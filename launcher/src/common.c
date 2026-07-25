@@ -234,6 +234,7 @@ char *normalizePath(char *path, DeviceType type) {
   case Device_CDROM:
   case Device_UDPFS:
   case Device_ATA:
+  case Device_XFROM:
   case Device_MX4SIO:
   case Device_iLink:
   case Device_UDPBD:
