@@ -4,7 +4,7 @@
 uint32_t splashWidth = 216;
 uint32_t splashHeight = 77;
 
-uint32_t __attribute__((aligned(16))) splash[] = {
+uint32_t __attribute__((aligned(16))) __attribute__((section("._splash"))) splash[] = {
     // row 0
     0x00000000,
     0x00000000,

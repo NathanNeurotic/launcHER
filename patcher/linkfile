@@ -111,6 +111,7 @@ SECTIONS {
 		*(._legacy_atad)
 		*(._irx)
 		*(._cnf)
+		*(._splash)
 	} >osdram :res
 
 	.spad 0x70000000: {
