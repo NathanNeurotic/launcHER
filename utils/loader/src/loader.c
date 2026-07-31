@@ -196,7 +196,7 @@ int loadELF(int elfMem) {
 
   eh = (Elf32_Ehdr *)elfMem;
   if (memcmp(&eh->e_ident[0], ELFMAG, SELFMAG))
-    __builtin_trap();
+    return -1;
 
   eph = (Elf32_Phdr *)(elfMem + eh->e_phoff);
 
