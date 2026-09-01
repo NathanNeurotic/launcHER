@@ -28,7 +28,13 @@ jobs:
           KELFSERVER_API_ADDRESS: ${{ secrets.KELFSERVER_API_ADDRESS }}
           KELFSERVER_API_KEY: ${{ secrets.KELFSERVER_API_KEY }}
         run: |
-          cmake -B build -DRELEASE=ON
+          if [ -n "$KELFSERVER_API_ADDRESS" ] && [ -n "$KELFSERVER_API_KEY" ]; then
+            cmake -B build -DRELEASE=ON
+          else
+            unset KELFSERVER_API_ADDRESS
+            unset KELFSERVER_API_KEY
+            cmake -B build
+          fi
           cmake --build build
 
       - name: Upload artifacts
@@ -38,6 +44,9 @@ jobs:
           name: artifacts
           path: |
             build/release/**
+            build/launcher/launcher.elf
+            build/osdmenu/osdmenu.elf
+            build/hosdmenu/hosdmenu.elf
 
   release:
     needs: [build]
