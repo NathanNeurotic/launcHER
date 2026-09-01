@@ -1,4 +1,4 @@
-name: Build
+name: Build launcHER
 
 on:
   push:
@@ -10,8 +10,7 @@ jobs:
     container: ghcr.io/ps2homebrew/ps2homebrew:main
     steps:
       - name: Install cmake
-        run: |
-          apk add cmake
+        run: apk add cmake
 
       - uses: actions/checkout@v4
         with:
@@ -22,66 +21,43 @@ jobs:
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           git fetch --prune --unshallow
 
-      - name: Compile project
-        id: make
-        env:
-          KELFSERVER_API_ADDRESS: ${{ secrets.KELFSERVER_API_ADDRESS }}
-          KELFSERVER_API_KEY: ${{ secrets.KELFSERVER_API_KEY }}
+      - name: Build launcHER
         run: |
-          if [ -n "$KELFSERVER_API_ADDRESS" ] && [ -n "$KELFSERVER_API_KEY" ]; then
-            cmake -B build -DRELEASE=ON
-          else
-            unset KELFSERVER_API_ADDRESS
-            unset KELFSERVER_API_KEY
-            cmake -B build
-          fi
-          cmake --build build
+          cmake -B build
+          cmake --build build --target launcHER
 
-      - name: Upload artifacts
+      - name: Upload launcHER
         uses: actions/upload-artifact@v4
-        if: steps.make.outcome == 'success'
         with:
-          name: artifacts
+          name: launcHER
+          if-no-files-found: error
           path: |
-            build/release/**
-            build/launcher/launcher.elf
-            build/osdmenu/osdmenu.elf
-            build/hosdmenu/hosdmenu.elf
+            build/release/launcHER.elf
+            build/release/launcHER.CNF
 
   release:
     needs: [build]
     runs-on: ubuntu-latest
-    permissions: write-all
-    if: startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main'
+    permissions:
+      contents: write
+    if: startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/EMBER'
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Fetch full clone
-        run: |
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          git fetch --prune --unshallow
-
-      - name: Get git describe
-        run: |
-          echo "GIT_VERSION=$(git describe --always --dirty --tags --exclude nightly)" >> $GITHUB_ENV
-
-      - name: Download all artifacts
+      - name: Download launcHER
         uses: actions/download-artifact@v4
-
-      - name: Prepare release archive
-        run: |
-          cd artifacts
-          zip -r ../osdmenu-${{ env.GIT_VERSION }}.zip ./*
+        with:
+          name: launcHER
+          path: release
 
       - uses: "marvinpinto/action-automatic-releases@latest"
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/EMBER'
         with:
           repo_token: "${{ secrets.GITHUB_TOKEN }}"
           automatic_release_tag: "nightly"
           prerelease: true
-          title: "Nightly build"
+          title: "launcHER nightly"
           files: |
-            osdmenu-${{ env.GIT_VERSION }}.zip
+            release/launcHER.elf
+            release/launcHER.CNF
 
       - uses: "marvinpinto/action-automatic-releases@latest"
         if: startsWith(github.ref, 'refs/tags/v')
@@ -89,4 +65,5 @@ jobs:
           repo_token: "${{ secrets.GITHUB_TOKEN }}"
           draft: true
           files: |
-            osdmenu-${{ env.GIT_VERSION }}.zip
+            release/launcHER.elf
+            release/launcHER.CNF
