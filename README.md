@@ -1,3 +1,5 @@
+<img width="857" height="483" alt="launcHER" src="https://github.com/user-attachments/assets/5641aed3-4695-4bc6-9436-e2a0fba8c7d5" />
+
 # launcHER
 
 **launcHER is a standalone PlayStation 2 forwarder built specifically to launch [Ember](https://github.com/Gageformer/Ember) from supported devices while preserving the environment Ember needs after handoff.**
