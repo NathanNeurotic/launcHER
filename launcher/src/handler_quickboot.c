@@ -9,23 +9,48 @@
 #include <string.h>
 
 int handleQuickboot(char *cnfPath) {
-  int isHDD = 0;
-  if (!strncmp(cnfPath, "hdd", 3))
-    isHDD = 1;
+  static const char quickbootName[] = "launcHER.CNF";
+  char resolvedPath[PATH_MAX] = {0};
 
-  int res;
+  // When quickboot is entered through an ELF path, always load launcHER.CNF
+  // from that ELF's directory. This keeps the config name stable even when
+  // launcHER.elf is renamed for an OPL APPS entry (for example Soul Blade.ELF).
   char *ext = strrchr(cnfPath, '.');
   if (!ext)
     return -ENOENT;
 
   if (!strcmp(ext, ".ELF") || !strcmp(ext, ".elf")) {
-    // Replace .ELF extension with .CNF
-    ext[1] = 'C';
-    ext[2] = 'N';
-    ext[3] = 'F';
-    ext[4] = '\0';
+    size_t prefixLen = 0;
+    char *separator = strrchr(cnfPath, '/');
+
+    if (separator) {
+      prefixLen = (size_t)(separator - cnfPath) + 1;
+    } else {
+      // Also support device paths without a slash, such as mc0:BOOT.ELF.
+      separator = strrchr(cnfPath, ':');
+      if (separator)
+        prefixLen = (size_t)(separator - cnfPath) + 1;
+    }
+
+    if (prefixLen + sizeof(quickbootName) > sizeof(resolvedPath))
+      return -ENOENT;
+
+    memcpy(resolvedPath, cnfPath, prefixLen);
+    memcpy(resolvedPath + prefixLen, quickbootName, sizeof(quickbootName));
+  } else {
+    // Explicit CNF/CFG paths still work exactly as supplied.
+    if (strlen(cnfPath) >= sizeof(resolvedPath))
+      return -ENOENT;
+    strcpy(resolvedPath, cnfPath);
   }
 
+  cnfPath = resolvedPath;
+
+  int isHDD = 0;
+  if (!strncmp(cnfPath, "hdd", 3))
+    isHDD = 1;
+
+  int res;
   DeviceType dtype;
   if (isHDD) {
     dtype = Device_APA;
