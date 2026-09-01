@@ -48,12 +48,14 @@ jobs:
       contents: write
     if: startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/EMBER'
     steps:
-      - name: Download launcHER
+      - name: Download launcHER assets
         uses: actions/download-artifact@v4
         with:
           name: launcHER
           path: release
 
+      # GitHub automatically adds Source code (zip) and Source code (tar.gz).
+      # We additionally publish the raw ELF, editable CNF, and ready-to-use ZIP.
       - uses: "marvinpinto/action-automatic-releases@latest"
         if: github.ref == 'refs/heads/EMBER'
         with:
