@@ -1,7 +1,13 @@
 # launcHER.CNF - Ember quickboot template
 #
-# Keep this file beside launcHER.elf. When launcHER is started with no
-# explicit target arguments, it looks for a CNF with the same base name.
+# Keep this file beside the launcHER binary.
+# The ELF itself may be renamed to anything (for example Soul Blade.ELF).
+# When started without explicit target arguments, launcHER always looks for
+# a file named launcHER.CNF in the directory it was launched from.
+#
+# Example OPL APPS layout:
+#   +OPL/APPS/Soul Blade/Soul Blade.ELF
+#   +OPL/APPS/Soul Blade/launcHER.CNF
 #
 # IMPORTANT:
 #   - Replace <GAME_FOLDER> with the bare folder name under EMBER/games.
@@ -54,7 +60,7 @@
 # ---------------------------------------------------------------------
 # PROFILE 5 - Internal APA/PFS HDD
 # Replace <PARTITION> with the APA partition containing EMBER.
-# Example target: hdd0:+EMBER:pfs:/EMBER/ember.elf
+# Example target: hdd0:__.EMBER:pfs:/EMBER/ember.elf
 #
 # APA is special: launcHER uses the hdd0: path to locate/load Ember, but
 # Ember itself must receive pfs0:/EMBER/ember.elf as argv[0] so its working
