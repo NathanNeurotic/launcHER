@@ -20,7 +20,7 @@ For APA/PFS HDD launches, launcHER also provides the behavior Ember specifically
 - allows Ember to receive `pfs0:/EMBER/ember.elf` as its real `argv[0]`;
 - forwards the game as a bare folder name in `argv[1]`.
 
-This allows Ember to continue resolving its relative `games/` directory and to retain writable access for memory cards, settings, and other files after launcHER exits.
+This allows Ember to continue resolving its relative `games/` directory and retain writable access for memory cards, settings, and other files after launcHER exits.
 
 ## Release files
 
@@ -61,9 +61,35 @@ argv[1] = Soul Blade
 
 Do not pass `games/Soul Blade`, a `.cue` path, or a full device path as the game argument.
 
+## OPL APPS layout
+
+launcHER does **not** require its ELF filename to match its CNF filename.
+
+A copy of `launcHER.elf` may be renamed to the game title for OPL while the configuration filename remains constant:
+
+```text
++OPL/
+└── APPS/
+    └── Soul Blade/
+        ├── Soul Blade.ELF   <- renamed copy of launcHER
+        └── launcHER.CNF
+```
+
+When `Soul Blade.ELF` starts without explicit target arguments, it resolves the directory it was launched from and opens:
+
+```text
+<launch directory>/launcHER.CNF
+```
+
+The ELF may therefore be named `Soul Blade.ELF`, `Pepsi Man.ELF`, `Final Fantasy VII.ELF`, or anything else. The quickboot configuration remains **`launcHER.CNF`**.
+
+This keeps OPL-facing filenames useful for game presentation and management without coupling them to launcHER's configuration name.
+
+Explicit `.CNF` or `.CFG` paths passed to launcHER are still honored exactly as supplied.
+
 ## Quickboot configuration
 
-Keep `launcHER.CNF` beside `launcHER.elf`. When launcHER is started without an explicit target, it automatically looks for a CNF with the same base name.
+Keep `launcHER.CNF` in the same directory as the launcHER binary or renamed copy being launched. When launcHER is started without an explicit target, it always looks for **`launcHER.CNF`** beside that ELF.
 
 Lines beginning with `#` are comments. Uncomment only the profile you intend to use.
 
@@ -223,7 +249,7 @@ Keeping the project focused also means upstream OSDMenu features that have nothi
 ## Credits
 
 - **[pcm720](https://github.com/pcm720)** — creator of [OSDMenu](https://github.com/pcm720/OSDMenu) and the standalone OSDMenu Launcher that launcHER is derived from. The device handlers, loader architecture, and foundation of this project come from that work.
-- **Eliminator / eliminator1403** — PS2 hardware testing, validation, regression checking, and device-side feedback.
+- **Eliminator / eliminator1403** — PS2 hardware testing, validation, regression checking, device-side feedback, and the filename-independent `launcHER.CNF` quickboot refinement used for renamed OPL APPS entries.
 - **[Gageformer](https://github.com/Gageformer)** — creator of [Ember](https://github.com/Gageformer/Ember), the project launcHER exists to launch.
 - **[NathanNeurotic / Ripto](https://github.com/NathanNeurotic)** — launcHER fork, Ember handoff integration, APA/PFS persistence changes, standalone build, configuration, and release packaging.
 - The **PS2SDK / ps2dev** contributors and the broader PS2 homebrew community whose drivers and libraries make the supported device stack possible.
