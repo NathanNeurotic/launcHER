@@ -82,7 +82,7 @@ uint32_t parseGSMFlags(char *gsmArg);
 // This argument should begin with "-la=", followed by one or more letters that modify the loader's behavior:
 //   - 'R': Reset IOP
 //   - 'N': Put the HDD into idle mode and keep the rest of DEV9 powered on (HDDUNITPOWER = NIC)
-//   - 'D': Keep both the HDD and DEV9 powered on (HDDUNITPOWER = NICHDD)
+//   - 'D': Keep both the HDD and DEV9 powered on (HDDUNITPOWER = NICHDD). For APA paths, keep pfs0 mounted read/write.
 //   - 'I': The argv[argc-2] argument contains IOPRP image path (for HDD, the path must be a pfs: path on the same partition as the ELF file)
 //   - 'E': The argv[argc-2] argument contains ELF memory location to use instead of argv[0]
 //   - 'A': Do not pass argv[0] to the target ELF and start with argv[1]
@@ -378,7 +378,7 @@ int loadIOPRP(char *ioprpPath) {
     return -EIO;
   }
 
-  // Reboot IOP with the IOPRP image
+  // Reboot IOP with IOPRP image
   res = SifIopRebootBuffer(mem, size);
   if (!res && !(res = SifIopRebootBufferEncrypted(mem, size)))
     return -1;
@@ -408,8 +408,10 @@ int mountPFS(char *path) {
     filePath[0] = '\0';
   }
 
-  // Mount the partition
-  int res = fileXioMount("pfs0:", path, FIO_MT_RDONLY);
+  // Preserve a writable PFS mount when NICHDD was requested. Other DEV9
+  // shutdown modes keep the existing read-only mount behavior.
+  int mountMode = (dev9ShutdownType == ShutdownType_None) ? FIO_MT_RDWR : FIO_MT_RDONLY;
+  int res = fileXioMount("pfs0:", path, mountMode);
   if (pathSeparator != '\0')
     filePath[0] = pathSeparator; // Restore the path
   if (res)
@@ -420,7 +422,12 @@ int mountPFS(char *path) {
 
 // Puts HDD in idle mode and powers off the dev9 device
 void shutdownDEV9(ShutdownType s) {
-  // Unmount the partition (if mounted)
+  // NICHDD explicitly preserves the HDD environment for the target ELF,
+  // including an APA pfs0: mount established above.
+  if (s == ShutdownType_None)
+    return;
+
+  // Other shutdown modes must release PFS before idling the HDD.
   fileXioUmount("pfs0:");
   switch (s) {
   case ShutdownType_HDD:
