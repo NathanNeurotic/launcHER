@@ -248,6 +248,7 @@ Keeping the project focused also means upstream OSDMenu features that have nothi
 
 ## Credits
 
+- **[nuno6573](https://github.com/nuno6573)** — the solution, concept, and selection of what to do for ember's external launcher. Thanks nuno for the information and idea!
 - **[pcm720](https://github.com/pcm720)** — creator of [OSDMenu](https://github.com/pcm720/OSDMenu) and the standalone OSDMenu Launcher that launcHER is derived from. The device handlers, loader architecture, and foundation of this project come from that work.
 - **Eliminator / eliminator1403** — PS2 hardware testing, validation, regression checking, device-side feedback, and the filename-independent `launcHER.CNF` quickboot refinement used for renamed OPL APPS entries.
 - **[Gageformer](https://github.com/Gageformer)** — creator of [Ember](https://github.com/Gageformer/Ember), the project launcHER exists to launch.
