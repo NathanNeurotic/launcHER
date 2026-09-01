@@ -9,8 +9,8 @@ jobs:
     runs-on: ubuntu-latest
     container: ghcr.io/ps2homebrew/ps2homebrew:main
     steps:
-      - name: Install cmake
-        run: apk add cmake
+      - name: Install build tools
+        run: apk add cmake zip
 
       - uses: actions/checkout@v4
         with:
@@ -26,6 +26,11 @@ jobs:
           cmake -B build
           cmake --build build --target launcHER
 
+      - name: Package launcHER
+        run: |
+          cd build/release
+          zip -9 launcHER.zip launcHER.elf launcHER.CNF
+
       - name: Upload launcHER
         uses: actions/upload-artifact@v4
         with:
@@ -34,6 +39,7 @@ jobs:
           path: |
             build/release/launcHER.elf
             build/release/launcHER.CNF
+            build/release/launcHER.zip
 
   release:
     needs: [build]
@@ -58,6 +64,7 @@ jobs:
           files: |
             release/launcHER.elf
             release/launcHER.CNF
+            release/launcHER.zip
 
       - uses: "marvinpinto/action-automatic-releases@latest"
         if: startsWith(github.ref, 'refs/tags/v')
@@ -67,3 +74,4 @@ jobs:
           files: |
             release/launcHER.elf
             release/launcHER.CNF
+            release/launcHER.zip
