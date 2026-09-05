@@ -1,4 +1,12 @@
-<img width="857" height="483" alt="launcHER" src="https://github.com/user-attachments/assets/5641aed3-4695-4bc6-9436-e2a0fba8c7d5" />
+
+<p align="center">
+
+<img width="1774" height="887" alt="ChatGPT Image Sep 4, 2026, 05_49_28 PM" src="https://github.com/user-attachments/assets/2ff5cd86-8be3-4c4e-b3fe-f7470e8eec39" />
+
+    
+  <img width="400" height="92" alt="AI-Assisted-Software-Lovers-Only" src="https://github.com/user-attachments/assets/71335775-9fe3-4507-ac2c-caa851abb24c" />
+</p>
+
 
 # launcHER
 
