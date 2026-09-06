@@ -13,15 +13,42 @@
 #   - Replace <GAME_FOLDER> with the bare folder name under EMBER/games.
 #   - Do NOT add games/ or a .cue filename.
 #   - arg= lines are global to every active path= line in this file.
-#   - Leave only ONE profile below uncommented at a time.
+#   - Leave only ONE profile below uncommented unless you intentionally want
+#     fallback paths that share the exact same arguments.
 #
 # Example game argument:
-# arg=Final Fantasy VII
+#   arg=Final Fantasy VII
+#
+# ---------------------------------------------------------------------
+# WHICH HDD DO I HAVE?
+# ---------------------------------------------------------------------
+#
+# USB HDD / USB SSD:
+#   path=mass?:/EMBER/ember.elf
+#
+# Internal HDD using exFAT:
+#   path=ata:/EMBER/ember.elf
+#
+# APA-Jail / mixed APA+exFAT HDD, Ember on the exFAT side:
+#   path=ata:/EMBER/ember.elf
+#
+# Internal APA/PFS HDD, or Ember inside a PFS partition:
+#   path=hdd0:<PARTITION>:pfs:/EMBER/ember.elf
+#
+# IMPORTANT:
+#   launcHER DOES NOT REQUIRE A DEDICATED __.EMBER PARTITION.
+#   __.EMBER is only an example and can be convenient for organization
+#   and free space. Use the PFS partition that actually contains EMBER.
+#
+# The question is not just "am I using an HDD?"
+# The question is "where is EMBER stored on that HDD?"
 
 # ---------------------------------------------------------------------
-# PROFILE 1 - Removable / local devices
-# These may share the same game argument, so multiple path= lines can be
-# enabled together if you want launcHER to try them in order.
+# PROFILE 1 - USB / removable / local devices
+#
+# USB HDDs and USB SSDs use the same mass-storage path as USB flash drives.
+# These paths may share the same game argument, so multiple path= lines can
+# be enabled together if you intentionally want launcHER to try them in order.
 # ---------------------------------------------------------------------
 # path=mmce?:/EMBER/ember.elf
 # path=mc?:/EMBER/ember.elf
@@ -32,7 +59,10 @@
 # arg=<GAME_FOLDER>
 
 # ---------------------------------------------------------------------
-# PROFILE 2 - Internal exFAT HDD (BDM)
+# PROFILE 2 - Internal exFAT HDD / APA-Jail exFAT side (ATA BDM)
+#
+# Use this when EMBER is stored on the exFAT filesystem of the internal HDD.
+# This does NOT require a PFS partition.
 # Keep the HDD powered for Ember after handoff.
 # ---------------------------------------------------------------------
 # path=ata:/EMBER/ember.elf
@@ -40,29 +70,20 @@
 # arg=-dev9=NICHDD
 
 # ---------------------------------------------------------------------
-# PROFILE 3 - UDPBD
-# Keep the network adapter powered after handoff.
-# IP configuration is read from mc?:/SYS-CONF/IPCONFIG.DAT.
-# ---------------------------------------------------------------------
-# path=udpbd:/EMBER/ember.elf
-# arg=<GAME_FOLDER>
-# arg=-dev9=NIC
-
-# ---------------------------------------------------------------------
-# PROFILE 4 - UDPFS
-# Keep the network adapter powered after handoff.
-# IP configuration is read from mc?:/SYS-CONF/IPCONFIG.DAT.
-# ---------------------------------------------------------------------
-# path=udpfs:/EMBER/ember.elf
-# arg=<GAME_FOLDER>
-# arg=-dev9=NIC
-
-# ---------------------------------------------------------------------
-# PROFILE 5 - Internal APA/PFS HDD
-# Replace <PARTITION> with the APA partition containing EMBER.
-# Example target: hdd0:__.EMBER:pfs:/EMBER/ember.elf
+# PROFILE 3 - Internal APA/PFS HDD
 #
-# APA is special: launcHER uses the hdd0: path to locate/load Ember, but
+# Use this only when EMBER itself is stored inside a PFS partition.
+# Replace <PARTITION> with the PFS partition that actually contains EMBER.
+#
+# A dedicated __.EMBER partition is NOT required.
+#
+# Example using __.EMBER:
+#   path=hdd0:__.EMBER:pfs:/EMBER/ember.elf
+#
+# Example using an existing __common partition:
+#   path=hdd0:__common:pfs:/EMBER/ember.elf
+#
+# APA/PFS is special: launcHER uses the hdd0: path to locate/load Ember, but
 # Ember itself must receive pfs0:/EMBER/ember.elf as argv[0] so its working
 # directory resolves correctly. NICHDD also preserves the writable pfs0:
 # mount through ExecPS2 for games, settings, and memory-card files.
@@ -72,3 +93,21 @@
 # arg=<GAME_FOLDER>
 # arg=-skip_argv0
 # arg=-dev9=NICHDD
+
+# ---------------------------------------------------------------------
+# PROFILE 4 - UDPBD
+# Keep the network adapter powered after handoff.
+# IP configuration is read from mc?:/SYS-CONF/IPCONFIG.DAT.
+# ---------------------------------------------------------------------
+# path=udpbd:/EMBER/ember.elf
+# arg=<GAME_FOLDER>
+# arg=-dev9=NIC
+
+# ---------------------------------------------------------------------
+# PROFILE 5 - UDPFS
+# Keep the network adapter powered after handoff.
+# IP configuration is read from mc?:/SYS-CONF/IPCONFIG.DAT.
+# ---------------------------------------------------------------------
+# path=udpfs:/EMBER/ember.elf
+# arg=<GAME_FOLDER>
+# arg=-dev9=NIC
