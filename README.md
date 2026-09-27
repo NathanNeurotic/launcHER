@@ -583,3 +583,4 @@ The project no longer builds or packages unrelated:
 - The **PS2SDK / ps2dev** contributors and broader PS2 homebrew community whose drivers and libraries make the supported storage stack possible.
 
 launcHER keeps its upstream lineage visible intentionally. It would not exist without pcm720's launcher work, Ember would not exist without Gageformer, and its hardware behavior would not be trustworthy without real-console testing.
+<img width="873" height="348" alt="launcherbanner" src="https://github.com/user-attachments/assets/e54f9ad4-c40b-483a-acaa-2accb5aa55cc" />
