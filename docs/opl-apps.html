@@ -1,0 +1,156 @@
+<!doctype html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>OPL APPS Integration · launcHER Docs</title>
+<meta name="description" content="Integrate launcHER into Open PS2 Loader's APPS menu: renaming ELFs, folder structure, title.cfg, cover art, and seamless launch handoff.">
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+<link rel="icon" type="image/png" href="assets/favicon.png">
+<meta property="og:site_name" content="launcHER Docs">
+<meta property="og:type" content="website">
+<link rel="stylesheet" href="assets/style.css">
+</head><body data-base="">
+<header class="topbar">
+  <button class="menu-btn" aria-label="Menu">☰</button>
+  <a class="brand" href="index.html">
+    <span class="psbtns"><i class="tri">&#9651;</i><i class="cir">&#9711;</i><i class="cro">&#10005;</i><i class="squ">&#9633;</i></span>
+    launcHER <small>DOCS</small></a>
+  <div class="topbar-actions">
+    <a class="topbar-btn primary" href="releases.html" title="Downloads &amp; Releases"><span class="icon icon-releases"></span>Downloads</a>
+    <a class="topbar-btn" href="https://github.com/NathanNeurotic/launcHER" target="_blank" rel="noopener" title="GitHub Repository"><span class="icon icon-github"></span>GitHub</a>
+  </div>
+  <div class="search">
+    <span class="ico"></span>
+    <input id="q" type="search" placeholder="Search devices, CNF syntax, HDD modes, OPL…  ( / )" autocomplete="off">
+    <kbd>/</kbd>
+    <div id="results"></div>
+  </div>
+</header>
+<canvas id="ps2-orbs" class="ps2-orbs-canvas" aria-hidden="true"></canvas>
+<div class="layout">
+  <nav class="sidebar">
+    <div class="sidebar-brand-sub">PLAYSTATION 2 // LAUNCHER</div>
+    <a href="index.html"><span class="icon icon-home"></span>Home</a>
+
+    <h4>Start</h4>
+    <a href="getting-started.html"><span class="icon icon-start"></span>Getting Started</a>
+    <a href="releases.html"><span class="icon icon-releases"></span>Downloads &amp; Releases</a>
+
+    <h4>Storage &amp; Devices</h4>
+    <a href="hdd-modes.html"><span class="icon icon-hdd"></span>"Which HDD Do I Have?"</a>
+    <a href="storage-profiles.html"><span class="icon icon-usb"></span>Storage Profiles</a>
+    <a href="apa-pfs.html"><span class="icon icon-server"></span>APA / PFS Deep Dive</a>
+
+    <h4>Configuration &amp; Launching</h4>
+    <a href="configuration.html"><span class="icon icon-settings"></span>launcHER.CNF Reference</a>
+    <a href="opl-apps.html" class="active"><span class="icon icon-apps"></span>OPL APPS Integration</a>
+
+    <h4>Reference</h4>
+    <a href="troubleshooting.html"><span class="icon icon-troubleshoot"></span>Troubleshooting &amp; Errors</a>
+    <a href="building.html"><span class="icon icon-terminal"></span>Building from Source</a>
+    <a href="credits.html"><span class="icon icon-credits"></span>Credits &amp; Lineage</a>
+
+    <h4 style="margin-top:24px;">Family Ecosystem</h4>
+    <a href="https://nathanneurotic.github.io/Open-PS2-Loader/"><span class="icon icon-play"></span>RiptOPL Docs ↗</a>
+    <a href="https://nathanneurotic.github.io/PS2-Servers/"><span class="icon icon-netboot"></span>PS2 Servers Docs ↗</a>
+    <a href="https://nathanneurotic.github.io/POPSLoader/"><span class="icon icon-book"></span>POPStarter Docs ↗</a>
+  </nav>
+  <main class="content">
+
+<h1>OPL APPS <span class="g">Integration</span></h1>
+<p class="lead">
+  launcHER is designed to be the ultimate companion for Open PS2 Loader's <b>Applications (APPS)</b> page. You can list individual Ember games directly on your OPL carousel or list with custom names and 3D cover art.
+</p>
+
+<h2 id="concept">The Renamed ELF Architecture</h2>
+<p>
+  Traditional loaders often require the configuration file to match the ELF name (e.g. <code>Game.ELF</code> needing <code>Game.CNF</code>).
+</p>
+<div class="callout info">
+  <div class="h">Filename Independence</div>
+  launcHER intentionally eliminates this requirement. You can rename a copy of <code>launcHER.elf</code> to <b>any title you want</b>, while its configuration file remains <code>launcHER.CNF</code>:
+  <pre><code>Soul Blade/
+├── Soul Blade.ELF    <span class="c"># Renamed copy of launcHER.elf</span>
+└── launcHER.CNF      <span class="c"># Quickboot configuration</span></code></pre>
+</div>
+
+<p>
+  When OPL launches <code>Soul Blade.ELF</code>, the ELF automatically detects its launch path, strips its own filename, and opens <code>launcHER.CNF</code> in the same folder.
+</p>
+
+<h2 id="folder-layouts">Folder Layouts by Storage Backend</h2>
+
+<h3>1. Internal APA HDD (+OPL partition)</h3>
+<pre><code>+OPL/
+└── APPS/
+    ├── Soul Blade/
+    │   ├── Soul Blade.ELF      <span class="c"># Renamed launcHER binary</span>
+    │   ├── launcHER.CNF        <span class="c"># Configuration template</span>
+    │   └── title.cfg           <span class="c"># Optional OPL title descriptor</span>
+    │
+    └── Final Fantasy VII/
+        ├── Final Fantasy VII.ELF
+        ├── launcHER.CNF
+        └── title.cfg</code></pre>
+
+<h3>2. USB Storage</h3>
+<pre><code>mass0:/
+└── APPS/
+    └── Soul Blade/
+        ├── Soul Blade.ELF
+        └── launcHER.CNF</code></pre>
+
+<h3>3. Internal exFAT HDD</h3>
+<pre><code>ata:/
+└── APPS/
+    └── Soul Blade/
+        ├── Soul Blade.ELF
+        └── launcHER.CNF</code></pre>
+
+<h2 id="title-cfg">OPL title.cfg Specification</h2>
+<p>
+  OPL reads <code>title.cfg</code> inside each application directory to determine its display name, boot target, and version details:
+</p>
+<pre><code>title=Soul Blade
+boot=Soul Blade.ELF
+version=Ember 1.0
+developer=Namco
+genre=Fighting
+players=players/2</code></pre>
+
+<p>
+  Save this as <code>title.cfg</code> directly beside <code>Soul Blade.ELF</code> and <code>launcHER.CNF</code>.
+</p>
+
+<h2 id="cover-art">Adding Cover Art to OPL</h2>
+<p>
+  In Open PS2 Loader and <a href="https://nathanneurotic.github.io/Open-PS2-Loader/">RiptOPL</a>, application cover art is placed in the standard <code>ART/</code> directory using the ELF filename as the prefix:
+</p>
+
+<pre><code>ART/
+├── Soul Blade.ELF_COV.jpg      <span class="c"># Front cover (or 3D Coverflow case)</span>
+├── Soul Blade.ELF_COV2.jpg     <span class="c"># Back cover</span>
+├── Soul Blade.ELF_ICO.png      <span class="c"># Disc icon</span>
+└── Soul Blade.ELF_BG.jpg       <span class="c"># Background wallpaper</span></code></pre>
+
+<h2 id="opl-db-compatibility">OPL DB and Official OPL Compatibility</h2>
+<p>
+  In OPL Daily Builds (OPL DB) and official ps2homebrew OPL, internal HDD application paths are delivered with numbered PFS tokens:
+</p>
+<pre><code>argv[0] = "hdd0:+OPL:pfs0:/APPS/Soul Blade/Soul Blade.ELF"</code></pre>
+
+<p>
+  launcHER natively handles this token format, cleanly mounting <code>hdd0:+OPL</code> without encountering <code>-ENODEV</code> (error <code>-19</code>). Whether you run official OPL, OPL DB, or RiptOPL, launcHER starts instantaneously!
+</p>
+
+</main>
+  <aside class="toc"><div class="toc-h">On this page</div><nav id="toc-nav"></nav></aside>
+</div>
+<footer>
+  <p><b>launcHER Documentation</b> &mdash; Standalone PlayStation 2 Ember forwarder.
+  See <a href="credits.html">Credits &amp; Lineage</a>.</p>
+  <p class="prov-inline">PlayStation 2 Homebrew Documentation Family:
+  <a href="https://nathanneurotic.github.io/Open-PS2-Loader/">RiptOPL Docs</a> &middot;
+  <a href="https://nathanneurotic.github.io/PS2-Servers/">PS2 Servers Docs</a> &middot;
+  <a href="https://nathanneurotic.github.io/POPSLoader/">POPStarter Docs</a>.</p>
+</footer>
+<script src="assets/app.js"></script>
+</body></html>

@@ -1,0 +1,114 @@
+<!doctype html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Credits &amp; Lineage · launcHER Docs</title>
+<meta name="description" content="Acknowledgments, project lineage, and upstream credits for the launcHER standalone forwarder.">
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+<link rel="icon" type="image/png" href="assets/favicon.png">
+<meta property="og:site_name" content="launcHER Docs">
+<meta property="og:type" content="website">
+<link rel="stylesheet" href="assets/style.css">
+</head><body data-base="">
+<header class="topbar">
+  <button class="menu-btn" aria-label="Menu">☰</button>
+  <a class="brand" href="index.html">
+    <span class="psbtns"><i class="tri">&#9651;</i><i class="cir">&#9711;</i><i class="cro">&#10005;</i><i class="squ">&#9633;</i></span>
+    launcHER <small>DOCS</small></a>
+  <div class="topbar-actions">
+    <a class="topbar-btn primary" href="releases.html" title="Downloads &amp; Releases"><span class="icon icon-releases"></span>Downloads</a>
+    <a class="topbar-btn" href="https://github.com/NathanNeurotic/launcHER" target="_blank" rel="noopener" title="GitHub Repository"><span class="icon icon-github"></span>GitHub</a>
+  </div>
+  <div class="search">
+    <span class="ico"></span>
+    <input id="q" type="search" placeholder="Search devices, CNF syntax, HDD modes, OPL…  ( / )" autocomplete="off">
+    <kbd>/</kbd>
+    <div id="results"></div>
+  </div>
+</header>
+<canvas id="ps2-orbs" class="ps2-orbs-canvas" aria-hidden="true"></canvas>
+<div class="layout">
+  <nav class="sidebar">
+    <div class="sidebar-brand-sub">PLAYSTATION 2 // LAUNCHER</div>
+    <a href="index.html"><span class="icon icon-home"></span>Home</a>
+
+    <h4>Start</h4>
+    <a href="getting-started.html"><span class="icon icon-start"></span>Getting Started</a>
+    <a href="releases.html"><span class="icon icon-releases"></span>Downloads &amp; Releases</a>
+
+    <h4>Storage &amp; Devices</h4>
+    <a href="hdd-modes.html"><span class="icon icon-hdd"></span>"Which HDD Do I Have?"</a>
+    <a href="storage-profiles.html"><span class="icon icon-usb"></span>Storage Profiles</a>
+    <a href="apa-pfs.html"><span class="icon icon-server"></span>APA / PFS Deep Dive</a>
+
+    <h4>Configuration &amp; Launching</h4>
+    <a href="configuration.html"><span class="icon icon-settings"></span>launcHER.CNF Reference</a>
+    <a href="opl-apps.html"><span class="icon icon-apps"></span>OPL APPS Integration</a>
+
+    <h4>Reference</h4>
+    <a href="troubleshooting.html"><span class="icon icon-troubleshoot"></span>Troubleshooting &amp; Errors</a>
+    <a href="building.html"><span class="icon icon-terminal"></span>Building from Source</a>
+    <a href="credits.html" class="active"><span class="icon icon-credits"></span>Credits &amp; Lineage</a>
+
+    <h4 style="margin-top:24px;">Family Ecosystem</h4>
+    <a href="https://nathanneurotic.github.io/Open-PS2-Loader/"><span class="icon icon-play"></span>RiptOPL Docs ↗</a>
+    <a href="https://nathanneurotic.github.io/PS2-Servers/"><span class="icon icon-netboot"></span>PS2 Servers Docs ↗</a>
+    <a href="https://nathanneurotic.github.io/POPSLoader/"><span class="icon icon-book"></span>POPStarter Docs ↗</a>
+  </nav>
+  <main class="content">
+
+<h1>Credits &amp; <span class="g">Lineage</span></h1>
+<p class="lead">
+  launcHER deliberately maintains its upstream lineage visible. It stands on the shoulders of dedicated PlayStation 2 homebrew engineers.
+</p>
+
+<div class="cards">
+  <article class="card">
+    <h3><a href="https://github.com/nuno6573" target="_blank" rel="noopener">nuno6573 &rarr;</a></h3>
+    <p>Solution concept, architectural selection, and guidance on using a tailored launcher forwarder for Ember's external environment. Thanks to nuno for the information and breakthrough idea.</p>
+  </article>
+
+  <article class="card">
+    <h3><a href="https://github.com/pcm720" target="_blank" rel="noopener">pcm720 &rarr;</a></h3>
+    <p>Creator of <a href="https://github.com/pcm720/OSDMenu" target="_blank" rel="noopener">OSDMenu</a> and the standalone OSDMenu Launcher from which launcHER is derived. The core device handlers, loader architecture, and foundational execution model originate from this work.</p>
+  </article>
+
+  <article class="card">
+    <h3><a href="https://github.com/Gageformer" target="_blank" rel="noopener">Gageformer &rarr;</a></h3>
+    <p>Creator of <a href="https://github.com/Gageformer/Ember" target="_blank" rel="noopener">Ember</a>, the high-performance PlayStation 1 emulator core that launcHER exists to launch.</p>
+  </article>
+
+  <article class="card">
+    <h3>Eliminator / eliminator1403</h3>
+    <p>PS2 hardware validation, real-console regression testing, device-side debugging, and the filename-independent <code>launcHER.CNF</code> quickboot refinement used for renamed OPL APPS entries.</p>
+  </article>
+
+  <article class="card">
+    <h3><a href="https://github.com/NathanNeurotic" target="_blank" rel="noopener">NathanNeurotic (Ripto) &rarr;</a></h3>
+    <p>launcHER fork, Ember handoff integration, APA/PFS driver persistence, robust OPL DB token parser, standalone build profile, documentation site, and release packaging.</p>
+  </article>
+
+  <article class="card">
+    <h3>PS2SDK &amp; ps2dev Community</h3>
+    <p>The global PlayStation 2 homebrew open-source community whose decades of reverse engineering, drivers, and toolchains make projects like launcHER possible.</p>
+  </article>
+</div>
+
+<h2 id="related-projects">Related Projects in the Ecosystem</h2>
+<ul class="checklist">
+  <li><b><a href="https://nathanneurotic.github.io/Open-PS2-Loader/">RiptOPL</a></b> — Downstream Open PS2 Loader fork with 3D Coverflow, favorites, integrated Neutrino core, and full APPS integration.</li>
+  <li><b><a href="https://nathanneurotic.github.io/PS2-Servers/">PS2 Servers</a></b> — High-speed Desktop, Core, and Edge network game servers (UDPFS, SMBv1/v2/v3, UDPBD, HTTP) for PlayStation 2.</li>
+  <li><b><a href="https://nathanneurotic.github.io/POPSLoader/">POPStarter Documentation</a></b> — Deep reference and game compatibility guides for POPSTARTER on PS2.</li>
+</ul>
+
+</main>
+  <aside class="toc"><div class="toc-h">On this page</div><nav id="toc-nav"></nav></aside>
+</div>
+<footer>
+  <p><b>launcHER Documentation</b> &mdash; Standalone PlayStation 2 Ember forwarder.
+  See <a href="credits.html">Credits &amp; Lineage</a>.</p>
+  <p class="prov-inline">PlayStation 2 Homebrew Documentation Family:
+  <a href="https://nathanneurotic.github.io/Open-PS2-Loader/">RiptOPL Docs</a> &middot;
+  <a href="https://nathanneurotic.github.io/PS2-Servers/">PS2 Servers Docs</a> &middot;
+  <a href="https://nathanneurotic.github.io/POPSLoader/">POPStarter Docs</a>.</p>
+</footer>
+<script src="assets/app.js"></script>
+</body></html>
