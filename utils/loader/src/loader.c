@@ -20,6 +20,7 @@
 #include <loadfile.h>
 #include <ps2sdkapi.h>
 #include <sifrpc.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <string.h>
 #include <ctype.h>

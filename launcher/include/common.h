@@ -3,6 +3,7 @@
 
 #include "loader.h"
 #include <debug.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #define USB_MOUNTPOINT "mass0:"
