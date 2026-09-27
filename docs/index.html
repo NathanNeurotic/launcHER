@@ -1,0 +1,199 @@
+<!doctype html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>launcHER Documentation · Standalone Ember Forwarder for PlayStation 2</title>
+<meta name="description" content="Official documentation for launcHER — standalone PlayStation 2 forwarder built specifically to launch Ember from USB, internal HDD (exFAT &amp; APA/PFS), MMCE, MX4SIO, and network while preserving the hardware environment Ember needs.">
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+<link rel="icon" type="image/png" href="assets/favicon.png">
+<meta property="og:site_name" content="launcHER Docs">
+<meta property="og:type" content="website">
+<meta property="og:image" content="assets/launcher-banner.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="assets/launcher-banner.png">
+<link rel="stylesheet" href="assets/style.css">
+</head><body data-base="">
+<header class="topbar">
+  <button class="menu-btn" aria-label="Menu">☰</button>
+  <a class="brand" href="index.html">
+    <span class="psbtns"><i class="tri">&#9651;</i><i class="cir">&#9711;</i><i class="cro">&#10005;</i><i class="squ">&#9633;</i></span>
+    launcHER <small>DOCS</small></a>
+  <div class="topbar-actions">
+    <a class="topbar-btn primary" href="releases.html" title="Downloads &amp; Releases"><span class="icon icon-releases"></span>Downloads</a>
+    <a class="topbar-btn" href="https://github.com/NathanNeurotic/launcHER" target="_blank" rel="noopener" title="GitHub Repository"><span class="icon icon-github"></span>GitHub</a>
+  </div>
+  <div class="search">
+    <span class="ico"></span>
+    <input id="q" type="search" placeholder="Search devices, CNF syntax, HDD modes, OPL…  ( / )" autocomplete="off">
+    <kbd>/</kbd>
+    <div id="results"></div>
+  </div>
+</header>
+<canvas id="ps2-orbs" class="ps2-orbs-canvas" aria-hidden="true"></canvas>
+<div class="layout">
+  <nav class="sidebar">
+    <div class="sidebar-brand-sub">PLAYSTATION 2 // LAUNCHER</div>
+    <a href="index.html" class="active"><span class="icon icon-home"></span>Home</a>
+
+    <h4>Start</h4>
+    <a href="getting-started.html"><span class="icon icon-start"></span>Getting Started</a>
+    <a href="releases.html"><span class="icon icon-releases"></span>Downloads &amp; Releases</a>
+
+    <h4>Storage &amp; Devices</h4>
+    <a href="hdd-modes.html"><span class="icon icon-hdd"></span>"Which HDD Do I Have?"</a>
+    <a href="storage-profiles.html"><span class="icon icon-usb"></span>Storage Profiles</a>
+    <a href="apa-pfs.html"><span class="icon icon-server"></span>APA / PFS Deep Dive</a>
+
+    <h4>Configuration &amp; Launching</h4>
+    <a href="configuration.html"><span class="icon icon-settings"></span>launcHER.CNF Reference</a>
+    <a href="opl-apps.html"><span class="icon icon-apps"></span>OPL APPS Integration</a>
+
+    <h4>Reference</h4>
+    <a href="troubleshooting.html"><span class="icon icon-troubleshoot"></span>Troubleshooting &amp; Errors</a>
+    <a href="building.html"><span class="icon icon-terminal"></span>Building from Source</a>
+    <a href="credits.html"><span class="icon icon-credits"></span>Credits &amp; Lineage</a>
+
+    <h4 style="margin-top:24px;">Family Ecosystem</h4>
+    <a href="https://nathanneurotic.github.io/Open-PS2-Loader/"><span class="icon icon-play"></span>RiptOPL Docs ↗</a>
+    <a href="https://nathanneurotic.github.io/PS2-Servers/"><span class="icon icon-netboot"></span>PS2 Servers Docs ↗</a>
+    <a href="https://nathanneurotic.github.io/POPSLoader/"><span class="icon icon-book"></span>POPStarter Docs ↗</a>
+  </nav>
+  <main class="content">
+
+<div class="hero">
+  <img class="hero-banner" src="assets/launcher-banner.png" alt="launcHER banner" width="1774" height="887">
+  <h1>launcHER <span class="g">Documentation</span></h1>
+  <div class="sys-strip">
+    <div class="sys-strip-row">
+      <span class="sys-pill">EMBER HANDOFF</span>
+      <span class="sys-pill">PFS MOUNT PERSISTENCE</span>
+      <span class="sys-pill">EXFAT / ATA BDM</span>
+      <span class="sys-pill">USB / MX4SIO / MMCE</span>
+    </div>
+    <div class="sys-strip-row">
+      <span class="sys-pill">DEV9 POWER PRESERVATION</span>
+      <span class="sys-pill">OPL DB &amp; ULE KHN READY</span>
+      <span class="sys-pill">STANDALONE FORWARDER</span>
+    </div>
+  </div>
+  <div class="btn-row">
+    <a class="btn" href="getting-started.html"><span class="icon icon-start"></span>Quick Start Guide</a>
+    <a class="btn ghost" href="hdd-modes.html"><span class="icon icon-hdd"></span>Which HDD Do I Have?</a>
+  </div>
+</div>
+
+<div class="callout info">
+  <div class="h">What is launcHER?</div>
+  <b>launcHER</b> is a standalone PlayStation 2 forwarder engineered specifically to launch
+  <a href="https://github.com/Gageformer/Ember" target="_blank" rel="noopener"><b>Ember</b></a> from supported storage devices while preserving the hardware environment and driver state Ember needs after handoff.
+  <br><br>
+  It is <b>not</b> an OSD replacement, HDD Browser, game manager, KELF installer, or menu system. It does one focused job:
+  <blockquote><b>Find Ember wherever you keep it, prepare that storage device correctly, pass Ember the game it should launch, and get out of the way without destroying what Ember needs.</b></blockquote>
+</div>
+
+<h2 id="hdd-myth">HDD Users: Read This First</h2>
+<p>
+  <b>launcHER does NOT require a dedicated HDD partition.</b> The <code>__.EMBER</code> APA partition shown in some examples is purely an organizational suggestion — not a technical requirement. You do <b>not</b> need to create <code>__.EMBER</code> to use launcHER.
+</p>
+<p>
+  Furthermore, "HDD" means completely different storage technologies on the PS2. Match the path to <b>where Ember actually lives</b>:
+</p>
+
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>Where Ember is stored</th>
+        <th>Storage Type</th>
+        <th>launcHER Path in CNF</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><b>USB flash drive / USB HDD / USB SSD</b></td>
+        <td>USB Mass Storage (FAT32/exFAT)</td>
+        <td><code>path=mass?:/EMBER/ember.elf</code></td>
+      </tr>
+      <tr>
+        <td><b>Internal HDD using exFAT</b></td>
+        <td>Internal ATA BDM</td>
+        <td><code>path=ata:/EMBER/ember.elf</code></td>
+      </tr>
+      <tr>
+        <td><b>APA-Jail / Mixed APA+exFAT (Ember on exFAT side)</b></td>
+        <td>Internal ATA BDM</td>
+        <td><code>path=ata:/EMBER/ember.elf</code></td>
+      </tr>
+      <tr>
+        <td><b>Internal APA/PFS HDD (Ember inside a PFS partition)</b></td>
+        <td>APA / PFS Partition Mount</td>
+        <td><code>path=hdd0:&lt;PARTITION&gt;:pfs:/EMBER/ember.elf</code></td>
+      </tr>
+      <tr>
+        <td><b>APA-Jail (Ember inside an APA partition, e.g. __common)</b></td>
+        <td>APA / PFS Partition Mount</td>
+        <td><code>path=hdd0:__common:pfs:/EMBER/ember.elf</code></td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<h2 id="why-launcher">Why Ember Needs a Specialized Forwarder</h2>
+<p>
+  Ember is not an ordinary standalone ELF that can simply be loaded into memory without preparation. It relies on its caller to provide:
+</p>
+<ul class="checklist">
+  <li><b>Bare Game Folder Argument</b> — Ember expects the clean subfolder name under <code>EMBER/games/</code> (e.g. <code>Soul Blade</code>), not a full path, nor a <code>.cue</code> filename.</li>
+  <li><b>DEV9 Hardware Power Preservation</b> — For ATA, APA/PFS, and network devices, turning off DEV9 on exit destroys the storage interface. launcHER keeps DEV9 powered through <code>-dev9=NICHDD</code> or <code>-dev9=NIC</code>.</li>
+  <li><b>Active PFS Mount Preservation</b> — In APA/PFS mode, Ember expects to continue accessing files through <code>pfs0:/</code>. launcHER mounts the partition and hands control over with <code>argv[0] = pfs0:/EMBER/ember.elf</code> while skipping the raw loader-facing <code>hdd0:</code> token.</li>
+  <li><b>Clean IOP Storage Drivers</b> — launcHER initializes clean, conflict-free drivers for ATA, USB, MMCE, MX4SIO, i.Link, UDPBD, and UDPFS.</li>
+</ul>
+
+<h2 id="quick-links">Explore the Documentation</h2>
+<div class="cards">
+  <article class="card">
+    <h3><a href="getting-started.html">Getting Started Guide &rarr;</a></h3>
+    <p>Step-by-step instructions to set up <code>launcHER.elf</code> and <code>launcHER.CNF</code>, configure your first game, and launch.</p>
+  </article>
+  <article class="card">
+    <h3><a href="hdd-modes.html">"Which HDD Do I Have?" &rarr;</a></h3>
+    <p>Demystify internal exFAT, APA/PFS, APA-Jail, and USB HDDs so you pick the right path configuration every time.</p>
+  </article>
+  <article class="card">
+    <h3><a href="storage-profiles.html">Storage Profiles &rarr;</a></h3>
+    <p>Complete configuration templates for USB, exFAT HDD, APA partitions, MMCE, Memory Cards, MX4SIO, and UDPBD.</p>
+  </article>
+  <article class="card">
+    <h3><a href="opl-apps.html">OPL APPS Integration &rarr;</a></h3>
+    <p>How to rename copies of launcHER to individual game titles (e.g. <code>Soul Blade.ELF</code>) with cover art in Open PS2 Loader.</p>
+  </article>
+  <article class="card">
+    <h3><a href="configuration.html">launcHER.CNF Reference &rarr;</a></h3>
+    <p>Deep reference on configuration syntax, global <code>arg=</code> lines, DEV9 flags, and command-line execution.</p>
+  </article>
+  <article class="card">
+    <h3><a href="troubleshooting.html">Troubleshooting &amp; Errors &rarr;</a></h3>
+    <p>Diagnose <code>Quickboot failed: -19</code>, missing partitions, black screens, and path syntax errors.</p>
+  </article>
+</div>
+
+<h2 id="key-features">Key Architectural Features</h2>
+<ul class="checklist">
+  <li><b>Zero Configuration In-Place Corruption</b> — Fully non-destructive APA path parser supporting classic <code>:pfs:</code>, numbered <code>:pfs0:</code>–<code>:pfs9:</code> (OPL DB), wLaunchELF <code>+OPLpfs0:</code>, and unadorned partition paths.</li>
+  <li><b>Filename-Independent Quickboot</b> — You can rename <code>launcHER.elf</code> to <code>Soul Blade.ELF</code>; it automatically resolves its parent directory and loads <code>launcHER.CNF</code>.</li>
+  <li><b>Case-Insensitive Config Discovery</b> — Automatically searches for <code>launcHER.CNF</code>, <code>launcHER.cnf</code>, <code>launcHER.CFG</code>, and <code>launcHER.cfg</code>.</li>
+  <li><b>Pure Standalone Footprint</b> — Stripped of legacy OSDMenu, MBR installers, and CD/DVD fluff for lightning-fast initialization.</li>
+</ul>
+
+</main>
+  <aside class="toc"><div class="toc-h">On this page</div><nav id="toc-nav"></nav></aside>
+</div>
+<footer>
+  <p><b>launcHER Documentation</b> &mdash; Standalone PlayStation 2 Ember forwarder.
+  Derived from <a href="https://github.com/pcm720/OSDMenu">pcm720/OSDMenu</a> for <a href="https://github.com/Gageformer/Ember">Ember</a>.
+  See <a href="credits.html">Credits &amp; Lineage</a>.</p>
+  <p class="prov-inline">PlayStation 2 Homebrew Documentation Family:
+  <a href="https://nathanneurotic.github.io/Open-PS2-Loader/">RiptOPL Docs</a> &middot;
+  <a href="https://nathanneurotic.github.io/PS2-Servers/">PS2 Servers Docs</a> &middot;
+  <a href="https://nathanneurotic.github.io/POPSLoader/">POPStarter Docs</a>.</p>
+</footer>
+<script src="assets/app.js"></script>
+</body></html>

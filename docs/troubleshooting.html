@@ -1,0 +1,166 @@
+<!doctype html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Troubleshooting &amp; Errors · launcHER Docs</title>
+<meta name="description" content="Resolve quickboot errors, -19 ENODEV, -2 ENOENT, black screens, partition mount failures, and hardware diagnostic reporting.">
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+<link rel="icon" type="image/png" href="assets/favicon.png">
+<meta property="og:site_name" content="launcHER Docs">
+<meta property="og:type" content="website">
+<link rel="stylesheet" href="assets/style.css">
+</head><body data-base="">
+<header class="topbar">
+  <button class="menu-btn" aria-label="Menu">☰</button>
+  <a class="brand" href="index.html">
+    <span class="psbtns"><i class="tri">&#9651;</i><i class="cir">&#9711;</i><i class="cro">&#10005;</i><i class="squ">&#9633;</i></span>
+    launcHER <small>DOCS</small></a>
+  <div class="topbar-actions">
+    <a class="topbar-btn primary" href="releases.html" title="Downloads &amp; Releases"><span class="icon icon-releases"></span>Downloads</a>
+    <a class="topbar-btn" href="https://github.com/NathanNeurotic/launcHER" target="_blank" rel="noopener" title="GitHub Repository"><span class="icon icon-github"></span>GitHub</a>
+  </div>
+  <div class="search">
+    <span class="ico"></span>
+    <input id="q" type="search" placeholder="Search devices, CNF syntax, HDD modes, OPL…  ( / )" autocomplete="off">
+    <kbd>/</kbd>
+    <div id="results"></div>
+  </div>
+</header>
+<canvas id="ps2-orbs" class="ps2-orbs-canvas" aria-hidden="true"></canvas>
+<div class="layout">
+  <nav class="sidebar">
+    <div class="sidebar-brand-sub">PLAYSTATION 2 // LAUNCHER</div>
+    <a href="index.html"><span class="icon icon-home"></span>Home</a>
+
+    <h4>Start</h4>
+    <a href="getting-started.html"><span class="icon icon-start"></span>Getting Started</a>
+    <a href="releases.html"><span class="icon icon-releases"></span>Downloads &amp; Releases</a>
+
+    <h4>Storage &amp; Devices</h4>
+    <a href="hdd-modes.html"><span class="icon icon-hdd"></span>"Which HDD Do I Have?"</a>
+    <a href="storage-profiles.html"><span class="icon icon-usb"></span>Storage Profiles</a>
+    <a href="apa-pfs.html"><span class="icon icon-server"></span>APA / PFS Deep Dive</a>
+
+    <h4>Configuration &amp; Launching</h4>
+    <a href="configuration.html"><span class="icon icon-settings"></span>launcHER.CNF Reference</a>
+    <a href="opl-apps.html"><span class="icon icon-apps"></span>OPL APPS Integration</a>
+
+    <h4>Reference</h4>
+    <a href="troubleshooting.html" class="active"><span class="icon icon-troubleshoot"></span>Troubleshooting &amp; Errors</a>
+    <a href="building.html"><span class="icon icon-terminal"></span>Building from Source</a>
+    <a href="credits.html"><span class="icon icon-credits"></span>Credits &amp; Lineage</a>
+
+    <h4 style="margin-top:24px;">Family Ecosystem</h4>
+    <a href="https://nathanneurotic.github.io/Open-PS2-Loader/"><span class="icon icon-play"></span>RiptOPL Docs ↗</a>
+    <a href="https://nathanneurotic.github.io/PS2-Servers/"><span class="icon icon-netboot"></span>PS2 Servers Docs ↗</a>
+    <a href="https://nathanneurotic.github.io/POPSLoader/"><span class="icon icon-book"></span>POPStarter Docs ↗</a>
+  </nav>
+  <main class="content">
+
+<h1>Troubleshooting &amp; <span class="g">Errors</span></h1>
+<p class="lead">
+  When launcHER encounters a filesystem or hardware handoff error, it displays a concise diagnostic code on screen. Use this reference to diagnose and resolve errors quickly.
+</p>
+
+<h2 id="error-codes">Error Code Diagnostic Table</h2>
+
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>Error Message</th>
+        <th>POSIX / PS2 Meaning</th>
+        <th>Root Cause &amp; Solution</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>Quickboot failed: -19</code></td>
+        <td><code>-ENODEV</code> (No such device)</td>
+        <td>
+          <b>1. OPL DB PFS token issue:</b> Older versions of launcHER failed when OPL DB passed <code>:pfs0:/</code> paths. Upgrade to the latest release.<br>
+          <b>2. Partition does not exist:</b> The partition specified in <code>path=hdd0:&lt;PARTITION&gt;...</code> does not exist on the drive. Check your partition list in wLaunchELF.<br>
+          <b>3. Missing DEV9 flag:</b> Internal drives need <code>arg=-dev9=NICHDD</code>.
+        </td>
+      </tr>
+      <tr>
+        <td><code>Quickboot failed: -2</code></td>
+        <td><code>-ENOENT</code> (No such file)</td>
+        <td>
+          <b>1. Missing CNF file:</b> <code>launcHER.CNF</code> is missing from the folder where the ELF was launched.<br>
+          <b>2. Missing ember.elf:</b> <code>ember.elf</code> was not found at the path defined by <code>path=</code>. Verify spelling and case sensitivity.
+        </td>
+      </tr>
+      <tr>
+        <td><code>Quickboot failed: -6</code></td>
+        <td><code>-ENXIO</code> (No such device or address)</td>
+        <td>
+          The physical hardware (internal HDD or USB drive) did not respond to driver initialization. Verify the Network Adapter is firmly screwed into the PS2 expansion bay, or try a different USB port.
+        </td>
+      </tr>
+      <tr>
+        <td><code>Quickboot failed: -22</code></td>
+        <td><code>-EINVAL</code> (Invalid argument)</td>
+        <td>
+          Syntax error in <code>launcHER.CNF</code> or a malformed path string. Verify that there are no extra quotation marks or leading spaces in your <code>path=</code> or <code>arg=</code> lines.
+        </td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<h2 id="black-screen-checklist">Black Screen After Launch Checklist</h2>
+<p>
+  If launcHER successfully starts Ember, but the screen stays black or returns to OSDSYS:
+</p>
+
+<div class="callout warning">
+  <div class="h">1. Check the Game Argument</div>
+  Did you pass <code>arg=Soul Blade</code> or did you pass <code>arg=Soul Blade/Soul Blade.cue</code>?
+  <br>
+  Ember requires the <b>bare folder name</b>. Passing a file path or <code>.cue</code> file will cause Ember to fail to load disc tracks.
+</div>
+
+<div class="callout warning">
+  <div class="h">2. Verify bios.bin is Present</div>
+  Ember requires a genuine PlayStation 1 BIOS image named <code>bios.bin</code> inside <code>EMBER/</code>:
+  <pre><code>EMBER/
+├── ember.elf
+├── bios.bin         <span class="c">&lt;-- Required!</span>
+└── games/</code></pre>
+</div>
+
+<div class="callout warning">
+  <div class="h">3. Check DEV9 Persistence Flag</div>
+  If you are launching from internal exFAT (<code>ata:/</code>) or an APA partition (<code>pfs0:/</code>), Ember needs the internal hard drive powered after handoff.
+  <br>
+  Ensure your <code>launcHER.CNF</code> includes:
+  <pre><code>arg=-dev9=NICHDD</code></pre>
+</div>
+
+<h2 id="reporting-bugs">Submitting a Bug Report</h2>
+<p>
+  If you encounter a reproducible crash or hardware incompatibility, please open an issue on the
+  <a href="https://github.com/NathanNeurotic/launcHER/issues" target="_blank" rel="noopener">launcHER GitHub Issues tracker</a> including:
+</p>
+<ul class="checklist">
+  <li><b>PS2 Model:</b> (e.g. SCPH-39001, SCPH-50004, SCPH-70012)</li>
+  <li><b>Storage Device &amp; Adapter:</b> (e.g. Official Sony Network Adapter with SATA kit, Gamestar clone, USB 3.0 flash drive)</li>
+  <li><b>Filesystem Layout:</b> (e.g. Pure exFAT, APA/PFS, APA-Jail)</li>
+  <li><b>Ember Location:</b> Exact path where <code>ember.elf</code> is stored</li>
+  <li><b>Complete launcHER.CNF Content:</b> Copy/paste the full text</li>
+  <li><b>Versions:</b> launcHER commit/release and Ember version</li>
+  <li><b>On-Screen Error:</b> Exact text displayed on the screen before the failure</li>
+</ul>
+
+</main>
+  <aside class="toc"><div class="toc-h">On this page</div><nav id="toc-nav"></nav></aside>
+</div>
+<footer>
+  <p><b>launcHER Documentation</b> &mdash; Standalone PlayStation 2 Ember forwarder.
+  See <a href="credits.html">Credits &amp; Lineage</a>.</p>
+  <p class="prov-inline">PlayStation 2 Homebrew Documentation Family:
+  <a href="https://nathanneurotic.github.io/Open-PS2-Loader/">RiptOPL Docs</a> &middot;
+  <a href="https://nathanneurotic.github.io/PS2-Servers/">PS2 Servers Docs</a> &middot;
+  <a href="https://nathanneurotic.github.io/POPSLoader/">POPStarter Docs</a>.</p>
+</footer>
+<script src="assets/app.js"></script>
+</body></html>

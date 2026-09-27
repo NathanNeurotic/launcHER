@@ -1,0 +1,127 @@
+<!doctype html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Downloads &amp; Releases · launcHER Docs</title>
+<meta name="description" content="Download official launcHER release packages, ELF binaries, and quickboot templates for PlayStation 2.">
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+<link rel="icon" type="image/png" href="assets/favicon.png">
+<meta property="og:site_name" content="launcHER Docs">
+<meta property="og:type" content="website">
+<link rel="stylesheet" href="assets/style.css">
+</head><body data-base="">
+<header class="topbar">
+  <button class="menu-btn" aria-label="Menu">☰</button>
+  <a class="brand" href="index.html">
+    <span class="psbtns"><i class="tri">&#9651;</i><i class="cir">&#9711;</i><i class="cro">&#10005;</i><i class="squ">&#9633;</i></span>
+    launcHER <small>DOCS</small></a>
+  <div class="topbar-actions">
+    <a class="topbar-btn primary" href="releases.html" title="Downloads &amp; Releases"><span class="icon icon-releases"></span>Downloads</a>
+    <a class="topbar-btn" href="https://github.com/NathanNeurotic/launcHER" target="_blank" rel="noopener" title="GitHub Repository"><span class="icon icon-github"></span>GitHub</a>
+  </div>
+  <div class="search">
+    <span class="ico"></span>
+    <input id="q" type="search" placeholder="Search devices, CNF syntax, HDD modes, OPL…  ( / )" autocomplete="off">
+    <kbd>/</kbd>
+    <div id="results"></div>
+  </div>
+</header>
+<canvas id="ps2-orbs" class="ps2-orbs-canvas" aria-hidden="true"></canvas>
+<div class="layout">
+  <nav class="sidebar">
+    <div class="sidebar-brand-sub">PLAYSTATION 2 // LAUNCHER</div>
+    <a href="index.html"><span class="icon icon-home"></span>Home</a>
+
+    <h4>Start</h4>
+    <a href="getting-started.html"><span class="icon icon-start"></span>Getting Started</a>
+    <a href="releases.html" class="active"><span class="icon icon-releases"></span>Downloads &amp; Releases</a>
+
+    <h4>Storage &amp; Devices</h4>
+    <a href="hdd-modes.html"><span class="icon icon-hdd"></span>"Which HDD Do I Have?"</a>
+    <a href="storage-profiles.html"><span class="icon icon-usb"></span>Storage Profiles</a>
+    <a href="apa-pfs.html"><span class="icon icon-server"></span>APA / PFS Deep Dive</a>
+
+    <h4>Configuration &amp; Launching</h4>
+    <a href="configuration.html"><span class="icon icon-settings"></span>launcHER.CNF Reference</a>
+    <a href="opl-apps.html"><span class="icon icon-apps"></span>OPL APPS Integration</a>
+
+    <h4>Reference</h4>
+    <a href="troubleshooting.html"><span class="icon icon-troubleshoot"></span>Troubleshooting &amp; Errors</a>
+    <a href="building.html"><span class="icon icon-terminal"></span>Building from Source</a>
+    <a href="credits.html"><span class="icon icon-credits"></span>Credits &amp; Lineage</a>
+
+    <h4 style="margin-top:24px;">Family Ecosystem</h4>
+    <a href="https://nathanneurotic.github.io/Open-PS2-Loader/"><span class="icon icon-play"></span>RiptOPL Docs ↗</a>
+    <a href="https://nathanneurotic.github.io/PS2-Servers/"><span class="icon icon-netboot"></span>PS2 Servers Docs ↗</a>
+    <a href="https://nathanneurotic.github.io/POPSLoader/"><span class="icon icon-book"></span>POPStarter Docs ↗</a>
+  </nav>
+  <main class="content">
+
+<h1>Downloads &amp; <span class="g">Releases</span></h1>
+<p class="lead">
+  launcHER is distributed as a lightweight two-file package containing the standalone executable and quickboot template.
+</p>
+
+<div class="cards">
+  <article class="card">
+    <h3><a href="https://github.com/NathanNeurotic/launcHER/releases" target="_blank" rel="noopener">GitHub Releases Page &rarr;</a></h3>
+    <p>Download official stable releases, packaged zip bundles, and changelogs.</p>
+    <a class="btn" href="https://github.com/NathanNeurotic/launcHER/releases" target="_blank" rel="noopener" style="margin-top:10px;"><span class="icon icon-releases"></span>Browse Releases</a>
+  </article>
+  <article class="card">
+    <h3><a href="https://github.com/NathanNeurotic/launcHER/actions" target="_blank" rel="noopener">CI Automated Builds &rarr;</a></h3>
+    <p>Download automated nightly build artifacts produced by GitHub Actions for every commit.</p>
+    <a class="btn ghost" href="https://github.com/NathanNeurotic/launcHER/actions" target="_blank" rel="noopener" style="margin-top:10px;"><span class="icon icon-terminal"></span>View Actions</a>
+  </article>
+</div>
+
+<h2 id="package-contents">What's in the Package</h2>
+<p>
+  Every release provides:
+</p>
+
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>File</th>
+        <th>Description</th>
+        <th>Required?</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><b><code>launcHER.elf</code></b></td>
+        <td>The compiled standalone PlayStation 2 forwarder binary. May be renamed to match game titles (e.g. <code>Soul Blade.ELF</code>).</td>
+        <td><b>Yes</b></td>
+      </tr>
+      <tr>
+        <td><b><code>launcHER.CNF</code></b></td>
+        <td>The quickboot configuration template containing documented profiles for USB, ATA exFAT, APA/PFS, MMCE, and UDPBD.</td>
+        <td><b>Yes</b></td>
+      </tr>
+      <tr>
+        <td><b><code>launcHER.zip</code></b></td>
+        <td>Convenience archive bundling both <code>launcHER.elf</code> and <code>launcHER.CNF</code> ready to extract onto console storage.</td>
+        <td>Optional</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="callout info">
+  <div class="h">No KELF Required</div>
+  Unlike legacy OSDMenu installations, standard launcHER operation does <b>not</b> require KELF encryption, MBR injection, or Sony magicgate header signing.
+</div>
+
+</main>
+  <aside class="toc"><div class="toc-h">On this page</div><nav id="toc-nav"></nav></aside>
+</div>
+<footer>
+  <p><b>launcHER Documentation</b> &mdash; Standalone PlayStation 2 Ember forwarder.
+  See <a href="credits.html">Credits &amp; Lineage</a>.</p>
+  <p class="prov-inline">PlayStation 2 Homebrew Documentation Family:
+  <a href="https://nathanneurotic.github.io/Open-PS2-Loader/">RiptOPL Docs</a> &middot;
+  <a href="https://nathanneurotic.github.io/PS2-Servers/">PS2 Servers Docs</a> &middot;
+  <a href="https://nathanneurotic.github.io/POPSLoader/">POPStarter Docs</a>.</p>
+</footer>
+<script src="assets/app.js"></script>
+</body></html>

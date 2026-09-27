@@ -1,0 +1,209 @@
+<!doctype html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>"Which HDD Do I Have?" · launcHER Docs</title>
+<meta name="description" content="Guide to understanding PS2 HDD configurations: USB HDD vs Internal exFAT (ATA BDM) vs APA/PFS Partitions vs APA-Jail. Find the exact path for your setup.">
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+<link rel="icon" type="image/png" href="assets/favicon.png">
+<meta property="og:site_name" content="launcHER Docs">
+<meta property="og:type" content="website">
+<link rel="stylesheet" href="assets/style.css">
+</head><body data-base="">
+<header class="topbar">
+  <button class="menu-btn" aria-label="Menu">☰</button>
+  <a class="brand" href="index.html">
+    <span class="psbtns"><i class="tri">&#9651;</i><i class="cir">&#9711;</i><i class="cro">&#10005;</i><i class="squ">&#9633;</i></span>
+    launcHER <small>DOCS</small></a>
+  <div class="topbar-actions">
+    <a class="topbar-btn primary" href="releases.html" title="Downloads &amp; Releases"><span class="icon icon-releases"></span>Downloads</a>
+    <a class="topbar-btn" href="https://github.com/NathanNeurotic/launcHER" target="_blank" rel="noopener" title="GitHub Repository"><span class="icon icon-github"></span>GitHub</a>
+  </div>
+  <div class="search">
+    <span class="ico"></span>
+    <input id="q" type="search" placeholder="Search devices, CNF syntax, HDD modes, OPL…  ( / )" autocomplete="off">
+    <kbd>/</kbd>
+    <div id="results"></div>
+  </div>
+</header>
+<canvas id="ps2-orbs" class="ps2-orbs-canvas" aria-hidden="true"></canvas>
+<div class="layout">
+  <nav class="sidebar">
+    <div class="sidebar-brand-sub">PLAYSTATION 2 // LAUNCHER</div>
+    <a href="index.html"><span class="icon icon-home"></span>Home</a>
+
+    <h4>Start</h4>
+    <a href="getting-started.html"><span class="icon icon-start"></span>Getting Started</a>
+    <a href="releases.html"><span class="icon icon-releases"></span>Downloads &amp; Releases</a>
+
+    <h4>Storage &amp; Devices</h4>
+    <a href="hdd-modes.html" class="active"><span class="icon icon-hdd"></span>"Which HDD Do I Have?"</a>
+    <a href="storage-profiles.html"><span class="icon icon-usb"></span>Storage Profiles</a>
+    <a href="apa-pfs.html"><span class="icon icon-server"></span>APA / PFS Deep Dive</a>
+
+    <h4>Configuration &amp; Launching</h4>
+    <a href="configuration.html"><span class="icon icon-settings"></span>launcHER.CNF Reference</a>
+    <a href="opl-apps.html"><span class="icon icon-apps"></span>OPL APPS Integration</a>
+
+    <h4>Reference</h4>
+    <a href="troubleshooting.html"><span class="icon icon-troubleshoot"></span>Troubleshooting &amp; Errors</a>
+    <a href="building.html"><span class="icon icon-terminal"></span>Building from Source</a>
+    <a href="credits.html"><span class="icon icon-credits"></span>Credits &amp; Lineage</a>
+
+    <h4 style="margin-top:24px;">Family Ecosystem</h4>
+    <a href="https://nathanneurotic.github.io/Open-PS2-Loader/"><span class="icon icon-play"></span>RiptOPL Docs ↗</a>
+    <a href="https://nathanneurotic.github.io/PS2-Servers/"><span class="icon icon-netboot"></span>PS2 Servers Docs ↗</a>
+    <a href="https://nathanneurotic.github.io/POPSLoader/"><span class="icon icon-book"></span>POPStarter Docs ↗</a>
+  </nav>
+  <main class="content">
+
+<h1>"Which HDD Do I Have?" <span class="g">HDD Modes Explained</span></h1>
+<p class="lead">
+  On PlayStation 2, saying "I have an HDD" can describe four fundamentally different hardware architectures and filesystem setups. launcHER needs to know <b>how Ember is accessed</b>, not just what physical drive is plugged in.
+</p>
+
+<div class="callout info">
+  <div class="h">The Fundamental Rule</div>
+  <b>launcHER does NOT require a dedicated HDD partition.</b>
+  <br>
+  You do not need to format your drive with APA or create <code>__.EMBER</code> if you already have Ember working on exFAT or USB. Choose the configuration that points directly to where Ember currently lives.
+</div>
+
+<h2 id="decision-tree">The Decision Tree</h2>
+<p>
+  Ask yourself these two simple questions to identify your mode:
+</p>
+
+<div class="cards">
+  <article class="card">
+    <h3>1. Is the drive plugged into USB?</h3>
+    <p>If your HDD or SSD is connected through an external USB port, it is <b>USB Mass Storage</b>. Use <code>mass?:/EMBER/ember.elf</code>.</p>
+  </article>
+  <article class="card">
+    <h3>2. Is it in the console Expansion Bay?</h3>
+    <p>If your drive is mounted inside the fat PS2 Network Adapter expansion bay, check whether it is formatted as <b>exFAT (ATA BDM)</b> or <b>APA / PFS partitions</b>.</p>
+  </article>
+</div>
+
+<pre><code>WHERE IS EMBER STORED?
+
+├── USB External Drive (HDD / SSD / Flash Drive)
+│   └── path=mass?:/EMBER/ember.elf
+│
+├── Internal Expansion Bay HDD — Pure exFAT
+│   └── path=ata:/EMBER/ember.elf
+│       arg=-dev9=NICHDD
+│
+├── Internal Expansion Bay HDD — Mixed APA-Jail
+│   ├── If Ember is on the exFAT side:
+│   │   └── path=ata:/EMBER/ember.elf
+│   │       arg=-dev9=NICHDD
+│   │
+│   └── If Ember is inside an APA partition:
+│       └── path=hdd0:&lt;PARTITION&gt;:pfs:/EMBER/ember.elf
+│           arg=pfs0:/EMBER/ember.elf
+│           arg=-skip_argv0
+│           arg=-dev9=NICHDD
+│
+└── Traditional Internal APA / PFS HDD
+    └── path=hdd0:&lt;PARTITION&gt;:pfs:/EMBER/ember.elf
+        arg=pfs0:/EMBER/ember.elf
+        arg=-skip_argv0
+        arg=-dev9=NICHDD</code></pre>
+
+<h2 id="mode-usb">Mode 1: USB HDD / USB SSD</h2>
+<p>
+  A spinning mechanical hard disk drive or 2.5" SSD plugged into a USB port (or USB hub) operates via the PS2's USB mass storage stack (<code>usbd_mini.irx</code> / <code>bdm.irx</code>).
+</p>
+<ul class="checklist">
+  <li><b>Filesystem:</b> FAT32 or exFAT.</li>
+  <li><b>Path format:</b> <code>mass?:/EMBER/ember.elf</code> or <code>usb?:/EMBER/ember.elf</code>.</li>
+  <li><b>DEV9 needed?</b> No. DEV9 is the internal network/HDD expansion interface and is not involved in USB.</li>
+</ul>
+
+<pre><code># USB Profile in launcHER.CNF
+path=mass?:/EMBER/ember.elf
+arg=Soul Blade</code></pre>
+
+<h2 id="mode-ata-exfat">Mode 2: Internal exFAT HDD (ATA BDM)</h2>
+<p>
+  Modern PS2 setups often format the entire internal HDD with standard exFAT (single partition MBR/GPT). Games are stored as ordinary ISOs or folders under <code>CD/</code>, <code>DVD/</code>, and <code>EMBER/</code>.
+</p>
+<ul class="checklist">
+  <li><b>Filesystem:</b> Native exFAT accessed via the BDM ATA driver (<code>ps2dev9.irx</code> + <code>ata_bd.irx</code>).</li>
+  <li><b>Path format:</b> <code>ata:/EMBER/ember.elf</code>.</li>
+  <li><b>DEV9 needed?</b> <b>YES</b> (<code>-dev9=NICHDD</code>). launcHER must keep the network adapter and ATA controller powered so Ember can read from <code>ata:/</code> after launcHER exits.</li>
+  <li><b>APA partition required?</b> <b>NO.</b> There are no APA headers or PFS filesystems involved.</li>
+</ul>
+
+<pre><code># Internal exFAT Profile in launcHER.CNF
+path=ata:/EMBER/ember.elf
+arg=Soul Blade
+arg=-dev9=NICHDD</code></pre>
+
+<h2 id="mode-apa-jail">Mode 3: APA-Jail (Mixed APA + exFAT)</h2>
+<p>
+  APA-Jail partitions an internal HDD with legacy APA headers at the start of the drive (for FMCB/FHDB or OSDMBR compatibility), followed by an unmanaged space formatted with standard exFAT.
+</p>
+<p>
+  Your path depends strictly on <b>which section stores Ember</b>:
+</p>
+<ul>
+  <li>If <code>EMBER/</code> is on the exFAT filesystem, use the <b>Internal exFAT (ATA BDM)</b> configuration: <code>path=ata:/EMBER/ember.elf</code>.</li>
+  <li>If <code>EMBER/</code> is stored inside one of the APA partitions (such as <code>__.EMBER</code> or <code>__common</code>), use the <b>APA/PFS</b> configuration below.</li>
+</ul>
+
+<h2 id="mode-apa-pfs">Mode 4: Internal APA / PFS HDD</h2>
+<p>
+  Traditional PlayStation 2 HDD formatting where the drive is divided into APA partitions (e.g. <code>__common</code>, <code>__system</code>, <code>+OPL</code>, <code>__.EMBER</code>) formatted with Sony's PFS (PlayStation File System).
+</p>
+<div class="callout info">
+  <div class="h">Can I use an existing partition?</div>
+  <b>YES.</b> You do not need a partition named <code>__.EMBER</code>. If you have space in <code>__common</code> or another partition, put <code>EMBER/</code> there and point launcHER at:
+  <pre><code>path=hdd0:__common:pfs:/EMBER/ember.elf</code></pre>
+</div>
+
+<p>
+  APA/PFS requires two distinct paths:
+</p>
+<ol>
+  <li><b>Loader target:</b> <code>hdd0:&lt;PARTITION&gt;:pfs:/EMBER/ember.elf</code> tells launcHER which partition to mount.</li>
+  <li><b>Ember handoff:</b> <code>arg=pfs0:/EMBER/ember.elf</code> tells Ember where to find itself once mounted.</li>
+</ol>
+
+<pre><code># APA/PFS Profile in launcHER.CNF
+path=hdd0:__.EMBER:pfs:/EMBER/ember.elf
+arg=pfs0:/EMBER/ember.elf
+arg=Soul Blade
+arg=-skip_argv0
+arg=-dev9=NICHDD</code></pre>
+
+<h2 id="separation-of-concerns">Where launcHER Lives vs Where Ember Lives</h2>
+<p>
+  They do <b>not</b> need to be on the same device!
+</p>
+<p>
+  For example, you can store `launcHER.elf` inside your OPL APPS folder (on an APA partition or USB) while Ember and all its games live on the internal exFAT HDD:
+</p>
+
+<pre><code>launcHER location:  +OPL/APPS/Soul Blade/Soul Blade.ELF
+launcHER.CNF:       path=ata:/EMBER/ember.elf
+                    arg=Soul Blade
+                    arg=-dev9=NICHDD
+Ember location:     ata:/EMBER/ember.elf</code></pre>
+
+<p>
+  launcHER reads its local <code>launcHER.CNF</code>, initializes the ATA storage driver, mounts the target device, and launches Ember with zero friction.
+</p>
+
+</main>
+  <aside class="toc"><div class="toc-h">On this page</div><nav id="toc-nav"></nav></aside>
+</div>
+<footer>
+  <p><b>launcHER Documentation</b> &mdash; Standalone PlayStation 2 Ember forwarder.
+  See <a href="credits.html">Credits &amp; Lineage</a>.</p>
+  <p class="prov-inline">PlayStation 2 Homebrew Documentation Family:
+  <a href="https://nathanneurotic.github.io/Open-PS2-Loader/">RiptOPL Docs</a> &middot;
+  <a href="https://nathanneurotic.github.io/PS2-Servers/">PS2 Servers Docs</a> &middot;
+  <a href="https://nathanneurotic.github.io/POPSLoader/">POPStarter Docs</a>.</p>
+</footer>
+<script src="assets/app.js"></script>
+</body></html>

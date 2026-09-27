@@ -1,0 +1,230 @@
+[
+  {
+    "title": "launcHER Documentation — Home Overview",
+    "cat": "overview",
+    "text": "launcHER is a standalone PlayStation 2 forwarder built specifically to launch Ember from supported storage devices while preserving the environment Ember needs after handoff. Standalone forwarder, Ember handoff, PFS mount persistence, exFAT, ATA BDM, USB, MX4SIO, MMCE, DEV9 power preservation, OPL DB, uLaunchELF.",
+    "url": "index.html"
+  },
+  {
+    "title": "HDD Users — Read This First",
+    "cat": "storage",
+    "text": "launcHER does not require a dedicated HDD partition. The __.EMBER APA partition is only an example. Choose the path that matches where Ember actually lives: USB mass?:/EMBER/ember.elf, internal exFAT ata:/EMBER/ember.elf, or APA/PFS hdd0:<PARTITION>:pfs:/EMBER/ember.elf.",
+    "url": "index.html#hdd-myth"
+  },
+  {
+    "title": "Why Ember Needs a Specialized Forwarder",
+    "cat": "overview",
+    "text": "Ember expects a bare game folder argument, DEV9 hardware power preservation, active PFS mount preservation for pfs0:/ access, and clean storage drivers.",
+    "url": "index.html#why-launcher"
+  },
+  {
+    "title": "Getting Started — Ember Directory Layout",
+    "cat": "start",
+    "text": "Ember folder structure: EMBER/ember.elf, EMBER/bios.bin, EMBER/games/<GAME_FOLDER>/ containing cue and bin files. Constant across USB, exFAT, and APA PFS.",
+    "url": "getting-started.html#step-1-ember-layout"
+  },
+  {
+    "title": "The Game Argument Rule",
+    "cat": "start",
+    "text": "Critical rule: pass bare folder name only such as arg=Soul Blade. Do NOT pass games/Soul Blade, nor cue filenames, nor absolute paths.",
+    "url": "getting-started.html#step-2-game-argument"
+  },
+  {
+    "title": "Setup launcHER.elf and launcHER.CNF",
+    "cat": "start",
+    "text": "Extract launcHER.elf and launcHER.CNF into your launch folder. Configure the profile matching your storage backend. Quickboot discovery automatically detects the CNF.",
+    "url": "getting-started.html#step-3-setup-launcher"
+  },
+  {
+    "title": "Renaming the ELF for OPL APPS",
+    "cat": "opl",
+    "text": "launcHER does not require its ELF name to match launcHER.CNF. Rename a copy of launcHER.elf to Soul Blade.ELF and keep launcHER.CNF beside it.",
+    "url": "getting-started.html#renaming-elf"
+  },
+  {
+    "title": "Which HDD Do I Have? — Decision Tree",
+    "cat": "storage",
+    "text": "Identify your PS2 HDD setup: USB external drive (mass?:), internal exFAT ATA BDM (ata:), mixed APA-Jail, or traditional APA/PFS partitions (hdd0:).",
+    "url": "hdd-modes.html#decision-tree"
+  },
+  {
+    "title": "USB HDD / USB SSD (Mass Storage)",
+    "cat": "storage",
+    "text": "External spinning disks or SSDs plugged into USB ports operate as USB mass storage: path=mass?:/EMBER/ember.elf. DEV9 is not required.",
+    "url": "hdd-modes.html#mode-usb"
+  },
+  {
+    "title": "Internal exFAT HDD (ATA BDM)",
+    "cat": "storage",
+    "text": "Internal hard drive formatted with single exFAT filesystem. Path is ata:/EMBER/ember.elf with arg=-dev9=NICHDD. No APA partitions or PFS required.",
+    "url": "hdd-modes.html#mode-ata-exfat"
+  },
+  {
+    "title": "APA-Jail (Mixed APA + exFAT)",
+    "cat": "storage",
+    "text": "Internal HDD with APA headers followed by exFAT unmanaged space. Use ata: if Ember is on exFAT, or hdd0: if Ember is inside an APA partition.",
+    "url": "hdd-modes.html#mode-apa-jail"
+  },
+  {
+    "title": "Internal APA / PFS Partitions",
+    "cat": "storage",
+    "text": "Traditional Sony APA partitions formatted with PFS. Use path=hdd0:<PARTITION>:pfs:/EMBER/ember.elf. Dedicated __.EMBER is optional; __common or +OPL works too.",
+    "url": "hdd-modes.html#mode-apa-pfs"
+  },
+  {
+    "title": "Separation of Concerns: Launcher vs Ember Location",
+    "cat": "storage",
+    "text": "launcHER and Ember do not need to live on the same device. launcHER can run from +OPL/APPS/ while Ember lives on internal exFAT ata:/EMBER/.",
+    "url": "hdd-modes.html#separation-of-concerns"
+  },
+  {
+    "title": "Storage Profiles — USB Mass Storage",
+    "cat": "storage",
+    "text": "USB configuration: path=mass?:/EMBER/ember.elf with arg=<GAME_FOLDER>. Supports mass?:, usb?:, and specific units like mass0:.",
+    "url": "storage-profiles.html#profile-usb"
+  },
+  {
+    "title": "Storage Profiles — Internal exFAT (ATA BDM)",
+    "cat": "storage",
+    "text": "Internal exFAT HDD: path=ata:/EMBER/ember.elf, arg=<GAME_FOLDER>, arg=-dev9=NICHDD. Keeps the expansion bay IDE interface powered for Ember.",
+    "url": "storage-profiles.html#profile-exfat"
+  },
+  {
+    "title": "Storage Profiles — APA / PFS HDD",
+    "cat": "storage",
+    "text": "APA/PFS profile: path=hdd0:<PARTITION>:pfs:/EMBER/ember.elf, arg=pfs0:/EMBER/ember.elf, arg=<GAME_FOLDER>, arg=-skip_argv0, arg=-dev9=NICHDD.",
+    "url": "storage-profiles.html#profile-apa-pfs"
+  },
+  {
+    "title": "Storage Profiles — MMCE & Memory Card",
+    "cat": "storage",
+    "text": "MMCE SPI SD card adapter (mmce?:/EMBER/ember.elf) and standard PlayStation 2 Memory Cards (mc?:/EMBER/ember.elf).",
+    "url": "storage-profiles.html#profile-mmce"
+  },
+  {
+    "title": "Storage Profiles — MX4SIO & i.Link",
+    "cat": "storage",
+    "text": "MX4SIO SIO2 SD adapter (mx4sio:/EMBER/ember.elf) and early fat PS2 i.Link FireWire (ilink:/EMBER/ember.elf).",
+    "url": "storage-profiles.html#profile-mx4sio"
+  },
+  {
+    "title": "Storage Profiles — UDPBD & UDPFS Network Boot",
+    "cat": "storage",
+    "text": "UDPBD network block device and UDPFS network filesystem with arg=-dev9=NIC. IP configuration read from mc?:/SYS-CONF/IPCONFIG.DAT.",
+    "url": "storage-profiles.html#profile-udpbd"
+  },
+  {
+    "title": "Multi-Path Fallback Configuration",
+    "cat": "storage",
+    "text": "Define multiple sequential path= lines in launcHER.CNF. The first path where ember.elf is found will be booted with the shared arguments.",
+    "url": "storage-profiles.html#fallback-paths"
+  },
+  {
+    "title": "APA / PFS Two-Phase Launch Mechanism",
+    "cat": "pfs",
+    "text": "Phase 1 mounts partition hdd0:<PARTITION> to pfs0: via fileXioMount. Phase 2 loads ELF and passes argv[0]=pfs0:/EMBER/ember.elf with bare game argument.",
+    "url": "apa-pfs.html#two-phase-handoff"
+  },
+  {
+    "title": "Anatomy of -skip_argv0 and -dev9=NICHDD",
+    "cat": "pfs",
+    "text": "Deep breakdown of why -skip_argv0 is essential to replace the hdd0: loader target with pfs0:, and how -dev9=NICHDD keeps the mount table active.",
+    "url": "apa-pfs.html#why-skip-argv0"
+  },
+  {
+    "title": "OPL DB and wLaunchELF Handoff Tokens",
+    "cat": "pfs",
+    "text": "Explains how OPL DB delivers hdd0:+OPL:pfs0:/APPS/... paths, uLE KhN passes :pfs:, and wLaunchELF R3Z passes +OPLpfs0:.",
+    "url": "apa-pfs.html#opl-handoff-tokens"
+  },
+  {
+    "title": "Robust APA Path Parser",
+    "cat": "pfs",
+    "text": "parseAPAPath isolates drive prefixes, skips leading separators, detects numbered pfs0: through pfs9: tokens, and prevents in-place buffer corruption.",
+    "url": "apa-pfs.html#parser-architecture"
+  },
+  {
+    "title": "OPL APPS Integration Concept",
+    "cat": "opl",
+    "text": "Rename copies of launcHER to match game titles (e.g. Soul Blade.ELF) with launcHER.CNF beside it for seamless listing on Open PS2 Loader's APPS page.",
+    "url": "opl-apps.html#concept"
+  },
+  {
+    "title": "OPL APPS Folder Layouts",
+    "cat": "opl",
+    "text": "Directory structures for +OPL/APPS/Soul Blade/, USB mass0:/APPS/, and internal exFAT ata:/APPS/.",
+    "url": "opl-apps.html#folder-layouts"
+  },
+  {
+    "title": "OPL title.cfg Configuration",
+    "cat": "opl",
+    "text": "title.cfg format for custom game titles, boot ELF specifications, developers, genres, and player counts.",
+    "url": "opl-apps.html#title-cfg"
+  },
+  {
+    "title": "OPL Cover Art and Coverflow Setup",
+    "cat": "opl",
+    "text": "Place front covers (_COV.jpg), back covers (_COV2.jpg), icons (_ICO.png), and wallpapers (_BG.jpg) in the ART/ folder using the ELF filename prefix.",
+    "url": "opl-apps.html#cover-art"
+  },
+  {
+    "title": "launcHER.CNF Syntax Rules",
+    "cat": "config",
+    "text": "Directives follow key=value format, comments begin with # or //, filenames are case-insensitive (.CNF, .cnf, .CFG, .cfg).",
+    "url": "configuration.html#syntax-rules"
+  },
+  {
+    "title": "launcHER.CNF Directives & Keys",
+    "cat": "config",
+    "text": "Directives: path=<path> defines target ELF and can be repeated for fallbacks; arg=<value> defines sequential command-line arguments.",
+    "url": "configuration.html#configuration-keys"
+  },
+  {
+    "title": "Global Launcher Flags Reference",
+    "cat": "config",
+    "text": "Flags: -skip_argv0, -dev9=NICHDD, -dev9=NIC, -dev9=HDD, -dev9=OFF, -reset_iop, and -delay=<seconds>.",
+    "url": "configuration.html#flags-reference"
+  },
+  {
+    "title": "Direct Command-Line Invocation",
+    "cat": "config",
+    "text": "Execute launcHER with direct command-line arguments instead of reading launcHER.CNF. Put global flags at the end of the argument list.",
+    "url": "configuration.html#direct-invocation"
+  },
+  {
+    "title": "Troubleshooting Error Codes (-19, -2, -6, -22)",
+    "cat": "errors",
+    "text": "Quickboot failed: -19 ENODEV (OPL DB pfs0 token or missing partition), -2 ENOENT (missing CNF or ember.elf), -6 ENXIO (device not responding), -22 EINVAL (syntax error).",
+    "url": "troubleshooting.html#error-codes"
+  },
+  {
+    "title": "Black Screen After Launch Checklist",
+    "cat": "errors",
+    "text": "Resolve black screens: verify bare game folder argument, ensure bios.bin is in EMBER/, and check for arg=-dev9=NICHDD on internal drives.",
+    "url": "troubleshooting.html#black-screen-checklist"
+  },
+  {
+    "title": "Submitting a Bug Report",
+    "cat": "errors",
+    "text": "Guidelines for opening an issue on GitHub: PS2 model, adapter, filesystem layout, exact CNF, Ember version, and on-screen output.",
+    "url": "troubleshooting.html#reporting-bugs"
+  },
+  {
+    "title": "Downloads & Releases",
+    "cat": "releases",
+    "text": "Download official release packages (launcHER.zip), standalone ELF binaries (launcHER.elf), and quickboot templates (launcHER.CNF).",
+    "url": "releases.html"
+  },
+  {
+    "title": "Building from Source",
+    "cat": "building",
+    "text": "Compile launcHER with PS2SDK, CMake 3.13+, and Docker. Build options: -DENABLE_PRINTF, -DUSE_EESIO, -DDEBUG.",
+    "url": "building.html"
+  },
+  {
+    "title": "Credits & Lineage",
+    "cat": "credits",
+    "text": "Lineage and credits: nuno6573 (concept & architecture), pcm720 (OSDMenu launcher foundation), Gageformer (Ember), eliminator1403 (hardware testing), NathanNeurotic (fork, PFS persistence, packaging).",
+    "url": "credits.html"
+  }
+]
