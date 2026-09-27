@@ -16,12 +16,14 @@ int handleQuickboot(char *cnfPath) {
   // from that ELF's directory. This keeps the config name stable even when
   // launcHER.elf is renamed for an OPL APPS entry (for example Soul Blade.ELF).
   char *ext = strrchr(cnfPath, '.');
-  if (!ext)
-    return -ENOENT;
+  int isConfig = (ext && (!strcasecmp(ext, ".cnf") || !strcasecmp(ext, ".cfg")));
 
-  if (!strcmp(ext, ".ELF") || !strcmp(ext, ".elf")) {
+  if (!isConfig) {
     size_t prefixLen = 0;
     char *separator = strrchr(cnfPath, '/');
+    char *bsep = strrchr(cnfPath, '\\');
+    if (bsep && (!separator || bsep > separator))
+      separator = bsep;
 
     if (separator) {
       prefixLen = (size_t)(separator - cnfPath) + 1;
@@ -47,17 +49,16 @@ int handleQuickboot(char *cnfPath) {
   cnfPath = resolvedPath;
 
   int isHDD = 0;
-  if (!strncmp(cnfPath, "hdd", 3))
+  DeviceType dtype = guessDeviceType(cnfPath);
+  if (dtype == Device_APA)
     isHDD = 1;
 
   int res;
-  DeviceType dtype;
   if (isHDD) {
     dtype = Device_APA;
     if ((res = initPFS(cnfPath, Device_None)))
       return res;
   } else {
-    dtype = guessDeviceType(cnfPath);
     if (dtype == Device_None)
       return -ENODEV;
 
@@ -67,7 +68,10 @@ int handleQuickboot(char *cnfPath) {
   }
 
   // Open the config file
-  char *launchTarget = cnfPath;
+  char launchTarget[PATH_MAX];
+  strncpy(launchTarget, cnfPath, sizeof(launchTarget) - 1);
+  launchTarget[sizeof(launchTarget) - 1] = '\0';
+
   cnfPath = normalizePath(cnfPath, dtype);
   if (!cnfPath) {
     if (isHDD)
@@ -83,6 +87,8 @@ int handleQuickboot(char *cnfPath) {
     delayAttempts--;
     if (delayAttempts < 0) {
       msg("Quickboot: Failed to open %s\n", cnfPath);
+      if (isHDD)
+        deinitPFS();
       return -ENODEV;
     }
     file = fopen(cnfPath, "r");
@@ -97,9 +103,12 @@ int handleQuickboot(char *cnfPath) {
   char relpathBuffer[PATH_MAX] = {0};
   char *valuePtr = NULL;
 
-  ext = strrchr(launchTarget, '/');
-  if (ext)
-    *ext = '\0';
+  char *lastSlash = strrchr(launchTarget, '/');
+  char *lastBslash = strrchr(launchTarget, '\\');
+  if (lastBslash && (!lastSlash || lastBslash > lastSlash))
+    lastSlash = lastBslash;
+  if (lastSlash)
+    *lastSlash = '\0';
 
   while (fgets(lineBuffer, sizeof(lineBuffer), file)) { // fgets returns NULL if EOF or an error occurs
     // Find the start of the value
@@ -114,7 +123,7 @@ int handleQuickboot(char *cnfPath) {
     } while (isspace((int)*valuePtr));
     valuePtr[strcspn(valuePtr, "\r\n")] = '\0';
 
-    if (!strncmp(lineBuffer, "boot", 4) && ext) {
+    if (!strncmp(lineBuffer, "boot", 4) && lastSlash) {
       if (strlen(valuePtr) > 0) {
         // Assemble full path
         snprintf(relpathBuffer, PATH_MAX - 1, "%s/%s", launchTarget, valuePtr);

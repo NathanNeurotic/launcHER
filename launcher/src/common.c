@@ -160,6 +160,114 @@ int launchPath(int argc, char *argv[]) {
   return ret;
 }
 
+// Checks if a substring looks like a PFS mount token (e.g. pfs:, pfs0:, pfs0/)
+static int isPfsToken(const char *s) {
+  if (!s || strncasecmp(s, "pfs", 3) != 0)
+    return 0;
+  const char *t = s + 3;
+  while (*t >= '0' && *t <= '9')
+    t++;
+  return (*t == ':' || *t == '/' || *t == '\\');
+}
+
+// Parses an APA/PFS path to extract the mount partition (e.g. "hdd0:+OPL")
+// and the relative path inside the partition.
+int parseAPAPath(const char *path, char *mountPart, size_t partSize, const char **pfsSubPath) {
+  if (!path || !path[0])
+    return -EINVAL;
+
+  char hddPrefix[8] = "hdd0:";
+  const char *p = path;
+
+  // Check if it begins with hdd<unit>:
+  if (!strncmp(p, "hdd", 3)) {
+    const char *colon = strchr(p, ':');
+    if (colon) {
+      size_t unitLen = (size_t)(colon - p) + 1;
+      if (unitLen < sizeof(hddPrefix)) {
+        memcpy(hddPrefix, p, unitLen);
+        hddPrefix[unitLen] = '\0';
+      }
+      p = colon + 1;
+    }
+  }
+
+  // If path started with "pfs" directly (e.g. pfs0:/path), there is no partition info in path
+  if (!strncmp(p, "pfs", 3)) {
+    if (mountPart && partSize > 0)
+      mountPart[0] = '\0';
+    if (pfsSubPath) {
+      const char *colon = strchr(p, ':');
+      *pfsSubPath = colon ? colon + 1 : p;
+    }
+    return 0;
+  }
+
+  // p points to the start of the partition name (e.g. "+OPL" or "__.EMBER").
+  // Find where the partition name ends. Delimiters:
+  // 1. ':' (e.g. "+OPL:pfs:/...", "+OPL:pfs0:/...", "+OPL:/...", "+OPL:")
+  // 2. '/' or '\\' (e.g. "+OPL/APPS/...")
+  // 3. "pfs" mount token without preceding colon (e.g. "+OPLpfs0:/...")
+  // 4. '\0' (end of string)
+  const char *partStart = p;
+  const char *partEnd = NULL;
+
+  const char *colon = strchr(partStart, ':');
+  const char *slash = strchr(partStart, '/');
+  const char *bslash = strchr(partStart, '\\');
+  if (bslash && (!slash || bslash < slash))
+    slash = bslash;
+
+  // Search for pfs mount token (e.g. pfs:, pfs0:, pfs0/)
+  const char *pfsToken = NULL;
+  const char *cur = partStart;
+  while ((cur = strstr(cur, "pfs")) != NULL) {
+    if (cur > partStart && isPfsToken(cur)) {
+      pfsToken = cur;
+      break;
+    }
+    cur += 3;
+  }
+
+  // Determine the earliest valid delimiter
+  if (colon)
+    partEnd = colon;
+  if (slash && (!partEnd || slash < partEnd))
+    partEnd = slash;
+  if (pfsToken && (!partEnd || pfsToken < partEnd))
+    partEnd = pfsToken;
+
+  if (!partEnd)
+    partEnd = partStart + strlen(partStart);
+
+  size_t partLen = (size_t)(partEnd - partStart);
+  if (partLen == 0)
+    return -EINVAL;
+
+  if (mountPart && partSize > 0) {
+    snprintf(mountPart, partSize, "%s%.*s", hddPrefix, (int)partLen, partStart);
+  }
+
+  // Advance past any delimiter, ":pfs", "pfs", digits, and colon to find the subpath
+  const char *sub = partEnd;
+  if (*sub == ':')
+    sub++;
+
+  if (!strncasecmp(sub, "pfs", 3)) {
+    sub += 3;
+    while (*sub >= '0' && *sub <= '9')
+      sub++;
+    if (*sub == ':')
+      sub++;
+  }
+
+  if (pfsSubPath) {
+    *pfsSubPath = sub;
+  }
+
+  return 0;
+}
+
 // Attempts to guess device type from path
 DeviceType guessDeviceType(char *path) {
   if (!strncmp("mc", path, 2)) {
@@ -193,7 +301,7 @@ DeviceType guessDeviceType(char *path) {
     return Device_UDPFS;
 #endif
 #ifdef APA
-  } else if (!strncmp("hdd", path, 3)) {
+  } else if (!strncmp("hdd", path, 3) || path[0] == '+' || !strncmp("pfs", path, 3) || !strncmp("__", path, 2) || strstr(path, ":pfs")) {
     return Device_APA;
 #endif
 #ifdef CDROM
@@ -214,21 +322,25 @@ DeviceType guessDeviceType(char *path) {
 char *normalizePath(char *path, DeviceType type) {
   pathbuffer[0] = '\0';
   switch (type) {
-  case Device_APA:
-    if (!strncmp("hdd", path, 3)) {
-      char *pfsPath = strstr(path, ":pfs:");
-      if (pfsPath) {
-        path = pfsPath + 5;
-      } else {
-        char *pfsPath = strchr(path, '/');
-        if (pfsPath)
-          path = pfsPath;
-      }
+  case Device_APA: {
+    const char *subPath = NULL;
+    if (parseAPAPath(path, NULL, 0, &subPath) == 0 && subPath && subPath[0] != '\0') {
+      if (subPath[0] == '/' || subPath[0] == '\\')
+        snprintf(pathbuffer, sizeof(pathbuffer), "%s%s", PFS_MOUNTPOINT, subPath);
+      else
+        snprintf(pathbuffer, sizeof(pathbuffer), "%s/%s", PFS_MOUNTPOINT, subPath);
+    } else {
+      if (path[0] == '/' || path[0] == '\\')
+        snprintf(pathbuffer, sizeof(pathbuffer), "%s%s", PFS_MOUNTPOINT, path);
+      else
+        snprintf(pathbuffer, sizeof(pathbuffer), "%s/%s", PFS_MOUNTPOINT, path);
     }
-    if (path[0] == '/')
-      strcat(pathbuffer, PFS_MOUNTPOINT);
-    else
-      strcat(pathbuffer, PFS_MOUNTPOINT "/");
+    for (char *c = pathbuffer + strlen(PFS_MOUNTPOINT); *c; c++) {
+      if (*c == '\\')
+        *c = '/';
+    }
+    break;
+  }
   case Device_MemoryCard:
   case Device_MMCE:
   case Device_CDROM:
@@ -271,20 +383,14 @@ int mountPFS(char *path) {
 #ifndef APA
   return -ENODEV;
 #else
-  // Extract partition path
-  char *filePath = strstr(path, ":pfs:");
-  char pathSeparator = '\0';
-  if (filePath || (filePath = strchr(path, '/'))) {
-    // Terminate the partition path
-    pathSeparator = filePath[0];
-    filePath[0] = '\0';
+  char mountPart[256];
+  if (parseAPAPath(path, mountPart, sizeof(mountPart), NULL) != 0 || mountPart[0] == '\0') {
+    return -ENODEV;
   }
 
   // Mount the partition
-  DPRINTF("Mounting %s to %s\n", path, PFS_MOUNTPOINT);
-  int res = fileXioMount(PFS_MOUNTPOINT, path, FIO_MT_RDONLY);
-  if (pathSeparator != '\0')
-    filePath[0] = pathSeparator; // Restore the path
+  DPRINTF("Mounting %s to %s\n", mountPart, PFS_MOUNTPOINT);
+  int res = fileXioMount(PFS_MOUNTPOINT, mountPart, FIO_MT_RDONLY);
   if (res)
     return -ENODEV;
 
@@ -302,10 +408,14 @@ int initPFS(char *path, DeviceType additionalDevices) {
   if ((res = initModules(Device_APA | additionalDevices)))
     return res;
 
+  char hddDev[8] = "hdd0:";
+  if (path && !strncmp(path, "hdd1", 4))
+    strcpy(hddDev, "hdd1:");
+
   // Wait for IOP to initialize device driver
   DPRINTF("Waiting for HDD to become available\n");
   for (int attempts = 0; attempts < DELAY_ATTEMPTS; attempts++) {
-    res = open("hdd0:", O_DIRECTORY | O_RDONLY);
+    res = open(hddDev, O_DIRECTORY | O_RDONLY);
     if (res >= 0) {
       close(res);
       break;
