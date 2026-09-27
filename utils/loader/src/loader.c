@@ -463,6 +463,8 @@ int parseAPAPath(const char *path, char *mountPart, size_t partSize, const char 
   // 3. "pfs" mount token without preceding colon (e.g. "+OPLpfs0:/...")
   // 4. '\0' (end of string)
   const char *partStart = p;
+  while (*partStart == '/' || *partStart == '\\')
+    partStart++;
   const char *partEnd = NULL;
 
   const char *colon = strchr(partStart, ':');
