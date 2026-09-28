@@ -1,7 +1,7 @@
 
 <p align="center">
 
-<img width="1774" height="887" alt="launcHER" src="https://github.com/user-attachments/assets/2ff5cd86-8be3-4c4e-b3fe-f7470e8eec39" />
+<img width="873" height="348" alt="launcHER" src="https://github.com/user-attachments/assets/e54f9ad4-c40b-483a-acaa-2accb5aa55cc" />
 
 <img width="400" height="92" alt="AI-Assisted-Software-Lovers-Only" src="https://github.com/user-attachments/assets/71335775-9fe3-4507-ac2c-caa851abb24c" />
 
