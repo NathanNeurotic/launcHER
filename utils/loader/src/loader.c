@@ -523,6 +523,8 @@ int parseAPAPath(const char *path, char *mountPart, size_t partSize, const char 
   return 0;
 }
 
+#define PFS_MT_WRITETHROUGH 0x02 // ps2sdk libpfs PFS_FIO_ATTR_WRITEABLE: commit on every write/close
+
 // Mounts the partition specified in path
 int mountPFS(char *path) {
   char mountPart[256];
@@ -531,7 +533,15 @@ int mountPFS(char *path) {
 
   // Preserve a writable PFS mount when NICHDD was requested. Other DEV9
   // shutdown modes keep the existing read-only mount behavior.
-  int mountMode = (dev9ShutdownType == ShutdownType_None) ? FIO_MT_RDWR : FIO_MT_RDONLY;
+  //
+  // The NICHDD mount must also be WRITE-THROUGH (0x02, ps2sdk libpfs PFS_FIO_ATTR_WRITEABLE).
+  // FIO_MT_RDWR is 0x00: writable, but PFS then keeps every write in its RAM cache until an
+  // unmount or sync -- it commits on write/close only when the mount flags carry 0x02
+  // (pfs_fio.c pfsFioCloseFileSlot, pfsFioWrite). NICHDD hands this mount to the target live and
+  // shutdownDEV9 skips the unmount, so a target that closes but never syncs (Ember: its memory
+  // cards, and PS1 play ends in a reset) never had its writes reach the disk
+  // (Gageformer/Ember#69; the same fix as RiptOPL's Ember hand-off).
+  int mountMode = (dev9ShutdownType == ShutdownType_None) ? (FIO_MT_RDWR | PFS_MT_WRITETHROUGH) : FIO_MT_RDONLY;
   int res = fileXioMount("pfs0:", mountPart, mountMode);
   if (res)
     return -ENODEV;
