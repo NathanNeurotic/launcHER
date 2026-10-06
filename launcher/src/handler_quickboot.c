@@ -8,6 +8,69 @@
 #include <stdlib.h>
 #include <string.h>
 
+// The name each BDM block device driver registers its devices under (ps2sdk bdmfs_fatfs uses the
+// driver's block_device path), and the launcher device it is.
+static const struct {
+  const char *name;
+  DeviceType type;
+} massDevices[] = {
+#ifdef USB
+    {"usb", Device_USB},
+#endif
+#ifdef ATA
+    {"ata", Device_ATA},
+#endif
+#ifdef MX4SIO
+    {"mx4sio", Device_MX4SIO},
+#endif
+#ifdef ILINK
+    {"ilink", Device_iLink},
+#endif
+};
+#define MASS_DEVICE_COUNT (sizeof(massDevices) / sizeof(massDevices[0]))
+#define MASS_UNITS 4 // devices (or partitions) looked at per driver
+
+// OPL and RiptOPL start an APPS entry with argv[0] = massN:/..., whatever block device holds it: USB,
+// the exFAT internal HDD, MX4SIO and i.Link all share ps2sdk's generic "mass" name. wLaunchELF passes
+// the device's own name (ata0:/..., mx4sio0:/...) instead, which is why the same launcHER works from
+// there. A mass path therefore cannot choose the drivers: load all of them, find the file on whichever
+// device has it and rewrite path to that device's own name, setting type. UDPBD is left out: it would
+// bring the network up just to look.
+static int findMassFile(char *path, size_t pathSize, DeviceType *type) {
+  char relPath[PATH_MAX];
+  char *colon = strchr(path, ':');
+  if (!colon || strlen(colon + 1) >= sizeof(relPath))
+    return -ENOENT;
+  strcpy(relPath, colon + 1);
+
+  DeviceType all = Device_None;
+  for (size_t i = 0; i < MASS_DEVICE_COUNT; i++)
+    all |= massDevices[i].type;
+  int res = initModulesAny(all);
+  if (res)
+    return res;
+
+  // Devices appear a moment after their drivers load: keep looking, as for any other CNF
+  for (int attempt = 0; attempt <= DELAY_ATTEMPTS; attempt++) {
+    for (size_t i = 0; i < MASS_DEVICE_COUNT; i++) {
+      for (int unit = 0; unit < MASS_UNITS; unit++) {
+        if (snprintf(path, pathSize, "%s%d:%s%s", massDevices[i].name, unit, (relPath[0] == '/') ? "" : "/", relPath) >= (int)pathSize)
+          return -ENOENT;
+        FILE *probe = fopen(path, "r");
+        if (probe) {
+          fclose(probe);
+          *type = massDevices[i].type;
+          DPRINTF("Found %s\n", path);
+          return 0;
+        }
+      }
+    }
+    sleep(1);
+  }
+  msg("Quickboot: %s was not found on any USB, exFAT HDD, MX4SIO or i.Link device\n", relPath);
+  return -ENODEV;
+}
+
 int handleQuickboot(char *cnfPath) {
   static const char quickbootName[] = "launcHER.CNF";
   char resolvedPath[PATH_MAX] = {0};
@@ -54,10 +117,17 @@ int handleQuickboot(char *cnfPath) {
     isHDD = 1;
 
   int res;
+  int foundByName = 0;
   if (isHDD) {
     dtype = Device_APA;
     if ((res = initPFS(cnfPath, Device_None)))
       return res;
+  } else if (!isConfig && dtype == Device_USB && !strncmp(cnfPath, "mass", 4)) {
+    // launcHER's own folder, named the generic massN: way (an OPL/RiptOPL APPS launch): find which
+    // device it really is. An explicit CNF path keeps launcHER's own meaning of mass, USB.
+    if ((res = findMassFile(resolvedPath, sizeof(resolvedPath), &dtype)))
+      return res;
+    foundByName = 1;
   } else {
     if (dtype == Device_None)
       return -ENODEV;
@@ -72,7 +142,9 @@ int handleQuickboot(char *cnfPath) {
   strncpy(launchTarget, cnfPath, sizeof(launchTarget) - 1);
   launchTarget[sizeof(launchTarget) - 1] = '\0';
 
-  cnfPath = normalizePath(cnfPath, dtype);
+  // A path findMassFile found is already the live device name (usb0:, ata0:, ...)
+  if (!foundByName)
+    cnfPath = normalizePath(cnfPath, dtype);
   if (!cnfPath) {
     if (isHDD)
       deinitPFS();

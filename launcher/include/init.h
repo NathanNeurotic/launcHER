@@ -15,4 +15,9 @@ void applyXPARAM(char *gameID);
 // Initializes IOP modules for given device type
 int initModules(DeviceType device);
 
+// Loads the drivers for every device type in `devices` at once, skipping a block device driver whose
+// hardware is absent instead of failing. Used to find launcHER.CNF behind a generic massN: path. The
+// next initModules always reboots the IOP, so a launch target still gets exactly its own drivers.
+int initModulesAny(DeviceType devices);
+
 #endif
