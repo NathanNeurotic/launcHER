@@ -7,6 +7,124 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <usbhdfsd-common.h>
+#define NEWLIB_PORT_AWARE
+#include "fileXio_rpc.h"
+
+// The BDM drivers this build has: the name a driver reports for a massN: slot
+// (USBMASS_IOCTL_GET_DRIVERNAME -- the names RiptOPL matches), the name it registers the same device
+// under for launcHER's own paths (ps2sdk bdmfs_fatfs: the block device's path), and the device it is.
+static const struct {
+  const char *driver, *driverAlt, *name;
+  DeviceType type;
+} massDrivers[] = {
+#ifdef USB
+    {"usb", NULL, "usb", Device_USB},
+#endif
+#ifdef ATA
+    {"ata", NULL, "ata", Device_ATA},
+#endif
+#ifdef MX4SIO
+    {"sdc", "mx4sio", "mx4sio", Device_MX4SIO},
+#endif
+#ifdef ILINK
+    {"sd", "ilink", "ilink", Device_iLink},
+#endif
+};
+#define MASS_DRIVER_COUNT ((int)(sizeof(massDrivers) / sizeof(massDrivers[0])))
+#define MASS_SLOTS        10 // bdmfs_fatfs mount slots, mass0: to mass9:
+
+// Which massDrivers entry backs mass<slot>:, by asking the slot itself. -1 = nothing mounted there,
+// or a driver launcHER does not load.
+static int massSlotDriver(int slot) {
+  char path[16], driver[32] = {0};
+
+  snprintf(path, sizeof(path), "mass%d:/", slot);
+  int dir = fileXioDopen(path);
+  if (dir < 0)
+    return -1;
+  int res = fileXioIoctl2(dir, USBMASS_IOCTL_GET_DRIVERNAME, NULL, 0, driver, sizeof(driver) - 1);
+  fileXioDclose(dir);
+  if (res < 0)
+    return -1;
+  for (int i = 0; i < MASS_DRIVER_COUNT; i++) {
+    if (!strcmp(driver, massDrivers[i].driver) || (massDrivers[i].driverAlt && !strcmp(driver, massDrivers[i].driverAlt)))
+      return i;
+  }
+  DPRINTF("mass%d: is driver %s, which launcHER does not load\n", slot, driver);
+  return -1;
+}
+
+// 1 when mass<slot>: holds rest, the path after the device's colon ("/APPS/.../launcHER.CNF").
+static int massSlotHas(int slot, const char *rest) {
+  char path[PATH_MAX];
+
+  if (snprintf(path, sizeof(path), "mass%d:%s", slot, rest) >= (int)sizeof(path))
+    return 0;
+  FILE *file = fopen(path, "r");
+  if (!file)
+    return 0;
+  fclose(file);
+  return 1;
+}
+
+// OPL and RiptOPL start an APPS entry with argv[0] = massN:/..., whatever block device holds it: "mass"
+// is only ps2sdk's connection-order name, shared by USB, the exFAT internal HDD, MX4SIO and i.Link.
+// wLaunchELF passes the device's own name (ata0:/...) instead, which is why the same launcHER works
+// from there. So do what RiptOPL does with its own massN: boot: load the BDM drivers and ask the slot
+// which driver it is. path is rewritten to the name wLaunchELF would have passed -- <name><k>:, k
+// counting the earlier slots of the same driver, which is how bdmfs numbers those names -- and type set
+// to match, so the launch carries on exactly as one from there. UDPBD is left out: it would bring the
+// network up just to ask.
+static int resolveMassPath(char *path, size_t pathSize, DeviceType *type) {
+  char rest[PATH_MAX];
+  char *colon = strchr(path, ':');
+  int slot = (path[4] >= '0' && path[4] <= '9') ? path[4] - '0' : 0;
+  int driver = -1, k = 0;
+
+  if (!colon || strlen(colon + 1) >= sizeof(rest))
+    return -ENOENT;
+  strcpy(rest, colon + 1);
+
+  DeviceType all = Device_None;
+  for (int i = 0; i < MASS_DRIVER_COUNT; i++)
+    all |= massDrivers[i].type;
+  int res = initModulesAny(all);
+  if (res)
+    return res;
+
+  // A device registers a moment after its driver loads: keep asking, as for any other CNF
+  for (int attempt = 0; attempt <= DELAY_ATTEMPTS && (driver = massSlotDriver(slot)) < 0; attempt++)
+    sleep(1);
+  if (driver < 0) {
+    msg("Quickboot: mass%d: did not answer as a USB, exFAT HDD, MX4SIO or i.Link device\n", slot);
+    return -ENODEV;
+  }
+
+  // This IOP numbers devices by its own connection order, which can differ from the loader's when
+  // several are plugged in. launcHER's own folder settles it: if the slot we were handed does not hold
+  // it, the mounted slot that does is the device the loader meant.
+  if (!massSlotHas(slot, rest)) {
+    for (int other = 0; other < MASS_SLOTS; other++) {
+      int d;
+      if (other != slot && (d = massSlotDriver(other)) >= 0 && massSlotHas(other, rest)) {
+        slot = other;
+        driver = d;
+        break;
+      }
+    }
+  }
+
+  for (int earlier = 0; earlier < slot; earlier++) {
+    if (massSlotDriver(earlier) == driver)
+      k++;
+  }
+  if (snprintf(path, pathSize, "%s%d:%s", massDrivers[driver].name, k, rest) >= (int)pathSize)
+    return -ENOENT;
+  *type = massDrivers[driver].type;
+  DPRINTF("mass%d: is %s -> %s\n", slot, massDrivers[driver].driver, path);
+  return 0;
+}
 
 int handleQuickboot(char *cnfPath) {
   static const char quickbootName[] = "launcHER.CNF";
@@ -59,6 +177,12 @@ int handleQuickboot(char *cnfPath) {
     if ((res = initPFS(cnfPath, Device_None)))
       return res;
   } else {
+    // launcHER's own folder named the generic massN: way (an OPL or RiptOPL APPS launch): find out which
+    // device that is, then carry on exactly as for a launch that named it. An explicit CNF path keeps
+    // launcHER's own meaning of mass, USB.
+    if (!isConfig && dtype == Device_USB && !strncmp(cnfPath, "mass", 4) &&
+        (res = resolveMassPath(resolvedPath, sizeof(resolvedPath), &dtype)))
+      return res;
     if (dtype == Device_None)
       return -ENODEV;
 

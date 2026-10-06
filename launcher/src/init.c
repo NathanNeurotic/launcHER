@@ -1,6 +1,7 @@
 
 #include "init.h"
 #include "common.h"
+#include "dprintf.h"
 #include <ctype.h>
 #include <fcntl.h>
 #include <iopcontrol.h>
@@ -190,11 +191,25 @@ static ModuleListEntry moduleList[] = {
 #define MODULE_COUNT sizeof(moduleList) / sizeof(ModuleListEntry)
 
 static DeviceType currentDevice = Device_None;
+// Set after initModulesAny: the IOP holds more drivers than any launch target asked for
+static int forceIOPReset = 0;
+
+static int loadModules(DeviceType device, int tolerant);
+
 // Initializes IOP modules for given device type
-int initModules(DeviceType device) {
-  if ((currentDevice)&device)
+int initModules(DeviceType device) { return loadModules(device, 0); }
+
+int initModulesAny(DeviceType devices) {
+  int ret = loadModules(devices, 1);
+  forceIOPReset = 1;
+  return ret;
+}
+
+static int loadModules(DeviceType device, int tolerant) {
+  if (!forceIOPReset && ((currentDevice)&device))
     // Do nothing if the drivers are already loaded
     return 0;
+  forceIOPReset = 0;
 
   if (currentDevice && !(currentDevice & (Device_APA | Device_ATA)) && !(currentDevice & (Device_APA | Device_ATA)))
     shutdownDEV9();
@@ -249,6 +264,12 @@ int initModules(DeviceType device) {
       ret = iopret;
     if (moduleList[i].type & Device_Optional)
       ret = 0;
+    // initModulesAny: hardware this console lacks (no DEV9 for the exFAT HDD, no i.Link port) only
+    // leaves that driver out
+    if (tolerant && ret && !(moduleList[i].type & Device_Basic)) {
+      DPRINTF("Skipping module %s: %d\n", moduleList[i].name, ret);
+      ret = 0;
+    }
 
     // Clean up arguments
     if (moduleList[i].argStr != NULL)
