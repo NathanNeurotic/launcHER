@@ -16,7 +16,7 @@ void applyXPARAM(char *gameID);
 int initModules(DeviceType device);
 
 // Loads the drivers for every device type in `devices` at once, skipping a block device driver whose
-// hardware is absent instead of failing. Used to find launcHER.CNF behind a generic massN: path. The
+// hardware is absent instead of failing. Used to ask a generic massN: slot which driver it is. The
 // next initModules always reboots the IOP, so a launch target still gets exactly its own drivers.
 int initModulesAny(DeviceType devices);
 

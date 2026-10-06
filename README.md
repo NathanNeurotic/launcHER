@@ -187,7 +187,7 @@ launcHER.CNF
 
 works correctly.
 
-**Started from OPL or RiptOPL's APPS?** Those loaders name every BDM device `mass0:`, `mass1:`, ... whether it is a USB drive, an exFAT internal HDD, MX4SIO or i.Link. launcHER therefore looks for its `launcHER.CNF` on all of them, then reboots the IOP so your `path=` target starts with only its own device's drivers, exactly as before. (wLaunchELF passes the device's own name, such as `ata0:/`, so it never needed this.)
+**Started from OPL or RiptOPL's APPS?** Those loaders name every BDM device `mass0:`, `mass1:`, ... whether it is a USB drive, an exFAT internal HDD, MX4SIO or i.Link. launcHER therefore asks the device behind that number which driver it is (the same check RiptOPL makes on its own `massN:` boot) and carries on under that device's own name, exactly as if it had been started as `ata0:/…` or `mx4sio0:/…`. Your `path=` target still starts with only its own device's drivers. (wLaunchELF passes the device's own name, such as `ata0:/`, so it never needed this.)
 
 Lines beginning with `#` are comments.
 
