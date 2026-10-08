@@ -198,6 +198,42 @@ apply to that image; they do not identify every POPS variant.
 
 ## Capability worklist
 
+### Next IOP integration contract
+
+The measured POPS `FUN_002002a0` transfers these embedded external IRX ranges
+through `FUN_002001d8` (IOP allocation, SIF DMA, load/execute and result check).
+Names and versions below were read independently from each ELF's `.iopmod`
+section; these IRXs remain inside the external POPS core.
+
+| Module | Version | EE source range, end exclusive | Original condition |
+|---|---|---|---|
+| sio2man | 2.5 | 0x002cbbc0..0x002cd559 | Always |
+| padman_hsync | 4.5 | 0x002cd560..0x002d8345 | Always |
+| Sound_Device_Library | 3.3 | 0x002d8350..0x002df2ed | Always |
+| sdr_driver | 4.1 | 0x002df2f0..0x002e0f81 | Always |
+| dev9 | 2.2 | 0x002e0f90..0x002e40d5 | Module-init parameter nonzero |
+| atad | 2.4 | 0x002e40e0..0x002e6f75 | Module-init parameter nonzero |
+| hdd | 2.2 | 0x002e6f80..0x002ee47d | Module-init parameter nonzero |
+| pfs | 2.1 | 0x002ee480..0x002fa81d | Module-init parameter nonzero |
+| IOPCD | 1.1 | 0x002fa820..0x002fe66f | Always |
+
+The startup routine `FUN_002004f0` chooses the nonzero module-init parameter
+after parsing a partition from its launch argument, then mounts `__common`
+and the game partition through `FUN_00214938`. With no parsed partition it skips
+that embedded storage group and calls disc initialization with a null path.
+That alternate path is not an established arbitrary-device VCD launch recipe:
+it also selects different disc and VMC initialization branches.
+
+`FUN_00210540` binds RPC server 0x435052, issues initialization/image-open
+requests and fetches a 0x400-byte TOC response. `FUN_0020cf00` initializes two
+0x20000-byte save images when its parameter is nonzero. Preserving those
+external Sony disc/audio/controller components while adapting the filesystem
+and storage services is the next integration question. Launch-time device
+availability alone cannot prove these services survive or remain compatible.
+The old reconstructed host `pfs_wrap.c` and `vcd_bat.c` are not usable IOP
+implementations: their stdio paths and speculative format handling do not
+establish the original driver or RPC contracts.
+
 Every row is part of the target. Host code, EE build, IOP behavior and console
 validation are separate gates. No row below currently claims a working POPS boot.
 
@@ -259,6 +295,16 @@ structural checks. The tests cover failed guards leaving memory untouched,
 malformed/truncated files, address arithmetic, source/destination aliasing, JAL
 delay-instruction preservation, J variants, PATCH metadata and scratchpad bounds.
 
-The host tests run in GitHub Actions alongside the PS2SDK build and gate release
-publication. At this stage no new exact-head CI, PS2 build or console result has
-been obtained. Local Docker's Linux daemon was unavailable during implementation.
+The host tests are configured in GitHub Actions alongside the PS2SDK build and
+gate release publication. Local PS2SDK compilation/linking/packing passed at
+code commit `01eadfe0fe5d448514277cd857e7cabb28ae5766`, using the cached
+`ghcr.io/ps2homebrew/ps2homebrew:main` image
+`sha256:1037f40df12cf2d1875dcfdc368ed7f70feb0eff186498c4e10ff874ef531a1b`
+and GCC 15.2.0. The packed artifact is 208,884 bytes with SHA256
+`101d33a1dabaf485805d02c7ca212932c10c966902d17eb1f81f901a407d3aec`,
+at `build/pops-ps2sdk/release/launcHER.elf` (ignored build output).
+
+Docker was started locally; its engine restarted during the first attempt, and
+the subsequent build completed. This is a target build result, not a POPS boot
+or hardware pass. GitHub CLI's saved token is invalid, so no new exact-head CI
+or PR publication has been obtained. No console result has been obtained.
