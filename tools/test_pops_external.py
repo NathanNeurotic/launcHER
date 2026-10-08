@@ -62,6 +62,21 @@ class BootBuffers(c.Structure):
                ("iop", c.c_void_p), ("iop_size", c.c_size_t)]
 
 
+class TrampolineArgs(c.Structure):
+    _fields_ = [
+        ("entry", c.c_uint32),
+        ("bss_address", c.c_uint32),
+        ("bss_size", c.c_uint32),
+        ("scratchpad_size", c.c_uint32),
+        ("staging_core", c.c_uint32),
+        ("core_address", c.c_uint32),
+        ("core_size", c.c_uint32),
+        ("argc", c.c_int32),
+        ("argv", c.c_uint32 * 4),
+        ("arg_strings", c.c_char * 128),
+    ]
+
+
 def check_boot_staging(plan, source, iop=None, original_writes=None):
     ram_size = plan.bss_address + plan.bss_size - 0x100000
     ram = c.create_string_buffer(b'x' * (ram_size + 16), ram_size + 16)
@@ -501,6 +516,55 @@ class InspectorTests(unittest.TestCase):
                            (1, 0x100, 0x200010, 0, 16, 16, 6, 16)])
         self.assertEqual(inspect_elf(overlapping)[0], RANGE)
 
+    def test_format_proxy_args_contract(self):
+        buf = c.create_string_buffer(1024)
+        # Missing required args or invalid buffer
+        self.assertEqual(LIB.pops_format_proxy_args(None, 1024, b"mass0:/a", b"mass0:/b", b"mass0:/c", None, None, None), INVALID)
+        self.assertEqual(LIB.pops_format_proxy_args(buf, 10, b"mass0:/a", b"mass0:/b", b"mass0:/c", None, None, None), INVALID)
+        self.assertEqual(LIB.pops_format_proxy_args(buf, 1024, None, b"mass0:/b", b"mass0:/c", None, None, None), INVALID)
+        # Invalid backend paths (no colon or recursive pops:)
+        self.assertEqual(LIB.pops_format_proxy_args(buf, 1024, b"invalid_path", b"mass0:/b", b"mass0:/c", None, None, None), INVALID)
+        self.assertEqual(LIB.pops_format_proxy_args(buf, 1024, b"pops0:/nested", b"mass0:/b", b"mass0:/c", None, None, None), INVALID)
+        # Valid packing
+        written = LIB.pops_format_proxy_args(buf, 1024, b"mass0:/Game.VCD", b"mass0:/SLOT0.VMC", b"mass0:/SLOT1.VMC",
+                                            b"mass0:/Disc2.VCD", None, None)
+        self.assertGreater(written, 0)
+        tokens = buf.raw[:written].split(b'\0')
+        self.assertEqual(tokens[:5], [b"popfs", b"mass0:/Game.VCD", b"mass0:/SLOT0.VMC", b"mass0:/SLOT1.VMC", b"mass0:/Disc2.VCD"])
+
+    def test_trampoline_args_init_and_layout(self):
+        plan = BootPlan()
+        plan.entry = 0x00200008
+        plan.core_address = 0x00200000
+        plan.core_size = 0x00302E60
+        plan.bss_address = 0x00502E60
+        plan.bss_size = 0x00362AE0
+        plan.scratchpad_size = 0x00003C30
+
+        args = TrampolineArgs()
+        # Invalid plan or staging core
+        self.assertEqual(LIB.pops_trampoline_args_init(None, c.byref(plan), 0x01000000, None), INVALID)
+        self.assertEqual(LIB.pops_trampoline_args_init(c.byref(args), None, 0x01000000, None), INVALID)
+        self.assertEqual(LIB.pops_trampoline_args_init(c.byref(args), c.byref(plan), 0, None), INVALID)
+
+        # Successful init with default arg
+        self.assertEqual(LIB.pops_trampoline_args_init(c.byref(args), c.byref(plan), 0x01000000, None), 0)
+        self.assertEqual(args.entry, 0x00200008)
+        self.assertEqual(args.core_address, 0x00200000)
+        self.assertEqual(args.core_size, 0x00302E60)
+        self.assertEqual(args.staging_core, 0x01000000)
+        self.assertEqual(args.argc, 1)
+        self.assertEqual(args.arg_strings.decode('ascii'), "pops0:IMAGE.VCD")
+        # argv[0] must point to arg_strings in bram (0x00084200 + offset)
+        self.assertEqual(args.argv[0], 0x00084200 + 48)
+
+        # Layout verification: disjoint staging buffer
+        self.assertEqual(LIB.pops_bootstrap_verify_layout(0x01000000, 0x400000, c.byref(plan)), 0)
+        # Staging buffer overlapping POPS BSS / core
+        self.assertEqual(LIB.pops_bootstrap_verify_layout(0x00800000, 0x100000, c.byref(plan)), RANGE)
+        # Staging buffer exceeding 32 MiB
+        self.assertEqual(LIB.pops_bootstrap_verify_layout(0x01F00000, 0x200000, c.byref(plan)), RANGE)
+
 
 def check_corpus(root):
     roots = [root / "hugopocked-fixes", root / "game-fixes"]
@@ -563,6 +627,7 @@ def main():
                     str(ROOT / "common/src/pops_profile.c"),
                     str(ROOT / "common/src/pops_boot_stage.c"),
                     str(ROOT / "common/src/pops_core_patches.c"),
+                    str(ROOT / "common/src/pops_bootstrap.c"),
                     str(ROOT / "third_party/lzma/LzmaDec.c"), "-o", str(library)], check=True)
     LIB = c.CDLL(str(library))
     LIB.pops_container_inspect.argtypes = [c.c_void_p, c.c_size_t, c.POINTER(Container)]
@@ -586,11 +651,25 @@ def main():
                                       c.c_size_t, c.POINTER(BootBuffers)]
     LIB.pops_core_patches_stage.argtypes = [c.c_uint32, c.c_void_p, c.c_size_t, c.c_uint32]
     LIB.pops_core_image_identify.argtypes = [c.c_void_p, c.c_size_t]
+    LIB.pops_format_proxy_args.argtypes = [
+        c.c_char_p, c.c_size_t,
+        c.c_char_p, c.c_char_p, c.c_char_p,
+        c.c_char_p, c.c_char_p, c.c_char_p
+    ]
+    LIB.pops_trampoline_args_init.argtypes = [
+        c.POINTER(TrampolineArgs), c.POINTER(BootPlan),
+        c.c_uint32, c.c_char_p
+    ]
+    LIB.pops_bootstrap_verify_layout.argtypes = [
+        c.c_uint32, c.c_size_t, c.POINTER(BootPlan)
+    ]
     for name in ("pops_container_inspect", "pops_container_plan", "pops_elf_inspect",
                  "pops_container_stage", "pops_patch_options", "pops_pak_inspect",
                  "pops_pak_decode", "pops_iop_image_inspect", "pops_image_sha256",
                  "pops_boot_plan_pak", "pops_boot_plan_elf", "pops_boot_stage_pak",
-                 "pops_boot_stage_elf", "pops_core_patches_stage", "pops_core_image_identify"):
+                 "pops_boot_stage_elf", "pops_core_patches_stage", "pops_core_image_identify",
+                 "pops_format_proxy_args", "pops_trampoline_args_init",
+                 "pops_bootstrap_verify_layout"):
         getattr(LIB, name).restype = c.c_int
     result = unittest.TextTestRunner(verbosity=2).run(
         unittest.defaultTestLoader.loadTestsFromTestCase(InspectorTests))

@@ -3,6 +3,7 @@
 #include "dprintf.h"
 #include "game_id.h"
 #include "handlers.h"
+#include "handler_pops.h"
 #include "init.h"
 #include "loader.h"
 #include <ctype.h>
@@ -63,7 +64,7 @@ void fail(const char *str, ...) {
 }
 
 // Tests if file exists by opening it
-int tryFile(char *filepath) {
+int tryFile(const char *filepath) {
   int fd = open(filepath, O_RDONLY);
   if (fd < 0) {
     return fd;
@@ -271,7 +272,7 @@ int parseAPAPath(const char *path, char *mountPart, size_t partSize, const char 
 }
 
 // Attempts to guess device type from path
-DeviceType guessDeviceType(char *path) {
+DeviceType guessDeviceType(const char *path) {
   if (!strncmp("mc", path, 2)) {
     return Device_MemoryCard;
 #ifdef MMCE
@@ -523,6 +524,9 @@ int parseGlobalFlags(int argc, char *argv[]) {
 }
 
 int LoadELFFromFile(int argc, char *argv[]) {
+  if (isPopsTarget(argv[0]))
+    return launchPOPS(argc, argv);
+
   if (settings.titleID || (settings.flags & FLAG_APP_GAMEID)) {
     char *titleID = settings.titleID;
     if (!titleID)

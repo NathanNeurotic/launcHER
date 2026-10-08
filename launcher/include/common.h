@@ -62,10 +62,10 @@ void msg(const char *str, ...);
 void fail(const char *str, ...);
 
 // Tests if file exists by opening it
-int tryFile(char *filepath);
+int tryFile(const char *filepath);
 
 // Attempts to guess device type from path
-DeviceType guessDeviceType(char *path);
+DeviceType guessDeviceType(const char *path);
 
 // Attempts to convert launcher-specific path into path supported by PS2 modules
 char *normalizePath(char *path, DeviceType type);

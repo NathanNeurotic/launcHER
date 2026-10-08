@@ -20,6 +20,8 @@ set(EE_SOURCES
     src/init.c
     src/handler_mc.c
     src/handler_quickboot.c
+    src/handler_pops.c
+    src/pops_trampoline.S
 )
 
 # Common files
@@ -35,6 +37,7 @@ list(APPEND EE_SOURCES
     ../common/src/pops_profile.c
     ../common/src/pops_boot_stage.c
     ../common/src/pops_core_patches.c
+    ../common/src/pops_bootstrap.c
     ../third_party/lzma/LzmaDec.c
     ../common/src/dprintf.c
 )
@@ -330,6 +333,7 @@ link_newlib_nano(launcher_unc
     cdvd
     patches
     kernel
+    iopreboot
     libdebug.a
     fileXio
     gskit

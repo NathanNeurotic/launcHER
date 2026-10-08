@@ -1,0 +1,439 @@
+#include "handler_pops.h"
+#include "common.h"
+#include "dprintf.h"
+#include "init.h"
+#include "pops_external.h"
+#include "pops_bootstrap.h"
+#include <fcntl.h>
+#include <kernel.h>
+#include <iopcontrol.h>
+#include <iopcontrol_special.h>
+#include <ps2sdkapi.h>
+#include <sifrpc.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#define NEWLIB_PORT_AWARE
+#include <fileXio_rpc.h>
+#include <io_common.h>
+
+extern const char pops_trampoline_code[];
+extern const char pops_trampoline_code_end[];
+
+#define POPS_LOAD_RAW_BUF   ((void *)0x01800000)
+#define POPS_LOAD_IOP_BUF   ((void *)0x01400000)
+#define POPS_STAGE_BUF      ((void *)POPS_STAGING_BASE)
+#define POPS_LOAD_MAX_SIZE  (8 * 1024 * 1024)
+
+int isPopsTarget(const char *path) {
+  if (!path)
+    return 0;
+  const char *dot = strrchr(path, '.');
+  if (!dot)
+    return 0;
+  return !strcasecmp(dot, ".vcd");
+}
+
+static void extractDirectory(const char *path, char *dir, size_t dir_size) {
+  if (!path || !dir || dir_size == 0)
+    return;
+  dir[0] = '\0';
+  const char *slash = strrchr(path, '/');
+  const char *bslash = strrchr(path, '\\');
+  if (bslash && (!slash || bslash > slash))
+    slash = bslash;
+  if (!slash)
+    slash = strrchr(path, ':');
+
+  if (slash) {
+    size_t len = (size_t)(slash - path) + 1;
+    if (len >= dir_size)
+      len = dir_size - 1;
+    memcpy(dir, path, len);
+    dir[len] = '\0';
+  }
+}
+
+static void extractGameBase(const char *path, char *base, size_t base_size) {
+  if (!path || !base || base_size == 0)
+    return;
+  base[0] = '\0';
+  const char *start = strrchr(path, '/');
+  const char *bstart = strrchr(path, '\\');
+  if (bstart && (!start || bstart > start))
+    start = bstart;
+  if (!start)
+    start = strrchr(path, ':');
+  start = start ? start + 1 : path;
+
+  /* Strip POPStarter launcher prefixes like XX. or SB. */
+  if (!strncasecmp(start, "XX.", 3) || !strncasecmp(start, "SB.", 3))
+    start += 3;
+
+  const char *dot = strrchr(start, '.');
+  size_t len = dot ? (size_t)(dot - start) : strlen(start);
+  if (len >= base_size)
+    len = base_size - 1;
+  memcpy(base, start, len);
+  base[len] = '\0';
+}
+
+int findPopsDependencies(const char *vcdPath, char *popsPath, size_t popsPathSize,
+                         char *ioprpPath, size_t ioprpPathSize) {
+  char vcdDir[PATH_MAX] = {0};
+  char devPrefix[16] = {0};
+  char testPath[PATH_MAX] = {0};
+  char testIop[PATH_MAX] = {0};
+
+  extractDirectory(vcdPath, vcdDir, sizeof(vcdDir));
+
+  const char *colon = strchr(vcdPath, ':');
+  if (colon && (size_t)(colon - vcdPath + 2) < sizeof(devPrefix)) {
+    size_t dlen = (size_t)(colon - vcdPath) + 1;
+    memcpy(devPrefix, vcdPath, dlen);
+    devPrefix[dlen] = '\0';
+  }
+
+  /* Candidate directories to search for POPS packages / binaries */
+  const char *searchDirs[6];
+  int searchCount = 0;
+
+  if (vcdDir[0])
+    searchDirs[searchCount++] = vcdDir;
+
+  char devPops[PATH_MAX] = {0};
+  if (devPrefix[0]) {
+    snprintf(devPops, sizeof(devPops), "%s/POPS/", devPrefix);
+    searchDirs[searchCount++] = devPops;
+  }
+
+  searchDirs[searchCount++] = "mc0:/POPS/";
+  searchDirs[searchCount++] = "mc1:/POPS/";
+  searchDirs[searchCount++] = "hdd0:__.POPS:pfs:/";
+
+  for (int d = 0; d < searchCount; ++d) {
+    const char *dir = searchDirs[d];
+    if (!dir || !dir[0])
+      continue;
+
+    /* 1. Try POPS_IOX.PAK */
+    snprintf(testPath, sizeof(testPath), "%sPOPS_IOX.PAK", dir);
+    if (!tryFile(testPath)) {
+      snprintf(popsPath, popsPathSize, "%s", testPath);
+      if (ioprpPath && ioprpPathSize > 0)
+        ioprpPath[0] = '\0';
+      return 0;
+    }
+
+    /* 2. Try POPS.PAK */
+    snprintf(testPath, sizeof(testPath), "%sPOPS.PAK", dir);
+    if (!tryFile(testPath)) {
+      snprintf(popsPath, popsPathSize, "%s", testPath);
+      if (ioprpPath && ioprpPathSize > 0)
+        ioprpPath[0] = '\0';
+      return 0;
+    }
+
+    /* 3. Try POPS.ELF + IOPRP252.IMG */
+    snprintf(testPath, sizeof(testPath), "%sPOPS.ELF", dir);
+    snprintf(testIop, sizeof(testIop), "%sIOPRP252.IMG", dir);
+    if (!tryFile(testPath) && !tryFile(testIop)) {
+      snprintf(popsPath, popsPathSize, "%s", testPath);
+      if (ioprpPath && ioprpPathSize > 0)
+        snprintf(ioprpPath, ioprpPathSize, "%s", testIop);
+      return 0;
+    }
+  }
+
+  return -ENOENT;
+}
+
+static int readFullFile(const char *path, void *buffer, size_t max_size, size_t *out_size) {
+  int fd = open(path, O_RDONLY);
+  if (fd < 0)
+    return fd;
+
+  off_t sz = lseek(fd, 0, SEEK_END);
+  if (sz <= 0 || (size_t)sz > max_size) {
+    close(fd);
+    return -EINVAL;
+  }
+  lseek(fd, 0, SEEK_SET);
+
+  size_t total = 0;
+  while (total < (size_t)sz) {
+    size_t chunk = (size_t)sz - total;
+    if (chunk > 65536)
+      chunk = 65536;
+    ssize_t n = read(fd, (char *)buffer + total, chunk);
+    if (n <= 0) {
+      close(fd);
+      return -EIO;
+    }
+    total += (size_t)n;
+  }
+  close(fd);
+
+  if (out_size)
+    *out_size = total;
+  return 0;
+}
+
+static int ensureVmcFile(const char *path) {
+  int fd = open(path, O_RDONLY);
+  if (fd >= 0) {
+    off_t sz = lseek(fd, 0, SEEK_END);
+    close(fd);
+    if (sz >= 131072)
+      return 0;
+  }
+
+  /* Create formatted 128 KiB standard PS1 Memory Card image */
+  fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+  if (fd < 0)
+    return fd;
+
+  uint8_t frame[128] = {0};
+  frame[0] = 0x4D; /* 'M' */
+  frame[1] = 0x43; /* 'C' */
+  frame[127] = 0x0E; /* XOR checksum: 0x4D ^ 0x43 */
+
+  if (write(fd, frame, sizeof(frame)) != (ssize_t)sizeof(frame)) {
+    close(fd);
+    return -EIO;
+  }
+
+  memset(frame, 0, sizeof(frame));
+  for (int i = 1; i < 1024; ++i) {
+    if (write(fd, frame, sizeof(frame)) != (ssize_t)sizeof(frame)) {
+      close(fd);
+      return -EIO;
+    }
+  }
+
+  close(fd);
+  return 0;
+}
+
+int launchPOPS(int argc, char *argv[]) {
+  if (argc < 1 || !argv || !argv[0] || !argv[0][0]) {
+    msg("POPS: Invalid launch arguments\n");
+    return -EINVAL;
+  }
+
+  const char *vcdPath = argv[0];
+  DeviceType device = guessDeviceType(vcdPath);
+
+  DPRINTF("POPS: Target disc %s (device %d)\n", vcdPath, device);
+
+  /* Verify target disc existence */
+  if (tryFile((char *)vcdPath)) {
+    msg("POPS: Cannot open target VCD: %s\n", vcdPath);
+    return -ENOENT;
+  }
+
+  char popsPath[PATH_MAX] = {0};
+  char ioprpPath[PATH_MAX] = {0};
+  int res = findPopsDependencies(vcdPath, popsPath, sizeof(popsPath),
+                                 ioprpPath, sizeof(ioprpPath));
+  if (res) {
+    msg("POPS: Missing POPS dependencies\n(POPS.PAK, POPS_IOX.PAK or POPS.ELF+IOPRP252.IMG)\n");
+    return -ENOENT;
+  }
+
+  DPRINTF("POPS: Using emulator %s\n", popsPath);
+
+  /* Resolve VMC save paths */
+  char vcdDir[PATH_MAX] = {0};
+  char gameBase[128] = {0};
+  char card0Path[PATH_MAX] = {0};
+  char card1Path[PATH_MAX] = {0};
+
+  extractDirectory(vcdPath, vcdDir, sizeof(vcdDir));
+  extractGameBase(vcdPath, gameBase, sizeof(gameBase));
+
+  snprintf(card0Path, sizeof(card0Path), "%s%s.VMC0", vcdDir, gameBase);
+  snprintf(card1Path, sizeof(card1Path), "%s%s.VMC1", vcdDir, gameBase);
+
+  /* Fall back to SLOT0.VMC if game-specific card is absent but SLOT0 exists */
+  char slot0Test[PATH_MAX];
+  snprintf(slot0Test, sizeof(slot0Test), "%sSLOT0.VMC", vcdDir);
+  if (tryFile(card0Path) && !tryFile(slot0Test))
+    snprintf(card0Path, sizeof(card0Path), "%s", slot0Test);
+
+  char slot1Test[PATH_MAX];
+  snprintf(slot1Test, sizeof(slot1Test), "%sSLOT1.VMC", vcdDir);
+  if (tryFile(card1Path) && !tryFile(slot1Test))
+    snprintf(card1Path, sizeof(card1Path), "%s", slot1Test);
+
+  /* Ensure backing save images exist before handoff */
+  ensureVmcFile(card0Path);
+  ensureVmcFile(card1Path);
+
+  PopsBootPlan plan;
+  size_t rawSize = 0;
+  const void *stagedCore = POPS_STAGE_BUF;
+  const void *rebootIop = NULL;
+
+  const char *dot = strrchr(popsPath, '.');
+  int isPak = dot && !strcasecmp(dot, ".pak");
+
+  if (isPak) {
+    res = readFullFile(popsPath, POPS_LOAD_RAW_BUF, POPS_LOAD_MAX_SIZE, &rawSize);
+    if (res) {
+      msg("POPS: Failed reading %s: %d\n", popsPath, res);
+      return res;
+    }
+
+    size_t decodedSize = 0;
+    res = pops_pak_decode(POPS_LOAD_RAW_BUF, rawSize, POPS_STAGE_BUF,
+                          POPS_STAGING_CAPACITY, &decodedSize);
+    if (res) {
+      msg("POPS: Failed decoding %s: %d\n", popsPath, res);
+      return res;
+    }
+
+    res = pops_boot_plan_pak(POPS_STAGE_BUF, decodedSize, &plan);
+    if (res) {
+      msg("POPS: Invalid PAK package %s: %d\n", popsPath, res);
+      return res;
+    }
+
+    rebootIop = (const void *)((uintptr_t)POPS_STAGE_BUF + plan.iop_offset);
+  } else {
+    /* Loose POPS.ELF + IOPRP252.IMG */
+    size_t elfSize = 0, iopSize = 0;
+    res = readFullFile(popsPath, POPS_LOAD_RAW_BUF, POPS_LOAD_MAX_SIZE, &elfSize);
+    if (res) {
+      msg("POPS: Failed reading %s: %d\n", popsPath, res);
+      return res;
+    }
+    res = readFullFile(ioprpPath, POPS_LOAD_IOP_BUF, POPS_LOAD_MAX_SIZE, &iopSize);
+    if (res) {
+      msg("POPS: Failed reading %s: %d\n", ioprpPath, res);
+      return res;
+    }
+
+    res = pops_boot_plan_elf(POPS_LOAD_RAW_BUF, elfSize, POPS_LOAD_IOP_BUF, iopSize, &plan);
+    if (res) {
+      msg("POPS: Invalid POPS.ELF or IOPRP: %d\n", res);
+      return res;
+    }
+
+    /* Stage ELF load segments into staging buffer */
+    PopsBootBuffers buffers;
+    buffers.ram_base = 0x100000;
+    buffers.ram = (void *)((uintptr_t)POPS_STAGE_BUF - (POPS_CORE_ADDR - 0x100000));
+    buffers.ram_size = plan.bss_address + plan.bss_size - 0x100000;
+    buffers.scratchpad = (void *)0x01f80000;
+    buffers.scratchpad_size = plan.scratchpad_size;
+    buffers.iop = (void *)((uintptr_t)POPS_STAGE_BUF + plan.core_size);
+    buffers.iop_size = plan.iop_size;
+
+    res = pops_boot_stage_elf(POPS_LOAD_RAW_BUF, elfSize, POPS_LOAD_IOP_BUF,
+                              iopSize, &buffers);
+    if (res) {
+      msg("POPS: Failed staging loose boot buffers: %d\n", res);
+      return res;
+    }
+
+    rebootIop = buffers.iop;
+  }
+
+  /* Verify staging memory layout */
+  res = pops_bootstrap_verify_layout(POPS_STAGING_BASE, plan.core_size + plan.iop_size, &plan);
+  if (res) {
+    msg("POPS: Staging layout verification failed: %d\n", res);
+    return res;
+  }
+
+  /* Stage all core patches into staging core */
+  res = pops_core_patches_stage(POPS_CORE_ADDR, (void *)stagedCore, plan.core_size, POPS_CORE_ALL);
+  if (res) {
+    msg("POPS: Core patch verification failed: %d\n", res);
+    return res;
+  }
+
+  /* Check for game TROJAN_0..9 fixes in game directory */
+  char trojanPath[PATH_MAX];
+  for (int slot = 0; slot <= 9; ++slot) {
+    snprintf(trojanPath, sizeof(trojanPath), "%sTROJAN_%d.BIN", vcdDir, slot);
+    if (!tryFile(trojanPath)) {
+      size_t trojanSize = 0;
+      void *trojanBuf = (void *)0x01f00000;
+      if (!readFullFile(trojanPath, trojanBuf, 0x100000, &trojanSize)) {
+        PopsContainer trojanCont;
+        if (!pops_container_inspect(trojanBuf, trojanSize, &trojanCont) &&
+            trojanCont.kind == POPS_CONTAINER_TROJAN) {
+          uint32_t expected[3] = {0};
+          /* Read expected hook words from staged core */
+          if (trojanCont.hook >= POPS_CORE_ADDR &&
+              trojanCont.hook + 12 <= POPS_CORE_ADDR + plan.core_size) {
+            uint32_t hookOff = trojanCont.hook - POPS_CORE_ADDR;
+            memcpy(expected, (const char *)stagedCore + hookOff, sizeof(expected));
+            pops_container_stage(trojanBuf, trojanSize, POPS_CORE_ADDR,
+                                 (void *)stagedCore, plan.core_size, expected, 3);
+            DPRINTF("POPS: Applied %s\n", trojanPath);
+          }
+        }
+      }
+    }
+  }
+
+  /* Reboot IOP with verified external IOPRP image */
+  DPRINTF("POPS: Rebooting IOP with external image (%u bytes)\n", plan.iop_size);
+  res = SifIopRebootBuffer((void *)rebootIop, plan.iop_size);
+  if (!res && !(res = SifIopRebootBufferEncrypted((void *)rebootIop, plan.iop_size))) {
+    msg("POPS: IOP reboot failed\n");
+    return -EIO;
+  }
+  while (!SifIopSync()) {}
+
+  /* Format proxy arguments for popfs */
+  char proxyArgs[POPS_PROXY_ARGS_MAX];
+  int argLen = pops_format_proxy_args(proxyArgs, sizeof(proxyArgs),
+                                      vcdPath, card0Path, card1Path,
+                                      NULL, NULL, NULL);
+  if (argLen <= 0) {
+    msg("POPS: Failed formatting proxy arguments\n");
+    return -EINVAL;
+  }
+
+  /* Initialize post-reboot storage and popfs */
+  res = initPopsServices(device, stagedCore, plan.core_size, proxyArgs, (uint32_t)argLen);
+  if (res) {
+    msg("POPS: Failed initializing services: %d\n", res);
+    return res;
+  }
+
+  if (device == Device_APA)
+    mountPFS((char *)vcdPath);
+
+  /* Set up low-memory execution trampoline below 1 MiB */
+  PopsTrampolineArgs *targs = (PopsTrampolineArgs *)POPS_TRAMPOLINE_ARGS;
+  res = pops_trampoline_args_init(targs, &plan, (uint32_t)(uintptr_t)stagedCore, "pops0:IMAGE.VCD");
+  if (res) {
+    msg("POPS: Trampoline setup failed: %d\n", res);
+    return res;
+  }
+
+  size_t trampolineCodeSize = (size_t)(pops_trampoline_code_end - pops_trampoline_code);
+  if (trampolineCodeSize == 0 || trampolineCodeSize > 0x180) {
+    msg("POPS: Invalid trampoline code size\n");
+    return -EINVAL;
+  }
+
+  memcpy((void *)POPS_TRAMPOLINE_ADDR, pops_trampoline_code, trampolineCodeSize);
+
+  FlushCache(0);
+  FlushCache(2);
+
+  DPRINTF("POPS: Transferring control to trampoline at 0x%08X\n", (uint32_t)POPS_TRAMPOLINE_ADDR);
+
+  /* Execute trampoline below 1 MiB, which stages core, clears RAM, and enters POPS */
+  ((void (*)(void *))POPS_TRAMPOLINE_ADDR)((void *)POPS_TRAMPOLINE_ARGS);
+
+  return 0;
+}

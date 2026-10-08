@@ -210,6 +210,47 @@ int handleQuickboot(char *cnfPath) {
     sleep(1);
     delayAttempts--;
     if (delayAttempts < 0) {
+      /* If launcHER.CNF is absent, check for an adjacent game VCD file */
+      char dirBuf[PATH_MAX];
+      char vcdCandidate[PATH_MAX];
+      strncpy(dirBuf, launchTarget, sizeof(dirBuf) - 1);
+      dirBuf[sizeof(dirBuf) - 1] = '\0';
+      char *sep = strrchr(dirBuf, '/');
+      char *bsep = strrchr(dirBuf, '\\');
+      if (bsep && (!sep || bsep > sep))
+        sep = bsep;
+      if (sep)
+        *sep = '\0';
+
+      snprintf(vcdCandidate, sizeof(vcdCandidate), "%s/IMAGE.VCD", dirBuf);
+      if (!tryFile(vcdCandidate)) {
+        char *vcdArgv[1] = { vcdCandidate };
+        return launchPath(1, vcdArgv);
+      }
+
+      /* Check matching <GameName>.VCD based on the launcher binary's name */
+      const char *elfName = strrchr(resolvedPath, '/');
+      const char *bName = strrchr(resolvedPath, '\\');
+      if (bName && (!elfName || bName > elfName))
+        elfName = bName;
+      if (!elfName)
+        elfName = strrchr(resolvedPath, ':');
+      elfName = elfName ? elfName + 1 : resolvedPath;
+      if (!strncasecmp(elfName, "XX.", 3) || !strncasecmp(elfName, "SB.", 3))
+        elfName += 3;
+      const char *dot = strrchr(elfName, '.');
+      size_t blen = dot ? (size_t)(dot - elfName) : strlen(elfName);
+      if (blen && blen < 128) {
+        char gameBase[128];
+        memcpy(gameBase, elfName, blen);
+        gameBase[blen] = '\0';
+        snprintf(vcdCandidate, sizeof(vcdCandidate), "%s/%s.VCD", dirBuf, gameBase);
+        if (!tryFile(vcdCandidate)) {
+          char *vcdArgv[1] = { vcdCandidate };
+          return launchPath(1, vcdArgv);
+        }
+      }
+
       msg("Quickboot: Failed to open %s\n", cnfPath);
       if (isHDD)
         deinitPFS();

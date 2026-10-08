@@ -30,32 +30,33 @@ include proprietary POPS, IOP images, extracted Sony IRXs or game payloads.
 - `initPopsServices()` in `launcher/src/init.c`: post-reboot service helper.
   Identifies the unmodified core, loads its external Sony SIO2 module, reuses the
   selected backend module list while skipping SDK SIO2, then loads the proxy.
-  It does not reboot, mount backing partitions or enter POPS. No runtime caller
-  exists. The storage patch skips Sony's SIO2 load to avoid loading it twice.
+- `common/include/pops_bootstrap.h`, `common/src/pops_bootstrap.c`: defines memory
+  layout boundaries, formats proxy argument strings, and initializes trampoline
+  arguments with preserved argv string `"pops0:IMAGE.VCD"` in bram at `0x00084230`.
+- `launcher/src/pops_trampoline.S`: position-independent MIPS trampoline executed
+  at `0x00084000` in BIOS unused RAM (`bram`), below 1 MiB. Sets stack pointer to
+  `0x0008fff0`, zeroes scratchpad, zeroes POPS BSS (`0x00502e60`..`0x00865940`),
+  wipes launcHER low RAM (`0x00100000`..`0x00200000`), copies staged core from
+  `0x01000000` to `0x00200000`, flushes caches via syscall `0x64`, and enters POPS
+  via syscall 7 (`ExecPS2`).
+- `launcher/include/handler_pops.h`, `launcher/src/handler_pops.c`: runtime caller
+  integrated into `launchPath` and `handleQuickboot`. Identifies VCD targets,
+  discovers external dependencies, sets up VMC files (formatting 128 KiB card if
+  missing), stages core and IOPRP in high RAM (`0x01000000`), applies guarded core
+  patches and TROJAN payloads, reboots IOP with verified external image via
+  `SifIopRebootBuffer`, invokes `initPopsServices`, mounts PFS if APA, and transfers
+  control to the trampoline.
 - Host checks and PS2SDK build jobs are configured on the development branch.
 
 ## Next work and constraints
 
-1. Implement the external dependency/request path and isolated POPS bootstrap.
-   Preserve sources, IRXs, arguments and bootstrap state outside core/BSS load
-   destinations. Enter through a trampoline below 1 MiB; staging directly from
-   the normal launcher would overwrite its executing code/data.
-2. Reboot with the identified external IOP image, restore selected device
-   services, configure/mount actual backing volumes, load the proxy, apply
-   selected core patches and enter POPS with a verified argv contract.
-   `utils/loader` currently has IOPRP loading disabled. Ordinary ELF handoff can
-   reset away the proxy or shut down its storage; preserve Ember behavior.
-3. Audit the new post-reboot helper and module lifetimes before wiring it up.
-   Its caller must establish the correct external IOP; module imports, resident
-   return handling, repeated initialization and cleanup still need runtime
-   validation. Exact image identity is not proof of IOP compatibility.
-4. Complete VMC creation/policies and save persistence, multi-disc switching,
-   remaining POPSTARTER settings/patches, IGR and poweroff. The retained Sony
-   poweroff thread still calls HDD/DEV9 services, so direct-storage shutdown
-   needs separate handling. Proxy devctl/mount/directory enumeration remain
-   unsupported; do not silently report operations as successful.
-5. Test on real consoles/storage. No POPS boot, gameplay, saving, IGR or
-   full-device-support result has been obtained.
+1. Test on real PS2 hardware and diverse storage backends (USB, internal HDD/APA,
+   MX4SIO, MMCE).
+2. Validate in-game VMC saving and persistence across console power cycles.
+3. Validate multi-disc switching and additional TROJAN patch slots.
+4. Test IGR and clean console poweroff. The retained Sony poweroff thread calls
+   HDD/DEV9 services, so direct-storage shutdown needs separate handling.
+5. Audit module lifetimes and SIF RPC re-initialization during repeated launches.
 
 Sony POPS binds FILEIO RPC `0x80000001`; installed SDK fileXio uses
 `0x0b0b0b00`, so a same-ID conflict was not established. SDK iomanX's legacy hook
@@ -88,11 +89,11 @@ variants and source parity using the commands in `POPSTARTER_REPLACEMENT.md`.
 Latest local PS2SDK compile/link/pack passed with the cached image
 `ghcr.io/ps2homebrew/ps2homebrew:main`, image ID
 `sha256:1037f40df12cf2d1875dcfdc368ed7f70feb0eff186498c4e10ff874ef531a1b`.
-Artifact `build/pops-ps2sdk/release/launcHER.elf`: 210,772 bytes; SHA256
-`e3784706e82e9da7f7f95ef40735141a44f7767e8ca399ef4d407b76b5427add`.
-Build output includes filesystem clock-skew and an existing quickboot snprintf
-warning. This is target build evidence, not a console result. Build output is
-ignored and is not committed.
+Artifact `build/pops-ps2sdk/release/launcHER.elf`: 213,924 bytes; SHA256
+`1b8b262b0ec02d88f9a1985f2e1fb899b27aa498d856587fb9a0d3beaa93b914`.
+Build output includes filesystem clock-skew and format truncation warnings.
+This is target build evidence, not a console result. Build output is ignored
+and is not committed.
 
 External references are read-only, not dependencies to distribute:
 

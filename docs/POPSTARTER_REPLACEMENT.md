@@ -342,10 +342,42 @@ The build reported filesystem clock-skew warnings; compilation, linking and
 packing completed successfully. The module is not yet loaded by a POPS runtime
 caller. This artifact is not a working POPSTARTER replacement or a console pass.
 
-The next required integration is an isolated POPS bootstrap: preserve external
-images and launch arguments outside the POPS load/BSS destinations, reboot with
-the selected external IOP image, restore the selected backing services, load the
-proxy, and enter the staged core through a trampoline below 1 MiB. Reusing the
-existing normal ELF path would overwrite the launcher and can reset away the
-proxy or shut down its storage device. The Sony legacy IOMAN/RPC interaction
-must be established before choosing module load order.
+The bootstrap and runtime caller are now implemented:
+
+## Runtime caller and trampoline bootstrap implementation checkpoint
+
+The implementation adds an isolated bootstrap and runtime caller:
+
+- `common/include/pops_bootstrap.h` and `common/src/pops_bootstrap.c`: Defines the memory
+  layout contract and formats proxy arguments (`"popfs\0<disc0>\0<card0>\0<card1>\0"`).
+  It initializes `PopsTrampolineArgs` with the target entry, BSS extent, scratchpad
+  size, staging buffers, and an preserved `"pops0:IMAGE.VCD"` argv string in bram at
+  `0x00084230`.
+- `launcher/src/pops_trampoline.S`: Position-independent MIPS assembly trampoline executed
+  at `0x00084000` in BIOS unused RAM (`bram`), below 1 MiB. It sets its stack pointer at
+  `0x0008fff0`, zeroes the scratchpad (`0x70000000`..`0x70003c30`), zeroes POPS BSS
+  (`0x00502e60`..`0x00865940`), wipes launcHER low RAM (`0x00100000`..`0x00200000`),
+  copies the verified staged core from `0x01000000` to `0x00200000`, flushes instruction
+  and data caches via syscall `0x64`, and transfers control to POPS via syscall 7 (`ExecPS2`).
+- `launcher/include/handler_pops.h` and `launcher/src/handler_pops.c`: Runtime caller.
+  Detects VCD targets via `isPopsTarget`, locates external dependencies across candidate
+  directories (VCD directory, `POPS/`, memory cards, APA partition), resolves and formats
+  VMC save images (creating a 128 KiB formatted blank card when missing), stages core
+  and IOP images in high RAM (`0x01000000`), stages core patches and external TROJAN payloads,
+  reboots IOP with the verified external image via `SifIopRebootBuffer`, invokes
+  `initPopsServices`, mounts PFS if APA, sets up trampoline arguments, and jumps to the
+  trampoline.
+- Integrated into `launcher/src/common.c` (`launchPath`) and `launcher/src/handler_quickboot.c`.
+- `launcher/CMakeLists.txt` links `iopreboot` for `SifIopRebootBuffer`.
+
+### Validation and target build
+
+All 30 host tests in `tools/test_pops_external.py` pass, covering trampoline argument
+layout and proxy argument packing contracts. Driver contract tests in `tools/test_popfs.py` pass.
+
+The PS2SDK Docker build completed successfully:
+- Target: `launcHER`
+- Packed artifact: `build/pops-ps2sdk/release/launcHER.elf` (213,924 bytes)
+- SHA-256: `1b8b262b0ec02d88f9a1985f2e1fb899b27aa498d856587fb9a0d3beaa93b914`
+
+This is a target build result. Real hardware console validation remains necessary.
