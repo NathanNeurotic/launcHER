@@ -1,6 +1,7 @@
 #include "common.h"
 #include "handlers.h"
 #include "loader.h"
+#include "launch_args.h"
 #include <fcntl.h>
 #include <kernel.h>
 #include <ps2sdkapi.h>
@@ -24,6 +25,10 @@ int main(int argc, char *argv[]) {
   settings.titleID = NULL;
   settings.dkwdrvPath = NULL;
   settings.dev9ShutdownType = ShutdownType_All;
+
+  argc = launcher_normalize_args(argc, argv);
+  if (argc < 1)
+    fail("Invalid launcher arguments");
 
   // Try to guess the device type using argv[0]
   if (!strncmp(argv[0], "mc1", 3))

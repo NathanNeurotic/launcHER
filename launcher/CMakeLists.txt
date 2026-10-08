@@ -28,6 +28,7 @@ list(APPEND EE_SOURCES
     ../common/src/game_id.c
     ../common/src/cnf.c
     ../common/src/loader.c
+    ../common/src/launch_args.c
     ../common/src/dprintf.c
 )
 
