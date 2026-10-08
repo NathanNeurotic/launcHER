@@ -2,6 +2,7 @@
 #include "init.h"
 #include "common.h"
 #include "dprintf.h"
+#include "pops_external.h"
 #include <ctype.h>
 #include <fcntl.h>
 #include <iopcontrol.h>
@@ -34,6 +35,7 @@ IRX_DEFINE(fileXio);
 IRX_DEFINE(sio2man);
 IRX_DEFINE(mcman);
 IRX_DEFINE(mcserv);
+IRX_DEFINE(popfs);
 
 #ifdef MMCE
 IRX_DEFINE(mmceman);
@@ -195,6 +197,7 @@ static DeviceType currentDevice = Device_None;
 static int forceIOPReset = 0;
 
 static int loadModules(DeviceType device, int tolerant);
+static int loadModuleList(DeviceType device, int tolerant, int sonySio2);
 
 // Initializes IOP modules for given device type
 int initModules(DeviceType device) { return loadModules(device, 0); }
@@ -233,11 +236,21 @@ static int loadModules(DeviceType device, int tolerant) {
   if (currentDevice == Device_None)
     sbv_patch_fileio(); // Patch fileio only once
 
+  return loadModuleList(device, tolerant, 0);
+}
+
+/* This helper never resets the IOP. The POPS bootstrap must first reboot with
+ * its identified external IOP image. fileXio has a separate RPC ID from Sony's
+ * FILEIO; iomanX bridges legacy imports to the modern filesystem drivers. */
+static int loadModuleList(DeviceType device, int tolerant, int sonySio2) {
+  int ret = 0, iopret = 0;
   // Load modules
   for (int i = 0; i < MODULE_COUNT; i++) {
     ret = 0;
     iopret = 0;
     if (!(device & moduleList[i].type) && !(moduleList[i].type & Device_Basic))
+      continue;
+    if (sonySio2 && !strcmp(moduleList[i].name, "sio2man"))
       continue;
 
     // If module has an arugment function, execute it
@@ -283,6 +296,37 @@ static int loadModules(DeviceType device, int tolerant) {
 
   fileXioInit();
   currentDevice = device;
+  return 0;
+}
+
+int initPopsServices(DeviceType devices, const void *core, size_t coreSize,
+                     const char *proxyArguments, uint32_t argumentSize) {
+  int ret, moduleResult = 0;
+  if (!proxyArguments || !argumentSize || argumentSize > 6 * 256 ||
+      proxyArguments[argumentSize - 1] != '\0')
+    return -EINVAL;
+  /* Fail before loading anything if the external embedded module ranges are
+   * not those of the measured, unmodified core. The caller patches it later. */
+  ret = pops_core_image_identify(core, coreSize);
+  if (ret)
+    return -EINVAL;
+  sceSifInitRpc(0);
+  sbv_patch_enable_lmb();
+  sbv_patch_disable_prefix_check();
+  /* Load Sony's SIO2 once, before MMCE/memory-card services. POPS must skip
+   * its first embedded-module call under POPS_CORE_STORAGE_BRIDGE. */
+  ret = SifExecModuleBuffer((void *)((const unsigned char *)core + 0xcbbc0),
+                           0x1999, 0, NULL, &moduleResult);
+  if (ret < 0 || moduleResult != 0)
+    return ret < 0 ? ret : -EIO;
+  ret = loadModuleList(devices, 0, 1);
+  if (ret)
+    return ret;
+  moduleResult = 0;
+  ret = SifExecModuleBuffer(popfs_irx, size_popfs_irx, argumentSize,
+                           proxyArguments, &moduleResult);
+  if (ret < 0 || moduleResult != 0)
+    return ret < 0 ? ret : -EIO;
   return 0;
 }
 

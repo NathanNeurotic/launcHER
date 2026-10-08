@@ -113,9 +113,10 @@ def check_boot_staging(plan, source, iop=None, original_writes=None):
     if before[offset:offset + 8] != struct.pack('<II', 0x12000031, 0x3c04002e):
         raise RuntimeError('Reference storage branch or delay slot changed')
     expected_bridge[offset:offset + 4] = struct.pack('<I', 0x10000031)
-    for address in (0x214968, 0x2149a0):
+    for address in (0x200324, 0x214968, 0x2149a0):
         offset = address - 0x100000
-        if before[offset:offset + 4] != struct.pack('<I', 0x0c08cd94):
+        expected_call = 0x0c080076 if address == 0x200324 else 0x0c08cd94
+        if before[offset:offset + 4] != struct.pack('<I', expected_call):
             raise RuntimeError('Reference partition-mount call changed')
         expected_bridge[offset:offset + 4] = struct.pack('<I', 0x00001021)
     if LIB.pops_core_patches_stage(0x100000, ram, ram_size, 0x40) or ram.raw != bytes(expected_bridge):

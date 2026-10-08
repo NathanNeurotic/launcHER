@@ -20,4 +20,11 @@ int initModules(DeviceType device);
 // next initModules always reboots the IOP, so a launch target still gets exactly its own drivers.
 int initModulesAny(DeviceType devices);
 
+/* After external POPS IOP reboot: load selected backends and the proxy without
+ * another reset. Core must be unmodified and identified; volumes still need
+ * mounting before POPS entry. Arguments are packed NUL-terminated IRX strings.
+ * Requires POPS_CORE_STORAGE_BRIDGE at entry to avoid loading SIO2 twice. */
+int initPopsServices(DeviceType devices, const void *core, size_t coreSize,
+                     const char *proxyArguments, uint32_t argumentSize);
+
 #endif

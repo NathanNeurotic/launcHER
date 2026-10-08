@@ -13,6 +13,8 @@ static const CorePatch patches[] = {
    * and IOPCD loads, and preserve the branch delay slot. Redirect the fixed
    * filesystem aliases to the separately configured launcHER IOP proxy. */
   {POPS_CORE_STORAGE_BRIDGE, 0x002003d8, 0x12000031, 0x10000031, 4},
+  /* Bootstrap loads the external Sony SIO2 module before backing services. */
+  {POPS_CORE_STORAGE_BRIDGE, 0x00200324, 0x0c080076, 0x00001021, 4},
   /* Backing volumes must already be mounted by the bootstrap. Bypass only
    * the two Sony partition-mount calls; retain poweroff thread setup and
    * both delay slots. The proxy has no authority to mount an arbitrary HDD. */
