@@ -80,10 +80,13 @@ enum {
   POPS_CORE_POWER_OFF = 1u << 3,
   POPS_CORE_DELCRO = 1u << 4,
   POPS_CORE_MODULE_ERRORS = 1u << 5,
-  POPS_CORE_ALL = (1u << 6) - 1
+  POPS_CORE_STORAGE_BRIDGE = 1u << 6,
+  POPS_CORE_ALL = (1u << 7) - 1
 };
 
-/* Exact measured original writes, into a caller-owned buffer only. Requires
+/* Measured original writes and an optional launcHER storage redirect, into a
+ * caller-owned buffer only. The redirect requires configured backing volumes
+ * and the proxy to be available before POPS entry. Requires
  * the complete, unmodified reference core. Apply selected groups once, together,
  * before Trojan/game-specific patches. All guards precede all writes; no cache
  * operations, runtime callbacks, path/IOP/storage/VMC setup or boot readiness. */

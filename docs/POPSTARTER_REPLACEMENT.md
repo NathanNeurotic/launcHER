@@ -245,7 +245,7 @@ validation are separate gates. No row below currently claims a working POPS boot
 | Trojan and PATCH support | Parsing, options decoding, guarded buffer staging | Slot precedence, version gates, overlap/order policy, complete configuration semantics, resident execution and cache handling |
 | Core POPS patches | Six guarded groups, 36 original writes; whole-buffer comparison against the original sequence | Remaining original patch/configuration groups, path/environment redirects, interactions and runtime dependencies |
 | VCD layout and disc access | No runtime implementation | Real VCD layout, sector translation, command/RPC/DMA contracts, retries, EOF and streaming behavior |
-| Direct storage without BDMA | No runtime implementation | Own POPS-facing IOP bridge backed by supported device services; establish behavior across POPS IOP setup |
+| Direct storage without BDMA | Own IOP filesystem proxy compiles and is embedded; guarded storage-load, partition-mount and pathname redirects stage successfully | Bootstrap the proxy and backing services across external IOP reboot; validate Sony legacy IOMAN/file-service interaction and hardware streaming |
 | VMCs and saves | No runtime implementation | Creation, naming, slot modes, read/write, dirty flushing, failure recovery and persistence across exit |
 | Configuration and compatibility modes | Header options decoded | Defaults, global/per-game precedence, text commands and original mode effects |
 | Cheats, game fixes, protection handling | External corpus can be parsed | Faithful selection and execution; distinguish POPS-memory and guest-memory targets |
@@ -308,3 +308,44 @@ Docker was started locally; its engine restarted during the first attempt, and
 the subsequent build completed. This is a target build result, not a POPS boot
 or hardware pass. GitHub CLI's saved token is invalid, so no new exact-head CI
 or PR publication has been obtained. No console result has been obtained.
+
+## Storage bridge implementation checkpoint
+
+The new `launcher/iop/popfs` module registers `pops:` and maps Sony's fixed
+`/disc/disc0` through `/disc/disc3`, `/ps1emu/card0`, `/ps1emu/card1`, and
+card `.bak` aliases to explicit backing paths. The required module arguments are
+disc0, card0, card1; optional arguments provide disc1 through disc3. Device
+prefixes are preserved, including massN, MMCE, network and pre-mounted PFS paths.
+The module does not guess a massN slot's physical device or retry another path.
+
+Disc opens are read-only. Save writes, short I/O, underlying errors, descriptor
+zero, 64-bit seeks, backup renames and handle lifetime are covered by host tests
+that compile the production driver. Save-volume sync attempts both volumes and
+reports backend errors. Unknown paths and cross-slot renames fail. Exact
+configured card/disc and backup collisions fail at module startup; physical
+aliases or case folding in an underlying filesystem are not yet detected.
+
+The storage bridge patch group contains eleven guarded writes: one branch skips
+Sony's embedded DEV9/ATAD/HDD/PFS loads, two calls bypass Sony partition mounts,
+and eight four-byte path prefixes select `pops:`. The partition-mount bypass
+retains the preceding poweroff thread setup and both call delay slots. Backing
+volumes must already be prepared by the bootstrap; this does not grant the proxy
+permission to mount Sony partition names. All changes require the exact known
+unmodified core and are compared across the entire staged RAM buffer for the
+loose dependency set and both packed dependency sets.
+
+Run `python tools/test_popfs.py` for the production IOP driver's host contracts.
+The PS2SDK build compiles and embeds this IRX. The current packed build is
+210,244 bytes, SHA256
+`3abfba1867444e86c9409168e4634d8ecaa101fee855c25608b8a4581028355b`.
+The build reported filesystem clock-skew warnings; compilation, linking and
+packing completed successfully. The module is not yet loaded by a POPS runtime
+caller. This artifact is not a working POPSTARTER replacement or a console pass.
+
+The next required integration is an isolated POPS bootstrap: preserve external
+images and launch arguments outside the POPS load/BSS destinations, reboot with
+the selected external IOP image, restore the selected backing services, load the
+proxy, and enter the staged core through a trampoline below 1 MiB. Reusing the
+existing normal ELF path would overwrite the launcher and can reset away the
+proxy or shut down its storage device. The Sony legacy IOMAN/RPC interaction
+must be established before choosing module load order.

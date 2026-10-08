@@ -14,6 +14,8 @@ jobs:
           python-version: '3.x'
       - name: Test external POPS and POPStarter container handling
         run: python tools/test_pops_external.py
+      - name: Test POPS IOP filesystem proxy contracts
+        run: python tools/test_popfs.py
 
   build:
     runs-on: ubuntu-latest

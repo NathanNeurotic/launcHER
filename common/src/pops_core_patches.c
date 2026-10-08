@@ -9,6 +9,23 @@ typedef struct {
 } CorePatch;
 
 static const CorePatch patches[] = {
+  /* Skip only embedded DEV9/ATAD/HDD/PFS loads. Keep Sony controller, audio
+   * and IOPCD loads, and preserve the branch delay slot. Redirect the fixed
+   * filesystem aliases to the separately configured launcHER IOP proxy. */
+  {POPS_CORE_STORAGE_BRIDGE, 0x002003d8, 0x12000031, 0x10000031, 4},
+  /* Backing volumes must already be mounted by the bootstrap. Bypass only
+   * the two Sony partition-mount calls; retain poweroff thread setup and
+   * both delay slots. The proxy has no authority to mount an arbitrary HDD. */
+  {POPS_CORE_STORAGE_BRIDGE, 0x00214968, 0x0c08cd94, 0x00001021, 4},
+  {POPS_CORE_STORAGE_BRIDGE, 0x002149a0, 0x0c08cd94, 0x00001021, 4},
+  {POPS_CORE_STORAGE_BRIDGE, 0x004f9838, 0x31736670, 0x73706f70, 4},
+  {POPS_CORE_STORAGE_BRIDGE, 0x004f9888, 0x31736670, 0x73706f70, 4},
+  {POPS_CORE_STORAGE_BRIDGE, 0x004f98a0, 0x31736670, 0x73706f70, 4},
+  {POPS_CORE_STORAGE_BRIDGE, 0x004ffe88, 0x30736670, 0x73706f70, 4},
+  {POPS_CORE_STORAGE_BRIDGE, 0x00502708, 0x30736670, 0x73706f70, 4},
+  {POPS_CORE_STORAGE_BRIDGE, 0x00502798, 0x31736670, 0x73706f70, 4},
+  {POPS_CORE_STORAGE_BRIDGE, 0x005028e0, 0x31736670, 0x73706f70, 4},
+  {POPS_CORE_STORAGE_BRIDGE, 0x005028e8, 0x30736670, 0x73706f70, 4},
   {POPS_CORE_HDD_CHECK, 0x002e5ad8, 0x0c0003b7, 0x00000000, 4}, /* FUN_008db778 */
   {POPS_CORE_CDROM_LICENSE, 0x00263ca8, 0x1440fffd, 0x00000000, 4}, /* FUN_008dba90 */
   {POPS_CORE_EXCEPTION_BREAKPOINTS, 0x0020838c, 0x0000000d, 0x00000000, 4}, /* FUN_008dbafc */

@@ -220,11 +220,27 @@ if(ENABLE_PRINTF)
 endif()
 
 # Process all IRX files
+set(POPFS_IRX "${CMAKE_CURRENT_BINARY_DIR}/popfs.irx")
+file(GLOB POPFS_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/iop/popfs/src/*")
+add_custom_command(
+    OUTPUT ${POPFS_IRX}
+    COMMAND ${CMAKE_COMMAND} -E chdir "${CMAKE_CURRENT_SOURCE_DIR}/iop/popfs" ${CMAKE_MAKE_PROGRAM}
+    COMMAND ${CMAKE_COMMAND} -E copy
+        "${CMAKE_CURRENT_SOURCE_DIR}/iop/popfs/irx/popfs.irx" ${POPFS_IRX}
+    DEPENDS ${POPFS_SOURCES} "${CMAKE_CURRENT_SOURCE_DIR}/iop/popfs/Makefile"
+    COMMENT "Building POPS filesystem bridge"
+    VERBATIM
+)
+add_custom_target(popfs DEPENDS ${POPFS_IRX})
+list(APPEND IRX_FILES popfs.irx)
+
 foreach(irx ${IRX_FILES})
   get_filename_component(irx_name ${irx} NAME_WE)
   string(REPLACE "-" "_" irx_name_clean ${irx_name})
 
-  if(irx_name STREQUAL "udpbd")
+  if(irx_name STREQUAL "popfs")
+    irx_to_source("${POPFS_IRX}" irx_source "popfs_irx" "")
+  elseif(irx_name STREQUAL "udpbd")
     # udpbd is not a part of PS2SDK
     irx_to_source("${CMAKE_CURRENT_SOURCE_DIR}/iop/udpfs/udpbd/irx/udpbd.irx" irx_source "udpbd_irx" "")
   elseif(irx_name STREQUAL "smap")
@@ -271,6 +287,7 @@ endforeach()
 
 # Create executable
 add_executable(launcher_unc ${EE_SOURCES} ${IRX_SOURCES} ${ELF_SOURCES} ${RES_SOURCES})
+add_dependencies(launcher_unc popfs)
 
 # Add dependencies on IOP modules built via Makefiles
 if(LAUNCHER_UDPBD)

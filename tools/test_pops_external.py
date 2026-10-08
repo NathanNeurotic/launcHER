@@ -101,6 +101,27 @@ def check_boot_staging(plan, source, iop=None, original_writes=None):
         raise RuntimeError("BSS clearing or boot destination boundaries are incorrect")
     print("Guarded boot buffer staging PASS: core, separate IOP, BSS and canaries")
     before = ram.raw
+    bridge_addresses = (0x4f9838, 0x4f9888, 0x4f98a0, 0x4ffe88,
+                        0x502708, 0x502798, 0x5028e0, 0x5028e8)
+    expected_bridge = bytearray(before)
+    for address in bridge_addresses:
+        offset = address - 0x100000
+        if before[offset:offset + 4] not in (b'pfs0', b'pfs1'):
+            raise RuntimeError('Reference filesystem alias changed')
+        expected_bridge[offset:offset + 4] = b'pops'
+    offset = 0x2003d8 - 0x100000
+    if before[offset:offset + 8] != struct.pack('<II', 0x12000031, 0x3c04002e):
+        raise RuntimeError('Reference storage branch or delay slot changed')
+    expected_bridge[offset:offset + 4] = struct.pack('<I', 0x10000031)
+    for address in (0x214968, 0x2149a0):
+        offset = address - 0x100000
+        if before[offset:offset + 4] != struct.pack('<I', 0x0c08cd94):
+            raise RuntimeError('Reference partition-mount call changed')
+        expected_bridge[offset:offset + 4] = struct.pack('<I', 0x00001021)
+    if LIB.pops_core_patches_stage(0x100000, ram, ram_size, 0x40) or ram.raw != bytes(expected_bridge):
+        raise RuntimeError('Storage bridge changed bytes outside verified sites')
+    print('Guarded storage bridge PASS: storage skip, preserved delay slot, eight aliases, entire RAM compared')
+    ram.raw = before
     # Corrupt the last original module-error guard and prove there are no earlier
     # patch writes on rejection. The full core identity guard also must fail.
     ram[0x2004be - 0x100000] = b'\0'
@@ -187,7 +208,7 @@ class InspectorTests(unittest.TestCase):
         memory = c.create_string_buffer(0x302e60)
         before = memory.raw
         self.assertEqual(LIB.pops_core_patches_stage(0x200000, memory, len(memory), 0), INVALID)
-        self.assertEqual(LIB.pops_core_patches_stage(0x200000, memory, len(memory), 64), INVALID)
+        self.assertEqual(LIB.pops_core_patches_stage(0x200000, memory, len(memory), 128), INVALID)
         self.assertEqual(LIB.pops_core_patches_stage(0x200000, memory, 1, 1), RANGE)
         self.assertEqual(LIB.pops_core_patches_stage(0x200004, memory, len(memory), 1), RANGE)
         self.assertEqual(LIB.pops_core_patches_stage(0x200000, memory, len(memory), 1), -4)
