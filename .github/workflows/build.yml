@@ -5,6 +5,16 @@ on:
   pull_request:
 
 jobs:
+  host-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Test external POPS and POPStarter container handling
+        run: python tools/test_pops_external.py
+
   build:
     runs-on: ubuntu-latest
     container: ghcr.io/ps2homebrew/ps2homebrew:main
@@ -42,7 +52,7 @@ jobs:
             build/release/launcHER.zip
 
   release:
-    needs: [build]
+    needs: [build, host-tests]
     runs-on: ubuntu-latest
     permissions:
       contents: write
