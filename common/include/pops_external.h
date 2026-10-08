@@ -71,6 +71,23 @@ typedef struct {
 
 /* SHA256 of bounded dependency images; no allocation. Digest assigned on success. */
 int pops_image_sha256(const void *file, size_t size, uint8_t digest[32]);
+int pops_core_image_identify(const void *core, size_t size);
+
+enum {
+  POPS_CORE_HDD_CHECK = 1u << 0,
+  POPS_CORE_CDROM_LICENSE = 1u << 1,
+  POPS_CORE_EXCEPTION_BREAKPOINTS = 1u << 2,
+  POPS_CORE_POWER_OFF = 1u << 3,
+  POPS_CORE_DELCRO = 1u << 4,
+  POPS_CORE_MODULE_ERRORS = 1u << 5,
+  POPS_CORE_ALL = (1u << 6) - 1
+};
+
+/* Exact measured original writes, into a caller-owned buffer only. Requires
+ * the complete, unmodified reference core. Apply selected groups once, together,
+ * before Trojan/game-specific patches. All guards precede all writes; no cache
+ * operations, runtime callbacks, path/IOP/storage/VMC setup or boot readiness. */
+int pops_core_patches_stage(uint32_t base, void *memory, size_t span, uint32_t groups);
 
 /* Identify the measured reference core and dependency sets by exact SHA256.
  * Unknown/mutated images fail closed. No writes, reboot, runtime patches or

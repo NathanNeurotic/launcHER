@@ -11,6 +11,7 @@ import ctypes as c
 import hashlib
 import lzma
 import os
+import re
 from pathlib import Path
 import shutil
 import struct
@@ -61,7 +62,7 @@ class BootBuffers(c.Structure):
                ("iop", c.c_void_p), ("iop_size", c.c_size_t)]
 
 
-def check_boot_staging(plan, source, iop=None):
+def check_boot_staging(plan, source, iop=None, original_writes=None):
     ram_size = plan.bss_address + plan.bss_size - 0x100000
     ram = c.create_string_buffer(b'x' * (ram_size + 16), ram_size + 16)
     scratch = c.create_string_buffer(b'x' * 0x4000, 0x4000)
@@ -99,6 +100,51 @@ def check_boot_staging(plan, source, iop=None):
             reboot.raw[plan.iop_size:] != b'x' * 16):
         raise RuntimeError("BSS clearing or boot destination boundaries are incorrect")
     print("Guarded boot buffer staging PASS: core, separate IOP, BSS and canaries")
+    before = ram.raw
+    # Corrupt the last original module-error guard and prove there are no earlier
+    # patch writes on rejection. The full core identity guard also must fail.
+    ram[0x2004be - 0x100000] = b'\0'
+    corrupted = ram.raw
+    if LIB.pops_core_patches_stage(0x100000, ram, ram_size, 0x3f) != -4 or ram.raw != corrupted:
+        raise RuntimeError("Core patch guard failure changed memory")
+    ram.raw = before
+    if LIB.pops_core_patches_stage(0x100000, ram, ram_size, 0x3f):
+        raise RuntimeError("Reference core patches rejected")
+    if original_writes is not None:
+        expected = bytearray(before)
+        for address, value, width in original_writes:
+            offset = address - 0x100000
+            expected[offset:offset + width] = value.to_bytes(width, 'little')
+        if ram.raw != bytes(expected):
+            raise RuntimeError("Core patch output differs from original write sequence")
+        print(f"Original-source core patch parity PASS: {len(original_writes)} writes, entire RAM compared")
+    # Original Delcro routine writes only the low byte of each instruction.
+    for address in (0x20044c, 0x200484):
+        offset = address - 0x100000
+        if ram.raw[offset] != 0 or ram.raw[offset + 1:offset + 4] != before[offset + 1:offset + 4]:
+            raise RuntimeError("Original byte patch widened into an instruction overwrite")
+    patched = ram.raw
+    if LIB.pops_core_patches_stage(0x100000, ram, ram_size, 0x3f) != -4 or ram.raw != patched:
+        raise RuntimeError("Core patch reapplication did not fail closed")
+    print("Guarded core patch staging PASS: original byte widths, rejection without mutation")
+
+
+def read_original_writes(path):
+    text = path.read_text()
+    writes = []
+    for name, expected_count in [('008db778', 1), ('008dba90', 1), ('008dbafc', 22),
+                                 ('008dbe78', 1), ('008dbf58', 2), ('008dbfd4', 9)]:
+        marker = f'/* FUN_{name} @'
+        if text.count(marker) != 1:
+            raise RuntimeError(f"Missing or ambiguous original export: {name}")
+        block = text.split(marker)[1].split('/* ---------------------------------------------------------------- */')[0]
+        found = re.findall(r'FUN_(008dc8e4|008dc918|008dc94c)\((0x[0-9a-f]+|0),(0x[0-9a-f]+)\)', block)
+        if len(found) != expected_count:
+            raise RuntimeError(f"Unexpected original write count in {name}")
+        for helper, value, address in found:
+            writes.append((int(address, 0), int(value, 0),
+                           {'008dc8e4': 1, '008dc918': 2, '008dc94c': 4}[helper]))
+    return writes
 
 
 def container(magic=b"TROJAN_7", control=0x60000, flags=0x10003,
@@ -137,6 +183,16 @@ def inspect_elf(data):
 
 
 class InspectorTests(unittest.TestCase):
+    def test_core_patch_bounds_flags_and_unknown_identity(self):
+        memory = c.create_string_buffer(0x302e60)
+        before = memory.raw
+        self.assertEqual(LIB.pops_core_patches_stage(0x200000, memory, len(memory), 0), INVALID)
+        self.assertEqual(LIB.pops_core_patches_stage(0x200000, memory, len(memory), 64), INVALID)
+        self.assertEqual(LIB.pops_core_patches_stage(0x200000, memory, 1, 1), RANGE)
+        self.assertEqual(LIB.pops_core_patches_stage(0x200004, memory, len(memory), 1), RANGE)
+        self.assertEqual(LIB.pops_core_patches_stage(0x200000, memory, len(memory), 1), -4)
+        self.assertEqual(memory.raw, before)
+
     def test_sha256_matches_hashlib_across_padding_and_block_boundaries(self):
         for size in (0, 1, 3, 55, 56, 63, 64, 65, 119, 120, 127, 128,
                      1000, 65536, 1000000):
@@ -467,6 +523,8 @@ def main():
     parser.add_argument("--elf", type=Path)
     parser.add_argument("--pak", type=Path, action="append", default=[])
     parser.add_argument("--iop-image", type=Path, action="append", default=[])
+    parser.add_argument("--loader-source", type=Path,
+                        help="Optional measured original R5900 export for independent patch parity")
     args = parser.parse_args()
     compiler = shutil.which(os.environ.get("CC", "gcc"))
     if not compiler:
@@ -482,6 +540,7 @@ def main():
                     str(ROOT / "common/src/pops_iop_image.c"),
                     str(ROOT / "common/src/pops_profile.c"),
                     str(ROOT / "common/src/pops_boot_stage.c"),
+                    str(ROOT / "common/src/pops_core_patches.c"),
                     str(ROOT / "third_party/lzma/LzmaDec.c"), "-o", str(library)], check=True)
     LIB = c.CDLL(str(library))
     LIB.pops_container_inspect.argtypes = [c.c_void_p, c.c_size_t, c.POINTER(Container)]
@@ -503,16 +562,19 @@ def main():
     LIB.pops_boot_stage_pak.argtypes = [c.c_void_p, c.c_size_t, c.POINTER(BootBuffers)]
     LIB.pops_boot_stage_elf.argtypes = [c.c_void_p, c.c_size_t, c.c_void_p,
                                       c.c_size_t, c.POINTER(BootBuffers)]
+    LIB.pops_core_patches_stage.argtypes = [c.c_uint32, c.c_void_p, c.c_size_t, c.c_uint32]
+    LIB.pops_core_image_identify.argtypes = [c.c_void_p, c.c_size_t]
     for name in ("pops_container_inspect", "pops_container_plan", "pops_elf_inspect",
                  "pops_container_stage", "pops_patch_options", "pops_pak_inspect",
                  "pops_pak_decode", "pops_iop_image_inspect", "pops_image_sha256",
                  "pops_boot_plan_pak", "pops_boot_plan_elf", "pops_boot_stage_pak",
-                 "pops_boot_stage_elf"):
+                 "pops_boot_stage_elf", "pops_core_patches_stage", "pops_core_image_identify"):
         getattr(LIB, name).restype = c.c_int
     result = unittest.TextTestRunner(verbosity=2).run(
         unittest.defaultTestLoader.loadTestsFromTestCase(InspectorTests))
     if not result.wasSuccessful():
         return 1
+    original_writes = read_original_writes(args.loader_source) if args.loader_source else None
     if args.corpus_root:
         check_corpus(args.corpus_root)
     if args.elf:
@@ -564,7 +626,7 @@ def main():
             if rejected.entry != 0x12345678:
                 raise RuntimeError("Failed profile check changed its output")
         print(f"External PAK identity and guarded boot plan PASS: variant={plan.iop_variant}")
-        check_boot_staging(plan, output.raw)
+        check_boot_staging(plan, output.raw, original_writes=original_writes)
     for path in args.iop_image:
         image = path.read_bytes()
         info = IopImage()
@@ -580,7 +642,7 @@ def main():
             if (plan.source, plan.iop_variant, plan.entry, plan.iop_size) != (0, 0, 0x200008, len(image)):
                 raise RuntimeError("Loose dependency boot plan mismatch")
             print("Loose ELF/IOPRP identity and guarded boot plan PASS")
-            check_boot_staging(plan, executable, image)
+            check_boot_staging(plan, executable, image, original_writes)
     return 0
 
 

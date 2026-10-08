@@ -97,6 +97,14 @@ static const char core_hash[] =
 static const char elf_hash[] =
   "59df3389c4df88a572daa720b05507c52c34eddfa0031a6fbeec55e0c2d0fcb1";
 
+int pops_core_image_identify(const void *core, size_t size) {
+  if (!core)
+    return POPS_FILE_INVALID;
+  if (size != CORE_SIZE)
+    return POPS_FILE_UNSUPPORTED;
+  return matches(core, size, core_hash) ? POPS_FILE_OK : POPS_FILE_GUARD;
+}
+
 static int iop_profile(const void *file, size_t size, int loose,
                         PopsIopVariant *variant) {
   PopsIopImage info;
@@ -137,8 +145,9 @@ int pops_boot_plan_pak(const void *decoded, size_t size, PopsBootPlan *out) {
     return POPS_FILE_INVALID;
   if (size != CORE_SIZE + 265233 && size != CORE_SIZE + 245081)
     return POPS_FILE_UNSUPPORTED;
-  if (!matches(bytes, CORE_SIZE, core_hash))
-    return POPS_FILE_GUARD;
+  status = pops_core_image_identify(bytes, CORE_SIZE);
+  if (status)
+    return status;
   status = iop_profile(bytes + CORE_SIZE, size - CORE_SIZE, 0, &plan.iop_variant);
   if (status)
     return status;

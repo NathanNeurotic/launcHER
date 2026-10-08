@@ -33,6 +33,7 @@ list(APPEND EE_SOURCES
     ../common/src/pops_iop_image.c
     ../common/src/pops_profile.c
     ../common/src/pops_boot_stage.c
+    ../common/src/pops_core_patches.c
     ../third_party/lzma/LzmaDec.c
     ../common/src/dprintf.c
 )

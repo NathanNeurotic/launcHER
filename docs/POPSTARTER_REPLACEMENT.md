@@ -79,6 +79,29 @@ core BSS from 0x00502e60 to 0x00865940, and clears 0x3c30 scratchpad bytes.
 The existing ELF trampoline is linked below 0x00100000. Its current IOPRP support
 is disabled; these buffer APIs do not enable it or authorize a live handoff.
 
+`common/src/pops_core_patches.c` stages 36 exact original writes in six selectable
+groups. It requires the unmodified reference core's SHA256 and checks every
+selected site before writing any site. Apply the selected groups together before
+Trojan/game-specific patches. Reapplication fails closed. These are buffer
+patches, not a complete POPS boot environment.
+
+| Group | Original clean R5900 function | Writes |
+|---|---|---:|
+| Genuine HDD check | FUN_008db778 | 1 |
+| CDROM license loop | FUN_008dba90 | 1 |
+| Exception breakpoints and associated original redirects | FUN_008dbafc | 22 |
+| sceCdPowerOff call fix | FUN_008dbe78 | 1 |
+| Delcro's other patches | FUN_008dbf58 | 2 |
+| SifLoadModuleBuffer error exit calls | FUN_008dbfd4 | 9 |
+
+This corrects older reconstruction labels: the write at 0x00214860 is the
+sceCdPowerOff fix, not the SifLoadModuleBuffer group. FUN_008dbf58 clears only
+the low byte at 0x0020044c and 0x00200484; widening those writes to words destroys
+the remaining instruction bytes. The original's strings confirm these group
+names. An optional independent check reads the original decompiler export's
+write sequence and compares the entire staged RAM buffer against its result:
+all 36 writes match for each of the three dependency sets.
+
 `common/src/pops_pak.c` decodes the length-framed PAK format using unmodified,
 public-domain upstream 7-Zip LZMA sources pinned in `third_party/lzma`. It bounds
 compressed and decoded inputs to 8 MiB, checks output capacity and aliasing,
@@ -184,7 +207,7 @@ validation are separate gates. No row below currently claims a working POPS boot
 | Application launch contract | Existing target/argument and CNF paths inspected | Define explicit POPS installation/game request and errors without changing Ember callers |
 | External POPS load | ELF/ROMDIR inspection, native PAK decode, exact reference identity, guarded core/IOP/BSS buffer staging | Dependency discovery, live placement, loader coexistence and executable handoff |
 | Trojan and PATCH support | Parsing, options decoding, guarded buffer staging | Slot precedence, version gates, overlap/order policy, complete configuration semantics, resident execution and cache handling |
-| Core POPS patches | Reference locations available | Reconstruct verified expected/replacement words and dependencies for each supported image |
+| Core POPS patches | Six guarded groups, 36 original writes; whole-buffer comparison against the original sequence | Remaining original patch/configuration groups, path/environment redirects, interactions and runtime dependencies |
 | VCD layout and disc access | No runtime implementation | Real VCD layout, sector translation, command/RPC/DMA contracts, retries, EOF and streaming behavior |
 | Direct storage without BDMA | No runtime implementation | Own POPS-facing IOP bridge backed by supported device services; establish behavior across POPS IOP setup |
 | VMCs and saves | No runtime implementation | Creation, naming, slot modes, read/write, dirty flushing, failure recovery and persistence across exit |
@@ -222,11 +245,15 @@ python tools/test_pops_external.py --corpus-root C:/Users/natha/Github/REPOP/pop
 python tools/test_pops_external.py --pak C:/Users/natha/Github/POPS/POPS.PAK --pak C:/Users/natha/Github/POPS/POPS_IOX.PAK --iop-image C:/Users/natha/Github/POPS/IOPRP252.IMG
 ```
 
+Add `--loader-source C:/Users/natha/Github/POPS/build/parity/popstarter/decompiled.c`
+to compare core patch output with the measured original clean R5900 exports.
+This input remains external and is never used by launcHER at runtime.
+
 The runner preserves and checks every parsed header field against an independent
 binary decode, checks every corpus staging range, and decodes every PATCH's
 configuration intent. It never copies the input files into the repository.
 
-Current validation: 27 host tests pass; all 4,820 corpus files and both root
+Current validation: 28 host tests pass; all 4,820 corpus files and both root
 specimens parse and plan successfully; the external reference ELF passes
 structural checks. The tests cover failed guards leaving memory untouched,
 malformed/truncated files, address arithmetic, source/destination aliasing, JAL
