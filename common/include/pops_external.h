@@ -46,6 +46,58 @@ typedef struct {
 int pops_iop_image_inspect(const void *file, size_t size, PopsIopImage *out);
 
 typedef enum {
+  POPS_SOURCE_LOOSE_ELF,
+  POPS_SOURCE_DECODED_PAK
+} PopsBootSource;
+
+typedef enum {
+  POPS_IOP_LOOSE_252,
+  POPS_IOP_PACKED_252,
+  POPS_IOP_PACKED_2305A
+} PopsIopVariant;
+
+typedef struct {
+  PopsBootSource source;
+  PopsIopVariant iop_variant;
+  uint32_t entry;
+  uint32_t core_address;
+  uint32_t core_size;
+  uint32_t bss_address;
+  uint32_t bss_size;
+  uint32_t scratchpad_size;
+  uint32_t iop_offset; /* In decoded PAK; zero for a separate loose image. */
+  uint32_t iop_size;
+} PopsBootPlan;
+
+/* SHA256 of bounded dependency images; no allocation. Digest assigned on success. */
+int pops_image_sha256(const void *file, size_t size, uint8_t digest[32]);
+
+/* Identify the measured reference core and dependency sets by exact SHA256.
+ * Unknown/mutated images fail closed. No writes, reboot, runtime patches or
+ * module compatibility claim. Output remains unchanged on failure. */
+int pops_boot_plan_pak(const void *decoded, size_t size, PopsBootPlan *out);
+int pops_boot_plan_elf(const void *elf, size_t elf_size, const void *iop,
+                       size_t iop_size, PopsBootPlan *out);
+
+typedef struct {
+  uint32_t ram_base;
+  void *ram;
+  size_t ram_size;
+  void *scratchpad;
+  size_t scratchpad_size;
+  void *iop;
+  size_t iop_size;
+} PopsBootBuffers;
+
+/* Prepare caller-owned buffers after exact identity checks. Source ranges and
+ * all three destination ranges must be disjoint. All checks precede writes.
+ * Clear the reference ELF's low RAM reservation, core BSS and scratchpad BSS;
+ * keep the IOP reboot image separate. No live-memory/cache/IOP operations. */
+int pops_boot_stage_pak(const void *decoded, size_t size, const PopsBootBuffers *buffers);
+int pops_boot_stage_elf(const void *elf, size_t elf_size, const void *iop,
+                        size_t iop_size, const PopsBootBuffers *buffers);
+
+typedef enum {
   POPS_CONTAINER_TROJAN,
   POPS_CONTAINER_CONFIG,
   POPS_CONTAINER_DATA

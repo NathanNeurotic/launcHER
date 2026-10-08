@@ -49,6 +49,58 @@ class IopImage(c.Structure):
                ("extinfo_size", c.c_uint32), ("files", c.c_uint16)]
 
 
+class BootPlan(c.Structure):
+    _fields_ = [("source", c.c_int), ("iop_variant", c.c_int)] + [
+        (name, c.c_uint32) for name in ("entry", "core_address", "core_size",
+        "bss_address", "bss_size", "scratchpad_size", "iop_offset", "iop_size")]
+
+
+class BootBuffers(c.Structure):
+    _fields_ = [("ram_base", c.c_uint32), ("ram", c.c_void_p), ("ram_size", c.c_size_t),
+               ("scratchpad", c.c_void_p), ("scratchpad_size", c.c_size_t),
+               ("iop", c.c_void_p), ("iop_size", c.c_size_t)]
+
+
+def check_boot_staging(plan, source, iop=None):
+    ram_size = plan.bss_address + plan.bss_size - 0x100000
+    ram = c.create_string_buffer(b'x' * (ram_size + 16), ram_size + 16)
+    scratch = c.create_string_buffer(b'x' * 0x4000, 0x4000)
+    reboot = c.create_string_buffer(b'x' * (plan.iop_size + 16), plan.iop_size + 16)
+    buffers = BootBuffers(0x100000, c.addressof(ram), ram_size,
+                          c.addressof(scratch), len(scratch), c.addressof(reboot), plan.iop_size)
+    def stage():
+        if iop is None:
+            return LIB.pops_boot_stage_pak(source, len(source), c.byref(buffers))
+        return LIB.pops_boot_stage_elf(source, len(source), iop, len(iop), c.byref(buffers))
+    for member in ('ram_size', 'scratchpad_size', 'iop_size'):
+        saved = getattr(buffers, member)
+        setattr(buffers, member, 1)
+        if stage() != RANGE or ram.raw != b'x' * len(ram) or scratch.raw != b'x' * len(scratch) or reboot.raw != b'x' * len(reboot):
+            raise RuntimeError(f"Boot buffer bounds failure wrote data: {member}")
+        setattr(buffers, member, saved)
+    saved = buffers.iop
+    buffers.iop = buffers.ram
+    if stage() != RANGE or ram.raw != b'x' * len(ram):
+        raise RuntimeError("Boot destination aliasing was not rejected before writes")
+    buffers.iop = saved
+    if stage():
+        raise RuntimeError("Known dependency staging failed")
+    core_start = plan.core_address - 0x100000
+    bss_start = plan.bss_address - 0x100000
+    core = ram.raw[core_start:bss_start]
+    if hashlib.sha256(core).hexdigest() != '38ecd425324a1244e90ae68b927496b9af511fd0ed89761199fb6eb699e71ab0':
+        raise RuntimeError("Staged core differs from the measured loaded image")
+    expected_iop = iop if iop is not None else source[plan.iop_offset:]
+    if reboot.raw[:plan.iop_size] != expected_iop:
+        raise RuntimeError("Reboot image was not preserved separately")
+    if (any(ram.raw[:core_start]) or any(ram.raw[bss_start:ram_size]) or
+            any(scratch.raw[:plan.scratchpad_size]) or ram.raw[ram_size:] != b'x' * 16 or
+            scratch.raw[plan.scratchpad_size:] != b'x' * (0x4000 - plan.scratchpad_size) or
+            reboot.raw[plan.iop_size:] != b'x' * 16):
+        raise RuntimeError("BSS clearing or boot destination boundaries are incorrect")
+    print("Guarded boot buffer staging PASS: core, separate IOP, BSS and canaries")
+
+
 def container(magic=b"TROJAN_7", control=0x60000, flags=0x10003,
               load=0x146FFF0, entry=0x1470020, hook=0x2327D0,
               payload=b"\0" * 64, metadata=b"Cumulative r7"):
@@ -85,6 +137,29 @@ def inspect_elf(data):
 
 
 class InspectorTests(unittest.TestCase):
+    def test_sha256_matches_hashlib_across_padding_and_block_boundaries(self):
+        for size in (0, 1, 3, 55, 56, 63, 64, 65, 119, 120, 127, 128,
+                     1000, 65536, 1000000):
+            data = bytes((i * 31 + 7) & 255 for i in range(size))
+            result = (c.c_uint8 * 32)()
+            self.assertEqual(LIB.pops_image_sha256(data, len(data), result), 0)
+            self.assertEqual(bytes(result), hashlib.sha256(data).digest())
+        result = (c.c_uint8 * 32)(*([99] * 32))
+        self.assertEqual(LIB.pops_image_sha256(None, 1, result), INVALID)
+        self.assertEqual(LIB.pops_image_sha256(b'x', 0x800001, result), RANGE)
+        self.assertEqual(bytes(result), b'c' * 32)
+
+    def test_unknown_boot_images_fail_without_changing_plan(self):
+        data = b'\0' * (0x302e60 + 245081)
+        result = BootPlan()
+        result.entry = 0x12345678
+        self.assertEqual(LIB.pops_boot_plan_pak(data, len(data), c.byref(result)), -4)
+        self.assertEqual(LIB.pops_boot_plan_pak(data, len(data) - 1, c.byref(result)), UNSUPPORTED)
+        image = self.iop_image()
+        self.assertEqual(LIB.pops_boot_plan_elf(elf(), len(elf()), image,
+                                              len(image), c.byref(result)), -4)
+        self.assertEqual(result.entry, 0x12345678)
+
     @staticmethod
     def iop_image(reset_size=0):
         def entry(name, ext, size):
@@ -405,6 +480,8 @@ def main():
                     str(ROOT / "common/src/pops_external.c"),
                     str(ROOT / "common/src/pops_pak.c"),
                     str(ROOT / "common/src/pops_iop_image.c"),
+                    str(ROOT / "common/src/pops_profile.c"),
+                    str(ROOT / "common/src/pops_boot_stage.c"),
                     str(ROOT / "third_party/lzma/LzmaDec.c"), "-o", str(library)], check=True)
     LIB = c.CDLL(str(library))
     LIB.pops_container_inspect.argtypes = [c.c_void_p, c.c_size_t, c.POINTER(Container)]
@@ -419,9 +496,18 @@ def main():
     LIB.pops_pak_decode.argtypes = [c.c_void_p, c.c_size_t, c.c_void_p,
                                   c.c_size_t, c.POINTER(c.c_size_t)]
     LIB.pops_iop_image_inspect.argtypes = [c.c_void_p, c.c_size_t, c.POINTER(IopImage)]
+    LIB.pops_image_sha256.argtypes = [c.c_void_p, c.c_size_t, c.POINTER(c.c_uint8)]
+    LIB.pops_boot_plan_pak.argtypes = [c.c_void_p, c.c_size_t, c.POINTER(BootPlan)]
+    LIB.pops_boot_plan_elf.argtypes = [c.c_void_p, c.c_size_t, c.c_void_p,
+                                     c.c_size_t, c.POINTER(BootPlan)]
+    LIB.pops_boot_stage_pak.argtypes = [c.c_void_p, c.c_size_t, c.POINTER(BootBuffers)]
+    LIB.pops_boot_stage_elf.argtypes = [c.c_void_p, c.c_size_t, c.c_void_p,
+                                      c.c_size_t, c.POINTER(BootBuffers)]
     for name in ("pops_container_inspect", "pops_container_plan", "pops_elf_inspect",
                  "pops_container_stage", "pops_patch_options", "pops_pak_inspect",
-                 "pops_pak_decode", "pops_iop_image_inspect"):
+                 "pops_pak_decode", "pops_iop_image_inspect", "pops_image_sha256",
+                 "pops_boot_plan_pak", "pops_boot_plan_elf", "pops_boot_stage_pak",
+                 "pops_boot_stage_elf"):
         getattr(LIB, name).restype = c.c_int
     result = unittest.TextTestRunner(verbosity=2).run(
         unittest.defaultTestLoader.loadTestsFromTestCase(InspectorTests))
@@ -459,12 +545,42 @@ def main():
         if LIB.pops_iop_image_inspect(image, len(image), c.byref(info)):
             raise RuntimeError(f"Reference PAK appended IOP image rejected: {path}")
         print(f"Reference appended IOP structure PASS: {info.files} ROMDIR files")
+        plan = BootPlan()
+        if LIB.pops_boot_plan_pak(output, len(output), c.byref(plan)):
+            raise RuntimeError(f"External PAK profile rejected: {path}")
+        expected_variant = 1 if len(image) == 265233 else 2
+        if (plan.source, plan.iop_variant, plan.entry, plan.core_size,
+            plan.iop_offset, plan.iop_size) != (1, expected_variant, 0x200008,
+                                               core_size, core_size, len(image)):
+            raise RuntimeError(f"External PAK plan mismatch: {path}")
+        # A valid ROMDIR does not authorize a modified module or POPS core.
+        for offset in (0x100, core_size + 0x1000):
+            altered = bytearray(output.raw)
+            altered[offset] ^= 1
+            rejected = BootPlan()
+            rejected.entry = 0x12345678
+            if not LIB.pops_boot_plan_pak(bytes(altered), len(altered), c.byref(rejected)):
+                raise RuntimeError(f"Modified external image accepted: {path}")
+            if rejected.entry != 0x12345678:
+                raise RuntimeError("Failed profile check changed its output")
+        print(f"External PAK identity and guarded boot plan PASS: variant={plan.iop_variant}")
+        check_boot_staging(plan, output.raw)
     for path in args.iop_image:
         image = path.read_bytes()
         info = IopImage()
         if LIB.pops_iop_image_inspect(image, len(image), c.byref(info)):
             raise RuntimeError(f"External IOP image rejected: {path}")
         print(f"External IOP structure PASS: {path.name}, {info.files} ROMDIR files")
+        if args.elf:
+            executable = args.elf.read_bytes()
+            plan = BootPlan()
+            if LIB.pops_boot_plan_elf(executable, len(executable), image,
+                                      len(image), c.byref(plan)):
+                raise RuntimeError(f"Loose dependency profile rejected: {path}")
+            if (plan.source, plan.iop_variant, plan.entry, plan.iop_size) != (0, 0, 0x200008, len(image)):
+                raise RuntimeError("Loose dependency boot plan mismatch")
+            print("Loose ELF/IOPRP identity and guarded boot plan PASS")
+            check_boot_staging(plan, executable, image)
     return 0
 
 

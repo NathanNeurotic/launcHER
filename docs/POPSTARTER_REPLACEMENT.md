@@ -45,7 +45,7 @@ an existence check for POPS.ELF.
 
 PAK payloads are loaded memory images, not ELF files with program headers;
 `pops_elf_inspect` cannot validate them as-is. The native replacement unpacker is
-now implemented; a separate verified package/image profile is still required.
+now implemented, together with exact reference package/image profiles.
 The current research unpacker that
 extracts and emulates POPStarter's own decoder is evidence tooling, not a runtime
 implementation suitable for eliminating POPStarter.
@@ -57,6 +57,27 @@ files/services that are missing or unsupported must fail explicitly. None of
 these external binary components is included in launcHER's distribution.
 
 ### Implemented file and container core
+
+`common/src/pops_profile.c` identifies the measured POPS core and all three
+dependency sets by SHA256 before producing a boot plan. The loose IOPRP252 and
+packed IOPRP252 remain separate variants despite their matching sizes. Unknown
+cores, modified modules and unmeasured combinations fail explicitly. The hash
+implementation is allocation-free and checked against hashlib across SHA256
+padding/block boundaries and inputs up to one million bytes.
+
+`common/src/pops_boot_stage.c` stages those verified dependencies into disjoint
+caller-owned RAM, scratchpad and reboot-image buffers. It copies ELF load
+segments or the decoded flat core, clears the ELF's low RAM reservation and
+core/scratchpad BSS, and preserves the IOP image separately. Buffer capacity and
+alias checks precede every write. It never writes live EE addresses itself.
+All three dependency sets produce the exact same measured loaded-core hash.
+The host checks cover capacity failures without mutation, destination aliasing,
+preserved reboot-image bytes and canaries beyond every written range.
+
+The reference plan enters at 0x00200008, loads the core at 0x00200000, clears
+core BSS from 0x00502e60 to 0x00865940, and clears 0x3c30 scratchpad bytes.
+The existing ELF trampoline is linked below 0x00100000. Its current IOPRP support
+is disabled; these buffer APIs do not enable it or authorize a live handoff.
 
 `common/src/pops_pak.c` decodes the length-framed PAK format using unmodified,
 public-domain upstream 7-Zip LZMA sources pinned in `third_party/lzma`. It bounds
@@ -161,7 +182,7 @@ validation are separate gates. No row below currently claims a working POPS boot
 |---|---|---|
 | Existing Ember forwarding | Existing implementation preserved | Regression check after adding the POPS handoff |
 | Application launch contract | Existing target/argument and CNF paths inspected | Define explicit POPS installation/game request and errors without changing Ember callers |
-| External POPS load | Structural ELF inspection | Image identity/profile, PAK unpacking, placement, BSS, loader coexistence and executable handoff |
+| External POPS load | ELF/ROMDIR inspection, native PAK decode, exact reference identity, guarded core/IOP/BSS buffer staging | Dependency discovery, live placement, loader coexistence and executable handoff |
 | Trojan and PATCH support | Parsing, options decoding, guarded buffer staging | Slot precedence, version gates, overlap/order policy, complete configuration semantics, resident execution and cache handling |
 | Core POPS patches | Reference locations available | Reconstruct verified expected/replacement words and dependencies for each supported image |
 | VCD layout and disc access | No runtime implementation | Real VCD layout, sector translation, command/RPC/DMA contracts, retries, EOF and streaming behavior |
@@ -205,7 +226,7 @@ The runner preserves and checks every parsed header field against an independent
 binary decode, checks every corpus staging range, and decodes every PATCH's
 configuration intent. It never copies the input files into the repository.
 
-Current validation: 25 host tests pass; all 4,820 corpus files and both root
+Current validation: 27 host tests pass; all 4,820 corpus files and both root
 specimens parse and plan successfully; the external reference ELF passes
 structural checks. The tests cover failed guards leaving memory untouched,
 malformed/truncated files, address arithmetic, source/destination aliasing, JAL
