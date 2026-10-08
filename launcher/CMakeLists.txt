@@ -29,6 +29,9 @@ list(APPEND EE_SOURCES
     ../common/src/cnf.c
     ../common/src/loader.c
     ../common/src/pops_external.c
+    ../common/src/pops_pak.c
+    ../common/src/pops_iop_image.c
+    ../third_party/lzma/LzmaDec.c
     ../common/src/dprintf.c
 )
 
@@ -287,6 +290,7 @@ endif()
 
 target_include_directories(launcher_unc PRIVATE
     ../common/include
+    ../third_party/lzma
     include
 )
 

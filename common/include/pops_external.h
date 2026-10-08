@@ -10,7 +10,8 @@ enum {
   POPS_FILE_INVALID = -1,
   POPS_FILE_UNSUPPORTED = -2,
   POPS_FILE_RANGE = -3,
-  POPS_FILE_GUARD = -4
+  POPS_FILE_GUARD = -4,
+  POPS_FILE_NOMEM = -5
 };
 
 typedef struct {
@@ -20,6 +21,29 @@ typedef struct {
 
 /* Validate a complete, external ELF32 little-endian MIPS executable. */
 int pops_elf_inspect(const void *file, size_t size, PopsElfInfo *out);
+
+/* Length-framed POPS PAK stream: not an ELF, and no image identity guarantee.
+ * Cap allocation/output at 8 MiB. Caller owns the output buffer; discard its
+ * contents on any decode error (decoding can have written a partial result).
+ * Output length is assigned only on success. Source and output must not alias.
+ * Original packages omit LZMA's end marker; exact declared length is required.
+ */
+#define POPS_PAK_MAX_SIZE UINT32_C(0x00800000)
+int pops_pak_inspect(const void *file, size_t size, uint32_t *decoded_size);
+int pops_pak_decode(const void *file, size_t size, void *output, size_t capacity,
+                    size_t *decoded_size);
+
+typedef struct {
+  uint32_t directory_offset;
+  uint32_t directory_size;
+  uint32_t extinfo_size;
+  uint16_t files;
+} PopsIopImage;
+
+/* Validate ROMDIR, EXTINFO and all file extents of an external reboot image.
+ * Structural success does not establish the modules' versions or compatibility.
+ * The final file need not have alignment padding beyond its actual data. */
+int pops_iop_image_inspect(const void *file, size_t size, PopsIopImage *out);
 
 typedef enum {
   POPS_CONTAINER_TROJAN,

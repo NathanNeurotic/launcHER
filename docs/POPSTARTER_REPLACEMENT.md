@@ -44,8 +44,9 @@ VMC setup, runtime patches and final handoff. Dependency discovery is not merely
 an existence check for POPS.ELF.
 
 PAK payloads are loaded memory images, not ELF files with program headers;
-`pops_elf_inspect` cannot validate them as-is. A native replacement unpacker and
-separate package/image profile are required. The current research unpacker that
+`pops_elf_inspect` cannot validate them as-is. The native replacement unpacker is
+now implemented; a separate verified package/image profile is still required.
+The current research unpacker that
 extracts and emulates POPStarter's own decoder is evidence tooling, not a runtime
 implementation suitable for eliminating POPStarter.
 
@@ -56,6 +57,30 @@ files/services that are missing or unsupported must fail explicitly. None of
 these external binary components is included in launcHER's distribution.
 
 ### Implemented file and container core
+
+`common/src/pops_pak.c` decodes the length-framed PAK format using unmodified,
+public-domain upstream 7-Zip LZMA sources pinned in `third_party/lzma`. It bounds
+compressed and decoded inputs to 8 MiB, checks output capacity and aliasing,
+and requires the exact declared output length. It converts the initial range
+word's byte order and uses fixed lc=3/lp=0/pb=2 properties. Caller-owned output
+may contain a partial decode on error and must then be discarded.
+
+The IOX reference omits one final zero range-renormalization byte as well as the
+LZMA end marker. SDK lookahead is padded with 20 zeros, but actual consumption
+may exceed the input by at most one byte, only when the SDK reports
+`MAYBE_FINISHED_WITHOUT_MARK` (zero range code). Both reference packages decode
+byte-for-byte identically to Python's independent liblzma implementation.
+The format has no checksum: structural decode alone cannot establish identity
+or detect every corruption. Runtime authorization still needs image profiles.
+
+`common/src/pops_iop_image.c` validates RESET/ROMDIR/EXTINFO ordering, RESET's
+self-consistent aligned directory offset, a bounded directory with a zero
+terminator, unique file names, every file extent and the complete EXTINFO
+accounting. The final file's bytes must exist; trailing alignment padding is
+optional. This follows the ROMFS layout documented by
+[PS2SDK ROMDRV](https://github.com/ps2dev/ps2sdk/blob/master/iop/fs/romdrv/include/romdrv.h)
+and its directory discovery rules. It does not validate module compatibility.
+Both appended reference IOP images and the loose IOPRP252 image pass.
 
 `common/src/pops_external.c` provides:
 
@@ -173,13 +198,14 @@ Optional read-only checks against an existing external installation:
 
 ```text
 python tools/test_pops_external.py --corpus-root C:/Users/natha/Github/REPOP/popstarter --elf C:/Users/natha/Github/POPS/POPS.ELF
+python tools/test_pops_external.py --pak C:/Users/natha/Github/POPS/POPS.PAK --pak C:/Users/natha/Github/POPS/POPS_IOX.PAK --iop-image C:/Users/natha/Github/POPS/IOPRP252.IMG
 ```
 
 The runner preserves and checks every parsed header field against an independent
 binary decode, checks every corpus staging range, and decodes every PATCH's
 configuration intent. It never copies the input files into the repository.
 
-Initial validation: 20 host tests pass; all 4,820 corpus files and both root
+Current validation: 25 host tests pass; all 4,820 corpus files and both root
 specimens parse and plan successfully; the external reference ELF passes
 structural checks. The tests cover failed guards leaving memory untouched,
 malformed/truncated files, address arithmetic, source/destination aliasing, JAL

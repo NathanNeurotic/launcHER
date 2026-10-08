@@ -8,6 +8,8 @@ external ELF. Neither input is copied into the repository or executed.
 import argparse
 import collections
 import ctypes as c
+import hashlib
+import lzma
 import os
 from pathlib import Path
 import shutil
@@ -40,6 +42,11 @@ class PatchOptions(c.Structure):
 
 class ElfInfo(c.Structure):
     _fields_ = [("entry", c.c_uint32), ("load_segments", c.c_uint16)]
+
+
+class IopImage(c.Structure):
+    _fields_ = [("directory_offset", c.c_uint32), ("directory_size", c.c_uint32),
+               ("extinfo_size", c.c_uint32), ("files", c.c_uint16)]
 
 
 def container(magic=b"TROJAN_7", control=0x60000, flags=0x10003,
@@ -78,6 +85,76 @@ def inspect_elf(data):
 
 
 class InspectorTests(unittest.TestCase):
+    @staticmethod
+    def iop_image(reset_size=0):
+        def entry(name, ext, size):
+            return struct.pack('<10sHI', name, ext, size)
+        directory = (entry(b'RESET', 4, reset_size) + entry(b'ROMDIR', 0, 80)
+                     + entry(b'EXTINFO', 0, 4) + entry(b'LOADCORE', 0, 7)
+                     + b'\0' * 16)
+        return (b'x' * reset_size).ljust((reset_size + 15) & ~15, b'\0') + directory + b'\0' * 16 + b'module!'
+
+    def test_iop_romdir_and_reset_extent(self):
+        for reset_size in (0, 23):
+            data = self.iop_image(reset_size)
+            result = IopImage()
+            self.assertEqual(LIB.pops_iop_image_inspect(data, len(data), c.byref(result)), 0)
+            self.assertEqual((result.directory_offset, result.directory_size,
+                              result.extinfo_size, result.files),
+                             ((reset_size + 15) & ~15, 80, 4, 4))
+
+    def test_iop_image_rejects_unbounded_or_inconsistent_directory(self):
+        data = self.iop_image()
+        for malformed in (data[:-1], word(data, 28, 0xfffffff0),
+                          word(data, 12, 1), word(data, 44, 0),
+                          word(data, 64, 1), word(data, 60, 0xffffffff),
+                          data[:48] + data[16:26] + data[58:]):
+            result = IopImage(123, 456, 789, 10)
+            self.assertNotEqual(LIB.pops_iop_image_inspect(malformed, len(malformed),
+                                                        c.byref(result)), 0)
+            self.assertEqual(result.directory_offset, 123)
+
+    @staticmethod
+    def pak(payload):
+        stream = lzma.compress(payload, format=lzma.FORMAT_RAW,
+                               filters=[dict(id=lzma.FILTER_LZMA1, dict_size=1 << 23,
+                                             lc=3, lp=0, pb=2)])
+        assert stream[0] == 0
+        return struct.pack('<I', len(payload)) + stream[1:5][::-1] + stream[5:]
+
+    def test_pak_decode_matches_independent_encoder(self):
+        payload = bytes(range(256)) * 1000 + b'IOPRP image'
+        data = self.pak(payload)
+        output = c.create_string_buffer(len(payload))
+        length = c.c_size_t(99)
+        self.assertEqual(LIB.pops_pak_decode(data, len(data), output,
+                                           len(output), c.byref(length)), 0)
+        self.assertEqual(length.value, len(payload))
+        self.assertEqual(output.raw, payload)
+
+    def test_pak_truncation_and_allocation_limits(self):
+        data = self.pak(bytes(range(256)) * 100)
+        output = c.create_string_buffer(25600)
+        length = c.c_size_t(99)
+        for malformed in (data[:7], data[:12], word(data, 0, 0),
+                          word(data, 0, 0x800001), word(data, 4, 0xffffffff)):
+            self.assertNotEqual(LIB.pops_pak_decode(malformed, len(malformed),
+                                                  output, len(output), c.byref(length)), 0)
+            self.assertEqual(length.value, 99)
+        output.raw = b'x' * len(output)
+        self.assertEqual(LIB.pops_pak_decode(data, len(data), output, 3,
+                                           c.byref(length)), RANGE)
+        self.assertEqual(output.raw, b'x' * len(output))
+
+    def test_pak_rejects_aliasing_before_write(self):
+        data = self.pak(b'a' * 1000)
+        buffer = c.create_string_buffer(data, 2000)
+        before = buffer.raw
+        length = c.c_size_t(99)
+        self.assertEqual(LIB.pops_pak_decode(buffer, len(data), buffer,
+                                           len(buffer), c.byref(length)), RANGE)
+        self.assertEqual(buffer.raw, before)
+
     def test_cumulative_entry_differs_from_load(self):
         status, result = inspect(container())
         self.assertEqual(status, 0)
@@ -313,6 +390,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--corpus-root", type=Path)
     parser.add_argument("--elf", type=Path)
+    parser.add_argument("--pak", type=Path, action="append", default=[])
+    parser.add_argument("--iop-image", type=Path, action="append", default=[])
     args = parser.parse_args()
     compiler = shutil.which(os.environ.get("CC", "gcc"))
     if not compiler:
@@ -322,7 +401,11 @@ def main():
     library = build / ("pops_external.dll" if os.name == "nt" else "pops_external.so")
     subprocess.run([compiler, "-std=c99", "-Wall", "-Wextra", "-Werror", "-pedantic",
                     "-shared", "-fPIC", "-I", str(ROOT / "common/include"),
-                    str(ROOT / "common/src/pops_external.c"), "-o", str(library)], check=True)
+                    "-I", str(ROOT / "third_party/lzma"),
+                    str(ROOT / "common/src/pops_external.c"),
+                    str(ROOT / "common/src/pops_pak.c"),
+                    str(ROOT / "common/src/pops_iop_image.c"),
+                    str(ROOT / "third_party/lzma/LzmaDec.c"), "-o", str(library)], check=True)
     LIB = c.CDLL(str(library))
     LIB.pops_container_inspect.argtypes = [c.c_void_p, c.c_size_t, c.POINTER(Container)]
     LIB.pops_container_plan.argtypes = [c.c_void_p, c.c_size_t, c.c_uint32,
@@ -332,8 +415,13 @@ def main():
                                        c.POINTER(c.c_uint32), c.c_size_t]
     LIB.pops_patch_options.argtypes = [c.POINTER(Container), c.POINTER(PatchOptions)]
     LIB.pops_elf_inspect.argtypes = [c.c_void_p, c.c_size_t, c.POINTER(ElfInfo)]
+    LIB.pops_pak_inspect.argtypes = [c.c_void_p, c.c_size_t, c.POINTER(c.c_uint32)]
+    LIB.pops_pak_decode.argtypes = [c.c_void_p, c.c_size_t, c.c_void_p,
+                                  c.c_size_t, c.POINTER(c.c_size_t)]
+    LIB.pops_iop_image_inspect.argtypes = [c.c_void_p, c.c_size_t, c.POINTER(IopImage)]
     for name in ("pops_container_inspect", "pops_container_plan", "pops_elf_inspect",
-                 "pops_container_stage", "pops_patch_options"):
+                 "pops_container_stage", "pops_patch_options", "pops_pak_inspect",
+                 "pops_pak_decode", "pops_iop_image_inspect"):
         getattr(LIB, name).restype = c.c_int
     result = unittest.TextTestRunner(verbosity=2).run(
         unittest.defaultTestLoader.loadTestsFromTestCase(InspectorTests))
@@ -347,6 +435,36 @@ def main():
             raise RuntimeError(f"External ELF rejected: {status}")
         print(f"External MIPS ELF structure PASS: entry=0x{info.entry:08x}, "
               f"load segments={info.load_segments}; POPS identity not established")
+    for path in args.pak:
+        data = path.read_bytes()
+        length = c.c_uint32()
+        if LIB.pops_pak_inspect(data, len(data), c.byref(length)):
+            raise RuntimeError(f"External PAK header rejected: {path}")
+        output = c.create_string_buffer(length.value)
+        decoded = c.c_size_t()
+        if LIB.pops_pak_decode(data, len(data), output, len(output), c.byref(decoded)):
+            raise RuntimeError(f"External PAK decode rejected: {path}")
+        reference = lzma.LZMADecompressor(format=lzma.FORMAT_RAW,
+            filters=[dict(id=lzma.FILTER_LZMA1, dict_size=1 << 23, lc=3, lp=0, pb=2)])
+        expected = reference.decompress(b'\0' + data[4:8][::-1] + data[8:],
+                                        max_length=length.value)
+        if output.raw != expected or decoded.value != length.value:
+            raise RuntimeError(f"Independent PAK decoder mismatch: {path}")
+        print(f"External PAK decode PASS: {path.name}, {decoded.value} bytes, "
+              f"SHA256={hashlib.sha256(output.raw).hexdigest()}")
+        # This offset belongs to the measured reference core, not arbitrary PAKs.
+        core_size = 0x302e60
+        image = output.raw[core_size:]
+        info = IopImage()
+        if LIB.pops_iop_image_inspect(image, len(image), c.byref(info)):
+            raise RuntimeError(f"Reference PAK appended IOP image rejected: {path}")
+        print(f"Reference appended IOP structure PASS: {info.files} ROMDIR files")
+    for path in args.iop_image:
+        image = path.read_bytes()
+        info = IopImage()
+        if LIB.pops_iop_image_inspect(image, len(image), c.byref(info)):
+            raise RuntimeError(f"External IOP image rejected: {path}")
+        print(f"External IOP structure PASS: {path.name}, {info.files} ROMDIR files")
     return 0
 
 
