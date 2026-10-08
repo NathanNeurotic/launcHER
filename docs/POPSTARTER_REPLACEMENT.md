@@ -13,6 +13,50 @@ quickboot behavior and IOP handoff are unchanged.
 
 ## Current implementation
 
+### External dependency sets and boot environment
+
+POPS.ELF alone is not a complete POPStarter-compatible installation. Support
+must cover both existing external layouts rather than require all filenames
+unconditionally:
+
+| Installation form | External input | Contents/responsibility |
+|---|---|---|
+| Loose files | POPS.ELF plus a compatible IOPRP252.IMG | EE executable and a separate IOP reboot image; traditionally used by the HDD workflow |
+| Packed IOX | POPS_IOX.PAK | Compressed POPS memory image plus an IOPRP2305A image in the inspected specimen |
+| Packed legacy | POPS.PAK | Compressed POPS memory image plus an IOPRP252 image in the inspected specimen |
+
+Read-only decoding of the local reference packages on 2026-10-08 confirmed:
+
+- POPS.PAK decodes to 3,422,833 bytes: a 3,157,600-byte core followed by a
+  265,233-byte image containing `ioprp252`.
+- POPS_IOX.PAK decodes to 3,402,681 bytes: the same-sized core followed by a
+  245,081-byte image containing `ioprp2305a`.
+- Both decoded cores have SHA-256
+  `38ecd425324a1244e90ae68b927496b9af511fd0ed89761199fb6eb699e71ab0`.
+- The loose IOPRP252.IMG and the PAK's appended IOPRP252 image have different
+  hashes despite equal lengths. Filename and length do not establish equivalence.
+
+The original loader copies the appended IOP image from 0x00502e60 into a separate
+allocation and clears its staging region. The replacement must reproduce the
+required dependency selection, unpacking, image identity/version handling,
+IOP reboot and module interception, RPC initialization, storage bridge setup,
+VMC setup, runtime patches and final handoff. Dependency discovery is not merely
+an existence check for POPS.ELF.
+
+PAK payloads are loaded memory images, not ELF files with program headers;
+`pops_elf_inspect` cannot validate them as-is. A native replacement unpacker and
+separate package/image profile are required. The current research unpacker that
+extracts and emulates POPStarter's own decoder is evidence tooling, not a runtime
+implementation suitable for eliminating POPStarter.
+
+Exact discovery/fallback order and IOP service lifetimes remain reconstruction
+work. The replacement should produce a validated boot plan for the selected
+external dependency set before changing memory or rebooting the IOP. Required
+files/services that are missing or unsupported must fail explicitly. None of
+these external binary components is included in launcHER's distribution.
+
+### Implemented file and container core
+
 `common/src/pops_external.c` provides:
 
 - ELF32 little-endian MIPS executable validation with program-header, file,
