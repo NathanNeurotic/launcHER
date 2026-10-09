@@ -218,9 +218,6 @@ static int loadModules(DeviceType device, int tolerant) {
   if (currentDevice && !(currentDevice & (Device_APA | Device_ATA)) && !(currentDevice & (Device_APA | Device_ATA)))
     shutdownDEV9();
 
-  int ret = 0;
-  int iopret = 0;
-
   // Initialize the RPC manager and reboot the IOP
   sceSifInitRpc(0);
   while (!SifIopReset("", 0)) {

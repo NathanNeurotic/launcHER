@@ -168,7 +168,6 @@ int handleQuickboot(char *cnfPath) {
     } else {
       // Bare ELF title without directory or device (e.g. "Crash.ELF" or "PP.Crash.ELF").
       char baseTitle[64] = {0};
-      int pfx = PREFIX_NONE;
       if (pops_is_pp_prefix(cnfPath)) {
         const char *pstart = strrchr(cnfPath, '/');
         const char *bstart = strrchr(cnfPath, '\\');
