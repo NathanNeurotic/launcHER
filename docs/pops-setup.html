@@ -1,0 +1,527 @@
+<!doctype html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>POPS &amp; PS1 Setup · launcHER Docs</title>
+<meta name="description" content="Setup guide for running PlayStation 1 games through Sony POPS with launcHER: dependency files, VCD format, CNF syntax, per-game directives, and memory cards.">
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+<link rel="icon" type="image/png" href="assets/favicon.png">
+<meta property="og:site_name" content="launcHER Docs">
+<meta property="og:type" content="website">
+<link rel="stylesheet" href="assets/style.css">
+</head><body data-base="">
+<header class="topbar">
+  <button class="menu-btn" aria-label="Menu">☰</button>
+  <a class="brand" href="index.html">
+    <span class="psbtns"><i class="tri">&#9651;</i><i class="cir">&#9711;</i><i class="cro">&#10005;</i><i class="squ">&#9633;</i></span>
+    launcHER <small>DOCS</small></a>
+  <div class="topbar-actions">
+    <a class="topbar-btn primary" href="releases.html" title="Downloads &amp; Releases"><span class="icon icon-releases"></span>Downloads</a>
+    <a class="topbar-btn" href="https://github.com/NathanNeurotic/launcHER" target="_blank" rel="noopener" title="GitHub Repository"><span class="icon icon-github"></span>GitHub</a>
+  </div>
+  <div class="search">
+    <span class="ico"></span>
+    <input id="q" type="search" placeholder="Search devices, CNF syntax, HDD modes, OPL…  ( / )" autocomplete="off">
+    <kbd>/</kbd>
+    <div id="results"></div>
+  </div>
+</header>
+<canvas id="ps2-orbs" class="ps2-orbs-canvas" aria-hidden="true"></canvas>
+<div class="layout">
+  <nav class="sidebar">
+    <div class="sidebar-brand-sub">PLAYSTATION 2 // LAUNCHER</div>
+    <a href="index.html"><span class="icon icon-home"></span>Home</a>
+
+    <h4>Start</h4>
+    <a href="getting-started.html"><span class="icon icon-start"></span>Getting Started</a>
+    <a href="pops-setup.html" class="active"><span class="icon icon-ps1"></span>POPS &amp; PS1 Setup</a>
+    <a href="releases.html"><span class="icon icon-releases"></span>Downloads &amp; Releases</a>
+
+    <h4>Storage &amp; Devices</h4>
+    <a href="hdd-modes.html"><span class="icon icon-hdd"></span>"Which HDD Do I Have?"</a>
+    <a href="storage-profiles.html"><span class="icon icon-usb"></span>Storage Profiles</a>
+    <a href="apa-pfs.html"><span class="icon icon-server"></span>APA / PFS Deep Dive</a>
+
+    <h4>Configuration &amp; Launching</h4>
+    <a href="configuration.html"><span class="icon icon-settings"></span>launcHER.CNF Reference</a>
+    <a href="opl-apps.html"><span class="icon icon-apps"></span>OPL APPS Integration</a>
+
+    <h4>Reference</h4>
+    <a href="troubleshooting.html"><span class="icon icon-troubleshoot"></span>Troubleshooting &amp; Errors</a>
+    <a href="building.html"><span class="icon icon-terminal"></span>Building from Source</a>
+    <a href="credits.html"><span class="icon icon-credits"></span>Credits &amp; Lineage</a>
+
+    <h4 style="margin-top:24px;">Family Ecosystem</h4>
+    <a href="https://nathanneurotic.github.io/Open-PS2-Loader/"><span class="icon icon-play"></span>RiptOPL Docs ↗</a>
+    <a href="https://nathanneurotic.github.io/PS2-Servers/"><span class="icon icon-netboot"></span>PS2 Servers Docs ↗</a>
+    <a href="https://nathanneurotic.github.io/POPSLoader/"><span class="icon icon-book"></span>POPStarter Docs ↗</a>
+  </nav>
+  <main class="content">
+
+<h1>Sony POPS &amp; <span class="g">PS1 Setup</span></h1>
+<p class="lead">
+  launcHER replaces POPStarter. It loads Sony's official PlayStation 1 emulator (POPS), mounts your storage, applies runtime patches, and boots your <code>.VCD</code> game images across all supported PS2 storage devices.
+</p>
+
+<div class="callout info">
+  <div class="h">External Dependencies Notice</div>
+  launcHER is a loader and environment orchestrator. It does not contain or distribute Sony's proprietary emulator binaries (<code>POPS.PAK</code>, <code>POPS_IOX.PAK</code>, <code>POPS.ELF</code>, <code>IOPRP252.IMG</code>) or PlayStation 1 BIOS images. You must provide clean copies from your own PlayStation 2 installations.
+</div>
+
+<h2 id="step-1-dependencies">Step 1: External POPS Dependencies</h2>
+<p>
+  Sony distributed POPS in different package formats across various official releases. launcHER accepts three distinct installation forms:
+</p>
+
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>Package Form</th>
+        <th>Required Files</th>
+        <th>Description</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><b>Packed IOX (Recommended)</b></td>
+        <td><code>POPS_IOX.PAK</code></td>
+        <td>Compressed POPS memory image containing the emulator core and an updated <code>ioprp2305a</code> reboot module. Offers the best compatibility on modern storage devices.</td>
+      </tr>
+      <tr>
+        <td><b>Packed Legacy</b></td>
+        <td><code>POPS.PAK</code></td>
+        <td>Compressed POPS memory image containing the emulator core and an <code>ioprp252</code> reboot module. Standard package from earlier POPStarter releases.</td>
+      </tr>
+      <tr>
+        <td><b>Loose Files</b></td>
+        <td><code>POPS.ELF</code> and <code>IOPRP252.IMG</code></td>
+        <td>Uncompressed EE executable paired with a standalone IOP reboot image. Both files must reside in the same directory.</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<h3>Discovery Search Order</h3>
+<p>
+  When you launch a <code>.VCD</code> game, launcHER searches for your POPS dependency files in this priority order:
+</p>
+
+<ol class="checklist">
+  <li><b>Target Game Directory:</b> The folder holding the active <code>.VCD</code> disc (for example, <code>mass0:/POPS/</code>).</li>
+  <li><b>Device Root POPS Folder:</b> <code>&lt;device&gt;:/POPS/</code> on the storage volume containing the game (for example, <code>ata:/POPS/</code> or <code>mass0:/POPS/</code>).</li>
+  <li><b>Memory Card Slot 1:</b> <code>mc0:/POPS/</code>.</li>
+  <li><b>Memory Card Slot 2:</b> <code>mc1:/POPS/</code>.</li>
+  <li><b>Internal APA Partition:</b> <code>hdd0:__.POPS:pfs:/</code> (for internal HDD setups).</li>
+</ol>
+
+<p>
+  Place your chosen dependency package (such as <code>POPS_IOX.PAK</code>) in any of these locations. Keeping it in your main <code>POPS/</code> directory or on <code>mc0:/POPS/</code> allows all games to share one file.
+</p>
+
+<h2 id="step-2-vcd-images">Step 2: Preparing .VCD Disc Images</h2>
+<p>
+  POPS requires disc images in Sony's Virtual CD (<code>.VCD</code>) format. These images use raw Mode 2 Form 1 CD-ROM sectors (2,352 bytes per sector).
+</p>
+
+<p>
+  Convert your original PlayStation 1 CD-ROM dumps (BIN/CUE pairs) to <code>.VCD</code> using tools such as <b>CUE2POPS</b>. Place the resulting <code>.VCD</code> files in your games directory:
+</p>
+
+<pre><code>POPS/
+├── POPS_IOX.PAK               <span class="c"># Shared emulator package</span>
+├── Crash Bandicoot.VCD        <span class="c"># Single-disc game</span>
+├── Spyro the Dragon.VCD       <span class="c"># Single-disc game</span>
+└── Metal Gear Solid/          <span class="c"># Multi-disc game subfolder</span>
+    ├── Metal Gear Solid (Disc 1).VCD
+    ├── Metal Gear Solid (Disc 2).VCD
+    └── DISCS.TXT</code></pre>
+
+<h2 id="step-3-launch-methods">Step 3: Launch Methods and CNF Configuration</h2>
+<p>
+  You can launch POPS games using <code>launcHER.CNF</code>, using direct binary names (OPL APPS style), or through command-line invocation.
+</p>
+
+<h3>Method A: Quickboot via launcHER.CNF</h3>
+<p>
+  Point the <code>path=</code> directive directly to your <code>.VCD</code> file. launcHER detects the <code>.VCD</code> file extension, mounts the parent storage device, and boots POPS automatically:
+</p>
+
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>Storage Transport</th>
+        <th>launcHER.CNF Example</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><b>USB Mass Storage</b></td>
+        <td>
+          <pre style="margin:0"><code>path=mass?:/POPS/Crash Bandicoot.VCD</code></pre>
+        </td>
+      </tr>
+      <tr>
+        <td><b>Internal exFAT HDD (ATA BDM)</b></td>
+        <td>
+          <pre style="margin:0"><code>path=ata:/POPS/Crash Bandicoot.VCD
+arg=-dev9=NICHDD</code></pre>
+        </td>
+      </tr>
+      <tr>
+        <td><b>APA / PFS Partition (hdd0:__.POPS)</b></td>
+        <td>
+          <pre style="margin:0"><code>path=hdd0:__.POPS:pfs:/Crash Bandicoot.VCD
+arg=-dev9=NICHDD</code></pre>
+        </td>
+      </tr>
+      <tr>
+        <td><b>MMCE (Memory Card SD adapter)</b></td>
+        <td>
+          <pre style="margin:0"><code>path=mmce?:/POPS/Crash Bandicoot.VCD</code></pre>
+        </td>
+      </tr>
+      <tr>
+        <td><b>MX4SIO / MC2SIO</b></td>
+        <td>
+          <pre style="margin:0"><code>path=mx4sio:/POPS/Crash Bandicoot.VCD</code></pre>
+        </td>
+      </tr>
+      <tr>
+        <td><b>i.Link (FireWire IEEE 1394)</b></td>
+        <td>
+          <pre style="margin:0"><code>path=ilink:/POPS/Crash Bandicoot.VCD</code></pre>
+        </td>
+      </tr>
+      <tr>
+        <td><b>UDPBD (Network Block Device)</b></td>
+        <td>
+          <pre style="margin:0"><code>path=udpbd:/POPS/Crash Bandicoot.VCD
+arg=-dev9=NIC</code></pre>
+        </td>
+      </tr>
+      <tr>
+        <td><b>UDPFS (Network Filesystem)</b></td>
+        <td>
+          <pre style="margin:0"><code>path=udpfs:/POPS/Crash Bandicoot.VCD
+arg=-dev9=NIC</code></pre>
+        </td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<h3>Method B: Direct Binary Quickboot (POPStarter Style)</h3>
+<p>
+  If you do not create a <code>launcHER.CNF</code> file, launcHER discovers adjacent game images based on its own executable filename:
+</p>
+
+<ol class="checklist">
+  <li><b>Matching Title Name:</b> Renaming the ELF to <code>Crash Bandicoot.ELF</code> boots <code>Crash Bandicoot.VCD</code> in the same folder.</li>
+  <li><b>POPStarter Prefixes:</b> Prefixes such as <code>XX.</code> or <code>SB.</code> are stripped automatically. For example, <code>XX.Crash Bandicoot.ELF</code> will locate and boot <code>Crash Bandicoot.VCD</code>.</li>
+  <li><b>Default Disc Name:</b> If the filename does not match, launcHER checks for <code>IMAGE.VCD</code> in the same directory.</li>
+</ol>
+
+<p>
+  This matches POPStarter's traditional OPL APPS convention, allowing drop-in upgrades without rewriting existing menu configurations.
+</p>
+
+<h3>Method C: Direct Command-Line Invocation</h3>
+<p>
+  Launchers, scripts, or menu frontends can pass the <code>.VCD</code> path directly to <code>launcHER.elf</code>:
+</p>
+
+<pre><code>launcHER.elf mass0:/POPS/Crash Bandicoot.VCD</code></pre>
+
+<h2 id="step-4-game-directives">Step 4: Per-Game Configuration Directives</h2>
+<p>
+  Place optional text configuration files alongside your <code>.VCD</code> image, or inside the per-game VMC subfolder. launcHER reads these files automatically before entering POPS:
+</p>
+
+<ul>
+  <li><code>PATCHES.TXT</code>: General directives, video modes, and memory patches.</li>
+  <li><code>MODES.TXT</code>: Compatibility modes 1 through 8.</li>
+  <li><code>CHEATS.TXT</code>: GameShark and Action Replay cheat codes.</li>
+  <li><code>DISCS.TXT</code>: Multi-disc image file paths.</li>
+  <li><code>VMCDIR.TXT</code>: Custom folder path for Virtual Memory Cards.</li>
+</ul>
+
+<h3>Video Mode Directives</h3>
+<p>
+  Override Graphics Synthesizer registers (PMODE, SMODE2, DISPLAY1, DISPLAY2) to match your display equipment:
+</p>
+
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>Directive</th>
+        <th>Description</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>$480p</code></td>
+        <td>Forces 480p progressive scan (DTV 720x480). Requires component cables or HDMI adapter.</td>
+      </tr>
+      <tr>
+        <td><code>$480i</code></td>
+        <td>Forces standard 480i NTSC interlaced video mode.</td>
+      </tr>
+      <tr>
+        <td><code>$576p</code></td>
+        <td>Forces 576p progressive scan (PAL progressive).</td>
+      </tr>
+      <tr>
+        <td><code>$576i</code></td>
+        <td>Forces standard 576i PAL interlaced video mode.</td>
+      </tr>
+      <tr>
+        <td><code>$PAL2NTSC</code></td>
+        <td>Converts European PAL 50Hz video timings to NTSC 60Hz.</td>
+      </tr>
+      <tr>
+        <td><code>$NTSC2PAL</code></td>
+        <td>Converts NTSC 60Hz video timings to PAL 50Hz.</td>
+      </tr>
+      <tr>
+        <td><code>$NOPAL</code></td>
+        <td>Disables PAL mode forcing and maintains standard NTSC timing.</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<h3>Screen Centering &amp; Fixes</h3>
+<p>
+  Fine-tune display position on digital monitors:
+</p>
+
+<ul>
+  <li><code>$HDTVFIX</code>: Applies horizontal and vertical adjustments for modern HDTV displays.</li>
+  <li><code>$XPOS_&lt;offset&gt;</code>: Adjusts horizontal screen position in pixels (e.g. <code>$XPOS_16</code> or <code>$XPOS_-8</code>).</li>
+  <li><code>$YPOS_&lt;offset&gt;</code>: Adjusts vertical screen position in scanlines (e.g. <code>$YPOS_10</code> or <code>$YPOS_-4</code>).</li>
+</ul>
+
+<h3>Visual Quality &amp; CPU Timing</h3>
+<ul>
+  <li><code>$SMOOTH</code>: Modifies Graphics Synthesizer texture sampling parameters (<code>TEX0.TFX</code>) to enable bilinear texture filtering.</li>
+  <li><code>$FASTMIPS</code>: Overrides dynamic recompiler instruction wait loops, speeding up CPU execution for select titles.</li>
+  <li><code>$SLOWMIPS</code>: Inserts cycle padding into recompiler wait loops to prevent physics and audio glitches in timing-sensitive titles.</li>
+  <li><code>$NOBOOT</code> or <code>$BIOS</code>: Boots straight into the PlayStation 1 BIOS shell (Memory Card manager and CD Audio player) instead of executing the game executable.</li>
+  <li><code>$NOIGR</code>: Disables In-Game Reset button monitoring.</li>
+</ul>
+
+<h2 id="step-5-compatibility-modes">Step 5: Compatibility Modes 1 through 8</h2>
+<p>
+  Certain games require low-level timing or subsystem adjustments within POPS. Specify these modes in <code>MODES.TXT</code> (as bare numbers like <code>1</code>, <code>2</code>) or in <code>PATCHES.TXT</code> (using <code>$COMPATIBILITY_0x01</code> through <code>$COMPATIBILITY_0x08</code>):
+</p>
+
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>Mode</th>
+        <th>Target Memory Site</th>
+        <th>Subsystem Adjustment</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><b>Mode 1</b></td>
+        <td><code>0x002148A0</code></td>
+        <td>Adjusts SPU2 DMA synchronization loops and wait timing. Resolves audio stutter and lockups in music and FMV sequences.</td>
+      </tr>
+      <tr>
+        <td><b>Mode 2</b></td>
+        <td><code>0x00207EC0</code></td>
+        <td>Disables the CD-ROM fast sector cache override. Fixes read errors in games that rely on standard disc seek latency.</td>
+      </tr>
+      <tr>
+        <td><b>Mode 3</b></td>
+        <td><code>0x00210850</code></td>
+        <td>Disables the alternate audio channel mixer, restoring original PS1 sound channel routing.</td>
+      </tr>
+      <tr>
+        <td><b>Mode 4</b></td>
+        <td><code>0x00205B10</code></td>
+        <td>Skips GPU FIFO synchronization locks. Eliminates visual rendering freezes in high-throughput 3D titles.</td>
+      </tr>
+      <tr>
+        <td><b>Mode 5</b></td>
+        <td><code>0x002061A0</code></td>
+        <td>Forces progressive display timing directly inside the emulator display scheduler.</td>
+      </tr>
+      <tr>
+        <td><b>Mode 6</b></td>
+        <td><code>0x0020C1F0</code></td>
+        <td>Enables alternate LibCrypt subchannel emulation for protected titles without pre-calculated keys.</td>
+      </tr>
+      <tr>
+        <td><b>Mode 7</b></td>
+        <td><code>0x002010A0</code></td>
+        <td>Throttles the R3000A CPU cycle counter (<code>addiu $a0, $zero, 2</code>) to resolve speed-dependent bugs.</td>
+      </tr>
+      <tr>
+        <td><b>Mode 8</b></td>
+        <td><code>0x00207EE8</code></td>
+        <td>Adjusts CD-DA streaming buffer parameters, preventing background CD audio loops from dropping out.</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<h2 id="step-6-compatibility-database">Step 6: Title Compatibility Database &amp; LibCrypt</h2>
+<p>
+  launcHER includes a built-in database of <b>568 verified game profiles</b> and <b>229 validated 16-bit LibCrypt magic keys</b>.
+</p>
+
+<p>
+  When you boot a game, launcHER performs these actions automatically:
+</p>
+
+<ol class="checklist">
+  <li>Inspects the ISO9660 Primary Volume Descriptor inside the <code>.VCD</code> file.</li>
+  <li>Reads <code>SYSTEM.CNF</code> and extracts the official serial (for example, <code>SCES-01422</code> or <code>SLUS-00870</code>).</li>
+  <li>Checks the internal database. If the game has known compatibility requirements, launcHER sets the recommended modes automatically.</li>
+  <li>If the title uses European LibCrypt copy protection, launcHER applies the bypass patches and programs physical Subchannel Q emulation into the driver using the title's verified 16-bit key. You do not need to patch your disc images.</li>
+</ol>
+
+<h2 id="step-7-vmc-saves">Step 7: Virtual Memory Cards (VMC)</h2>
+<p>
+  POPS saves game data into Virtual Memory Card (VMC) images on your storage device rather than physical PS2 memory cards.
+</p>
+
+<h3>Naming Conventions</h3>
+<p>
+  launcHER checks for card images using this filename priority:
+</p>
+
+<ul>
+  <li>Slot 1: <code>&lt;SERIAL&gt;.VMC0</code> &rarr; <code>&lt;GAME_BASE&gt;.VMC0</code> &rarr; <code>SLOT0.VMC</code></li>
+  <li>Slot 2: <code>&lt;SERIAL&gt;.VMC1</code> &rarr; <code>&lt;GAME_BASE&gt;.VMC1</code> &rarr; <code>SLOT1.VMC</code></li>
+</ul>
+
+<p>
+  For example, for <i>Crash Bandicoot</i> (<code>SCUS-94900</code>), launcHER looks for <code>SCUS-94900.VMC0</code> and <code>SCUS-94900.VMC1</code>.
+</p>
+
+<h3>Automatic Formatting</h3>
+<p>
+  If neither card image exists when launching, launcHER creates both 128 KiB files on your storage device, pre-formatting them with valid PlayStation memory card header blocks and XOR checksums. The game recognizes them as formatted memory cards immediately.
+</p>
+
+<h3>Custom Save Folder Redirection</h3>
+<p>
+  Create a <code>VMCDIR.TXT</code> file in your game folder to redirect card saves to a common directory or subfolder:
+</p>
+
+<pre><code>SAVES/Crash/</code></pre>
+
+<h2 id="step-8-multi-disc">Step 8: Multi-Disc Games (DISCS.TXT)</h2>
+<p>
+  For games spanning multiple CD-ROMs (such as <i>Final Fantasy VII</i> or <i>Metal Gear Solid</i>), create a <code>DISCS.TXT</code> file in the game directory. List each disc on its own line:
+</p>
+
+<pre><code>Metal Gear Solid (Disc 1).VCD
+Metal Gear Solid (Disc 2).VCD</code></pre>
+
+<p>
+  You can list up to 4 discs. Paths can be relative to the game folder or absolute device paths.
+</p>
+
+<h3>In-Game Disc Swapping</h3>
+<p>
+  When the game prompts you to change discs:
+</p>
+
+<ol class="checklist">
+  <li>Press <b>SELECT + L1 + R1</b> on your controller.</li>
+  <li>launcHER's virtual disc driver signals a disc tray open event to POPS.</li>
+  <li>The driver switches the active sector stream to the next <code>.VCD</code> file listed in <code>DISCS.TXT</code>.</li>
+  <li>The driver signals a disc tray closed event, and the game resumes loading from the new disc.</li>
+</ol>
+
+<h2 id="step-9-cheats">Step 9: GameShark &amp; Action Replay Cheats</h2>
+<p>
+  Add GameShark or Action Replay cheat codes to <code>CHEATS.TXT</code> in your game folder:
+</p>
+
+<pre><code># Infinite Health
+8009A120 0004
+
+# All Items
+3009A135 0063
+
+# Conditional Modifier (Execute next line if value matches)
+D008B200 0001
+8008B204 00FF</code></pre>
+
+<p>
+  Supported code types include:
+</p>
+
+<ul>
+  <li><code>80xxxxxx yyyy</code>: 16-bit constant RAM write.</li>
+  <li><code>30xxxxxx 00yy</code>: 8-bit constant RAM write.</li>
+  <li><code>D0xxxxxx yyyy</code>: 16-bit conditional test. Executes following cheat line only when memory matches the condition.</li>
+</ul>
+
+<p>
+  launcHER stages these codes and evaluates them against guest PlayStation 1 RAM (<code>0x00000000</code> to <code>0x001FFFFF</code>) during gameplay.
+</p>
+
+<h2 id="step-10-igr-hotkeys">Step 10: In-Game Reset &amp; Controller Hotkeys</h2>
+
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>Action</th>
+        <th>Button Combination</th>
+        <th>Behavior</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><b>In-Game Reset (IGR)</b></td>
+        <td><code>L1 + L2 + R1 + R2 + SELECT + START</code></td>
+        <td>Shuts down the emulator safely and returns to your PS2 menu (OSDSYS, OPL, or wLaunchELF).</td>
+      </tr>
+      <tr>
+        <td><b>Disc Swap</b></td>
+        <td><code>SELECT + L1 + R1</code></td>
+        <td>Cycles to the next disc image defined in <code>DISCS.TXT</code>.</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<h3>Custom IGR Background Graphics</h3>
+<p>
+  Place TIM2 image files in your game directory or VMC folder to customize the exit confirmation interface:
+</p>
+
+<ul>
+  <li><code>IGR_BG.TM2</code>: Background wallpaper image.</li>
+  <li><code>IGR_YES.TM2</code>: Selected confirmation button texture.</li>
+  <li><code>IGR_NO.TM2</code>: Selected cancellation button texture.</li>
+</ul>
+
+<h3>Custom Game Fixes (TROJAN_*.BIN)</h3>
+<p>
+  If a community patch requires code injection hooks, place <code>TROJAN_0.BIN</code> through <code>TROJAN_9.BIN</code> alongside the game. launcHER verifies the container header, checks the hook address, stages the payload, and applies the injection before starting execution.
+</p>
+
+</main>
+  <aside class="toc"><div class="toc-h">On this page</div><nav id="toc-nav"></nav></aside>
+</div>
+<footer>
+  <p><b>launcHER Documentation</b> &mdash; Standalone PlayStation 2 Ember forwarder.
+  See <a href="credits.html">Credits &amp; Lineage</a>.</p>
+  <p class="prov-inline">PlayStation 2 Homebrew Documentation Family:
+  <a href="https://nathanneurotic.github.io/Open-PS2-Loader/">RiptOPL Docs</a> &middot;
+  <a href="https://nathanneurotic.github.io/PS2-Servers/">PS2 Servers Docs</a> &middot;
+  <a href="https://nathanneurotic.github.io/POPSLoader/">POPStarter Docs</a>.</p>
+</footer>
+<script src="assets/app.js"></script>
+</body></html>

@@ -32,6 +32,7 @@
 
     <h4>Start</h4>
     <a href="getting-started.html"><span class="icon icon-start"></span>Getting Started</a>
+    <a href="pops-setup.html"><span class="icon icon-ps1"></span>POPS &amp; PS1 Setup</a>
     <a href="releases.html"><span class="icon icon-releases"></span>Downloads &amp; Releases</a>
 
     <h4>Storage &amp; Devices</h4>
@@ -137,8 +138,30 @@ players=players/2</code></pre>
 </p>
 <pre><code>argv[0] = "hdd0:+OPL:pfs0:/APPS/Soul Blade/Soul Blade.ELF"</code></pre>
 
+<h2 id="pops-opl-apps">POPS Games in OPL APPS</h2>
 <p>
-  launcHER natively handles this token format, cleanly mounting <code>hdd0:+OPL</code> without encountering <code>-ENODEV</code> (error <code>-19</code>). Whether you run official OPL, OPL DB, or RiptOPL, launcHER starts instantaneously!
+  You can list Sony POPS games in OPL APPS using two methods:
+</p>
+
+<h3>Method 1: launcHER.CNF Quickboot</h3>
+<p>
+  Place a renamed copy of <code>launcHER.elf</code> alongside a <code>launcHER.CNF</code> file pointing to your <code>.VCD</code>:
+</p>
+<pre><code>APPS/Crash Bandicoot/
+├── Crash Bandicoot.ELF      <span class="c"># Renamed copy of launcHER.elf</span>
+├── launcHER.CNF             <span class="c"># Contains: path=mass0:/POPS/Crash Bandicoot.VCD</span>
+└── title.cfg</code></pre>
+
+<h3>Method 2: POPStarter Compatibility Mode (XX. Prefix)</h3>
+<p>
+  launcHER natively recognizes POPStarter's naming standard. If you rename the ELF with an <code>XX.</code> or <code>SB.</code> prefix (such as <code>XX.Crash Bandicoot.ELF</code>) in the same directory as <code>Crash Bandicoot.VCD</code>:
+</p>
+<pre><code>POPS/
+├── POPS_IOX.PAK
+├── Crash Bandicoot.VCD
+└── XX.Crash Bandicoot.ELF   <span class="c"># Copy of launcHER.elf</span></code></pre>
+<p>
+  When launched without a CNF file, launcHER strips the <code>XX.</code> prefix, identifies <code>Crash Bandicoot.VCD</code>, and launches POPS without extra configuration. See the <a href="pops-setup.html"><b>POPS &amp; PS1 Setup Guide</b></a> for complete details.
 </p>
 
 </main>

@@ -32,6 +32,7 @@
 
     <h4>Start</h4>
     <a href="getting-started.html"><span class="icon icon-start"></span>Getting Started</a>
+    <a href="pops-setup.html"><span class="icon icon-ps1"></span>POPS &amp; PS1 Setup</a>
     <a href="releases.html"><span class="icon icon-releases"></span>Downloads &amp; Releases</a>
 
     <h4>Storage &amp; Devices</h4>
@@ -57,62 +58,80 @@
 
 <h1>Storage <span class="g">Profiles</span></h1>
 <p class="lead">
-  launcHER features a modular storage stack compiled directly into its standalone binary. Each transport has specific configuration requirements to ensure the storage interface remains online for Ember.
+  launcHER features a modular storage stack compiled directly into its standalone binary. Each transport has specific configuration requirements to ensure the storage interface remains online for Ember or Sony POPS.
 </p>
 
 <h2 id="profile-usb">Profile 1: USB Mass Storage</h2>
 <p>
   Applies to USB flash drives, USB external hard drives, and USB external SSDs.
 </p>
+<h3>Ember Configuration:</h3>
 <pre><code>path=mass?:/EMBER/ember.elf
 arg=&lt;GAME_FOLDER&gt;</code></pre>
 
+<h3>POPS Configuration:</h3>
+<pre><code>path=mass?:/POPS/&lt;GAME&gt;.VCD</code></pre>
+
 <p>
-  The wildcard <code>mass?:</code> searches all connected USB drives (<code>mass0:</code>, <code>mass1:</code>, etc.) in order until <code>EMBER/ember.elf</code> is located. You can also specify <code>usb?:</code> or a fixed unit like <code>mass0:</code>.
+  The wildcard <code>mass?:</code> searches all connected USB drives (<code>mass0:</code>, <code>mass1:</code>, etc.) in order until the target executable or <code>.VCD</code> image is located. You can also specify <code>usb?:</code> or a fixed unit like <code>mass0:</code>.
 </p>
 
 <h2 id="profile-exfat">Profile 2: Internal exFAT HDD (ATA BDM)</h2>
 <p>
   Applies to internal PS2 hard drives or SSDs formatted with exFAT under the BDM ATA driver.
 </p>
+<h3>Ember Configuration:</h3>
 <pre><code>path=ata:/EMBER/ember.elf
 arg=&lt;GAME_FOLDER&gt;
 arg=-dev9=NICHDD</code></pre>
 
+<h3>POPS Configuration:</h3>
+<pre><code>path=ata:/POPS/&lt;GAME&gt;.VCD
+arg=-dev9=NICHDD</code></pre>
+
 <div class="callout info">
   <div class="h">Why -dev9=NICHDD?</div>
-  By default, PS2 loaders shut down hardware peripherals before transferring execution to a child ELF to ensure a clean slate. Adding <code>arg=-dev9=NICHDD</code> prevents launcHER from cutting power to the Network Adapter / IDE controller, allowing Ember to continue reading from <code>ata:/</code>.
+  By default, PS2 loaders shut down hardware peripherals before transferring execution to a child ELF to ensure a clean slate. Adding <code>arg=-dev9=NICHDD</code> prevents launcHER from cutting power to the Network Adapter / IDE controller, allowing Ember or POPS to continue reading from <code>ata:/</code>.
 </div>
 
 <h2 id="profile-apa-pfs">Profile 3: Internal APA / PFS HDD Partitions</h2>
 <p>
-  Applies when Ember itself is installed inside an APA partition formatted with the PlayStation File System (PFS).
+  Applies when Ember or POPS is installed inside an APA partition formatted with the PlayStation File System (PFS).
 </p>
+<h3>Ember Configuration:</h3>
 <pre><code>path=hdd0:&lt;PARTITION&gt;:pfs:/EMBER/ember.elf
 arg=pfs0:/EMBER/ember.elf
 arg=&lt;GAME_FOLDER&gt;
 arg=-skip_argv0
 arg=-dev9=NICHDD</code></pre>
 
+<h3>POPS Configuration:</h3>
+<pre><code>path=hdd0:__.POPS:pfs:/&lt;GAME&gt;.VCD
+arg=-dev9=NICHDD</code></pre>
+
 <p>Real-world examples:</p>
 <ul>
-  <li><b>Dedicated partition:</b> <code>path=hdd0:__.EMBER:pfs:/EMBER/ember.elf</code></li>
-  <li><b>Existing partition:</b> <code>path=hdd0:__common:pfs:/EMBER/ember.elf</code></li>
+  <li><b>Ember dedicated partition:</b> <code>path=hdd0:__.EMBER:pfs:/EMBER/ember.elf</code></li>
+  <li><b>Ember existing partition:</b> <code>path=hdd0:__common:pfs:/EMBER/ember.elf</code></li>
+  <li><b>POPS partition:</b> <code>path=hdd0:__.POPS:pfs:/Crash Bandicoot.VCD</code></li>
 </ul>
 
 <div class="callout warning">
-  <div class="h">Why does APA/PFS need two paths?</div>
+  <div class="h">Why does Ember on APA/PFS need two paths?</div>
   launcHER must locate and mount the physical partition using the <code>hdd0:&lt;PARTITION&gt;:pfs:</code> syntax. Once mounted by the PS2 filesystem driver, Ember expects to access itself as <code>pfs0:/EMBER/ember.elf</code>.
   <br><br>
-  <code>arg=-skip_argv0</code> instructs launcHER to omit the raw <code>hdd0:</code> loader path from Ember's argument array, ensuring Ember's working directory resolves seamlessly.
+  <code>arg=-skip_argv0</code> instructs launcHER to omit the raw <code>hdd0:</code> loader path from Ember's argument array, ensuring Ember's working directory resolves cleanly. POPS targets do not require <code>-skip_argv0</code> because launcHER handles the POPS staging and popfs driver mapping internally.
 </div>
 
 <h2 id="profile-mmce">Profile 4: MMCE (Multi-Media Card Emulator)</h2>
 <p>
   High-speed SPI SD card adapter connected via the Memory Card slot.
 </p>
+<h3>Ember:</h3>
 <pre><code>path=mmce?:/EMBER/ember.elf
 arg=&lt;GAME_FOLDER&gt;</code></pre>
+<h3>POPS:</h3>
+<pre><code>path=mmce?:/POPS/&lt;GAME&gt;.VCD</code></pre>
 
 <h2 id="profile-mc">Profile 5: Memory Card (mc0 / mc1)</h2>
 <p>
@@ -125,22 +144,32 @@ arg=&lt;GAME_FOLDER&gt;</code></pre>
 <p>
   SD card adapter connected to Memory Card slot 2 via SIO2 bus.
 </p>
+<h3>Ember:</h3>
 <pre><code>path=mx4sio:/EMBER/ember.elf
 arg=&lt;GAME_FOLDER&gt;</code></pre>
+<h3>POPS:</h3>
+<pre><code>path=mx4sio:/POPS/&lt;GAME&gt;.VCD</code></pre>
 
 <h2 id="profile-ilink">Profile 7: i.Link (FireWire IEEE 1394)</h2>
 <p>
   External storage connected to the front i.Link 4-pin port on early fat PS2 models (SCPH-10000 to SCPH-3900x).
 </p>
+<h3>Ember:</h3>
 <pre><code>path=ilink:/EMBER/ember.elf
 arg=&lt;GAME_FOLDER&gt;</code></pre>
+<h3>POPS:</h3>
+<pre><code>path=ilink:/POPS/&lt;GAME&gt;.VCD</code></pre>
 
 <h2 id="profile-udpbd">Profile 8: UDPBD (Network Block Device)</h2>
 <p>
   Network block device streaming disc images or raw block devices over Ethernet via UDP.
 </p>
+<h3>Ember:</h3>
 <pre><code>path=udpbd:/EMBER/ember.elf
 arg=&lt;GAME_FOLDER&gt;
+arg=-dev9=NIC</code></pre>
+<h3>POPS:</h3>
+<pre><code>path=udpbd:/POPS/&lt;GAME&gt;.VCD
 arg=-dev9=NIC</code></pre>
 
 <p>
@@ -151,8 +180,12 @@ arg=-dev9=NIC</code></pre>
 <p>
   Low-overhead UDP filesystem streaming from <a href="https://nathanneurotic.github.io/PS2-Servers/">PS2 Servers</a> over local Ethernet.
 </p>
+<h3>Ember:</h3>
 <pre><code>path=udpfs:/EMBER/ember.elf
 arg=&lt;GAME_FOLDER&gt;
+arg=-dev9=NIC</code></pre>
+<h3>POPS:</h3>
+<pre><code>path=udpfs:/POPS/&lt;GAME&gt;.VCD
 arg=-dev9=NIC</code></pre>
 
 <h2 id="fallback-paths">Multi-Path Fallback Configuration</h2>
@@ -165,7 +198,7 @@ path=mmce?:/EMBER/ember.elf
 arg=Soul Blade</code></pre>
 
 <p>
-  launcHER tests each path in sequential order. The first one that contains <code>EMBER/ember.elf</code> will be launched with the supplied arguments.
+  launcHER tests each path in sequential order. The first one that contains the target file will be launched with the supplied arguments.
 </p>
 
 </main>

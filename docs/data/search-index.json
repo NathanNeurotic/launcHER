@@ -226,5 +226,71 @@
     "cat": "credits",
     "text": "Lineage and credits: nuno6573 (concept & architecture), pcm720 (OSDMenu launcher foundation), Gageformer (Ember), eliminator1403 (hardware testing), NathanNeurotic (fork, PFS persistence, packaging).",
     "url": "credits.html"
+  },
+  {
+    "title": "Sony POPS & PS1 Setup Guide",
+    "cat": "pops",
+    "text": "Run PlayStation 1 VCD games using Sony POPS with launcHER: replaces POPStarter, launches .VCD images directly, and mounts storage without BDMAssault.",
+    "url": "pops-setup.html"
+  },
+  {
+    "title": "POPS External Dependencies (POPS_IOX.PAK, POPS.PAK, POPS.ELF)",
+    "cat": "pops",
+    "text": "POPS dependency requirements: POPS_IOX.PAK, POPS.PAK, or loose POPS.ELF with IOPRP252.IMG. Search priority order: game folder, device /POPS/, mc0:/POPS/, mc1:/POPS/, hdd0:__.POPS:pfs:/.",
+    "url": "pops-setup.html#step-1-dependencies"
+  },
+  {
+    "title": "Preparing .VCD Disc Images (CUE2POPS)",
+    "cat": "pops",
+    "text": "PlayStation 1 Virtual CD images (.VCD) use Mode 2 Form 1 raw sectors (2352 bytes). Converted from BIN/CUE dumps using CUE2POPS.",
+    "url": "pops-setup.html#step-2-vcd-images"
+  },
+  {
+    "title": "POPS Quickboot and launcHER.CNF Configuration",
+    "cat": "pops",
+    "text": "Configure path= pointing directly to .VCD files across USB (mass?:), ATA exFAT (ata:), APA PFS (hdd0:__.POPS), MMCE, MX4SIO, i.Link, UDPBD, and UDPFS.",
+    "url": "pops-setup.html#step-3-launch-methods"
+  },
+  {
+    "title": "POPS Per-Game Directives (PATCHES.TXT, MODES.TXT)",
+    "cat": "pops",
+    "text": "Video mode overrides ($480p, $480i, $576p, $576i, $PAL2NTSC, $NTSC2PAL, $NOPAL), centering ($HDTVFIX, $XPOS, $YPOS), smoothing ($SMOOTH), CPU timing ($FASTMIPS, $SLOWMIPS), and shell boot ($NOBOOT, $BIOS).",
+    "url": "pops-setup.html#step-4-game-directives"
+  },
+  {
+    "title": "POPS Compatibility Modes 1 through 8",
+    "cat": "pops",
+    "text": "Compatibility modes 1..8: Mode 1 SPU2 DMA sync, Mode 2 fast sector cache override, Mode 3 audio mixer, Mode 4 GPU FIFO sync, Mode 5 progressive timing, Mode 6 LibCrypt subchannel, Mode 7 R3000A CPU throttle, Mode 8 CD-DA buffer.",
+    "url": "pops-setup.html#step-5-compatibility-modes"
+  },
+  {
+    "title": "Built-In Game Compatibility & LibCrypt Engine",
+    "cat": "pops",
+    "text": "568 verified game profiles and 229 validated 16-bit LibCrypt keys. Automatically reads SYSTEM.CNF serial from ISO9660 PVD and applies hardware subchannel Q emulation.",
+    "url": "pops-setup.html#step-6-compatibility-database"
+  },
+  {
+    "title": "Virtual Memory Cards (VMC) in POPS",
+    "cat": "pops",
+    "text": "Automatic creation of formatted 128 KiB PS1 memory card images (<SERIAL>.VMC0 and <SERIAL>.VMC1). Redirection to custom folders via VMCDIR.TXT.",
+    "url": "pops-setup.html#step-7-vmc-saves"
+  },
+  {
+    "title": "Multi-Disc Disc Swapping (DISCS.TXT)",
+    "cat": "pops",
+    "text": "Define up to 4 discs in DISCS.TXT. In-game disc swap combo SELECT + L1 + R1 cycles to the next disc image dynamically.",
+    "url": "pops-setup.html#step-8-multi-disc"
+  },
+  {
+    "title": "GameShark & Action Replay Cheats (CHEATS.TXT)",
+    "cat": "pops",
+    "text": "Cheat engine supporting 16-bit writes (type 80), 8-bit writes (type 30), and 16-bit conditional executions (type D0) injected into guest PS1 RAM.",
+    "url": "pops-setup.html#step-9-cheats"
+  },
+  {
+    "title": "In-Game Reset (IGR) and Controller Hotkeys",
+    "cat": "pops",
+    "text": "Controller hotkeys: In-Game Reset with L1 + L2 + R1 + R2 + SELECT + START, disc swap with SELECT + L1 + R1. Custom textures IGR_BG.TM2 and TROJAN_*.BIN fixes.",
+    "url": "pops-setup.html#step-10-igr-hotkeys"
   }
 ]
