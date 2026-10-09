@@ -127,3 +127,11 @@ Original PATCH loader evidence begins near line 3206 in the measured POPSTARTER
 decompile: numbered PATCH files use a 64-byte header and additional original
 validation/dispatch, separate from TROJAN handling near line 2822. Reconstruct
 these rules before connecting the generic container stager to runtime discovery.
+
+Compatibility continuation: Modes 1..5 and 7 now use guarded measured writes
+from FUN_008dc2c4, verified against complete external-core buffers for every
+supported mask. Modes 6/8 reject without mutation. Trace original DAT_009b9d48
+state/caller ordering and Mode 6 OSD globals next; do not reuse speculative
+`POPS/popstarter/src/runtime_hooks.c` mode switches (they were the source of the
+incorrect single-write implementations). Optional reference reproduction is in
+`POPSTARTER_REPLACEMENT.md`. No new hardware result has been obtained.

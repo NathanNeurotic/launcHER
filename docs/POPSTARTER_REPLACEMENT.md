@@ -394,7 +394,7 @@ replacement is not yet a faithful drop-in POPSTARTER implementation.
 | Configuration | Text parsing, root/title discovery and table conversion | Reconstruct original precedence and all directive semantics |
 | Saves | Raw-card creation and popfs read/write/backup helpers | Console save, reload and power-cycle validation |
 | Cheats | Standalone evaluator and partial parser | Resident code, actual guest RAM mapping, periodic hook, master/slide codes and SAFEMODE activation; enabled cheats currently reject launch |
-| Compatibility modes | Existing helper contains speculative writes | Replace all eight modes against measured original behavior; mode 8 currently overlaps a storage redirect |
+| Compatibility modes | Guarded original-dispatch writes for 1..5 and 7 | Reconstruct runtime state gating and mode 6 OSD conditions; establish mode 8 provenance; validate games |
 | Video, BIOS and OSD | Parsed options and unverified patch helpers | Reconstruct original instructions, widths, runtime timing and behavior |
 | LibCrypt | Key database and standalone SubQ generator | Connect actual POPS request path and validate protected games |
 | Multi-disc | Proxy paths and popfs devctl helpers | Resident controls and switching already-open disc handles |
@@ -447,3 +447,31 @@ boot failures despite passing component tests. The first repair:
 Do not describe this development branch as a drop-in parity release. Remaining
 work is tracked in the capability table above. Host tests and target compilation
 do not establish a PS2 runtime pass.
+
+## Compatibility dispatcher repair checkpoint - 2026-10-09
+
+The previous Mode 1..8 helper did not match the measured original dispatcher
+`FUN_008dc2c4`. It has been replaced for Modes 1..5 and 7 with the original
+38 writes, preserving widths and ascending dispatch order. All selected sites
+are checked against pristine instructions before any mutation. A bounds or
+instruction mismatch rejects the entire operation. Errors now propagate through
+`pops_apply_all_config_patches` to the caller.
+
+Mode 6 requires the original OSD globals and conditional halfword update at
+0x002525b0, not the previous LibCrypt NOP. Mode 8 has no branch in the inspected
+dispatcher; its old NOP at 0x00207ee8 destroyed the verified exception-hook
+redirect. Both currently return ENOTSUP without changing the core.
+
+`tools/test_pops_modes.py` compares whole buffers for all 64 supported masks,
+checks all 192 masks containing unsupported modes, and verifies atomic guard and
+bounds failures. The optional external comparison passed against both the
+measured original dispatcher and external POPS ELF:
+
+```text
+python tools/test_pops_modes.py --elf C:/Users/natha/Github/POPS/POPS.ELF --decompile C:/Users/natha/Github/POPS/build/parity/popstarter/decompiled.c
+```
+
+This establishes patch-write parity for the original DAT_009b9d48 == 0 path.
+It does not establish the mapping/lifecycle of that original state global,
+original caller ordering across config sources, or in-game compatibility.
+Video, LibCrypt and BIOS helper patches remain separately unverified.

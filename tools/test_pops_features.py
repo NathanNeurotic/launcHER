@@ -416,22 +416,23 @@ class FeatureTests(unittest.TestCase):
         buf = bytearray(core_size)
         core_ptr = (c.c_uint8 * core_size).from_buffer(buf)
 
-        # Test Mode 1 (0x002148A0 -> NOP), Mode 2 (0x00207EC0 -> NOP), Mode 7 (0x002010A0 -> addiu)
+        # Original dispatcher modes 1/2/7: seed pristine guard instructions.
+        for offset, value in ((0x10318, 0x8f828228), (0x1032c, 0x1443fffa),
+                              (0x83c, 0x0441000a), (0x85c, 0x1000fffa),
+                              (0xde9c, 0x0c0836ee)):
+            struct.pack_into('<I', buf, offset, value)
         mask = (1 << 0) | (1 << 1) | (1 << 6)
-        res = LIB.pops_apply_compat_modes(core_ptr, core_size, mask)
-        self.assertEqual(res, 0)
-
-        # Check Mode 1 at offset 0x002148A0 - 0x00200000 = 0x148A0
-        val_m1 = struct.unpack_from("<I", buf, 0x148A0)[0]
-        self.assertEqual(val_m1, 0x00000000)
-
-        # Check Mode 2 at offset 0x00207EC0 - 0x00200000 = 0x7EC0
-        val_m2 = struct.unpack_from("<I", buf, 0x7EC0)[0]
-        self.assertEqual(val_m2, 0x00000000)
-
-        # Check Mode 7 at offset 0x002010A0 - 0x00200000 = 0x10A0
-        val_m7 = struct.unpack_from("<I", buf, 0x10A0)[0]
-        self.assertEqual(val_m7, 0x24040002)
+        self.assertEqual(LIB.pops_apply_compat_modes(core_ptr, core_size, mask), 0)
+        self.assertEqual(struct.unpack_from('<I', buf, 0x10318)[0], 0x240322e8)
+        self.assertEqual(struct.unpack_from('<I', buf, 0x850)[0], 0xa503c200)
+        self.assertEqual(buf[0x1e45c], 0x40)
+        before = bytes(buf)
+        for unsupported in (1 << 5, 1 << 7, 0xff):
+            self.assertLess(LIB.pops_apply_compat_modes(core_ptr, core_size, unsupported), 0)
+            self.assertEqual(bytes(buf), before)
+        # A guard mismatch leaves every selected site unchanged.
+        self.assertLess(LIB.pops_apply_compat_modes(core_ptr, core_size, mask), 0)
+        self.assertEqual(bytes(buf), before)
 
         # Test PAL2NTSC video override
         res = LIB.pops_apply_video_overrides(core_ptr, core_size, 1, 1, -10, 20)
@@ -512,7 +513,7 @@ class FeatureTests(unittest.TestCase):
         self.assertEqual(ram_buf[0x9A126], 0x77)
 
         # Out-of-bounds rejection
-        self.assertEqual(LIB.pops_apply_compat_modes(core_ptr, 0x10000, 1), -22) # -EINVAL
+        self.assertLess(LIB.pops_apply_compat_modes(core_ptr, 0x10000, 1), 0)
 
 if __name__ == "__main__":
     unittest.main()

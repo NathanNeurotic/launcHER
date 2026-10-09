@@ -34,50 +34,85 @@ static int write_u32(void *base, size_t size, uint32_t addr, uint32_t val) {
   return 0;
 }
 
+/* Measured POPSTARTER FUN_008dc2c4: modes 1..5 and 7, widths and
+ * order retained. Expected bytes are from the supported external POPS ELF.
+ * Mode 6 needs original OSD state; mode 8 has no branch in this dispatcher. */
+typedef struct {
+  uint8_t mode;
+  uint32_t address, expected, replacement;
+  uint8_t width;
+} CompatPatch;
+static const CompatPatch compat_patches[] = {
+  {1, 0x00210314, 0x00000000, 0x3c02005a, 4},
+  {1, 0x00210318, 0x8f828228, 0x24030082, 4},
+  {1, 0x0021031c, 0x00000000, 0xa043c201, 4},
+  {1, 0x00210320, 0x00000000, 0x2403ffff, 4},
+  {1, 0x00210324, 0x00000000, 0x8f828228, 4},
+  {1, 0x00210328, 0x00000000, 0x00000000, 4},
+  {1, 0x0021032c, 0x1443fffa, 0x1443fffd, 4},
+  {2, 0x00210314, 0x00000000, 0x3c02005a, 4},
+  {2, 0x00210318, 0x8f828228, 0x240322e8, 4},
+  {2, 0x0021031c, 0x00000000, 0xa443c200, 4},
+  {2, 0x00210320, 0x00000000, 0x2403ffff, 4},
+  {2, 0x00210324, 0x00000000, 0x8f828228, 4},
+  {2, 0x00210328, 0x00000000, 0x00000000, 4},
+  {2, 0x0021032c, 0x1443fffa, 0x1443fffd, 4},
+  {2, 0x0020083c, 0x0441000a, 0x1000000a, 4},
+  {2, 0x0020085c, 0x1000fffa, 0x00000000, 4},
+  {2, 0x00200844, 0x00000000, 0x3c08005a, 4},
+  {2, 0x00200848, 0x00000000, 0x240322c0, 4},
+  {2, 0x00200850, 0x00000000, 0xa503c200, 4},
+  {2, 0x00200858, 0x00000000, 0x0c0836ee, 4},
+  {2, 0x00200860, 0x00000000, 0x10003590, 4},
+  {2, 0x0020de9c, 0x0c0836ee, 0x1000ca69, 4},
+  {3, 0x00210314, 0x00000000, 0x3c02005a, 4},
+  {3, 0x00210318, 0x8f828228, 0x240300c1, 4},
+  {3, 0x0021031c, 0x00000000, 0xa043c200, 4},
+  {3, 0x00210320, 0x00000000, 0x2403ffff, 4},
+  {3, 0x00210324, 0x00000000, 0x8f828228, 4},
+  {3, 0x00210328, 0x00000000, 0x00000000, 4},
+  {3, 0x0021032c, 0x1443fffa, 0x1443fffd, 4},
+  {4, 0x0021af70, 0x00000064, 0x00000000, 1},
+  {5, 0x0020083c, 0x0441000a, 0x1000000a, 4},
+  {5, 0x00200850, 0x00000000, 0x3c05005a, 4},
+  {5, 0x00200854, 0x00000000, 0x24030022, 4},
+  {5, 0x00200858, 0x00000000, 0xa0a3c201, 4},
+  {5, 0x0020085c, 0x1000fffa, 0x00000000, 4},
+  {5, 0x00200860, 0x00000000, 0x10002d13, 4},
+  {5, 0x0020bcac, 0x00000000, 0x1000d2e8, 4},
+  {7, 0x0021e45c, 0x00000000, 0x00000040, 1},
+};
+
 int pops_apply_compat_modes(void *staged_core, size_t core_size, uint8_t modes_mask) {
-  if (!staged_core || core_size < 0x250000)
+  uint8_t *bytes = staged_core;
+  size_t i;
+  unsigned j;
+  if (!bytes)
     return -EINVAL;
-
-  /* Mode 1: SPU2 DMA sync & wait timing adjustment (0x002148A0 -> NOP) */
-  if (modes_mask & (1 << 0)) {
-    write_u32(staged_core, core_size, 0x002148A0, 0x00000000);
+  if (modes_mask & ((1 << 5) | (1 << 7)))
+    return -ENOTSUP;
+  /* Validate all sites before changing any. Overlapping modes deliberately
+   * retain original ascending dispatch order, with later writes winning. */
+  for (i = 0; i < sizeof(compat_patches) / sizeof(compat_patches[0]); ++i) {
+    const CompatPatch *p = &compat_patches[i];
+    uint32_t actual = 0;
+    size_t offset = p->address - POPS_CORE_BASE_ADDR;
+    if (!(modes_mask & (1 << (p->mode - 1))))
+      continue;
+    if (offset > core_size || p->width > core_size - offset)
+      return -ERANGE;
+    for (j = 0; j < p->width; ++j)
+      actual |= (uint32_t)bytes[offset + j] << (8 * j);
+    if (actual != p->expected)
+      return -EINVAL;
   }
-
-  /* Mode 2: Force CD-ROM fast sector cache (0x00207EC0 -> NOP) */
-  if (modes_mask & (1 << 1)) {
-    write_u32(staged_core, core_size, 0x00207EC0, 0x00000000);
+  for (i = 0; i < sizeof(compat_patches) / sizeof(compat_patches[0]); ++i) {
+    const CompatPatch *p = &compat_patches[i];
+    if (!(modes_mask & (1 << (p->mode - 1))))
+      continue;
+    for (j = 0; j < p->width; ++j)
+      bytes[p->address - POPS_CORE_BASE_ADDR + j] = (uint8_t)(p->replacement >> (8 * j));
   }
-
-  /* Mode 3: Disable alternate audio channel mixer (0x00210850 -> NOP) */
-  if (modes_mask & (1 << 2)) {
-    write_u32(staged_core, core_size, 0x00210850, 0x00000000);
-  }
-
-  /* Mode 4: Skip GPU FIFO sync locks (0x00205B10 -> NOP) */
-  if (modes_mask & (1 << 3)) {
-    write_u32(staged_core, core_size, 0x00205B10, 0x00000000);
-  }
-
-  /* Mode 5: Force progressive display timing (0x002061A0 -> li $v0, 1) */
-  if (modes_mask & (1 << 4)) {
-    write_u32(staged_core, core_size, 0x002061A0, 0x24020001);
-  }
-
-  /* Mode 6: Alternate LibCrypt subchannel emulation (0x0020C1F0 -> NOP) */
-  if (modes_mask & (1 << 5)) {
-    write_u32(staged_core, core_size, 0x0020C1F0, 0x00000000);
-  }
-
-  /* Mode 7: Throttle R3000A CPU cycle counter (0x002010A0 -> addiu $a0, $zero, 2) */
-  if (modes_mask & (1 << 6)) {
-    write_u32(staged_core, core_size, 0x002010A0, 0x24040002);
-  }
-
-  /* Mode 8: CD-DA streaming buffer adjustments (0x00207EE8 -> NOP) */
-  if (modes_mask & (1 << 7)) {
-    write_u32(staged_core, core_size, 0x00207EE8, 0x00000000);
-  }
-
   return 0;
 }
 
@@ -304,8 +339,11 @@ int pops_apply_all_config_patches(void *staged_core, size_t core_size, const Pop
   if (!staged_core || !cfg)
     return -EINVAL;
 
-  if (cfg->compat_modes)
-    pops_apply_compat_modes(staged_core, core_size, cfg->compat_modes);
+  if (cfg->compat_modes) {
+    int result = pops_apply_compat_modes(staged_core, core_size, cfg->compat_modes);
+    if (result)
+      return result;
+  }
 
   if (cfg->video_mode || cfg->hdtv_fix || cfg->x_offset || cfg->y_offset)
     pops_apply_video_overrides(staged_core, core_size, cfg->video_mode, cfg->hdtv_fix,

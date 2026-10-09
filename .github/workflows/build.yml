@@ -18,6 +18,8 @@ jobs:
         run: python tools/test_popfs.py
       - name: Test POPS card creation and I/O failure handling
         run: python tools/test_pops_vmc.py
+      - name: Test measured POPStarter compatibility dispatch
+        run: python tools/test_pops_modes.py
       - name: Test POPS configuration and feature helpers
         run: python tools/test_pops_features.py
 
