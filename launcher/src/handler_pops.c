@@ -4,6 +4,10 @@
 #include "init.h"
 #include "pops_external.h"
 #include "pops_bootstrap.h"
+#include "pops_vcd.h"
+#include "pops_config.h"
+#include "pops_compat_db.h"
+#include "pops_modes_patches.h"
 #include <fcntl.h>
 #include <kernel.h>
 #include <iopcontrol.h>
@@ -245,7 +249,14 @@ int launchPOPS(int argc, char *argv[]) {
 
   DPRINTF("POPS: Using emulator %s\n", popsPath);
 
-  /* Resolve VMC save paths */
+  /* Inspect target VCD ISO9660 filesystem for game serial */
+  PopsVcdInfo vcdInfo;
+  memset(&vcdInfo, 0, sizeof(vcdInfo));
+  if (pops_vcd_inspect_path(vcdPath, &vcdInfo) == 0 && vcdInfo.normalized_serial[0]) {
+    DPRINTF("POPS: Detected serial %s (raw %s)\n", vcdInfo.normalized_serial, vcdInfo.raw_serial);
+  }
+
+  /* Resolve directory, base name, and game configuration */
   char vcdDir[PATH_MAX] = {0};
   char gameBase[128] = {0};
   char card0Path[PATH_MAX] = {0};
@@ -254,23 +265,82 @@ int launchPOPS(int argc, char *argv[]) {
   extractDirectory(vcdPath, vcdDir, sizeof(vcdDir));
   extractGameBase(vcdPath, gameBase, sizeof(gameBase));
 
-  snprintf(card0Path, sizeof(card0Path), "%s%s.VMC0", vcdDir, gameBase);
-  snprintf(card1Path, sizeof(card1Path), "%s%s.VMC1", vcdDir, gameBase);
+  PopsConfig cfg;
+  pops_config_init(&cfg);
+  pops_config_discover(&cfg, vcdDir, gameBase);
 
-  /* Fall back to SLOT0.VMC if game-specific card is absent but SLOT0 exists */
-  char slot0Test[PATH_MAX];
-  snprintf(slot0Test, sizeof(slot0Test), "%sSLOT0.VMC", vcdDir);
-  if (tryFile(card0Path) && !tryFile(slot0Test))
-    snprintf(card0Path, sizeof(card0Path), "%s", slot0Test);
+  /* Look up known compatibility modes and LibCrypt bypass */
+  const char *matchSerial = vcdInfo.normalized_serial[0] ? vcdInfo.normalized_serial : gameBase;
+  const PopsCompatEntry *compat = pops_compat_db_lookup(matchSerial);
+  if (compat) {
+    DPRINTF("POPS: Matched title in DB: %s (%s), default_modes=0x%02X, libcrypt=%d\n",
+            compat->title, compat->serial, compat->default_modes, compat->has_libcrypt);
+    if (cfg.compat_modes == 0 && compat->default_modes != 0) {
+      cfg.compat_modes = compat->default_modes;
+    }
+  }
 
-  char slot1Test[PATH_MAX];
-  snprintf(slot1Test, sizeof(slot1Test), "%sSLOT1.VMC", vcdDir);
-  if (tryFile(card1Path) && !tryFile(slot1Test))
-    snprintf(card1Path, sizeof(card1Path), "%s", slot1Test);
+  /* Resolve VMC destination directory */
+  char vmcDir[PATH_MAX] = {0};
+  if (cfg.vmc_dir[0]) {
+    if (strchr(cfg.vmc_dir, ':')) {
+      snprintf(vmcDir, sizeof(vmcDir), "%.800s", cfg.vmc_dir);
+    } else {
+      snprintf(vmcDir, sizeof(vmcDir), "%.700s%.128s/", vcdDir, cfg.vmc_dir);
+    }
+  } else {
+    snprintf(vmcDir, sizeof(vmcDir), "%.800s", vcdDir);
+  }
+
+  const char *vmcBase = vcdInfo.normalized_serial[0] ? vcdInfo.normalized_serial : gameBase;
+  snprintf(card0Path, sizeof(card0Path), "%.800s%.64s.VMC0", vmcDir, vmcBase);
+  snprintf(card1Path, sizeof(card1Path), "%.800s%.64s.VMC1", vmcDir, vmcBase);
+
+  /* Fall back to gameBase or SLOT0/1.VMC if specific card is absent */
+  if (tryFile(card0Path)) {
+    char testPath[PATH_MAX];
+    snprintf(testPath, sizeof(testPath), "%.800s%.64s.VMC0", vmcDir, gameBase);
+    if (!tryFile(testPath)) {
+      snprintf(card0Path, sizeof(card0Path), "%s", testPath);
+    } else {
+      snprintf(testPath, sizeof(testPath), "%.800sSLOT0.VMC", vmcDir);
+      if (!tryFile(testPath))
+        snprintf(card0Path, sizeof(card0Path), "%s", testPath);
+    }
+  }
+
+  if (tryFile(card1Path)) {
+    char testPath[PATH_MAX];
+    snprintf(testPath, sizeof(testPath), "%.800s%.64s.VMC1", vmcDir, gameBase);
+    if (!tryFile(testPath)) {
+      snprintf(card1Path, sizeof(card1Path), "%s", testPath);
+    } else {
+      snprintf(testPath, sizeof(testPath), "%.800sSLOT1.VMC", vmcDir);
+      if (!tryFile(testPath))
+        snprintf(card1Path, sizeof(card1Path), "%s", testPath);
+    }
+  }
 
   /* Ensure backing save images exist before handoff */
   ensureVmcFile(card0Path);
   ensureVmcFile(card1Path);
+
+  /* Map multi-disc paths from DISCS.TXT */
+  char discPaths[POPS_MAX_DISCS][PATH_MAX];
+  const char *discArgs[POPS_MAX_DISCS] = { vcdPath, NULL, NULL, NULL };
+  strncpy(discPaths[0], vcdPath, sizeof(discPaths[0]) - 1);
+
+  if (cfg.disc_count > 1) {
+    for (int d = 1; d < cfg.disc_count && d < POPS_MAX_DISCS; ++d) {
+      if (strchr(cfg.discs[d], ':') || cfg.discs[d][0] == '/' || cfg.discs[d][0] == '\\') {
+        snprintf(discPaths[d], sizeof(discPaths[d]), "%s", cfg.discs[d]);
+      } else {
+        snprintf(discPaths[d], sizeof(discPaths[d]), "%s%s", vcdDir, cfg.discs[d]);
+      }
+      discArgs[d] = discPaths[d];
+      DPRINTF("POPS: Disc %d mapped to %s\n", d + 1, discPaths[d]);
+    }
+  }
 
   PopsBootPlan plan;
   size_t rawSize = 0;
@@ -356,30 +426,63 @@ int launchPOPS(int argc, char *argv[]) {
     return res;
   }
 
-  /* Check for game TROJAN_0..9 fixes in game directory */
+  /* Apply compatibility modes and user directive patches */
+  res = pops_apply_all_config_patches((void *)stagedCore, plan.core_size, &cfg);
+  if (res) {
+    msg("POPS: Applying config patches failed: %d\n", res);
+    return res;
+  }
+
+  /* Apply LibCrypt bypass if title requires it and mode 6 is not already set */
+  if (compat && compat->has_libcrypt && !(cfg.compat_modes & (1 << 5))) {
+    DPRINTF("POPS: Applying LibCrypt bypass for %s\n", compat->serial);
+    pops_apply_libcrypt_bypass((void *)stagedCore, plan.core_size);
+  }
+
+  /* Apply title-specific database patch if registered */
+  if (compat && compat->patch_offset >= POPS_CORE_ADDR &&
+      compat->patch_offset + 4 <= POPS_CORE_ADDR + plan.core_size) {
+    uint32_t off = compat->patch_offset - POPS_CORE_ADDR;
+    *(uint32_t *)((uint8_t *)stagedCore + off) = compat->patch_val;
+    DPRINTF("POPS: Applied DB title patch at 0x%08X = 0x%08X\n",
+            compat->patch_offset, compat->patch_val);
+  }
+
+  /* Check for game TROJAN_0..9 fixes in game and VMC directories */
   char trojanPath[PATH_MAX];
-  for (int slot = 0; slot <= 9; ++slot) {
-    snprintf(trojanPath, sizeof(trojanPath), "%sTROJAN_%d.BIN", vcdDir, slot);
-    if (!tryFile(trojanPath)) {
-      size_t trojanSize = 0;
-      void *trojanBuf = (void *)0x01f00000;
-      if (!readFullFile(trojanPath, trojanBuf, 0x100000, &trojanSize)) {
-        PopsContainer trojanCont;
-        if (!pops_container_inspect(trojanBuf, trojanSize, &trojanCont) &&
-            trojanCont.kind == POPS_CONTAINER_TROJAN) {
-          uint32_t expected[3] = {0};
-          /* Read expected hook words from staged core */
-          if (trojanCont.hook >= POPS_CORE_ADDR &&
-              trojanCont.hook + 12 <= POPS_CORE_ADDR + plan.core_size) {
-            uint32_t hookOff = trojanCont.hook - POPS_CORE_ADDR;
-            memcpy(expected, (const char *)stagedCore + hookOff, sizeof(expected));
-            pops_container_stage(trojanBuf, trojanSize, POPS_CORE_ADDR,
-                                 (void *)stagedCore, plan.core_size, expected, 3);
-            DPRINTF("POPS: Applied %s\n", trojanPath);
+  const char *trojanDirs[2] = { vcdDir, vmcDir };
+  int trojanDirCount = (strcmp(vcdDir, vmcDir) == 0) ? 1 : 2;
+
+  for (int td = 0; td < trojanDirCount; ++td) {
+    for (int slot = 0; slot <= 9; ++slot) {
+      snprintf(trojanPath, sizeof(trojanPath), "%sTROJAN_%d.BIN", trojanDirs[td], slot);
+      if (!tryFile(trojanPath)) {
+        size_t trojanSize = 0;
+        void *trojanBuf = (void *)0x01f00000;
+        if (!readFullFile(trojanPath, trojanBuf, 0x100000, &trojanSize)) {
+          PopsContainer trojanCont;
+          if (!pops_container_inspect(trojanBuf, trojanSize, &trojanCont) &&
+              trojanCont.kind == POPS_CONTAINER_TROJAN) {
+            uint32_t expected[3] = {0};
+            /* Read expected hook words from staged core */
+            if (trojanCont.hook >= POPS_CORE_ADDR &&
+                trojanCont.hook + 12 <= POPS_CORE_ADDR + plan.core_size) {
+              uint32_t hookOff = trojanCont.hook - POPS_CORE_ADDR;
+              memcpy(expected, (const char *)stagedCore + hookOff, sizeof(expected));
+              pops_container_stage(trojanBuf, trojanSize, POPS_CORE_ADDR,
+                                   (void *)stagedCore, plan.core_size, expected, 3);
+              DPRINTF("POPS: Applied %s\n", trojanPath);
+            }
           }
         }
       }
     }
+  }
+
+  /* Stage GameShark cheats to guest PS1 RAM */
+  if (cfg.cheat_count > 0) {
+    DPRINTF("POPS: Staging %u GameShark cheats to guest PS1 RAM\n", cfg.cheat_count);
+    pops_apply_cheats((void *)0x01000000, cfg.cheats, cfg.cheat_count);
   }
 
   /* Reboot IOP with verified external IOPRP image */
@@ -394,8 +497,8 @@ int launchPOPS(int argc, char *argv[]) {
   /* Format proxy arguments for popfs */
   char proxyArgs[POPS_PROXY_ARGS_MAX];
   int argLen = pops_format_proxy_args(proxyArgs, sizeof(proxyArgs),
-                                      vcdPath, card0Path, card1Path,
-                                      NULL, NULL, NULL);
+                                      discArgs[0], card0Path, card1Path,
+                                      discArgs[1], discArgs[2], discArgs[3]);
   if (argLen <= 0) {
     msg("POPS: Failed formatting proxy arguments\n");
     return -EINVAL;

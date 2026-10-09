@@ -38,6 +38,10 @@ list(APPEND EE_SOURCES
     ../common/src/pops_boot_stage.c
     ../common/src/pops_core_patches.c
     ../common/src/pops_bootstrap.c
+    ../common/src/pops_vcd.c
+    ../common/src/pops_config.c
+    ../common/src/pops_compat_db.c
+    ../common/src/pops_modes_patches.c
     ../third_party/lzma/LzmaDec.c
     ../common/src/dprintf.c
 )

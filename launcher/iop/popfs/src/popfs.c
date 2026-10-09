@@ -13,6 +13,8 @@ IRX_ID("launcHER_POP_filesystem", 1, 0);
  * No fallback to another image/device on an open or I/O failure. */
 static char paths[PATH_COUNT][PATH_LIMIT];
 static unsigned active;
+static int active_disc;
+static int lid_open;
 
 static void count_add(int delta) {
   int state;
@@ -61,6 +63,8 @@ static int resolve(const char *name, char output[PATH_LIMIT]) {
   if (!strncmp(relative, "disc/disc", 9) && relative[9] >= '0' &&
       relative[9] < '0' + DISC_COUNT && !relative[10]) {
     index = relative[9] - '0';
+    if (index == 0 && active_disc > 0 && active_disc < DISC_COUNT && paths[active_disc][0])
+      index = active_disc;
   } else if (!strncmp(relative, "ps1emu/card", 11) &&
              (relative[11] == '0' || relative[11] == '1') &&
              (!relative[12] || !strcmp(relative + 12, ".bak"))) {
@@ -102,6 +106,8 @@ static int bridge_open(iomanX_iop_file_t *file, const char *name, int flags, int
     return index == -1 ? -EISDIR : index;
   if (index < DISC_COUNT && flags != FIO_O_RDONLY)
     return -EROFS;
+  if (index < DISC_COUNT && lid_open)
+    return -ENODEV;
   count_add(1); /* Reserve before the underlying open can block. */
   fd = iomanX_open(backing, flags, mode);
   if (fd < 0) {
@@ -211,6 +217,41 @@ static int bridge_sync(iomanX_iop_file_t *file, const char *name, int flag) {
   return first_error;
 }
 
+#define POPS_DEVCTL_SWAP_DISC 0x01
+#define POPS_DEVCTL_GET_DISC  0x02
+#define POPS_DEVCTL_OPEN_LID  0x03
+#define POPS_DEVCTL_CLOSE_LID 0x04
+
+static int bridge_devctl(iomanX_iop_file_t *file, const char *devname, int cmd,
+                         void *arg, unsigned int arglen, void *buf, unsigned int buflen) {
+  (void)file; (void)devname; (void)arglen; (void)buflen;
+  switch (cmd) {
+    case POPS_DEVCTL_SWAP_DISC:
+      if (arg) {
+        int disc = *(int *)arg;
+        if (disc >= 0 && disc < DISC_COUNT && paths[disc][0]) {
+          active_disc = disc;
+          return 0;
+        }
+      }
+      return -EINVAL;
+    case POPS_DEVCTL_GET_DISC:
+      if (buf && buflen >= sizeof(int)) {
+        *(int *)buf = active_disc;
+        return 0;
+      }
+      return -EINVAL;
+    case POPS_DEVCTL_OPEN_LID:
+      lid_open = 1;
+      return 0;
+    case POPS_DEVCTL_CLOSE_LID:
+      lid_open = 0;
+      return 0;
+    default:
+      return -EINVAL;
+  }
+}
+
 IOMANX_RETURN_VALUE_IMPL(ENOSYS);
 static iomanX_iop_device_ops_t operations = {
   .init = bridge_init, .deinit = bridge_deinit,
@@ -223,7 +264,7 @@ static iomanX_iop_device_ops_t operations = {
   .chstat = IOMANX_RETURN_VALUE(ENOSYS), .rename = bridge_rename,
   .chdir = IOMANX_RETURN_VALUE(ENOSYS), .sync = bridge_sync,
   .mount = IOMANX_RETURN_VALUE(ENOSYS), .umount = IOMANX_RETURN_VALUE(ENOSYS),
-  .lseek64 = bridge_seek64, .devctl = IOMANX_RETURN_VALUE(ENOSYS),
+  .lseek64 = bridge_seek64, .devctl = bridge_devctl,
   .symlink = IOMANX_RETURN_VALUE(ENOSYS), .readlink = IOMANX_RETURN_VALUE(ENOSYS),
   .ioctl2 = bridge_ioctl2
 };
