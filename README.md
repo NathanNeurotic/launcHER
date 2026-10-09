@@ -533,6 +533,8 @@ Placing `POPS_IOX.PAK` in `mc0:/POPS/` or your main `POPS/` folder allows all ga
 
 Convert original PlayStation 1 disc dumps (BIN/CUE) to Virtual CD (`.VCD`) format using tools such as **CUE2POPS**. POPS expects raw Mode 2 Form 1 sectors (2,352 bytes per sector).
 
+Keep `.VCD` images directly in `POPS/`. Per-game subfolders are for TROJAN fixes, cheats and virtual memory cards; VCD lookup does not scan those subfolders. Name each per-game folder after its VCD filename without the `.VCD` extension.
+
 Example directory structure:
 
 ```text
@@ -540,10 +542,13 @@ POPS/
 ├── POPS_IOX.PAK
 ├── Crash Bandicoot.VCD
 ├── Spyro the Dragon.VCD
-└── Metal Gear Solid/
-    ├── Metal Gear Solid (Disc 1).VCD
-    ├── Metal Gear Solid (Disc 2).VCD
-    └── DISCS.TXT
+├── Metal Gear Solid (Disc 1).VCD
+├── Metal Gear Solid (Disc 2).VCD
+└── Crash Bandicoot/
+    ├── TROJAN_0.BIN
+    ├── CHEATS.TXT
+    ├── SLOT0.VMC
+    └── SLOT1.VMC
 ```
 
 ### launcHER.CNF configuration for POPS
@@ -586,7 +591,7 @@ If you launch without a `launcHER.CNF` file, launcHER identifies adjacent game i
 
 ### Per-game configuration directives
 
-Place optional configuration files alongside your `.VCD` image or inside the per-game VMC subfolder. Multiple directives can share a line (e.g. `$SAFEMODE $WIDESCREEN $DITHER_OFF`):
+Place optional configuration files alongside your `.VCD` image or inside its per-game subfolder (for example, `POPS/Crash Bandicoot/` for `POPS/Crash Bandicoot.VCD`). `VMCDIR.TXT` redirects save files only; cheats and TROJAN fixes remain in the original per-game folder. Multiple directives can share a line (e.g. `$SAFEMODE $WIDESCREEN $DITHER_OFF`):
 
 - **`PATCHES.TXT` / `MODES.TXT`:** Directives and compatibility modes.
   - Video overrides: `$480p`, `$480i`, `$576p`, `$576i`, `$240p`, `$PAL2NTSC`, `$NTSC2PAL`, `$NOPAL`, `$FORCEPAL`, `$FORCENTSC`, `$VMODE_<0..8>`.
