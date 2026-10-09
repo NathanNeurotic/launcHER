@@ -382,84 +382,29 @@ The PS2SDK Docker build completed successfully:
 
 This is a target build result. Real hardware console validation remains necessary.
 
-## Feature parity implementation checkpoint
+## Feature parity audit status
 
-The following components are implemented, but full POPStarter feature parity
-has not been achieved. Parsed options and standalone helpers do not establish
-working in-game behavior. See the repair checkpoint below for known blockers.
+The component names and earlier host tests overstate runtime coverage. The
+replacement is not yet a faithful drop-in POPSTARTER implementation.
 
-### 1. VCD Inspection & Game Identification (`pops_vcd.h`, `pops_vcd.c`)
-- Inspects ISO9660 filesystem inside `.VCD` images directly from host or PS2 storage.
-- Detects sector geometry: raw 2352-byte Mode 2 Form 1 sectors (with 24-byte header offset)
-  and standard 2048-byte ISO sectors.
-- Locates Primary Volume Descriptor at sector 16 (`0x10`).
-- Traverses root directory table to locate and read `SYSTEM.CNF`.
-- Extracts `BOOT = cdrom0:\<SERIAL>;1` and normalizes title serials (e.g. `SLUS_008.70;1` -> `SLUS-00870`).
-- Allocation-free stream interface using read and seek callbacks.
+| Capability | Confirmed implementation | Remaining requirement |
+| --- | --- | --- |
+| External POPS bootstrap | Verified dependency identities, guarded core patches, staging and trampoline | Same-console boot and backend coverage |
+| VCD identification | ISO9660 and raw-sector inspection helpers | Establish actual POPStarter VCD container offsets and variants |
+| Configuration | Text parsing, root/title discovery and table conversion | Reconstruct original precedence and all directive semantics |
+| Saves | Raw-card creation and popfs read/write/backup helpers | Console save, reload and power-cycle validation |
+| Cheats | Standalone evaluator and partial parser | Resident code, actual guest RAM mapping, periodic hook, master/slide codes and SAFEMODE activation; enabled cheats currently reject launch |
+| Compatibility modes | Existing helper contains speculative writes | Replace all eight modes against measured original behavior; mode 8 currently overlaps a storage redirect |
+| Video, BIOS and OSD | Parsed options and unverified patch helpers | Reconstruct original instructions, widths, runtime timing and behavior |
+| LibCrypt | Key database and standalone SubQ generator | Connect actual POPS request path and validate protected games |
+| Multi-disc | Proxy paths and popfs devctl helpers | Resident controls and switching already-open disc handles |
+| IGR | Combo helper | Resident input hook, original menu/assets, reset and shutdown paths |
+| External fixes | Guarded container inspector/stager; partial TROJAN discovery | PATCH discovery, original slot/order rules, error handling and runtime integration |
+| SMB / optional modules | Module loading helpers | Return-value checks, login/share mounting and backend lifecycle |
 
-### 2. Configuration Directives (`pops_config.h`, `pops_config.c`)
-- Automatic discovery of configuration files in VCD directory and per-title VMC folders:
-  `PATCHES.TXT`, `MODES.TXT`, `CHEATS.TXT`, `DISCS.TXT`, `VMCDIR.TXT`.
-- Parses video overrides: `$480p`, `$480i`, `$576p`, `$576i`, `$PAL2NTSC`, `$NTSC2PAL`, `$NOPAL`.
-- Parses screen centering and fixes: `$HDTVFIX`, `$XPOS_<offset>`, `$YPOS_<offset>`.
-- Parses texture smoothing: `$SMOOTH`.
-- Parses CPU dynamic recompiler throttling: `$FASTMIPS`, `$SLOWMIPS`.
-- Parses boot and system options: `$NOBOOT` / `$BIOS`, `$NOIGR`.
-- Parses compatibility modes: `$COMPATIBILITY_0x01` through `$COMPATIBILITY_0x08`.
-- Parses multi-disc lists: `DISCS.TXT` (up to 4 discs).
-- Parses custom VMC paths: `VMCDIR.TXT`.
-- Parses GameShark / Action Replay cheat codes: types `0x80` (16-bit), `0x30` (8-bit), `0xD0` (conditional).
-
-### 3. Compatibility Modes 1 through 8 (`pops_modes_patches.h`, `pops_modes_patches.c`)
-- Mode 1 (`0x002148A0` -> NOP): SPU2 DMA synchronization and wait timing adjustments.
-- Mode 2 (`0x00207EC0` -> NOP): CD-ROM fast sector cache override.
-- Mode 3 (`0x00210850` -> NOP): Disables alternate audio channel mixer.
-- Mode 4 (`0x00205B10` -> NOP): Skips GPU FIFO synchronization locks.
-- Mode 5 (`0x002061A0` -> `li $v0, 1`): Forces progressive display timing.
-- Mode 6 (`0x0020C1F0` -> NOP): Alternate LibCrypt subchannel emulation.
-- Mode 7 (`0x002010A0` -> `addiu $a0, $zero, 2`): Throttles R3000A CPU cycle counter.
-- Mode 8 (`0x00207EE8` -> NOP): CD-DA streaming buffer adjustments.
-- Video overrides: reprogramming GS registers for progressive 480p/576p, PAL2NTSC, NTSC2PAL, and centering.
-- Bilinear texture sampling modification for `$SMOOTH`.
-- BIOS shell boot override (`0x00210cf8` -> `0x01`).
-- LibCrypt subchannel Q emulation bypass (`0x0020C1F0`, `0x0020CFB0`).
-- Guest PS1 RAM cheat code injector (`0x01000000`..`0x01200000`).
-
-### 4. Compatibility Database & LibCrypt (`pops_compat_db.h`, `pops_compat_db.c`)
-- 568 verified title entries catalogued from binary evidence and canonical LibCrypt datasets.
-- Includes 229 validated 16-bit LibCrypt magic word keys satisfying the eight-1-bits invariant.
-- Matches titles by normalized serial or raw filename.
-- Automatically supplies default compatibility modes and LibCrypt subchannel flags
-  when user does not specify explicit overrides.
-- Applies title-specific custom memory patches and passes active 16-bit LibCrypt keys
-  to popfs devctl for physical subchannel Q emulation.
-- Provides allocation-free Subchannel Q generator (`pops_generate_subq`) producing 12-byte
-  packets with BCD-encoded relative/absolute time and injected key in CRC bytes.
-
-### 5. Multi-Disc Swapping & In-Game Combos (`popfs.c`, `pops_modes_patches.h`)
-- Supports up to 4 discs mapped through `DISCS.TXT` and formatted into proxy arguments.
-- Exposes devctl interface for tray state (`POPS_DEVCTL_OPEN_LID`, `POPS_DEVCTL_CLOSE_LID`,
-  `POPS_DEVCTL_GET_LID`) and disc cycling (`POPS_DEVCTL_SWAP_DISC`, `POPS_DEVCTL_GET_DISC`,
-  `POPS_DEVCTL_NEXT_DISC`).
-- Read operations on `/disc/disc0` dynamically map to the currently active VCD file.
-- Pad combo detectors: `pops_check_igr_combo` (L1 + L2 + R1 + R2 + SELECT + START) and
-  `pops_check_disc_swap_combo` (SELECT + L1 + R1).
-- Detection of custom IGR textures (`IGR_BG.TM2`, `IGR_YES.TM2`, `IGR_NO.TM2`).
-
-### 6. GameShark Engine (`pops_modes_patches.c`)
-- Periodic evaluator supporting 16-bit writes (`0x80`), 8-bit writes (`0x30`), and
-  16-bit conditional executions (`0xD0`).
-
-### 7. Validation and Target Build
-- Host unit test suite `tools/test_pops_features.py`: 5 suites passing (VCD inspection,
-  config directives, table export/import, database lookup with 16-bit LibCrypt keys,
-  combo detection, Subchannel Q generation, and conditional 0xD0 cheat engine execution).
-- Host unit test suite `tools/test_pops_external.py`: 30 tests passing.
-- Host driver contract suite `tools/test_popfs.py`: passing with devctl tray, disc swap,
-  and Subchannel Q assertions.
-- PS2SDK target build: `launcHER.elf` compiled and packed (222,660 bytes).
-
-
+Host tests establish the component contracts they exercise. They do not prove
+that POPS calls these helpers, that resident code survives handoff, or that
+save writes survive a console power cycle.
 
 ## Repair checkpoint - 2026-10-09
 
@@ -476,10 +421,29 @@ boot failures despite passing component tests. The first repair:
 - Checks the SIO2 identity before/after reference patches and rejects a modified
   IRX against loose ELF/IOPRP252 and both packed dependency sets.
 
-Remaining audit issues are not fixed by this checkpoint: cheat writes overlap
-executable staging and lack a periodic runtime hook; VMC creation may truncate
-existing files and has incomplete formatting; compatibility mode implementations
-need reconstruction against original behavior; PATCH loading, IGR, disc change,
-LibCrypt runtime integration, and BIOS/OSD support need completion. Do not use
-this development branch with valuable saves or describe it as a drop-in parity
-release. Host tests and target compilation do not establish a PS2 runtime pass.
+## Save and configuration repair checkpoint - 2026-10-09
+
+- Existing cards are opened read-only and must have the exact 128 KiB raw-card
+  size. A short, oversized, unreadable or unseekable card aborts launch without
+  modification. New files use exclusive creation and complete block-zero card
+  metadata; write, close and directory failures propagate. Only an incomplete
+  file created by the current call is removed on failure.
+- Both save-card results are checked before IOP reboot. This repairs source-level
+  data-loss risks; physical storage durability and the existing popfs write path
+  still require hardware testing.
+- Bare hexadecimal cheat lines remain disabled, following the original `$`
+  enable marker. Unsupported enabled code types and overlong configuration
+  lines report errors. Config discovery ignores absent files only.
+- The unsafe one-time cheat write into the staged POPS executable is removed.
+  Enabled parsed cheats reject launch until a resident runtime engine exists.
+  This is an explicit safety restriction, not completed cheat support.
+- VMCDIR changes save destinations only: title configuration and TROJAN lookup
+  retain the original title folder. Absolute save-directory extensions receive
+  a trailing separator before card filenames are joined.
+- Added production-code VMC fault-injection coverage and enabled both save-card
+  and feature host suites in CI. Local checks: seven feature tests, VMC contracts,
+  popfs contracts, 31 external-image tests and launch-argument contracts pass.
+
+Do not describe this development branch as a drop-in parity release. Remaining
+work is tracked in the capability table above. Host tests and target compilation
+do not establish a PS2 runtime pass.

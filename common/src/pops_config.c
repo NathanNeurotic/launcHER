@@ -21,7 +21,9 @@ static int is_hex_string(const char *s, size_t len) {
 }
 
 static int try_parse_cheat(PopsConfig *cfg, const char *tok1, const char *tok2) {
-  const char *p1 = (*tok1 == '$') ? tok1 + 1 : tok1;
+  if (*tok1 != '$')
+    return 0; /* Removing '$' disables a POPStarter code. */
+  const char *p1 = tok1 + 1;
   if (strlen(p1) != 8 || strlen(tok2) != 4)
     return 0;
   if (!is_hex_string(p1, 8) || !is_hex_string(tok2, 4))
@@ -34,7 +36,7 @@ static int try_parse_cheat(PopsConfig *cfg, const char *tok1, const char *tok2) 
   if (type != 0x80 && type != 0x10 && type != 0x30 && type != 0x20 &&
       type != 0xD0 && type != 0xD1 && type != 0xD2 && type != 0xD3 &&
       type != 0xE0 && type != 0xE1) {
-    return 0;
+    return -ENOTSUP;
   }
 
   if (cfg->cheat_count < POPS_MAX_CHEATS) {
@@ -44,7 +46,7 @@ static int try_parse_cheat(PopsConfig *cfg, const char *tok1, const char *tok2) 
     cfg->cheat_count++;
     return 1;
   }
-  return 0;
+  return -EOVERFLOW;
 }
 
 static int parse_single_directive(PopsConfig *cfg, const char *token) {
@@ -216,9 +218,9 @@ int pops_config_parse_line(PopsConfig *cfg, const char *line) {
     }
     next_token[len2] = '\0';
 
-    if (try_parse_cheat(cfg, token, next_token)) {
-      return 0;
-    }
+    int cheat_result = try_parse_cheat(cfg, token, next_token);
+    if (cheat_result)
+      return cheat_result < 0 ? cheat_result : 0;
 
     if ((!strcasecmp(token, "MODE") || !strcasecmp(token, "$MODE")) &&
         isdigit((unsigned char)*next_token)) {
@@ -279,74 +281,95 @@ int pops_config_load_file(PopsConfig *cfg, const char *filepath) {
 
   FILE *f = fopen(filepath, "r");
   if (!f)
-    return -ENOENT;
+    return errno ? -errno : -EIO;
 
   char line[256];
+  int result = 0;
   while (fgets(line, sizeof(line), f)) {
-    char *end = line + strlen(line) - 1;
-    while (end >= line && (*end == '\r' || *end == '\n'))
-      *end-- = '\0';
-    pops_config_parse_line(cfg, line);
+    size_t length = strlen(line);
+    if (length == sizeof(line) - 1 && line[length - 1] != '\n') {
+      result = -EOVERFLOW;
+      break;
+    }
+    while (length && (line[length - 1] == '\r' || line[length - 1] == '\n'))
+      line[--length] = '\0';
+    result = pops_config_parse_line(cfg, line);
+    if (result)
+      break;
   }
+  if (!result && ferror(f))
+    result = errno ? -errno : -EIO;
+  if (fclose(f) && !result)
+    result = errno ? -errno : -EIO;
+  return result;
+}
 
-  fclose(f);
-  return 0;
+/* Trim without forming a pointer before an empty line's buffer. */
+static char *trim_line(char *line) {
+  char *start = line, *end;
+  while (*start && isspace((unsigned char)*start))
+    ++start;
+  end = start + strlen(start);
+  while (end > start && isspace((unsigned char)end[-1]))
+    *--end = '\0';
+  return start;
+}
+
+static int finish_file(FILE *file, int result) {
+  if (!result && ferror(file))
+    result = errno ? -errno : -EIO;
+  if (fclose(file) && !result)
+    result = errno ? -errno : -EIO;
+  return result;
 }
 
 int pops_config_load_discs(PopsConfig *cfg, const char *filepath) {
+  char line[256];
+  int result = 0;
+  FILE *f;
   if (!cfg || !filepath)
     return -EINVAL;
-
-  FILE *f = fopen(filepath, "r");
+  f = fopen(filepath, "r");
   if (!f)
-    return -ENOENT;
-
-  char line[256];
+    return errno ? -errno : -EIO;
   cfg->disc_count = 0;
-  while (fgets(line, sizeof(line), f) && cfg->disc_count < POPS_MAX_DISCS) {
-    char *start = line;
-    while (*start && isspace((unsigned char)*start))
-      start++;
-    char *end = start + strlen(start) - 1;
-    while (end >= start && isspace((unsigned char)*end))
-      *end-- = '\0';
-
-    if (*start && *start != '#' && *start != ';') {
-      strncpy(cfg->discs[cfg->disc_count], start, sizeof(cfg->discs[cfg->disc_count]) - 1);
-      cfg->discs[cfg->disc_count][sizeof(cfg->discs[cfg->disc_count]) - 1] = '\0';
-      cfg->disc_count++;
+  while (fgets(line, sizeof(line), f)) {
+    char *start;
+    size_t length = strlen(line);
+    if (length == sizeof(line) - 1 && line[length - 1] != '\n') {
+      result = -EOVERFLOW;
+      break;
     }
+    start = trim_line(line);
+    if (!*start || *start == '#' || *start == ';')
+      continue;
+    if (cfg->disc_count == POPS_MAX_DISCS ||
+        strlen(start) >= sizeof(cfg->discs[0])) {
+      result = -EOVERFLOW;
+      break;
+    }
+    strcpy(cfg->discs[cfg->disc_count++], start);
   }
-
-  fclose(f);
-  return 0;
+  return finish_file(f, result);
 }
 
 int pops_config_load_vmcdir(PopsConfig *cfg, const char *filepath) {
+  char line[256];
+  int result = 0;
+  FILE *f;
   if (!cfg || !filepath)
     return -EINVAL;
-
-  FILE *f = fopen(filepath, "r");
+  f = fopen(filepath, "r");
   if (!f)
-    return -ENOENT;
-
-  char line[256];
+    return errno ? -errno : -EIO;
   if (fgets(line, sizeof(line), f)) {
-    char *start = line;
-    while (*start && isspace((unsigned char)*start))
-      start++;
-    char *end = start + strlen(start) - 1;
-    while (end >= start && isspace((unsigned char)*end))
-      *end-- = '\0';
-
-    if (*start) {
-      strncpy(cfg->vmc_dir, start, sizeof(cfg->vmc_dir) - 1);
-      cfg->vmc_dir[sizeof(cfg->vmc_dir) - 1] = '\0';
-    }
+    char *start = trim_line(line);
+    if (strlen(start) >= sizeof(cfg->vmc_dir))
+      result = -EOVERFLOW;
+    else if (*start)
+      strcpy(cfg->vmc_dir, start);
   }
-
-  fclose(f);
-  return 0;
+  return finish_file(f, result);
 }
 
 int pops_config_load_cheats(PopsConfig *cfg, const char *filepath) {
@@ -358,6 +381,7 @@ int pops_config_discover(PopsConfig *cfg, const char *vcd_dir, const char *game_
     return -EINVAL;
 
   char path[512];
+  int result;
 
   /* 1. Try global configuration in memory cards (mc0:/POPSTARTER/, mc1:/POPSTARTER/, mc0:/POPS/) */
   static const char *globalDirs[] = {
@@ -365,48 +389,77 @@ int pops_config_discover(PopsConfig *cfg, const char *vcd_dir, const char *game_
   };
   for (int g = 0; g < 4; ++g) {
     snprintf(path, sizeof(path), "%sPATCHES.TXT", globalDirs[g]);
-    pops_config_load_file(cfg, path);
+    result = pops_config_load_file(cfg, path);
+    if (result && result != -ENOENT)
+      return result;
 
     snprintf(path, sizeof(path), "%sMODES.TXT", globalDirs[g]);
-    pops_config_load_file(cfg, path);
+    result = pops_config_load_file(cfg, path);
+    if (result && result != -ENOENT)
+      return result;
 
     snprintf(path, sizeof(path), "%sCHEATS.TXT", globalDirs[g]);
-    pops_config_load_cheats(cfg, path);
+    result = pops_config_load_cheats(cfg, path);
+    if (result && result != -ENOENT)
+      return result;
   }
 
   /* 2. Try PATCHES.TXT in game directory */
   if (vcd_dir && vcd_dir[0]) {
     snprintf(path, sizeof(path), "%sPATCHES.TXT", vcd_dir);
-    pops_config_load_file(cfg, path);
+    result = pops_config_load_file(cfg, path);
+    if (result && result != -ENOENT)
+      return result;
 
     snprintf(path, sizeof(path), "%sMODES.TXT", vcd_dir);
-    pops_config_load_file(cfg, path);
+    result = pops_config_load_file(cfg, path);
+    if (result && result != -ENOENT)
+      return result;
 
     snprintf(path, sizeof(path), "%sCHEATS.TXT", vcd_dir);
-    pops_config_load_cheats(cfg, path);
+    result = pops_config_load_cheats(cfg, path);
+    if (result && result != -ENOENT)
+      return result;
 
     snprintf(path, sizeof(path), "%sDISCS.TXT", vcd_dir);
-    pops_config_load_discs(cfg, path);
+    result = pops_config_load_discs(cfg, path);
+    if (result && result != -ENOENT)
+      return result;
 
     snprintf(path, sizeof(path), "%sVMCDIR.TXT", vcd_dir);
-    pops_config_load_vmcdir(cfg, path);
+    result = pops_config_load_vmcdir(cfg, path);
+    if (result && result != -ENOENT)
+      return result;
   }
 
-  /* 3. Try VMC subfolder <game_base>/ (or custom vmc_dir) */
-  const char *subfolder = cfg->vmc_dir[0] ? cfg->vmc_dir : game_base;
+  /* VMCDIR redirects saves only. Fixes and cheats stay in the title folder. */
+  const char *subfolder = game_base;
   if (vcd_dir && vcd_dir[0] && subfolder && subfolder[0]) {
+    snprintf(path, sizeof(path), "%s%s/VMCDIR.TXT", vcd_dir, subfolder);
+    result = pops_config_load_vmcdir(cfg, path);
+    if (result && result != -ENOENT)
+      return result;
+
     snprintf(path, sizeof(path), "%s%s/PATCHES.TXT", vcd_dir, subfolder);
-    pops_config_load_file(cfg, path);
+    result = pops_config_load_file(cfg, path);
+    if (result && result != -ENOENT)
+      return result;
 
     snprintf(path, sizeof(path), "%s%s/MODES.TXT", vcd_dir, subfolder);
-    pops_config_load_file(cfg, path);
+    result = pops_config_load_file(cfg, path);
+    if (result && result != -ENOENT)
+      return result;
 
     snprintf(path, sizeof(path), "%s%s/CHEATS.TXT", vcd_dir, subfolder);
-    pops_config_load_cheats(cfg, path);
+    result = pops_config_load_cheats(cfg, path);
+    if (result && result != -ENOENT)
+      return result;
 
     if (cfg->disc_count == 0) {
       snprintf(path, sizeof(path), "%s%s/DISCS.TXT", vcd_dir, subfolder);
-      pops_config_load_discs(cfg, path);
+      result = pops_config_load_discs(cfg, path);
+      if (result && result != -ENOENT)
+        return result;
     }
   }
 

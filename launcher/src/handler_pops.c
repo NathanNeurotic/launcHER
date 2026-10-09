@@ -6,6 +6,7 @@
 #include "pops_external.h"
 #include "pops_bootstrap.h"
 #include "pops_vcd.h"
+#include "pops_vmc.h"
 #include "pops_config.h"
 #include "pops_compat_db.h"
 #include "pops_modes_patches.h"
@@ -189,52 +190,6 @@ static int readFullFile(const char *path, void *buffer, size_t max_size, size_t 
 
   if (out_size)
     *out_size = total;
-  return 0;
-}
-
-static int ensureVmcFile(const char *path) {
-  int fd = open(path, O_RDONLY);
-  if (fd >= 0) {
-    off_t sz = lseek(fd, 0, SEEK_END);
-    close(fd);
-    if (sz >= 131072)
-      return 0;
-  }
-
-  /* Ensure parent directory exists before creating card image */
-  char dir[PATH_MAX];
-  extractDirectory(path, dir, sizeof(dir));
-  if (dir[0]) {
-    size_t dlen = strlen(dir);
-    if (dlen > 1 && (dir[dlen - 1] == '/' || dir[dlen - 1] == '\\'))
-      dir[dlen - 1] = '\0';
-    mkdir(dir, 0777);
-  }
-
-  /* Create formatted 128 KiB standard PS1 Memory Card image */
-  fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-  if (fd < 0)
-    return fd;
-
-  uint8_t frame[128] = {0};
-  frame[0] = 0x4D; /* 'M' */
-  frame[1] = 0x43; /* 'C' */
-  frame[127] = 0x0E; /* XOR checksum: 0x4D ^ 0x43 */
-
-  if (write(fd, frame, sizeof(frame)) != (ssize_t)sizeof(frame)) {
-    close(fd);
-    return -EIO;
-  }
-
-  memset(frame, 0, sizeof(frame));
-  for (int i = 1; i < 1024; ++i) {
-    if (write(fd, frame, sizeof(frame)) != (ssize_t)sizeof(frame)) {
-      close(fd);
-      return -EIO;
-    }
-  }
-
-  close(fd);
   return 0;
 }
 
@@ -733,9 +688,20 @@ int launchPOPS(int argc, char *argv[]) {
   extractDirectory(vcdPath, vcdDir, sizeof(vcdDir));
   extractGameBase(vcdPath, gameBase, sizeof(gameBase));
 
+  char gameConfigDir[PATH_MAX];
+  snprintf(gameConfigDir, sizeof(gameConfigDir), "%s%s/", vcdDir, gameBase);
+
   PopsConfig cfg;
   pops_config_init(&cfg);
-  pops_config_discover(&cfg, vcdDir, gameBase);
+  res = pops_config_discover(&cfg, vcdDir, gameBase);
+  if (res) {
+    msg("POPS: Cannot load game configuration: %d\n", res);
+    return res;
+  }
+  if (cfg.cheat_count) {
+    msg("POPS: Enabled cheats require a resident runtime engine, which is not implemented.\n");
+    return -ENOTSUP;
+  }
 
   /* Look up known compatibility modes and LibCrypt bypass */
   const char *matchSerial = vcdInfo.normalized_serial[0] ? vcdInfo.normalized_serial : gameBase;
@@ -752,7 +718,8 @@ int launchPOPS(int argc, char *argv[]) {
   char vmcDir[PATH_MAX] = {0};
   if (cfg.vmc_dir[0]) {
     if (strchr(cfg.vmc_dir, ':')) {
-      snprintf(vmcDir, sizeof(vmcDir), "%.800s", cfg.vmc_dir);
+      snprintf(vmcDir, sizeof(vmcDir), "%.800s%s", cfg.vmc_dir,
+               cfg.vmc_dir[strlen(cfg.vmc_dir) - 1] == '/' ? "" : "/");
     } else {
       snprintf(vmcDir, sizeof(vmcDir), "%.700s%.128s/", vcdDir, cfg.vmc_dir);
     }
@@ -858,8 +825,16 @@ int launchPOPS(int argc, char *argv[]) {
   }
 
   /* Ensure backing save images exist before handoff */
-  ensureVmcFile(card0Path);
-  ensureVmcFile(card1Path);
+  res = pops_vmc_ensure(card0Path);
+  if (res) {
+    msg("POPS: Cannot prepare card %s: %d\n", card0Path, res);
+    return res;
+  }
+  res = pops_vmc_ensure(card1Path);
+  if (res) {
+    msg("POPS: Cannot prepare card %s: %d\n", card1Path, res);
+    return res;
+  }
 
   /* Map multi-disc paths from DISCS.TXT */
   char discPaths[POPS_MAX_DISCS][PATH_MAX];
@@ -987,14 +962,13 @@ int launchPOPS(int argc, char *argv[]) {
             compat->patch_offset, compat->patch_val);
   }
 
-  /* Check for game TROJAN_0..9 fixes in game, VMC, and memory card directories */
+  /* Save redirection must not redirect title fixes. */
   char trojanPath[PATH_MAX];
   const char *trojanDirs[6];
   int trojanDirCount = 0;
   if (vcdDir && vcdDir[0])
     trojanDirs[trojanDirCount++] = vcdDir;
-  if (vmcDir && vmcDir[0] && (!vcdDir || strcmp(vcdDir, vmcDir) != 0))
-    trojanDirs[trojanDirCount++] = vmcDir;
+  trojanDirs[trojanDirCount++] = gameConfigDir;
   trojanDirs[trojanDirCount++] = "mc0:/POPSTARTER/";
   trojanDirs[trojanDirCount++] = "mc1:/POPSTARTER/";
   trojanDirs[trojanDirCount++] = "mc0:/POPS/";
@@ -1024,14 +998,6 @@ int launchPOPS(int argc, char *argv[]) {
         }
       }
     }
-  }
-
-  /* Stage GameShark cheats to guest PS1 RAM (delayed if $SAFEMODE is active) */
-  if (cfg.cheat_count > 0 && !cfg.safe_mode) {
-    DPRINTF("POPS: Staging %u GameShark cheats to guest PS1 RAM\n", cfg.cheat_count);
-    pops_apply_cheats((void *)0x01000000, cfg.cheats, cfg.cheat_count);
-  } else if (cfg.cheat_count > 0 && cfg.safe_mode) {
-    DPRINTF("POPS: Safe mode active: postponing initial RAM cheat staging\n");
   }
 
   /* Reboot IOP with verified external IOPRP image */

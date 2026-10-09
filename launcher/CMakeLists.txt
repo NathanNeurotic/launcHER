@@ -39,6 +39,7 @@ list(APPEND EE_SOURCES
     ../common/src/pops_core_patches.c
     ../common/src/pops_bootstrap.c
     ../common/src/pops_vcd.c
+    ../common/src/pops_vmc.c
     ../common/src/pops_config.c
     ../common/src/pops_compat_db.c
     ../common/src/pops_modes_patches.c

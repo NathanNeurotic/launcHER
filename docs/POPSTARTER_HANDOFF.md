@@ -110,3 +110,20 @@ Read `docs/POPSTARTER_REPLACEMENT.md` for detailed hashes, dependency sets,
 module ranges, capability gaps and validation boundaries. GitHub CLI's default
 saved token is stale, but Git credential manager successfully authenticated Git
 push and GitHub operations for PR #19. Never print credentials in logs.
+
+## Current continuation checkpoint (2026-10-09)
+
+The published boot repair is `16aa41cc24806bf00a0259be3c6d4f18afa33d0a`.
+Its GitHub Actions run 37938178727 passed host checks and PS2 target packaging.
+The older local artifact/hash above is historical, not the current artifact.
+
+The next repair protects existing VMCs, formats new raw cards, checks both card
+results, separates title configuration/fixes from save redirection, and rejects
+enabled cheats before the unsafe staged-core write. The resident cheat engine
+is still missing. See the revised capability matrix and repair checkpoint in
+`POPSTARTER_REPLACEMENT.md`; earlier component descriptions are not parity proof.
+
+Original PATCH loader evidence begins near line 3206 in the measured POPSTARTER
+decompile: numbered PATCH files use a 64-byte header and additional original
+validation/dispatch, separate from TROJAN handling near line 2822. Reconstruct
+these rules before connecting the generic container stager to runtime discovery.

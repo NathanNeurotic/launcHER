@@ -16,6 +16,10 @@ jobs:
         run: python tools/test_pops_external.py
       - name: Test POPS IOP filesystem proxy contracts
         run: python tools/test_popfs.py
+      - name: Test POPS card creation and I/O failure handling
+        run: python tools/test_pops_vmc.py
+      - name: Test POPS configuration and feature helpers
+        run: python tools/test_pops_features.py
 
   build:
     runs-on: ubuntu-latest

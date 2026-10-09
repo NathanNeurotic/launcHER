@@ -67,11 +67,12 @@ def compile_shared_library():
     so_path = Path(tempfile.gettempdir()) / so_name
     sources = [
         str(ROOT / "common/src/pops_config.c"),
+        str(ROOT / "tools/fixtures/pops_config_host_io.c"),
         str(ROOT / "common/src/pops_compat_db.c"),
         str(ROOT / "common/src/pops_modes_patches.c"),
         str(ROOT / "common/src/pops_vcd.c"),
     ]
-    cmd = ["gcc", "-shared", "-fPIC", "-O2", "-I", str(ROOT / "common/include")] + sources + ["-o", str(so_path)]
+    cmd = ["gcc", "-shared", "-fPIC", "-O2", "-Dfopen=pops_test_fopen", "-I", str(ROOT / "common/include")] + sources + ["-o", str(so_path)]
     subprocess.check_call(cmd)
     return c.CDLL(str(so_path))
 
@@ -211,6 +212,68 @@ class FeatureTests(unittest.TestCase):
         self.assertEqual(info.normalized_serial.decode("ascii"), "SLUS-00870")
         temp_vcd.unlink()
 
+    def test_cheat_disable_errors_and_redirected_configuration(self):
+        cfg = PopsConfig()
+        LIB.pops_config_init(c.byref(cfg))
+        for line in (b"80001234 5678", b"50000202 0001", b"C0000000 0000"):
+            self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), line), 0)
+        self.assertEqual(cfg.cheat_count, 0)
+        for line in (b"$50000202 0001", b"$C0000000 0000"):
+            self.assertLess(LIB.pops_config_parse_line(c.byref(cfg), line), 0)
+        for _ in range(256):
+            self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$80001234 5678"), 0)
+        self.assertLess(LIB.pops_config_parse_line(c.byref(cfg), b"$80001234 5678"), 0)
+
+        LIB.pops_config_discover.argtypes = [c.POINTER(PopsConfig), c.c_char_p, c.c_char_p]
+        LIB.pops_config_load_file.argtypes = [c.POINTER(PopsConfig), c.c_char_p]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            title = root / 'Game'
+            saves = root / 'Shared'
+            title.mkdir()
+            saves.mkdir()
+            (root / 'VMCDIR.TXT').write_text('Shared')
+            (title / 'CHEATS.TXT').write_text('$80001234 5678\n')
+            (saves / 'CHEATS.TXT').write_text('$50000202 0001\n')
+            LIB.pops_config_init(c.byref(cfg))
+            self.assertEqual(LIB.pops_config_discover(c.byref(cfg),
+                             (str(root) + '/').encode(), b'Game'), 0)
+            self.assertEqual(cfg.cheat_count, 1)
+            self.assertEqual(cfg.vmc_dir, b'Shared')
+            (title / 'VMCDIR.TXT').write_text('Other')
+            self.assertEqual(LIB.pops_config_discover(c.byref(cfg),
+                             (str(root) + '/').encode(), b'Game'), 0)
+            self.assertEqual(cfg.vmc_dir, b'Other')
+            (title / 'CHEATS.TXT').write_text('$C0000000 0000\n')
+            self.assertLess(LIB.pops_config_discover(c.byref(cfg),
+                            (str(root) + '/').encode(), b'Game'), 0)
+            oversized = root / 'long.txt'
+            oversized.write_text('$80001234 5678' + ' ' * 300)
+            self.assertLess(LIB.pops_config_load_file(c.byref(cfg), str(oversized).encode()), 0)
+
+    def test_auxiliary_config_bounds(self):
+        cfg = PopsConfig()
+        LIB.pops_config_init(c.byref(cfg))
+        for name in ('pops_config_load_discs', 'pops_config_load_vmcdir'):
+            getattr(LIB, name).argtypes = [c.POINTER(PopsConfig), c.c_char_p]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'config.txt'
+            encoded = str(path).encode()
+            path.write_text('\n  \n# comment\nDisc1.VCD\nDisc2.VCD\n')
+            self.assertEqual(LIB.pops_config_load_discs(c.byref(cfg), encoded), 0)
+            self.assertEqual(cfg.disc_count, 2)
+            self.assertEqual(bytes(cfg.discs[0]).split(b'\0')[0], b'Disc1.VCD')
+            for content in ('X' * 128, 'Disc.VCD\n' * 5, 'X' * 300):
+                path.write_text(content)
+                self.assertLess(LIB.pops_config_load_discs(c.byref(cfg), encoded), 0)
+            cfg.vmc_dir = b'Keep'
+            path.write_text('X' * 128)
+            self.assertLess(LIB.pops_config_load_vmcdir(c.byref(cfg), encoded), 0)
+            self.assertEqual(cfg.vmc_dir, b'Keep')
+            path.write_text('\n')
+            self.assertEqual(LIB.pops_config_load_vmcdir(c.byref(cfg), encoded), 0)
+            self.assertEqual(cfg.vmc_dir, b'Keep')
+
     def test_config_parser_directives(self):
         cfg = PopsConfig()
         LIB.pops_config_init(c.byref(cfg))
@@ -247,8 +310,10 @@ class FeatureTests(unittest.TestCase):
         self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"MODE 4"), 0)
         self.assertTrue(cfg.compat_modes & (1 << 3))
 
-        # GameShark cheats with and without $ prefix, plus extended types (0x10, 0x20)
+        # Only dollar-prefixed codes are enabled; bare codes remain disabled.
         self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"8009A120 0004"), 0)
+        self.assertEqual(cfg.cheat_count, 0)
+        self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$8009A120 0004"), 0)
         self.assertEqual(cfg.cheat_count, 1)
         self.assertEqual(cfg.cheats[0].address, 0x09A120)
         self.assertEqual(cfg.cheats[0].value, 0x0004)
@@ -265,7 +330,7 @@ class FeatureTests(unittest.TestCase):
         self.assertEqual(cfg.cheats[2].type, 0x30)
         self.assertEqual(cfg.cheats[2].value, 0x12)
 
-        self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"1009A126 0034"), 0)
+        self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$1009A126 0034"), 0)
         self.assertEqual(cfg.cheat_count, 4)
         self.assertEqual(cfg.cheats[3].type, 0x10)
 

@@ -84,7 +84,7 @@ int pops_config_load_vmcdir(PopsConfig *cfg, const char *filepath);
 int pops_config_load_cheats(PopsConfig *cfg, const char *filepath);
 
 /* Discovers and loads PATCHES.TXT, MODES.TXT, CHEATS.TXT, DISCS.TXT, VMCDIR.TXT
- * in candidate directories (game VCD directory and VMC directory). */
+ * in memory-card, VCD root and title directories. VMCDIR redirects saves only. */
 int pops_config_discover(PopsConfig *cfg, const char *vcd_dir, const char *game_base);
 
 /* Import configuration from verified 32-byte POPStarter configuration table ($410 - $42F) */
