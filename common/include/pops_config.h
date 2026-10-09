@@ -17,6 +17,7 @@ enum PopsVideoMode {
   POPS_VMODE_480I,
   POPS_VMODE_576P,
   POPS_VMODE_576I,
+  POPS_VMODE_240P,
 };
 
 #define POPS_MAX_DISCS    4
@@ -25,7 +26,7 @@ enum PopsVideoMode {
 typedef struct {
   uint32_t address;
   uint16_t value;
-  uint8_t type; /* 0x80 (16-bit), 0x30 (8-bit), 0xD0 (conditional) */
+  uint8_t type; /* 0x80/0x10 (16-bit), 0x30/0x20 (8-bit), 0xD0..0xD3/0xE0..0xE1 (conditional) */
 } PopsCheatEntry;
 
 typedef struct {
@@ -35,14 +36,19 @@ typedef struct {
   int16_t x_offset;
   int16_t y_offset;
   uint8_t smooth;
+  uint8_t widescreen;   /* $WIDESCREEN 16:9 projection patch */
+  uint8_t dither_off;   /* $DITHER_OFF / $NODITHER disables GS dithering */
 
   /* Engine throttling */
   uint8_t fast_mips;
   uint8_t slow_mips;
 
   /* System options */
-  uint8_t no_boot;  /* $NOBOOT / $BIOS forces PS1 BIOS OSD shell */
-  uint8_t no_igr;   /* $NOIGR disables In-Game Reset */
+  uint8_t no_boot;      /* $NOBOOT / $BIOS forces PS1 BIOS OSD shell */
+  uint8_t no_igr;       /* $NOIGR disables In-Game Reset */
+  uint8_t igr_type;     /* $IGR0 (0), $IGR1 (1), $IGR2 (2) */
+  uint8_t safe_mode;    /* $SAFEMODE delays cheat activation */
+  uint8_t usb_delay;    /* $USBDELAY_# seconds */
 
   /* Compatibility modes bitmask: (1 << (mode - 1)) for Modes 1..8 */
   uint8_t compat_modes;

@@ -8,10 +8,12 @@
 #include "pops_config.h"
 #include "pops_compat_db.h"
 #include "pops_modes_patches.h"
+#include <ctype.h>
 #include <fcntl.h>
 #include <kernel.h>
 #include <iopcontrol.h>
 #include <iopcontrol_special.h>
+#include <loadfile.h>
 #include <ps2sdkapi.h>
 #include <sifrpc.h>
 #include <stdint.h>
@@ -218,6 +220,134 @@ static int ensureVmcFile(const char *path) {
   }
 
   close(fd);
+  return 0;
+}
+
+int pops_load_custom_modules(const char *vcdDir, const char *vmcDir) {
+  char modPath[PATH_MAX];
+  const char *searchDirs[8];
+  int dirCount = 0;
+
+  if (vmcDir && vmcDir[0])
+    searchDirs[dirCount++] = vmcDir;
+
+  if (vcdDir && vcdDir[0] && (!vmcDir || strcmp(vcdDir, vmcDir) != 0))
+    searchDirs[dirCount++] = vcdDir;
+
+  char vcdIrxDir[PATH_MAX] = {0};
+  if (vcdDir && vcdDir[0]) {
+    snprintf(vcdIrxDir, sizeof(vcdIrxDir), "%sIRX/", vcdDir);
+    searchDirs[dirCount++] = vcdIrxDir;
+  }
+
+  searchDirs[dirCount++] = "mc0:/POPSTARTER/";
+  searchDirs[dirCount++] = "mc1:/POPSTARTER/";
+  searchDirs[dirCount++] = "mc0:/POPS/";
+  searchDirs[dirCount++] = "mc1:/POPS/";
+
+  /* 1. Load sequential custom modules: MODULE_0.IRX .. MODULE_9.IRX */
+  for (int slot = 0; slot <= 9; ++slot) {
+    for (int d = 0; d < dirCount; ++d) {
+      snprintf(modPath, sizeof(modPath), "%sMODULE_%d.IRX", searchDirs[d], slot);
+      if (!tryFile(modPath)) {
+        DPRINTF("POPS: Loading custom module %s\n", modPath);
+        int res = SifLoadModule(modPath, 0, NULL);
+        DPRINTF("POPS: Module %s loaded (res %d)\n", modPath, res);
+        break;
+      }
+    }
+  }
+
+  /* 2. Load named peripheral drivers */
+  static const char *peripheralDrivers[] = {
+    "USBMOUSE.IRX",
+    "USB_MOUSE.IRX",
+    "USBKBD.IRX",
+    "USBGUN.IRX",
+    "GUNCON.IRX",
+    "MULTITAP.IRX",
+    "DS3.IRX",
+    "DS4.IRX",
+    "PADMAN.IRX",
+    "SIO2MAN.IRX"
+  };
+  int numDrivers = (int)(sizeof(peripheralDrivers) / sizeof(peripheralDrivers[0]));
+
+  for (int p = 0; p < numDrivers; ++p) {
+    for (int d = 0; d < dirCount; ++d) {
+      snprintf(modPath, sizeof(modPath), "%s%s", searchDirs[d], peripheralDrivers[p]);
+      if (!tryFile(modPath)) {
+        DPRINTF("POPS: Loading peripheral driver %s\n", modPath);
+        int res = SifLoadModule(modPath, 0, NULL);
+        DPRINTF("POPS: Driver %s loaded (res %d)\n", modPath, res);
+        break;
+      }
+    }
+  }
+
+  /* 3. Load modules from manifest files: MODULES.TXT / IRX.TXT */
+  static const char *manifestNames[] = { "MODULES.TXT", "IRX.TXT" };
+  for (int m = 0; m < 2; ++m) {
+    for (int d = 0; d < dirCount; ++d) {
+      snprintf(modPath, sizeof(modPath), "%s%s", searchDirs[d], manifestNames[m]);
+      if (!tryFile(modPath)) {
+        DPRINTF("POPS: Reading module manifest %s\n", modPath);
+        int fd = open(modPath, O_RDONLY);
+        if (fd >= 0) {
+          char lineBuf[256];
+          int lineIdx = 0;
+          char ch;
+          while (read(fd, &ch, 1) == 1) {
+            if (ch == '\r' || ch == '\n') {
+              if (lineIdx > 0) {
+                lineBuf[lineIdx] = '\0';
+                char *s = lineBuf;
+                while (*s && isspace((unsigned char)*s))
+                  s++;
+                if (*s && *s != '#' && *s != ';') {
+                  char target[PATH_MAX];
+                  if (strchr(s, ':') || *s == '/' || *s == '\\') {
+                    snprintf(target, sizeof(target), "%s", s);
+                  } else {
+                    snprintf(target, sizeof(target), "%s%s", searchDirs[d], s);
+                  }
+                  if (!tryFile(target)) {
+                    DPRINTF("POPS: Manifest loading %s\n", target);
+                    int res = SifLoadModule(target, 0, NULL);
+                    DPRINTF("POPS: Manifest loaded %s (res %d)\n", target, res);
+                  }
+                }
+                lineIdx = 0;
+              }
+            } else if (lineIdx < (int)sizeof(lineBuf) - 1) {
+              lineBuf[lineIdx++] = ch;
+            }
+          }
+          if (lineIdx > 0) {
+            lineBuf[lineIdx] = '\0';
+            char *s = lineBuf;
+            while (*s && isspace((unsigned char)*s))
+              s++;
+            if (*s && *s != '#' && *s != ';') {
+              char target[PATH_MAX];
+              if (strchr(s, ':') || *s == '/' || *s == '\\') {
+                snprintf(target, sizeof(target), "%s", s);
+              } else {
+                snprintf(target, sizeof(target), "%s%s", searchDirs[d], s);
+              }
+              if (!tryFile(target)) {
+                DPRINTF("POPS: Manifest loading %s\n", target);
+                int res = SifLoadModule(target, 0, NULL);
+                DPRINTF("POPS: Manifest loaded %s (res %d)\n", target, res);
+              }
+            }
+          }
+          close(fd);
+        }
+      }
+    }
+  }
+
   return 0;
 }
 
@@ -479,10 +609,12 @@ int launchPOPS(int argc, char *argv[]) {
     }
   }
 
-  /* Stage GameShark cheats to guest PS1 RAM */
-  if (cfg.cheat_count > 0) {
+  /* Stage GameShark cheats to guest PS1 RAM (delayed if $SAFEMODE is active) */
+  if (cfg.cheat_count > 0 && !cfg.safe_mode) {
     DPRINTF("POPS: Staging %u GameShark cheats to guest PS1 RAM\n", cfg.cheat_count);
     pops_apply_cheats((void *)0x01000000, cfg.cheats, cfg.cheat_count);
+  } else if (cfg.cheat_count > 0 && cfg.safe_mode) {
+    DPRINTF("POPS: Safe mode active: postponing initial RAM cheat staging\n");
   }
 
   /* Reboot IOP with verified external IOPRP image */
@@ -509,6 +641,15 @@ int launchPOPS(int argc, char *argv[]) {
   if (res) {
     msg("POPS: Failed initializing services: %d\n", res);
     return res;
+  }
+
+  /* Load user-supplied custom IRX modules and peripheral drivers */
+  pops_load_custom_modules(vcdDir, vmcDir);
+
+  /* Apply USB delay if configured */
+  if (cfg.usb_delay > 0) {
+    DPRINTF("POPS: USB delay requested: %u seconds\n", cfg.usb_delay);
+    sleep(cfg.usb_delay);
   }
 
   /* Forward verified LibCrypt magic key to popfs for Subchannel Q emulation */

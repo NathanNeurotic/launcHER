@@ -276,16 +276,32 @@ arg=-dev9=NIC</code></pre>
         <td>Forces standard 576i PAL interlaced video mode.</td>
       </tr>
       <tr>
-        <td><code>$PAL2NTSC</code></td>
+        <td><code>$240p</code></td>
+        <td>Forces 240p progressive scan mode (NTSC progressive timing without interlacing).</td>
+      </tr>
+      <tr>
+        <td><code>$PAL2NTSC</code> / <code>$FORCENTSC</code></td>
         <td>Converts European PAL 50Hz video timings to NTSC 60Hz.</td>
       </tr>
       <tr>
-        <td><code>$NTSC2PAL</code></td>
+        <td><code>$NTSC2PAL</code> / <code>$FORCEPAL</code></td>
         <td>Converts NTSC 60Hz video timings to PAL 50Hz.</td>
       </tr>
       <tr>
         <td><code>$NOPAL</code></td>
         <td>Disables PAL mode forcing and maintains standard NTSC timing.</td>
+      </tr>
+      <tr>
+        <td><code>$VMODE_#</code></td>
+        <td>Sets video mode by index (0=Default, 1=PAL2NTSC, 2=NTSC2PAL, 3=NOPAL, 4=480p, 5=480i, 6=576p, 7=576i, 8=240p).</td>
+      </tr>
+      <tr>
+        <td><code>$WIDESCREEN</code></td>
+        <td>Patches the horizontal projection scale factor at <code>0x00205B00</code> to 16:9 aspect ratio.</td>
+      </tr>
+      <tr>
+        <td><code>$DITHER_OFF</code> / <code>$NODITHER</code></td>
+        <td>Disables Graphics Synthesizer dithering at <code>0x00205D58</code> to remove banding noise.</td>
       </tr>
     </tbody>
   </table>
@@ -302,13 +318,22 @@ arg=-dev9=NIC</code></pre>
   <li><code>$YPOS_&lt;offset&gt;</code>: Adjusts vertical screen position in scanlines (e.g. <code>$YPOS_10</code> or <code>$YPOS_-4</code>).</li>
 </ul>
 
-<h3>Visual Quality &amp; CPU Timing</h3>
+<h3>Visual Quality, Timing &amp; System Directives</h3>
+<p>
+  Multiple directives may appear on the same line separated by spaces (e.g. <code>$SAFEMODE $WIDESCREEN $DITHER_OFF</code>):
+</p>
 <ul>
   <li><code>$SMOOTH</code>: Modifies Graphics Synthesizer texture sampling parameters (<code>TEX0.TFX</code>) to enable bilinear texture filtering.</li>
+  <li><code>$WIDESCREEN</code>: Patches horizontal projection scaling to 16:9 anamorphic widescreen.</li>
+  <li><code>$DITHER_OFF</code> or <code>$NODITHER</code>: Disables Graphics Synthesizer dithering to remove color-banding artifacts.</li>
   <li><code>$FASTMIPS</code>: Overrides dynamic recompiler instruction wait loops, speeding up CPU execution for select titles.</li>
   <li><code>$SLOWMIPS</code>: Inserts cycle padding into recompiler wait loops to prevent physics and audio glitches in timing-sensitive titles.</li>
+  <li><code>$SAFEMODE</code>: Delays RAM cheat staging during initial boot, preventing early boot crashes on games with dynamic memory layouts.</li>
+  <li><code>$USBDELAY_#</code>: Pauses boot for the specified number of seconds to allow slow USB storage drives and peripherals to initialize.</li>
   <li><code>$NOBOOT</code> or <code>$BIOS</code>: Boots straight into the PlayStation 1 BIOS shell (Memory Card manager and CD Audio player) instead of executing the game executable.</li>
-  <li><code>$NOIGR</code>: Disables In-Game Reset button monitoring.</li>
+  <li><code>$NOIGR</code> or <code>$IGR0</code>: Disables In-Game Reset button monitoring.</li>
+  <li><code>$IGR1</code>: Enables standard In-Game Reset button combo (<code>L1 + L2 + R1 + R2 + SELECT + START</code>).</li>
+  <li><code>$IGR2</code>: Enables alternate In-Game Reset button combo (<code>L1 + L2 + R1 + R2 + SELECT + CROSS</code>).</li>
 </ul>
 
 <h2 id="step-5-compatibility-modes">Step 5: Compatibility Modes 1 through 8</h2>
@@ -443,27 +468,41 @@ Metal Gear Solid (Disc 2).VCD</code></pre>
 
 <h2 id="step-9-cheats">Step 9: GameShark &amp; Action Replay Cheats</h2>
 <p>
-  Add GameShark or Action Replay cheat codes to <code>CHEATS.TXT</code> in your game folder:
+  Add GameShark or Action Replay cheat codes to <code>CHEATS.TXT</code> in your game folder. Both un-prefixed lines and canonical POPStarter <code>$</code>-prefixed lines are supported:
 </p>
 
-<pre><code># Infinite Health
-8009A120 0004
+<pre><code># Infinite Health (16-bit write)
+$8009A120 0004
 
-# All Items
-3009A135 0063
+# All Items (8-bit write)
+$3009A135 0063
 
-# Conditional Modifier (Execute next line if value matches)
-D008B200 0001
-8008B204 00FF</code></pre>
+# GameShark Type 10 (16-bit write) and Type 20 (8-bit write)
+1009A140 0008
+$2009A142 0002
+
+# Conditional Checks (D0..D3: 16-bit, E0..E1: 8-bit)
+# If 0x0008B200 == 0x0001, execute next line:
+$D008B200 0001
+$8008B204 00FF
+
+# If 0x0008B210 != 0x0056, execute next line:
+$E108B210 0056
+$3008B212 0001</code></pre>
 
 <p>
   Supported code types include:
 </p>
 
 <ul>
-  <li><code>80xxxxxx yyyy</code>: 16-bit constant RAM write.</li>
-  <li><code>30xxxxxx 00yy</code>: 8-bit constant RAM write.</li>
-  <li><code>D0xxxxxx yyyy</code>: 16-bit conditional test. Executes following cheat line only when memory matches the condition.</li>
+  <li><code>80xxxxxx yyyy</code> / <code>10xxxxxx yyyy</code>: 16-bit constant RAM write.</li>
+  <li><code>30xxxxxx 00yy</code> / <code>20xxxxxx 00yy</code>: 8-bit constant RAM write.</li>
+  <li><code>D0xxxxxx yyyy</code>: 16-bit conditional equal (<code>==</code>). Executes the next cheat entry only when memory matches.</li>
+  <li><code>D1xxxxxx yyyy</code>: 16-bit conditional not equal (<code>!=</code>).</li>
+  <li><code>D2xxxxxx yyyy</code>: 16-bit conditional less than (<code>&lt;</code>).</li>
+  <li><code>D3xxxxxx yyyy</code>: 16-bit conditional greater than (<code>&gt;</code>).</li>
+  <li><code>E0xxxxxx 00yy</code>: 8-bit conditional equal (<code>==</code>).</li>
+  <li><code>E1xxxxxx 00yy</code>: 8-bit conditional not equal (<code>!=</code>).</li>
 </ul>
 
 <p>
@@ -511,6 +550,48 @@ D008B200 0001
 <p>
   If a community patch requires code injection hooks, place <code>TROJAN_0.BIN</code> through <code>TROJAN_9.BIN</code> alongside the game. launcHER verifies the container header, checks the hook address, stages the payload, and applies the injection before starting execution.
 </p>
+
+<h2 id="step-11-custom-irx">Step 11: Custom IRX Modules &amp; Peripherals</h2>
+<p>
+  launcHER supports user-supplied IOP driver modules and peripheral replacement drivers after storage initialization.
+</p>
+
+<h3>Numbered Driver Modules (MODULE_0.IRX .. MODULE_9.IRX)</h3>
+<p>
+  Place driver files named <code>MODULE_0.IRX</code> through <code>MODULE_9.IRX</code> in any candidate folder. launcHER scans candidate directories and loads existing modules sequentially in ascending numerical order.
+</p>
+
+<h3>Named Peripheral Drivers</h3>
+<p>
+  Place driver modules into your game directory, VMC directory, or memory card to support specialty hardware:
+</p>
+
+<ul>
+  <li><code>USBMOUSE.IRX</code> / <code>USB_MOUSE.IRX</code>: USB mouse drivers.</li>
+  <li><code>USBKBD.IRX</code>: USB keyboard drivers.</li>
+  <li><code>USBGUN.IRX</code> / <code>GUNCON.IRX</code>: Light gun peripherals (GunCon, USB light guns).</li>
+  <li><code>MULTITAP.IRX</code>: Multi-controller adapter driver.</li>
+  <li><code>DS3.IRX</code> / <code>DS4.IRX</code>: DualShock 3 and DualShock 4 controller drivers.</li>
+  <li><code>PADMAN.IRX</code> / <code>SIO2MAN.IRX</code>: Controller and SIO2 transport replacements.</li>
+</ul>
+
+<h3>Driver Manifests (MODULES.TXT &amp; IRX.TXT)</h3>
+<p>
+  To load arbitrary module files, create <code>MODULES.TXT</code> or <code>IRX.TXT</code> containing file paths or filenames (one module per line). Paths can be absolute (e.g. <code>mc0:/IRX/USBMOUSE.IRX</code>) or relative to the game directory.
+</p>
+
+<h3>Search Locations</h3>
+<p>
+  launcHER searches for custom IRX modules and manifests in this priority order:
+</p>
+
+<ol class="checklist">
+  <li>Per-game Virtual Memory Card folder (<code>vmcDir</code>).</li>
+  <li>The active game <code>.VCD</code> directory (<code>vcdDir</code>).</li>
+  <li>Dedicated IRX subfolder: <code>&lt;vcdDir&gt;IRX/</code>.</li>
+  <li>Memory Card slot 1: <code>mc0:/POPSTARTER/</code> and <code>mc0:/POPS/</code>.</li>
+  <li>Memory Card slot 2: <code>mc1:/POPSTARTER/</code> and <code>mc1:/POPS/</code>.</li>
+</ol>
 
 </main>
   <aside class="toc"><div class="toc-h">On this page</div><nav id="toc-nav"></nav></aside>

@@ -23,10 +23,15 @@ class PopsConfig(c.Structure):
         ("x_offset", c.c_int16),
         ("y_offset", c.c_int16),
         ("smooth", c.c_uint8),
+        ("widescreen", c.c_uint8),
+        ("dither_off", c.c_uint8),
         ("fast_mips", c.c_uint8),
         ("slow_mips", c.c_uint8),
         ("no_boot", c.c_uint8),
         ("no_igr", c.c_uint8),
+        ("igr_type", c.c_uint8),
+        ("safe_mode", c.c_uint8),
+        ("usb_delay", c.c_uint8),
         ("compat_modes", c.c_uint8),
         ("disc_count", c.c_uint8),
         ("discs", (c.c_char * 128) * 4),
@@ -93,6 +98,10 @@ class FeatureTests(unittest.TestCase):
         LIB.pops_apply_video_overrides.restype = c.c_int
         LIB.pops_apply_smooth.argtypes = [c.c_void_p, c.c_size_t]
         LIB.pops_apply_smooth.restype = c.c_int
+        LIB.pops_apply_widescreen.argtypes = [c.c_void_p, c.c_size_t]
+        LIB.pops_apply_widescreen.restype = c.c_int
+        LIB.pops_apply_dither_off.argtypes = [c.c_void_p, c.c_size_t]
+        LIB.pops_apply_dither_off.restype = c.c_int
         LIB.pops_apply_throttling.argtypes = [c.c_void_p, c.c_size_t, c.c_uint8, c.c_uint8]
         LIB.pops_apply_throttling.restype = c.c_int
         LIB.pops_apply_bios_shell.argtypes = [c.c_void_p, c.c_size_t]
@@ -103,6 +112,8 @@ class FeatureTests(unittest.TestCase):
         LIB.pops_apply_cheats.restype = c.c_int
         LIB.pops_check_igr_combo.argtypes = [c.c_uint16]
         LIB.pops_check_igr_combo.restype = c.c_int
+        LIB.pops_check_igr_combo_type.argtypes = [c.c_uint16, c.c_uint8]
+        LIB.pops_check_igr_combo_type.restype = c.c_int
         LIB.pops_check_disc_swap_combo.argtypes = [c.c_uint16]
         LIB.pops_check_disc_swap_combo.restype = c.c_int
         LIB.pops_generate_subq.argtypes = [c.c_uint32, c.c_uint16, c.POINTER(c.c_uint8 * 12)]
@@ -236,12 +247,58 @@ class FeatureTests(unittest.TestCase):
         self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"MODE 4"), 0)
         self.assertTrue(cfg.compat_modes & (1 << 3))
 
-        # GameShark cheat
+        # GameShark cheats with and without $ prefix, plus extended types (0x10, 0x20)
         self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"8009A120 0004"), 0)
         self.assertEqual(cfg.cheat_count, 1)
         self.assertEqual(cfg.cheats[0].address, 0x09A120)
         self.assertEqual(cfg.cheats[0].value, 0x0004)
         self.assertEqual(cfg.cheats[0].type, 0x80)
+
+        self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$8009A122 0005"), 0)
+        self.assertEqual(cfg.cheat_count, 2)
+        self.assertEqual(cfg.cheats[1].address, 0x09A122)
+        self.assertEqual(cfg.cheats[1].value, 0x0005)
+        self.assertEqual(cfg.cheats[1].type, 0x80)
+
+        self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$3009A124 0012"), 0)
+        self.assertEqual(cfg.cheat_count, 3)
+        self.assertEqual(cfg.cheats[2].type, 0x30)
+        self.assertEqual(cfg.cheats[2].value, 0x12)
+
+        self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"1009A126 0034"), 0)
+        self.assertEqual(cfg.cheat_count, 4)
+        self.assertEqual(cfg.cheats[3].type, 0x10)
+
+        self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$2009A128 0056"), 0)
+        self.assertEqual(cfg.cheat_count, 5)
+        self.assertEqual(cfg.cheats[4].type, 0x20)
+
+        # Multi-directive line
+        self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$SAFEMODE $WIDESCREEN $DITHER_OFF"), 0)
+        self.assertEqual(cfg.safe_mode, 1)
+        self.assertEqual(cfg.widescreen, 1)
+        self.assertEqual(cfg.dither_off, 1)
+
+        # Additional video directives and aliases
+        self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$240p"), 0)
+        self.assertEqual(cfg.video_mode, 8)
+
+        self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$FORCEPAL"), 0)
+        self.assertEqual(cfg.video_mode, 2)
+
+        self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$FORCENTSC"), 0)
+        self.assertEqual(cfg.video_mode, 1)
+
+        self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$VMODE_4"), 0)
+        self.assertEqual(cfg.video_mode, 4)
+
+        # Delays and IGR mode
+        self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$USBDELAY_5"), 0)
+        self.assertEqual(cfg.usb_delay, 5)
+
+        self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$IGR2"), 0)
+        self.assertEqual(cfg.no_igr, 0)
+        self.assertEqual(cfg.igr_type, 2)
 
         # 32-byte table export and reload
         tbl = (c.c_uint8 * 32)()
@@ -250,7 +307,6 @@ class FeatureTests(unittest.TestCase):
         self.assertEqual(tbl[9], 1)   # mode 2
         self.assertEqual(tbl[11], 1)  # mode 4
         self.assertEqual(tbl[17], 1)  # no_boot ($421)
-        self.assertEqual(tbl[18], 0)  # no_igr ($422)
 
         cfg2 = PopsConfig()
         LIB.pops_config_init(c.byref(cfg2))
@@ -259,7 +315,6 @@ class FeatureTests(unittest.TestCase):
         self.assertTrue(cfg2.compat_modes & (1 << 1))
         self.assertTrue(cfg2.compat_modes & (1 << 3))
         self.assertEqual(cfg2.no_boot, 1)
-        self.assertEqual(cfg2.no_igr, 1)
 
     def test_compat_db_lookup(self):
         count = LIB.pops_compat_db_count()
@@ -321,6 +376,24 @@ class FeatureTests(unittest.TestCase):
         val_vsync = struct.unpack_from("<I", buf, 0x302770)[0]  # 0x00502770 - 0x00200000 = 0x302770
         self.assertEqual(val_vsync, 0x000a6300)
 
+        # Test 240p video override (POPS_VMODE_240P = 8)
+        res = LIB.pops_apply_video_overrides(core_ptr, core_size, 8, 0, 0, 0)
+        self.assertEqual(res, 0)
+        val_240p = struct.unpack_from("<I", buf, 0x002061A0 - 0x00200000)[0]
+        self.assertEqual(val_240p, 0x24020000)
+
+        # Test Widescreen patch (0x00205B00)
+        res = LIB.pops_apply_widescreen(core_ptr, core_size)
+        self.assertEqual(res, 0)
+        val_ws = struct.unpack_from("<I", buf, 0x00205B00 - 0x00200000)[0]
+        self.assertEqual(val_ws, 0x24020C00)
+
+        # Test Dither disable patch (0x00205D58)
+        res = LIB.pops_apply_dither_off(core_ptr, core_size)
+        self.assertEqual(res, 0)
+        val_dither = struct.unpack_from("<I", buf, 0x00205D58 - 0x00200000)[0]
+        self.assertEqual(val_dither, 0x00000000)
+
         # Test LibCrypt bypass
         res = LIB.pops_apply_libcrypt_bypass(core_ptr, core_size)
         self.assertEqual(res, 0)
@@ -333,6 +406,12 @@ class FeatureTests(unittest.TestCase):
         igr_active_low = (~(0x0400 | 0x0100 | 0x0800 | 0x0200 | 0x0001 | 0x0008)) & 0xFFFF
         self.assertEqual(LIB.pops_check_igr_combo(0xFFFF), 0)
         self.assertEqual(LIB.pops_check_igr_combo(igr_active_low), 1)
+
+        # Test IGR types (0: disabled, 1: normal, 2: alternate with CROSS)
+        self.assertEqual(LIB.pops_check_igr_combo_type(igr_active_low, 0), 0)
+        self.assertEqual(LIB.pops_check_igr_combo_type(igr_active_low, 1), 1)
+        igr2_active_low = (~(0x0400 | 0x0100 | 0x0800 | 0x0200 | 0x0001 | 0x4000)) & 0xFFFF
+        self.assertEqual(LIB.pops_check_igr_combo_type(igr2_active_low, 2), 1)
 
         swap_active_low = (~(0x0001 | 0x0400 | 0x0800)) & 0xFFFF
         self.assertEqual(LIB.pops_check_disc_swap_combo(0xFFFF), 0)
@@ -347,20 +426,25 @@ class FeatureTests(unittest.TestCase):
         self.assertEqual(subq[10], 0x7C)
         self.assertEqual(subq[11], 0x23)
 
-        # Test GameShark cheat RAM injector with 0xD0 conditional execution
+        # Test GameShark cheat RAM injector with 0xD0..0xD3 and 0xE0..0xE1 conditionals
         ram_size = 0x200000
         ram_buf = bytearray(ram_size)
         ram_ptr = (c.c_uint8 * ram_size).from_buffer(ram_buf)
-        cheats_arr = (CheatEntry * 4)(
-            CheatEntry(0x0009A120, 0x1234, 0x80),  # write 0x1234 to 0x9A120
+        cheats_arr = (CheatEntry * 8)(
+            CheatEntry(0x0009A120, 0x1234, 0x10),  # write 0x1234 to 0x9A120 (type 0x10)
             CheatEntry(0x0009A120, 0x1234, 0xD0),  # if *(u16 *)0x9A120 == 0x1234:
-            CheatEntry(0x0009A124, 0x56, 0x30),    #   write 0x56 to 0x9A124
+            CheatEntry(0x0009A124, 0x56, 0x20),    #   write 0x56 to 0x9A124 (type 0x20)
             CheatEntry(0x0009A120, 0x9999, 0xD0),  # if *(u16 *)0x9A120 == 0x9999 (false):
+            CheatEntry(0x0009A124, 0xAA, 0x30),    #   write 0xAA (should be skipped!)
+            CheatEntry(0x0009A124, 0x56, 0xE0),    # if *(u8 *)0x9A124 == 0x56 (true 8-bit):
+            CheatEntry(0x0009A126, 0x77, 0x30),    #   write 0x77 to 0x9A126
+            CheatEntry(0x0009A124, 0x56, 0xE1),    # if *(u8 *)0x9A124 != 0x56 (false 8-bit):
         )
-        res = LIB.pops_cheat_engine_tick(ram_ptr, cheats_arr, 4)
+        res = LIB.pops_cheat_engine_tick(ram_ptr, cheats_arr, 8)
         self.assertEqual(res, 0)
         self.assertEqual(struct.unpack_from("<H", ram_buf, 0x9A120)[0], 0x1234)
         self.assertEqual(ram_buf[0x9A124], 0x56)
+        self.assertEqual(ram_buf[0x9A126], 0x77)
 
         # Out-of-bounds rejection
         self.assertEqual(LIB.pops_apply_compat_modes(core_ptr, 0x10000, 1), -22) # -EINVAL

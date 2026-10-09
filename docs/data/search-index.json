@@ -284,7 +284,7 @@
   {
     "title": "GameShark & Action Replay Cheats (CHEATS.TXT)",
     "cat": "pops",
-    "text": "Cheat engine supporting 16-bit writes (type 80), 8-bit writes (type 30), and 16-bit conditional executions (type D0) injected into guest PS1 RAM.",
+    "text": "Cheat engine supporting 16-bit writes (types 80, 10), 8-bit writes (types 30, 20), conditionals (types D0..D3, E0..E1), $ prefixes, and safe mode.",
     "url": "pops-setup.html#step-9-cheats"
   },
   {
@@ -292,5 +292,11 @@
     "cat": "pops",
     "text": "Controller hotkeys: In-Game Reset with L1 + L2 + R1 + R2 + SELECT + START, disc swap with SELECT + L1 + R1. Custom textures IGR_BG.TM2 and TROJAN_*.BIN fixes.",
     "url": "pops-setup.html#step-10-igr-hotkeys"
+  },
+  {
+    "title": "Custom IRX Driver Modules & Peripherals",
+    "cat": "pops",
+    "text": "Load custom IOP driver modules MODULE_0..9.IRX, peripheral drivers USBMOUSE, USBKBD, GUNCON, DS3, DS4, and driver manifests MODULES.TXT and IRX.TXT.",
+    "url": "pops-setup.html#step-11-custom-irx"
   }
 ]

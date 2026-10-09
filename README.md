@@ -586,18 +586,28 @@ If you launch without a `launcHER.CNF` file, launcHER identifies adjacent game i
 
 ### Per-game configuration directives
 
-Place optional configuration files alongside your `.VCD` image or inside the per-game VMC subfolder:
+Place optional configuration files alongside your `.VCD` image or inside the per-game VMC subfolder. Multiple directives can share a line (e.g. `$SAFEMODE $WIDESCREEN $DITHER_OFF`):
 
 - **`PATCHES.TXT` / `MODES.TXT`:** Directives and compatibility modes.
-  - Video overrides: `$480p`, `$480i`, `$576p`, `$576i`, `$PAL2NTSC`, `$NTSC2PAL`, `$NOPAL`.
-  - Centering: `$HDTVFIX`, `$XPOS_<offset>`, `$YPOS_<offset>`.
-  - Texture filtering: `$SMOOTH` (enables bilinear smoothing on the Graphics Synthesizer).
+  - Video overrides: `$480p`, `$480i`, `$576p`, `$576i`, `$240p`, `$PAL2NTSC`, `$NTSC2PAL`, `$NOPAL`, `$FORCEPAL`, `$FORCENTSC`, `$VMODE_<0..8>`.
+  - Screen geometry: `$HDTVFIX`, `$WIDESCREEN` (16:9 projection patch), `$XPOS_<offset>`, `$YPOS_<offset>`.
+  - Visual filtering: `$SMOOTH` (bilinear texture filtering), `$DITHER_OFF` / `$NODITHER` (removes GS dithering banding).
   - CPU recompiler throttling: `$FASTMIPS`, `$SLOWMIPS`.
-  - System options: `$NOBOOT` / `$BIOS` (boots to PS1 BIOS shell), `$NOIGR`.
+  - Boot and IGR: `$NOBOOT` / `$BIOS`, `$NOIGR` / `$IGR0`, `$IGR1`, `$IGR2`.
+  - Delays and stability: `$SAFEMODE` (delays RAM cheat staging), `$USBDELAY_<seconds>`.
   - Compatibility modes: `$COMPATIBILITY_0x01` through `0x08`, or bare digits `1`..`8` in `MODES.TXT`.
 - **`DISCS.TXT`:** Multi-disc paths (up to 4 discs). Press **SELECT + L1 + R1** in-game to cycle discs.
-- **`CHEATS.TXT`:** GameShark / Action Replay codes (types `80`, `30`, `D0`).
+- **`CHEATS.TXT`:** GameShark / Action Replay codes with or without `$` prefix. Supports 16-bit writes (`80`, `10`), 8-bit writes (`30`, `20`), 16-bit conditionals (`D0`..`D3`), and 8-bit conditionals (`E0`..`E1`).
 - **`VMCDIR.TXT`:** Redirects Virtual Memory Card save files to a custom folder path.
+
+### Custom IRX driver replacement and peripherals
+
+launcHER loads user-supplied IOP driver modules and peripheral replacements right after storage initialization:
+
+- **Numbered modules:** `MODULE_0.IRX` through `MODULE_9.IRX` load sequentially in numerical order.
+- **Named peripherals:** Specialty drivers load when present: `USBMOUSE.IRX` / `USB_MOUSE.IRX`, `USBKBD.IRX`, `USBGUN.IRX` / `GUNCON.IRX`, `MULTITAP.IRX`, `DS3.IRX` / `DS4.IRX`, `PADMAN.IRX`, `SIO2MAN.IRX`.
+- **Manifest lists:** `MODULES.TXT` and `IRX.TXT` specify arbitrary module file paths to load.
+- **Search locations:** Searches `vmcDir`, `vcdDir`, `vcdDir/IRX/`, `mc0:/POPSTARTER/`, `mc1:/POPSTARTER/`, `mc0:/POPS/`, and `mc1:/POPS/`.
 
 ### Built-in compatibility database and LibCrypt
 

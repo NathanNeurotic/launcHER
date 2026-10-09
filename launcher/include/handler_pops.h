@@ -13,4 +13,7 @@ int launchPOPS(int argc, char *argv[]);
 int findPopsDependencies(const char *vcdPath, char *popsPath, size_t popsPathSize,
                          char *ioprpPath, size_t ioprpPathSize);
 
+// Loads custom user modules (MODULE_0..9.IRX, peripheral IRXs, MODULES.TXT)
+int pops_load_custom_modules(const char *vcdDir, const char *vmcDir);
+
 #endif

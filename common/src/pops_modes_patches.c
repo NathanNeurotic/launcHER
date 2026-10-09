@@ -107,6 +107,9 @@ int pops_apply_video_overrides(void *staged_core, size_t core_size,
     write_u32(staged_core, core_size, 0x002061A0, 0x24020003);
   } else if (video_mode == POPS_VMODE_576I) {
     write_u32(staged_core, core_size, 0x002061A0, 0x24020004);
+  } else if (video_mode == POPS_VMODE_240P) {
+    write_u32(staged_core, core_size, 0x002061A0, 0x24020000); /* 240p progressive */
+    write_u32(staged_core, core_size, 0x002061E0, 0x24050000); /* non-interlaced */
   }
 
   if (hdtv_fix) {
@@ -128,6 +131,20 @@ int pops_apply_smooth(void *staged_core, size_t core_size) {
     return -EINVAL;
   /* Modify GS texture filter flag (TEX0.TFX bilinear) */
   return write_u32(staged_core, core_size, 0x00205E00, 0x24020001);
+}
+
+int pops_apply_widescreen(void *staged_core, size_t core_size) {
+  if (!staged_core || core_size < 0x250000)
+    return -EINVAL;
+  /* Horizontal 16:9 projection aspect factor patch */
+  return write_u32(staged_core, core_size, 0x00205B00, 0x24020C00);
+}
+
+int pops_apply_dither_off(void *staged_core, size_t core_size) {
+  if (!staged_core || core_size < 0x250000)
+    return -EINVAL;
+  /* Disable Graphics Synthesizer dithering */
+  return write_u32(staged_core, core_size, 0x00205D58, 0x00000000);
 }
 
 int pops_apply_throttling(void *staged_core, size_t core_size, uint8_t fast_mips, uint8_t slow_mips) {
@@ -160,9 +177,16 @@ int pops_apply_libcrypt_bypass(void *staged_core, size_t core_size) {
   return 0;
 }
 
-int pops_check_igr_combo(uint16_t buttons_active_low) {
+int pops_check_igr_combo_type(uint16_t buttons_active_low, uint8_t igr_type) {
+  if (igr_type == 0)
+    return 0;
   uint16_t pressed = (uint16_t)(~buttons_active_low);
-  return ((pressed & POPS_IGR_COMBO) == POPS_IGR_COMBO);
+  uint16_t target = (igr_type == 2) ? POPS_IGR2_COMBO : POPS_IGR_COMBO;
+  return ((pressed & target) == target);
+}
+
+int pops_check_igr_combo(uint16_t buttons_active_low) {
+  return pops_check_igr_combo_type(buttons_active_low, 1);
 }
 
 int pops_check_disc_swap_combo(uint16_t buttons_active_low) {
@@ -211,20 +235,62 @@ int pops_cheat_engine_tick(void *ps1_ram_base, const PopsCheatEntry *cheats, uin
   while (i < cheat_count) {
     uint32_t addr = cheats[i].address & 0x001FFFFF;
     uint8_t type = cheats[i].type;
+    uint16_t val = cheats[i].value;
 
-    if (type == 0xD0) {
-      uint16_t cur = *(uint16_t *)((uint8_t *)ps1_ram_base + addr);
-      if (cur != cheats[i].value) {
+    /* 16-bit conditionals */
+    if (type == 0xD0 || type == 0xD1 || type == 0xD2 || type == 0xD3) {
+      if (addr + 2 > 0x00200000) {
+        i += 2;
+        continue;
+      }
+      uint16_t cur = *(uint16_t *)((uint8_t *)ps1_ram_base + (addr & ~1U));
+      int cond = 0;
+      if (type == 0xD0) cond = (cur == val);
+      else if (type == 0xD1) cond = (cur != val);
+      else if (type == 0xD2) cond = (cur < val);
+      else if (type == 0xD3) cond = (cur > val);
+
+      if (!cond) {
         i += 2;
         continue;
       }
       i++;
       continue;
-    } else if (type == 0x80) {
-      *(uint16_t *)((uint8_t *)ps1_ram_base + addr) = cheats[i].value;
-    } else if (type == 0x30) {
-      *(uint8_t *)((uint8_t *)ps1_ram_base + addr) = (uint8_t)cheats[i].value;
     }
+
+    /* 8-bit conditionals */
+    if (type == 0xE0 || type == 0xE1) {
+      if (addr + 1 > 0x00200000) {
+        i += 2;
+        continue;
+      }
+      uint8_t cur = *(uint8_t *)((uint8_t *)ps1_ram_base + addr);
+      uint8_t target = (uint8_t)val;
+      int cond = 0;
+      if (type == 0xE0) cond = (cur == target);
+      else if (type == 0xE1) cond = (cur != target);
+
+      if (!cond) {
+        i += 2;
+        continue;
+      }
+      i++;
+      continue;
+    }
+
+    /* 16-bit writes */
+    if (type == 0x80 || type == 0x10) {
+      if (addr + 2 <= 0x00200000) {
+        *(uint16_t *)((uint8_t *)ps1_ram_base + (addr & ~1U)) = val;
+      }
+    }
+    /* 8-bit writes */
+    else if (type == 0x30 || type == 0x20) {
+      if (addr + 1 <= 0x00200000) {
+        *(uint8_t *)((uint8_t *)ps1_ram_base + addr) = (uint8_t)val;
+      }
+    }
+
     i++;
   }
   return 0;
@@ -247,6 +313,12 @@ int pops_apply_all_config_patches(void *staged_core, size_t core_size, const Pop
 
   if (cfg->smooth)
     pops_apply_smooth(staged_core, core_size);
+
+  if (cfg->widescreen)
+    pops_apply_widescreen(staged_core, core_size);
+
+  if (cfg->dither_off)
+    pops_apply_dither_off(staged_core, core_size);
 
   if (cfg->fast_mips || cfg->slow_mips)
     pops_apply_throttling(staged_core, core_size, cfg->fast_mips, cfg->slow_mips);

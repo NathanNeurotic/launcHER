@@ -12,138 +12,262 @@ void pops_config_init(PopsConfig *cfg) {
   cfg->video_mode = POPS_VMODE_DEFAULT;
 }
 
+static int is_hex_string(const char *s, size_t len) {
+  for (size_t i = 0; i < len; ++i) {
+    if (!isxdigit((unsigned char)s[i]))
+      return 0;
+  }
+  return 1;
+}
+
+static int try_parse_cheat(PopsConfig *cfg, const char *tok1, const char *tok2) {
+  const char *p1 = (*tok1 == '$') ? tok1 + 1 : tok1;
+  if (strlen(p1) != 8 || strlen(tok2) != 4)
+    return 0;
+  if (!is_hex_string(p1, 8) || !is_hex_string(tok2, 4))
+    return 0;
+
+  uint32_t raw_addr = (uint32_t)strtoul(p1, NULL, 16);
+  uint16_t val = (uint16_t)strtoul(tok2, NULL, 16);
+  uint8_t type = (uint8_t)(raw_addr >> 24);
+
+  if (type != 0x80 && type != 0x10 && type != 0x30 && type != 0x20 &&
+      type != 0xD0 && type != 0xD1 && type != 0xD2 && type != 0xD3 &&
+      type != 0xE0 && type != 0xE1) {
+    return 0;
+  }
+
+  if (cfg->cheat_count < POPS_MAX_CHEATS) {
+    cfg->cheats[cfg->cheat_count].address = raw_addr & 0x001FFFFF;
+    cfg->cheats[cfg->cheat_count].value = val;
+    cfg->cheats[cfg->cheat_count].type = type;
+    cfg->cheat_count++;
+    return 1;
+  }
+  return 0;
+}
+
+static int parse_single_directive(PopsConfig *cfg, const char *token) {
+  if (!cfg || !token || !*token)
+    return 0;
+
+  if (!strcasecmp(token, "$480p")) {
+    cfg->video_mode = POPS_VMODE_480P;
+    return 1;
+  }
+  if (!strcasecmp(token, "$480i")) {
+    cfg->video_mode = POPS_VMODE_480I;
+    return 1;
+  }
+  if (!strcasecmp(token, "$576p")) {
+    cfg->video_mode = POPS_VMODE_576P;
+    return 1;
+  }
+  if (!strcasecmp(token, "$576i")) {
+    cfg->video_mode = POPS_VMODE_576I;
+    return 1;
+  }
+  if (!strcasecmp(token, "$240p")) {
+    cfg->video_mode = POPS_VMODE_240P;
+    return 1;
+  }
+  if (!strcasecmp(token, "$PAL2NTSC") || !strcasecmp(token, "$FORCENTSC")) {
+    cfg->video_mode = POPS_VMODE_PAL2NTSC;
+    return 1;
+  }
+  if (!strcasecmp(token, "$NTSC2PAL") || !strcasecmp(token, "$FORCEPAL")) {
+    cfg->video_mode = POPS_VMODE_NTSC2PAL;
+    return 1;
+  }
+  if (!strcasecmp(token, "$NOPAL")) {
+    cfg->video_mode = POPS_VMODE_NOPAL;
+    return 1;
+  }
+  if (!strncasecmp(token, "$VMODE_", 7) || !strncasecmp(token, "$VMODE", 6)) {
+    const char *num_str = (!strncasecmp(token, "$VMODE_", 7)) ? token + 7 : token + 6;
+    int vm = (int)strtol(num_str, NULL, 10);
+    if (vm >= POPS_VMODE_DEFAULT && vm <= POPS_VMODE_240P) {
+      cfg->video_mode = (uint8_t)vm;
+      return 1;
+    }
+  }
+  if (!strcasecmp(token, "$HDTVFIX")) {
+    cfg->hdtv_fix = 1;
+    return 1;
+  }
+  if (!strcasecmp(token, "$SMOOTH")) {
+    cfg->smooth = 1;
+    return 1;
+  }
+  if (!strcasecmp(token, "$WIDESCREEN")) {
+    cfg->widescreen = 1;
+    return 1;
+  }
+  if (!strcasecmp(token, "$DITHER_OFF") || !strcasecmp(token, "$NODITHER")) {
+    cfg->dither_off = 1;
+    return 1;
+  }
+  if (!strcasecmp(token, "$FASTMIPS")) {
+    cfg->fast_mips = 1;
+    return 1;
+  }
+  if (!strcasecmp(token, "$SLOWMIPS")) {
+    cfg->slow_mips = 1;
+    return 1;
+  }
+  if (!strcasecmp(token, "$NOBOOT") || !strcasecmp(token, "$BIOS")) {
+    cfg->no_boot = 1;
+    return 1;
+  }
+  if (!strcasecmp(token, "$NOIGR") || !strcasecmp(token, "$IGR0")) {
+    cfg->no_igr = 1;
+    cfg->igr_type = 0;
+    return 1;
+  }
+  if (!strcasecmp(token, "$IGR1")) {
+    cfg->no_igr = 0;
+    cfg->igr_type = 1;
+    return 1;
+  }
+  if (!strcasecmp(token, "$IGR2")) {
+    cfg->no_igr = 0;
+    cfg->igr_type = 2;
+    return 1;
+  }
+  if (!strcasecmp(token, "$SAFEMODE")) {
+    cfg->safe_mode = 1;
+    return 1;
+  }
+  if (!strncasecmp(token, "$USBDELAY_", 10)) {
+    cfg->usb_delay = (uint8_t)strtol(token + 10, NULL, 10);
+    return 1;
+  }
+  if (!strncasecmp(token, "$USBDELAY", 9) && isdigit((unsigned char)token[9])) {
+    cfg->usb_delay = (uint8_t)strtol(token + 9, NULL, 10);
+    return 1;
+  }
+  if (!strncasecmp(token, "$XPOS_", 6)) {
+    cfg->x_offset = (int16_t)strtol(token + 6, NULL, 10);
+    return 1;
+  }
+  if (!strncasecmp(token, "$YPOS_", 6)) {
+    cfg->y_offset = (int16_t)strtol(token + 6, NULL, 10);
+    return 1;
+  }
+  if (!strncasecmp(token, "$COMPATIBILITY_0x0", 18)) {
+    int mode = (int)strtol(token + 18, NULL, 16);
+    if (mode >= 1 && mode <= 8) {
+      cfg->compat_modes |= (uint8_t)(1 << (mode - 1));
+      return 1;
+    }
+  }
+  if (!strncasecmp(token, "$COMPATIBILITY_0x", 17)) {
+    int mode = (int)strtol(token + 17, NULL, 16);
+    if (mode >= 1 && mode <= 8) {
+      cfg->compat_modes |= (uint8_t)(1 << (mode - 1));
+      return 1;
+    }
+  }
+  if (!strncasecmp(token, "$MODE", 5) && isdigit((unsigned char)token[5])) {
+    int mode = (int)strtol(token + 5, NULL, 10);
+    if (mode >= 1 && mode <= 8) {
+      cfg->compat_modes |= (uint8_t)(1 << (mode - 1));
+      return 1;
+    }
+  }
+  if (isdigit((unsigned char)*token)) {
+    int mode = (int)strtol(token, NULL, 10);
+    if (mode >= 1 && mode <= 8 && token[1] == '\0') {
+      cfg->compat_modes |= (uint8_t)(1 << (mode - 1));
+      return 1;
+    }
+  }
+  return 0;
+}
+
 int pops_config_parse_line(PopsConfig *cfg, const char *line) {
   if (!cfg || !line)
     return -EINVAL;
 
-  /* Skip leading whitespace */
-  while (*line && isspace((unsigned char)*line))
-    line++;
+  const char *p = line;
+  char token[64];
+  char next_token[64];
 
-  /* Ignore empty lines and comments */
-  if (!*line || *line == '#' || *line == ';')
+  while (*p && isspace((unsigned char)*p))
+    p++;
+
+  if (!*p || *p == '#' || *p == ';')
     return 0;
 
-  /* Handle '$' configuration commands */
-  if (*line == '$') {
-    if (!strcasecmp(line, "$480p")) {
-      cfg->video_mode = POPS_VMODE_480P;
+  int len1 = 0;
+  while (*p && !isspace((unsigned char)*p) && len1 < (int)sizeof(token) - 1) {
+    token[len1++] = *p++;
+  }
+  token[len1] = '\0';
+
+  while (*p && isspace((unsigned char)*p))
+    p++;
+
+  if (*p && *p != '#' && *p != ';') {
+    const char *save_p = p;
+    int len2 = 0;
+    while (*p && !isspace((unsigned char)*p) && len2 < (int)sizeof(next_token) - 1) {
+      next_token[len2++] = *p++;
+    }
+    next_token[len2] = '\0';
+
+    if (try_parse_cheat(cfg, token, next_token)) {
       return 0;
     }
-    if (!strcasecmp(line, "$480i")) {
-      cfg->video_mode = POPS_VMODE_480I;
-      return 0;
-    }
-    if (!strcasecmp(line, "$576p")) {
-      cfg->video_mode = POPS_VMODE_576P;
-      return 0;
-    }
-    if (!strcasecmp(line, "$576i")) {
-      cfg->video_mode = POPS_VMODE_576I;
-      return 0;
-    }
-    if (!strcasecmp(line, "$PAL2NTSC")) {
-      cfg->video_mode = POPS_VMODE_PAL2NTSC;
-      return 0;
-    }
-    if (!strcasecmp(line, "$NTSC2PAL")) {
-      cfg->video_mode = POPS_VMODE_NTSC2PAL;
-      return 0;
-    }
-    if (!strcasecmp(line, "$NOPAL")) {
-      cfg->video_mode = POPS_VMODE_NOPAL;
-      return 0;
-    }
-    if (!strcasecmp(line, "$HDTVFIX")) {
-      cfg->hdtv_fix = 1;
-      return 0;
-    }
-    if (!strcasecmp(line, "$SMOOTH")) {
-      cfg->smooth = 1;
-      return 0;
-    }
-    if (!strcasecmp(line, "$FASTMIPS")) {
-      cfg->fast_mips = 1;
-      return 0;
-    }
-    if (!strcasecmp(line, "$SLOWMIPS")) {
-      cfg->slow_mips = 1;
-      return 0;
-    }
-    if (!strcasecmp(line, "$NOBOOT") || !strcasecmp(line, "$BIOS")) {
-      cfg->no_boot = 1;
-      return 0;
-    }
-    if (!strcasecmp(line, "$NOIGR")) {
-      cfg->no_igr = 1;
-      return 0;
-    }
-    if (!strncasecmp(line, "$XPOS_", 6)) {
-      cfg->x_offset = (int16_t)strtol(line + 6, NULL, 10);
-      return 0;
-    }
-    if (!strncasecmp(line, "$YPOS_", 6)) {
-      cfg->y_offset = (int16_t)strtol(line + 6, NULL, 10);
-      return 0;
-    }
-    if (!strncasecmp(line, "$COMPATIBILITY_0x0", 18)) {
-      int mode = (int)strtol(line + 18, NULL, 16);
+
+    if ((!strcasecmp(token, "MODE") || !strcasecmp(token, "$MODE")) &&
+        isdigit((unsigned char)*next_token)) {
+      int mode = (int)strtol(next_token, NULL, 10);
       if (mode >= 1 && mode <= 8) {
         cfg->compat_modes |= (uint8_t)(1 << (mode - 1));
-        return 0;
       }
+      goto loop_remaining;
     }
-    if (!strncasecmp(line, "$COMPATIBILITY_0x", 17)) {
-      int mode = (int)strtol(line + 17, NULL, 16);
+
+    parse_single_directive(cfg, token);
+    p = save_p;
+  } else {
+    parse_single_directive(cfg, token);
+  }
+
+loop_remaining:
+  while (*p) {
+    while (*p && isspace((unsigned char)*p))
+      p++;
+    if (!*p || *p == '#' || *p == ';')
+      break;
+
+    int tlen = 0;
+    while (*p && !isspace((unsigned char)*p) && tlen < (int)sizeof(token) - 1) {
+      token[tlen++] = *p++;
+    }
+    token[tlen] = '\0';
+
+    while (*p && isspace((unsigned char)*p))
+      p++;
+
+    if ((!strcasecmp(token, "MODE") || !strcasecmp(token, "$MODE")) &&
+        *p && isdigit((unsigned char)*p)) {
+      const char *save_p = p;
+      int nlen = 0;
+      while (*p && !isspace((unsigned char)*p) && nlen < (int)sizeof(next_token) - 1) {
+        next_token[nlen++] = *p++;
+      }
+      next_token[nlen] = '\0';
+      int mode = (int)strtol(next_token, NULL, 10);
       if (mode >= 1 && mode <= 8) {
         cfg->compat_modes |= (uint8_t)(1 << (mode - 1));
-        return 0;
+        continue;
       }
+      p = save_p;
     }
-    if (!strncasecmp(line, "$MODE", 5)) {
-      int mode = (int)strtol(line + 5, NULL, 10);
-      if (mode >= 1 && mode <= 8) {
-        cfg->compat_modes |= (uint8_t)(1 << (mode - 1));
-        return 0;
-      }
-    }
-    return 0;
-  }
 
-  /* Handle bare digits for compatibility modes in MODES.TXT (e.g. "1", "2", "3") */
-  if (isdigit((unsigned char)*line)) {
-    int mode = (int)strtol(line, NULL, 10);
-    if (mode >= 1 && mode <= 8) {
-      cfg->compat_modes |= (uint8_t)(1 << (mode - 1));
-      return 0;
-    }
-  }
-
-  if (!strncasecmp(line, "MODE ", 5) && isdigit((unsigned char)line[5])) {
-    int mode = (int)strtol(line + 5, NULL, 10);
-    if (mode >= 1 && mode <= 8) {
-      cfg->compat_modes |= (uint8_t)(1 << (mode - 1));
-      return 0;
-    }
-  }
-
-  /* Handle GameShark / Action Replay cheat codes: e.g. "8009A120 0004" */
-  char code1[32], code2[32];
-  if (sscanf(line, "%31s %31s", code1, code2) == 2) {
-    if (strlen(code1) == 8 && strlen(code2) == 4) {
-      if (cfg->cheat_count < POPS_MAX_CHEATS) {
-        uint32_t raw_addr = (uint32_t)strtoul(code1, NULL, 16);
-        uint16_t val = (uint16_t)strtoul(code2, NULL, 16);
-        uint8_t type = (uint8_t)(raw_addr >> 24);
-        uint32_t addr = raw_addr & 0x001FFFFF; /* 2MB PS1 RAM mask */
-
-        cfg->cheats[cfg->cheat_count].address = addr;
-        cfg->cheats[cfg->cheat_count].value = val;
-        cfg->cheats[cfg->cheat_count].type = type;
-        cfg->cheat_count++;
-        return 0;
-      }
-    }
+    parse_single_directive(cfg, token);
   }
 
   return 0;
