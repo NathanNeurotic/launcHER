@@ -210,19 +210,28 @@ arg=-dev9=NIC</code></pre>
   </table>
 </div>
 
-<h3>Method B: Direct Binary Quickboot (POPStarter Style)</h3>
+<h3>Method B: Direct Binary Quickboot (POPStarter Drop-in Replacement)</h3>
 <p>
-  If you do not create a <code>launcHER.CNF</code> file, launcHER discovers adjacent game images based on its executable filename:
+  When running without a <code>launcHER.CNF</code> file, launcHER discovers game images based on its executable filename:
 </p>
 
 <ol class="checklist">
-  <li><b>No Prefix (Default POPS APA):</b> Renaming the ELF to <code>Crash Bandicoot.ELF</code> without a prefix defaults to the internal HDD APA partition: <code>hdd0:__.POPS:pfs:/Crash Bandicoot.VCD</code>, followed by adjacent directory checks.</li>
-  <li><b>USB Prefix (<code>XX.</code>):</b> Prefixes like <code>XX.Crash Bandicoot.ELF</code> target USB mass storage first: checking the adjacent folder, <code>mass0:/POPS/Crash Bandicoot.VCD</code>, and adjacent <code>IMAGE.VCD</code>.</li>
-  <li><b>Matching Title First:</b> launcHER checks for matching <code>&lt;Game&gt;.VCD</code> before falling back to <code>IMAGE.VCD</code>.</li>
+  <li><b>No Prefix (Default POPS APA):</b> An executable named <code>Crash Bandicoot.ELF</code> without a prefix defaults to the internal HDD APA partition: <code>hdd0:__.POPS:pfs:/Crash Bandicoot.VCD</code>, followed by adjacent directory checks.</li>
+  <li><b>BDMA and Storage Prefix (<code>XX.</code>):</b> Executables named with an <code>XX.</code> prefix (such as <code>XX.Crash Bandicoot.ELF</code>) inspect BDMA settings on memory card (<code>mc0:/POPSTARTER/bdma_mode.txt</code>, <code>mc1:/POPSTARTER/bdma_mode.txt</code>, or <code>.pldr_bdma_mode</code>). When configured, launcHER routes to the designated backend:
+    <ul>
+      <li><code>ATA</code> or <code>EXFAT</code>: Internal exFAT HDD (<code>ata:/POPS/&lt;Game&gt;.VCD</code>).</li>
+      <li><code>MX4SIO</code>: SD card in memory card slot (<code>mx4sio:/POPS/&lt;Game&gt;.VCD</code>).</li>
+      <li><code>MMCE</code>: Memory Card SD adapter (<code>mmce0:/POPS/&lt;Game&gt;.VCD</code>).</li>
+      <li><code>USB</code> or default: USB mass storage (<code>mass0:/POPS/&lt;Game&gt;.VCD</code>).</li>
+    </ul>
+    When BDMA driver binaries (<code>bdm_assault.irx</code>, <code>BDM.IRX</code>, <code>USBD.IRX</code>) exist without a mode marker, launcHER probes USB, ATA, MX4SIO, and MMCE in sequence.
+  </li>
+  <li><b>SMB Prefix (<code>SB.</code>):</b> Executables named with an <code>SB.</code> prefix (such as <code>SB.Crash Bandicoot.ELF</code>) route to SMB network shares (<code>smb0:/POPS/&lt;Game&gt;.VCD</code>).</li>
+  <li><b>Matching Title Priority:</b> launcHER verifies <code>&lt;Game&gt;.VCD</code> before checking generic <code>IMAGE.VCD</code>.</li>
 </ol>
 
 <p>
-  This matches POPStarter's traditional OPL APPS and HDD conventions, allowing seamless drop-in upgrades without rewriting existing menu configurations.
+  This maintains POPStarter directory conventions without requiring BDMAssault driver binaries or Sony modules beyond the standard POPS emulator package.
 </p>
 
 <h3>Method C: Direct Command-Line Invocation</h3>
@@ -232,7 +241,8 @@ arg=-dev9=NIC</code></pre>
 
 <ul>
   <li><b>Bare Game Title:</b> <code>launcHER.elf "Crash Bandicoot"</code> defaults to <code>hdd0:__.POPS:pfs:/Crash Bandicoot.VCD</code>, followed by launcher directory and USB fallbacks.</li>
-  <li><b>Prefixed Title:</b> <code>launcHER.elf "XX.Crash Bandicoot"</code> targets USB mass storage.</li>
+  <li><b>Prefixed Title:</b> <code>launcHER.elf "XX.Crash Bandicoot"</code> checks BDMA mode markers and routes to the active backend (ATA, MX4SIO, MMCE, or USB).</li>
+  <li><b>SMB Prefixed Title:</b> <code>launcHER.elf "SB.Crash Bandicoot"</code> checks SMB network shares.</li>
   <li><b>Relative or Full Path:</b> <code>launcHER.elf mass0:/POPS/Crash Bandicoot.VCD</code> boots the target image directly.</li>
 </ul>
 

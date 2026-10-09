@@ -248,7 +248,7 @@
   {
     "title": "POPS Quickboot and launcHER.CNF Configuration",
     "cat": "pops",
-    "text": "Configure path= pointing directly to .VCD files across USB (mass?:), ATA exFAT (ata:), APA PFS (hdd0:__.POPS), MMCE, MX4SIO, i.Link, UDPBD, and UDPFS. Supports direct invocation and quickboot without CNF, defaulting unprefixed titles to POPS APA.",
+    "text": "Configure path= pointing directly to .VCD files across USB (mass?:), ATA exFAT (ata:), APA PFS (hdd0:__.POPS), MMCE, MX4SIO, i.Link, UDPBD, and UDPFS. Supports direct invocation and quickboot without CNF, defaulting unprefixed titles to POPS APA, detecting BDMA settings for XX. prefixes (ATA, MX4SIO, MMCE, USB), and SB. prefixes for SMB.",
     "url": "pops-setup.html#step-3-launch-methods"
   },
   {

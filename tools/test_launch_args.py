@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import tempfile
 
 root = Path(__file__).resolve().parents[1]
 build = root / 'build/launch-args-host'
@@ -52,15 +53,83 @@ check([self, None], None)
 check([''], None)
 assert lib.launcher_normalize_args(0, None) == -1
 
+# BDMA mode parsing tests
+lib.pops_parse_bdma_mode.argtypes = [c.c_char_p]
+lib.pops_parse_bdma_mode.restype = c.c_int
+
+assert lib.pops_parse_bdma_mode(b"ATA") == 2
+assert lib.pops_parse_bdma_mode(b"ata0") == 2
+assert lib.pops_parse_bdma_mode(b"EXFAT") == 2
+assert lib.pops_parse_bdma_mode(b"HDD") == 2
+assert lib.pops_parse_bdma_mode(b"MX4SIO") == 3
+assert lib.pops_parse_bdma_mode(b"mc2sio") == 3
+assert lib.pops_parse_bdma_mode(b"MMCE") == 4
+assert lib.pops_parse_bdma_mode(b"mmce1") == 4
+assert lib.pops_parse_bdma_mode(b"USB") == 1
+assert lib.pops_parse_bdma_mode(b"fat32") == 1
+assert lib.pops_parse_bdma_mode(b"GENERIC") == 5
+assert lib.pops_parse_bdma_mode(b"bdma") == 5
+assert lib.pops_parse_bdma_mode(b"unknown") == 0
+assert lib.pops_parse_bdma_mode(b"# comment") == 0
+assert lib.pops_parse_bdma_mode(None) == 0
+
+# BDMA detection tests via test root
+lib.pops_set_bdma_test_root.argtypes = [c.c_char_p]
+lib.pops_set_bdma_test_root.restype = None
+lib.pops_detect_bdma_mode.argtypes = []
+lib.pops_detect_bdma_mode.restype = c.c_int
+
+with tempfile.TemporaryDirectory() as tmpdir:
+    td = Path(tmpdir)
+    lib.pops_set_bdma_test_root(str(td).encode())
+    # Empty dir: NONE
+    assert lib.pops_detect_bdma_mode() == 0
+
+    # bdma_mode.txt with ATA
+    pop_dir = td / "POPSTARTER"
+    pop_dir.mkdir(parents=True, exist_ok=True)
+    mode_file = pop_dir / "bdma_mode.txt"
+    mode_file.write_text("ATA\n")
+    assert lib.pops_detect_bdma_mode() == 2
+
+    # bdma_mode.txt with MX4SIO
+    mode_file.write_text("MX4SIO\n")
+    assert lib.pops_detect_bdma_mode() == 3
+
+    # bdma_mode.txt with MMCE
+    mode_file.write_text("MMCE\n")
+    assert lib.pops_detect_bdma_mode() == 4
+
+    mode_file.unlink()
+
+    # Presence of driver: bdm_assault.irx -> GENERIC
+    driver_file = pop_dir / "bdm_assault.irx"
+    driver_file.write_bytes(b"\x00" * 16)
+    assert lib.pops_detect_bdma_mode() == 5
+
+    driver_file.unlink()
+
+    # Reset test root
+    lib.pops_set_bdma_test_root(None)
+
 # Candidate target resolution tests
 lib.pops_resolve_candidate_targets.argtypes = [c.c_char_p, c.c_char_p, c.POINTER(c.c_char * 512), c.c_int]
 lib.pops_resolve_candidate_targets.restype = c.c_int
+lib.pops_resolve_candidate_targets_bdma.argtypes = [c.c_char_p, c.c_char_p, c.POINTER(c.c_char * 512), c.c_int, c.c_int]
+lib.pops_resolve_candidate_targets_bdma.restype = c.c_int
 
 def resolve(launcher, arg, max_c=16):
     buf = ((c.c_char * 512) * max_c)()
     lp = launcher.encode() if launcher is not None else None
     a = arg.encode() if arg is not None else None
     count = lib.pops_resolve_candidate_targets(lp, a, buf, max_c)
+    return [bytes(buf[i]).split(b'\x00')[0].decode() for i in range(count)]
+
+def resolve_bdma(launcher, arg, mode, max_c=16):
+    buf = ((c.c_char * 512) * max_c)()
+    lp = launcher.encode() if launcher is not None else None
+    a = arg.encode() if arg is not None else None
+    count = lib.pops_resolve_candidate_targets_bdma(lp, a, buf, max_c, mode)
     return [bytes(buf[i]).split(b'\x00')[0].decode() for i in range(count)]
 
 # 1. No prefix bare title: defaults to POPS APA partition first
@@ -91,4 +160,36 @@ assert cands[2] == 'mass0:/POPS/Crash Bandicoot.VCD', cands
 cands = resolve('mc0:/BOOT/BOOT.ELF', 'mass0:/POPS/Crash Bandicoot.VCD')
 assert cands == ['mass0:/POPS/Crash Bandicoot.VCD'], cands
 
-print('Launcher argv compatibility PASS: duplicated self paths, partition identity, explicit targets, malformed argv, pops candidate resolution')
+# 6. ATA BDMA mode with XX. prefix
+cands = resolve_bdma('mass0:/APPS/XX.Crash Bandicoot.ELF', None, 2)
+assert cands[0] == 'ata:/POPS/Crash Bandicoot.VCD', cands
+assert cands[1] == 'ata:/POPS/IMAGE.VCD', cands
+assert cands[2] == 'ata:/Crash Bandicoot.VCD', cands
+
+# 7. MX4SIO BDMA mode with XX. prefix
+cands = resolve_bdma('mass0:/APPS/launcHER.elf', 'XX.Crash Bandicoot', 3)
+assert cands[0] == 'mx4sio:/POPS/Crash Bandicoot.VCD', cands
+assert cands[1] == 'mx4sio:/POPS/IMAGE.VCD', cands
+assert cands[2] == 'mx4sio:/Crash Bandicoot.VCD', cands
+
+# 8. MMCE BDMA mode with XX. prefix
+cands = resolve_bdma('mass0:/APPS/XX.Crash Bandicoot.ELF', None, 4)
+assert cands[0] == 'mmce0:/POPS/Crash Bandicoot.VCD', cands
+assert cands[1] == 'mmce0:/POPS/IMAGE.VCD', cands
+assert cands[2] == 'mmce0:/Crash Bandicoot.VCD', cands
+assert cands[3] == 'mmce1:/POPS/Crash Bandicoot.VCD', cands
+
+# 9. Generic BDMA mode with XX. prefix: probes USB, ATA, MX4SIO, MMCE
+cands = resolve_bdma('mass0:/APPS/XX.Crash Bandicoot.ELF', None, 5)
+assert cands[0] == 'mass0:/POPS/Crash Bandicoot.VCD', cands
+assert 'ata:/POPS/Crash Bandicoot.VCD' in cands, cands
+assert 'mx4sio:/POPS/Crash Bandicoot.VCD' in cands, cands
+assert 'mmce0:/POPS/Crash Bandicoot.VCD' in cands, cands
+
+# 10. SB. prefix (SMB network share)
+cands = resolve('smb0:/POPS/SB.Crash Bandicoot.ELF', None)
+assert cands[0] == 'smb0:/POPS/Crash Bandicoot.VCD', cands
+assert cands[1] == 'smb0:/Crash Bandicoot.VCD', cands
+assert cands[2] == 'smb:/POPS/Crash Bandicoot.VCD', cands
+
+print('Launcher argv compatibility PASS: duplicated self paths, partition identity, explicit targets, malformed argv, pops candidate resolution, bdma detection and routing')
