@@ -51,4 +51,44 @@ check([bare, bare], [bare])  # Cannot invent the missing HDD partition.
 check([self, None], None)
 check([''], None)
 assert lib.launcher_normalize_args(0, None) == -1
-print('Launcher argv compatibility PASS: duplicated self paths, partition identity, explicit targets, malformed argv')
+
+# Candidate target resolution tests
+lib.pops_resolve_candidate_targets.argtypes = [c.c_char_p, c.c_char_p, c.POINTER(c.c_char * 512), c.c_int]
+lib.pops_resolve_candidate_targets.restype = c.c_int
+
+def resolve(launcher, arg, max_c=16):
+    buf = ((c.c_char * 512) * max_c)()
+    lp = launcher.encode() if launcher is not None else None
+    a = arg.encode() if arg is not None else None
+    count = lib.pops_resolve_candidate_targets(lp, a, buf, max_c)
+    return [bytes(buf[i]).split(b'\x00')[0].decode() for i in range(count)]
+
+# 1. No prefix bare title: defaults to POPS APA partition first
+cands = resolve('mass0:/APPS/launcHER.elf', 'Crash Bandicoot')
+assert cands[0] == 'hdd0:__.POPS:pfs:/Crash Bandicoot.VCD', cands
+assert cands[1] == 'hdd0:__.POPS:pfs:/IMAGE.VCD', cands
+assert 'mass0:/APPS/Crash Bandicoot.VCD' in cands
+assert 'mass0:/POPS/Crash Bandicoot.VCD' in cands
+
+# 2. No prefix renamed ELF (Quickboot): defaults to POPS APA partition first
+cands = resolve('hdd0:+OPL:pfs:/APPS/Crash Bandicoot.ELF', None)
+assert cands[0] == 'hdd0:__.POPS:pfs:/Crash Bandicoot.VCD', cands
+assert cands[1] == 'hdd0:__.POPS:pfs:/IMAGE.VCD', cands
+
+# 3. With XX. prefix in ELF name: USB mass targets take priority over APA
+cands = resolve('mass0:/APPS/XX.Crash Bandicoot.ELF', None)
+assert cands[0] == 'mass0:/APPS/Crash Bandicoot.VCD', cands
+assert cands[1] == 'mass0:/APPS/IMAGE.VCD', cands
+assert cands[2] == 'mass0:/POPS/Crash Bandicoot.VCD', cands
+
+# 4. With XX. prefix in argument: USB mass targets take priority over APA
+cands = resolve('mass0:/APPS/launcHER.elf', 'XX.Crash Bandicoot')
+assert cands[0] == 'mass0:/APPS/Crash Bandicoot.VCD', cands
+assert cands[1] == 'mass0:/APPS/IMAGE.VCD', cands
+assert cands[2] == 'mass0:/POPS/Crash Bandicoot.VCD', cands
+
+# 5. Full explicit device path: preserved directly
+cands = resolve('mc0:/BOOT/BOOT.ELF', 'mass0:/POPS/Crash Bandicoot.VCD')
+assert cands == ['mass0:/POPS/Crash Bandicoot.VCD'], cands
+
+print('Launcher argv compatibility PASS: duplicated self paths, partition identity, explicit targets, malformed argv, pops candidate resolution')

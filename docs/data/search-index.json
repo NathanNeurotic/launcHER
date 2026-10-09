@@ -1,12 +1,12 @@
 [
   {
-    "title": "launcHER Documentation — Home Overview",
+    "title": "launcHER Documentation \u2014 Home Overview",
     "cat": "overview",
     "text": "launcHER is a standalone PlayStation 2 forwarder built specifically to launch Ember from supported storage devices while preserving the environment Ember needs after handoff. Standalone forwarder, Ember handoff, PFS mount persistence, exFAT, ATA BDM, USB, MX4SIO, MMCE, DEV9 power preservation, OPL DB, uLaunchELF.",
     "url": "index.html"
   },
   {
-    "title": "HDD Users — Read This First",
+    "title": "HDD Users \u2014 Read This First",
     "cat": "storage",
     "text": "launcHER does not require a dedicated HDD partition. The __.EMBER APA partition is only an example. Choose the path that matches where Ember actually lives: USB mass?:/EMBER/ember.elf, internal exFAT ata:/EMBER/ember.elf, or APA/PFS hdd0:<PARTITION>:pfs:/EMBER/ember.elf.",
     "url": "index.html#hdd-myth"
@@ -18,7 +18,7 @@
     "url": "index.html#why-launcher"
   },
   {
-    "title": "Getting Started — Ember Directory Layout",
+    "title": "Getting Started \u2014 Ember Directory Layout",
     "cat": "start",
     "text": "Ember folder structure: EMBER/ember.elf, EMBER/bios.bin, EMBER/games/<GAME_FOLDER>/ containing cue and bin files. Constant across USB, exFAT, and APA PFS.",
     "url": "getting-started.html#step-1-ember-layout"
@@ -42,7 +42,7 @@
     "url": "getting-started.html#renaming-elf"
   },
   {
-    "title": "Which HDD Do I Have? — Decision Tree",
+    "title": "Which HDD Do I Have? \u2014 Decision Tree",
     "cat": "storage",
     "text": "Identify your PS2 HDD setup: USB external drive (mass?:), internal exFAT ATA BDM (ata:), mixed APA-Jail, or traditional APA/PFS partitions (hdd0:).",
     "url": "hdd-modes.html#decision-tree"
@@ -78,37 +78,37 @@
     "url": "hdd-modes.html#separation-of-concerns"
   },
   {
-    "title": "Storage Profiles — USB Mass Storage",
+    "title": "Storage Profiles \u2014 USB Mass Storage",
     "cat": "storage",
     "text": "USB configuration: path=mass?:/EMBER/ember.elf with arg=<GAME_FOLDER>. Supports mass?:, usb?:, and specific units like mass0:.",
     "url": "storage-profiles.html#profile-usb"
   },
   {
-    "title": "Storage Profiles — Internal exFAT (ATA BDM)",
+    "title": "Storage Profiles \u2014 Internal exFAT (ATA BDM)",
     "cat": "storage",
     "text": "Internal exFAT HDD: path=ata:/EMBER/ember.elf, arg=<GAME_FOLDER>, arg=-dev9=NICHDD. Keeps the expansion bay IDE interface powered for Ember.",
     "url": "storage-profiles.html#profile-exfat"
   },
   {
-    "title": "Storage Profiles — APA / PFS HDD",
+    "title": "Storage Profiles \u2014 APA / PFS HDD",
     "cat": "storage",
     "text": "APA/PFS profile: path=hdd0:<PARTITION>:pfs:/EMBER/ember.elf, arg=pfs0:/EMBER/ember.elf, arg=<GAME_FOLDER>, arg=-skip_argv0, arg=-dev9=NICHDD.",
     "url": "storage-profiles.html#profile-apa-pfs"
   },
   {
-    "title": "Storage Profiles — MMCE & Memory Card",
+    "title": "Storage Profiles \u2014 MMCE & Memory Card",
     "cat": "storage",
     "text": "MMCE SPI SD card adapter (mmce?:/EMBER/ember.elf) and standard PlayStation 2 Memory Cards (mc?:/EMBER/ember.elf).",
     "url": "storage-profiles.html#profile-mmce"
   },
   {
-    "title": "Storage Profiles — MX4SIO & i.Link",
+    "title": "Storage Profiles \u2014 MX4SIO & i.Link",
     "cat": "storage",
     "text": "MX4SIO SIO2 SD adapter (mx4sio:/EMBER/ember.elf) and early fat PS2 i.Link FireWire (ilink:/EMBER/ember.elf).",
     "url": "storage-profiles.html#profile-mx4sio"
   },
   {
-    "title": "Storage Profiles — UDPBD & UDPFS Network Boot",
+    "title": "Storage Profiles \u2014 UDPBD & UDPFS Network Boot",
     "cat": "storage",
     "text": "UDPBD network block device and UDPFS network filesystem with arg=-dev9=NIC. IP configuration read from mc?:/SYS-CONF/IPCONFIG.DAT.",
     "url": "storage-profiles.html#profile-udpbd"
@@ -248,7 +248,7 @@
   {
     "title": "POPS Quickboot and launcHER.CNF Configuration",
     "cat": "pops",
-    "text": "Configure path= pointing directly to .VCD files across USB (mass?:), ATA exFAT (ata:), APA PFS (hdd0:__.POPS), MMCE, MX4SIO, i.Link, UDPBD, and UDPFS.",
+    "text": "Configure path= pointing directly to .VCD files across USB (mass?:), ATA exFAT (ata:), APA PFS (hdd0:__.POPS), MMCE, MX4SIO, i.Link, UDPBD, and UDPFS. Supports direct invocation and quickboot without CNF, defaulting unprefixed titles to POPS APA.",
     "url": "pops-setup.html#step-3-launch-methods"
   },
   {

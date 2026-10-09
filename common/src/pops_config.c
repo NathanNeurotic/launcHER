@@ -359,7 +359,22 @@ int pops_config_discover(PopsConfig *cfg, const char *vcd_dir, const char *game_
 
   char path[512];
 
-  /* 1. Try PATCHES.TXT in game directory */
+  /* 1. Try global configuration in memory cards (mc0:/POPSTARTER/, mc1:/POPSTARTER/, mc0:/POPS/) */
+  static const char *globalDirs[] = {
+    "mc0:/POPSTARTER/", "mc1:/POPSTARTER/", "mc0:/POPS/", "mc1:/POPS/"
+  };
+  for (int g = 0; g < 4; ++g) {
+    snprintf(path, sizeof(path), "%sPATCHES.TXT", globalDirs[g]);
+    pops_config_load_file(cfg, path);
+
+    snprintf(path, sizeof(path), "%sMODES.TXT", globalDirs[g]);
+    pops_config_load_file(cfg, path);
+
+    snprintf(path, sizeof(path), "%sCHEATS.TXT", globalDirs[g]);
+    pops_config_load_cheats(cfg, path);
+  }
+
+  /* 2. Try PATCHES.TXT in game directory */
   if (vcd_dir && vcd_dir[0]) {
     snprintf(path, sizeof(path), "%sPATCHES.TXT", vcd_dir);
     pops_config_load_file(cfg, path);
@@ -377,7 +392,7 @@ int pops_config_discover(PopsConfig *cfg, const char *vcd_dir, const char *game_
     pops_config_load_vmcdir(cfg, path);
   }
 
-  /* 2. Try VMC subfolder <game_base>/ (or custom vmc_dir) */
+  /* 3. Try VMC subfolder <game_base>/ (or custom vmc_dir) */
   const char *subfolder = cfg->vmc_dir[0] ? cfg->vmc_dir : game_base;
   if (vcd_dir && vcd_dir[0] && subfolder && subfolder[0]) {
     snprintf(path, sizeof(path), "%s%s/PATCHES.TXT", vcd_dir, subfolder);

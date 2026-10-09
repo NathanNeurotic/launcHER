@@ -212,25 +212,30 @@ arg=-dev9=NIC</code></pre>
 
 <h3>Method B: Direct Binary Quickboot (POPStarter Style)</h3>
 <p>
-  If you do not create a <code>launcHER.CNF</code> file, launcHER discovers adjacent game images based on its own executable filename:
+  If you do not create a <code>launcHER.CNF</code> file, launcHER discovers adjacent game images based on its executable filename:
 </p>
 
 <ol class="checklist">
-  <li><b>Matching Title Name:</b> Renaming the ELF to <code>Crash Bandicoot.ELF</code> boots <code>Crash Bandicoot.VCD</code> in the same folder.</li>
-  <li><b>POPStarter Prefixes:</b> Prefixes such as <code>XX.</code> or <code>SB.</code> are stripped automatically. For example, <code>XX.Crash Bandicoot.ELF</code> will locate and boot <code>Crash Bandicoot.VCD</code>.</li>
-  <li><b>Default Disc Name:</b> If the filename does not match, launcHER checks for <code>IMAGE.VCD</code> in the same directory.</li>
+  <li><b>No Prefix (Default POPS APA):</b> Renaming the ELF to <code>Crash Bandicoot.ELF</code> without a prefix defaults to the internal HDD APA partition: <code>hdd0:__.POPS:pfs:/Crash Bandicoot.VCD</code>, followed by adjacent directory checks.</li>
+  <li><b>USB Prefix (<code>XX.</code>):</b> Prefixes like <code>XX.Crash Bandicoot.ELF</code> target USB mass storage first: checking the adjacent folder, <code>mass0:/POPS/Crash Bandicoot.VCD</code>, and adjacent <code>IMAGE.VCD</code>.</li>
+  <li><b>Matching Title First:</b> launcHER checks for matching <code>&lt;Game&gt;.VCD</code> before falling back to <code>IMAGE.VCD</code>.</li>
 </ol>
 
 <p>
-  This matches POPStarter's traditional OPL APPS convention, allowing drop-in upgrades without rewriting existing menu configurations.
+  This matches POPStarter's traditional OPL APPS and HDD conventions, allowing seamless drop-in upgrades without rewriting existing menu configurations.
 </p>
 
 <h3>Method C: Direct Command-Line Invocation</h3>
 <p>
-  Launchers, scripts, or menu frontends can pass the <code>.VCD</code> path directly to <code>launcHER.elf</code>:
+  Launchers, scripts, or menu frontends can pass arguments directly to <code>launcHER.elf</code> without requiring a <code>launcHER.CNF</code> file:
 </p>
 
-<pre><code>launcHER.elf mass0:/POPS/Crash Bandicoot.VCD</code></pre>
+<ul>
+  <li><b>Bare Game Title:</b> <code>launcHER.elf "Crash Bandicoot"</code> defaults to <code>hdd0:__.POPS:pfs:/Crash Bandicoot.VCD</code>, followed by launcher directory and USB fallbacks.</li>
+  <li><b>Prefixed Title:</b> <code>launcHER.elf "XX.Crash Bandicoot"</code> targets USB mass storage.</li>
+  <li><b>Relative or Full Path:</b> <code>launcHER.elf mass0:/POPS/Crash Bandicoot.VCD</code> boots the target image directly.</li>
+</ul>
+
 
 <h2 id="step-4-game-directives">Step 4: Per-Game Configuration Directives</h2>
 <p>

@@ -1,5 +1,6 @@
 #include "common.h"
 #include "handlers.h"
+#include "handler_pops.h"
 #include "loader.h"
 #include "launch_args.h"
 #include <fcntl.h>
@@ -62,6 +63,7 @@ int main(int argc, char *argv[]) {
   }
 
   // Remove launcher path from arguments
+  char *launcherPath = argv[0];
   argc--;
   argv = &argv[1];
   if (!argv[0])
@@ -71,6 +73,26 @@ int main(int argc, char *argv[]) {
   if (p && (!strcasecmp(p, ".cfg") || !strcasecmp(p, ".cnf")))
     // If argv[1] is a CNF/CFG file, try to load it
     fail("Quickboot failed: %d", handleQuickboot(argv[0]));
+
+  /* If target is an explicit device path ending in .vcd, .elf, or .irx, launch directly */
+  if (guessDeviceType(argv[0]) != Device_None) {
+    if (isPopsTarget(argv[0]) || (p && (!strcasecmp(p, ".elf") || !strcasecmp(p, ".irx"))))
+      fail("Failed to launch %s: %d", argv[0], launchPath(argc, argv));
+  }
+
+  /* Resolve bare title, relative path, or filename arguments */
+  char candidates[16][512];
+  int count = pops_resolve_candidate_targets(launcherPath, argv[0], candidates, 16);
+  if (count > 0) {
+    char *origArg = argv[0];
+    for (int i = 0; i < count; ++i) {
+      argv[0] = candidates[i];
+      int res = launchPath(argc, argv);
+      if (res == 0)
+        return 0;
+    }
+    fail("Failed to launch %s: %d", origArg, -ENOENT);
+  }
 
   fail("Failed to launch %s: %d", argv[0], launchPath(argc, argv));
 }

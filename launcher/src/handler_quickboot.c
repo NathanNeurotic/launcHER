@@ -1,6 +1,7 @@
 #include "cnf.h"
 #include "common.h"
 #include "dprintf.h"
+#include "launch_args.h"
 #include <ctype.h>
 #include <init.h>
 #include <ps2sdkapi.h>
@@ -128,6 +129,9 @@ static int resolveMassPath(char *path, size_t pathSize, DeviceType *type) {
 
 int handleQuickboot(char *cnfPath) {
   static const char quickbootName[] = "launcHER.CNF";
+  char originalTarget[PATH_MAX];
+  strncpy(originalTarget, cnfPath, sizeof(originalTarget) - 1);
+  originalTarget[sizeof(originalTarget) - 1] = '\0';
   char resolvedPath[PATH_MAX] = {0};
 
   // When quickboot is entered through an ELF path, always load launcHER.CNF
@@ -210,50 +214,52 @@ int handleQuickboot(char *cnfPath) {
     sleep(1);
     delayAttempts--;
     if (delayAttempts < 0) {
-      /* If launcHER.CNF is absent, check for an adjacent game VCD file */
-      char dirBuf[PATH_MAX];
-      char vcdCandidate[PATH_MAX];
-      strncpy(dirBuf, launchTarget, sizeof(dirBuf) - 1);
-      dirBuf[sizeof(dirBuf) - 1] = '\0';
-      char *sep = strrchr(dirBuf, '/');
-      char *bsep = strrchr(dirBuf, '\\');
-      if (bsep && (!sep || bsep > sep))
-        sep = bsep;
-      if (sep)
-        *sep = '\0';
+      /* If launcHER.CNF is absent, resolve matching or adjacent game VCD files */
+      char candidates[16][512];
+      int candidateCount = pops_resolve_candidate_targets(originalTarget, NULL, candidates, 16);
 
-      snprintf(vcdCandidate, sizeof(vcdCandidate), "%s/IMAGE.VCD", dirBuf);
-      if (!tryFile(vcdCandidate)) {
-        char *vcdArgv[1] = { vcdCandidate };
-        return launchPath(1, vcdArgv);
-      }
+      for (int c = 0; c < candidateCount; ++c) {
+        const char *cand = candidates[c];
+        char probePath[PATH_MAX];
+        if (isHDD) {
+          const char *pfsSub = strstr(cand, ":pfs:/");
+          if (!pfsSub)
+            pfsSub = strstr(cand, ":pfs0:/");
+          if (pfsSub) {
+            snprintf(probePath, sizeof(probePath), "pfs0:%s", pfsSub + (pfsSub[5] == '0' ? 6 : 5));
+          } else if (!strncmp(cand, "pfs", 3)) {
+            snprintf(probePath, sizeof(probePath), "%s", cand);
+          } else {
+            probePath[0] = '\0';
+          }
+        } else {
+          if (guessDeviceType(cand) == dtype) {
+            snprintf(probePath, sizeof(probePath), "%s", cand);
+          } else {
+            probePath[0] = '\0';
+          }
+        }
 
-      /* Check matching <GameName>.VCD based on the launcher binary's name */
-      const char *elfName = strrchr(resolvedPath, '/');
-      const char *bName = strrchr(resolvedPath, '\\');
-      if (bName && (!elfName || bName > elfName))
-        elfName = bName;
-      if (!elfName)
-        elfName = strrchr(resolvedPath, ':');
-      elfName = elfName ? elfName + 1 : resolvedPath;
-      if (!strncasecmp(elfName, "XX.", 3) || !strncasecmp(elfName, "SB.", 3))
-        elfName += 3;
-      const char *dot = strrchr(elfName, '.');
-      size_t blen = dot ? (size_t)(dot - elfName) : strlen(elfName);
-      if (blen && blen < 128) {
-        char gameBase[128];
-        memcpy(gameBase, elfName, blen);
-        gameBase[blen] = '\0';
-        snprintf(vcdCandidate, sizeof(vcdCandidate), "%s/%s.VCD", dirBuf, gameBase);
-        if (!tryFile(vcdCandidate)) {
-          char *vcdArgv[1] = { vcdCandidate };
+        if (probePath[0] && !tryFile(probePath)) {
+          if (isHDD)
+            deinitPFS();
+          char *vcdArgv[1] = { (char *)cand };
           return launchPath(1, vcdArgv);
         }
       }
 
-      msg("Quickboot: Failed to open %s\n", cnfPath);
+      /* Fall back to direct launches across devices */
       if (isHDD)
         deinitPFS();
+
+      for (int c = 0; c < candidateCount; ++c) {
+        char *vcdArgv[1] = { candidates[c] };
+        int lres = launchPath(1, vcdArgv);
+        if (lres == 0)
+          return 0;
+      }
+
+      msg("Quickboot: Failed to open %s\n", cnfPath);
       return -ENODEV;
     }
     file = fopen(cnfPath, "r");

@@ -103,7 +103,7 @@ int findPopsDependencies(const char *vcdPath, char *popsPath, size_t popsPathSiz
   }
 
   /* Candidate directories to search for POPS packages / binaries */
-  const char *searchDirs[6];
+  const char *searchDirs[8];
   int searchCount = 0;
 
   if (vcdDir[0])
@@ -115,6 +115,8 @@ int findPopsDependencies(const char *vcdPath, char *popsPath, size_t popsPathSiz
     searchDirs[searchCount++] = devPops;
   }
 
+  searchDirs[searchCount++] = "mc0:/POPSTARTER/";
+  searchDirs[searchCount++] = "mc1:/POPSTARTER/";
   searchDirs[searchCount++] = "mc0:/POPS/";
   searchDirs[searchCount++] = "mc1:/POPS/";
   searchDirs[searchCount++] = "hdd0:__.POPS:pfs:/";
@@ -194,6 +196,16 @@ static int ensureVmcFile(const char *path) {
     close(fd);
     if (sz >= 131072)
       return 0;
+  }
+
+  /* Ensure parent directory exists before creating card image */
+  char dir[PATH_MAX];
+  extractDirectory(path, dir, sizeof(dir));
+  if (dir[0]) {
+    size_t dlen = strlen(dir);
+    if (dlen > 1 && (dir[dlen - 1] == '/' || dir[dlen - 1] == '\\'))
+      dir[dlen - 1] = '\0';
+    mkdir(dir, 0777);
   }
 
   /* Create formatted 128 KiB standard PS1 Memory Card image */
@@ -419,35 +431,103 @@ int launchPOPS(int argc, char *argv[]) {
       snprintf(vmcDir, sizeof(vmcDir), "%.700s%.128s/", vcdDir, cfg.vmc_dir);
     }
   } else {
-    snprintf(vmcDir, sizeof(vmcDir), "%.800s", vcdDir);
-  }
-
-  const char *vmcBase = vcdInfo.normalized_serial[0] ? vcdInfo.normalized_serial : gameBase;
-  snprintf(card0Path, sizeof(card0Path), "%.800s%.64s.VMC0", vmcDir, vmcBase);
-  snprintf(card1Path, sizeof(card1Path), "%.800s%.64s.VMC1", vmcDir, vmcBase);
-
-  /* Fall back to gameBase or SLOT0/1.VMC if specific card is absent */
-  if (tryFile(card0Path)) {
+    /* Probe candidate VMC locations:
+     * 1. Subfolder <vcdDir>/<gameBase>/ (standard POPStarter convention)
+     * 2. Subfolder <vcdDir>/<serial>/
+     * 3. Flat in <vcdDir>/
+     * 4. Default to subfolder <vcdDir>/<gameBase>/ if no existing saves are present
+     */
     char testPath[PATH_MAX];
-    snprintf(testPath, sizeof(testPath), "%.800s%.64s.VMC0", vmcDir, gameBase);
+    int foundVmc = 0;
+
+    /* 1. Try game subfolder <gameBase>/ */
+    snprintf(testPath, sizeof(testPath), "%s%s/SLOT0.VMC", vcdDir, gameBase);
     if (!tryFile(testPath)) {
-      snprintf(card0Path, sizeof(card0Path), "%s", testPath);
+      snprintf(vmcDir, sizeof(vmcDir), "%s%s/", vcdDir, gameBase);
+      foundVmc = 1;
     } else {
-      snprintf(testPath, sizeof(testPath), "%.800sSLOT0.VMC", vmcDir);
-      if (!tryFile(testPath))
-        snprintf(card0Path, sizeof(card0Path), "%s", testPath);
+      snprintf(testPath, sizeof(testPath), "%s%s/%s.VMC0", vcdDir, gameBase, gameBase);
+      if (!tryFile(testPath)) {
+        snprintf(vmcDir, sizeof(vmcDir), "%s%s/", vcdDir, gameBase);
+        foundVmc = 1;
+      }
+    }
+
+    /* 2. Try serial subfolder <serial>/ */
+    if (!foundVmc && vcdInfo.normalized_serial[0]) {
+      snprintf(testPath, sizeof(testPath), "%s%s/SLOT0.VMC", vcdDir, vcdInfo.normalized_serial);
+      if (!tryFile(testPath)) {
+        snprintf(vmcDir, sizeof(vmcDir), "%s%s/", vcdDir, vcdInfo.normalized_serial);
+        foundVmc = 1;
+      }
+    }
+
+    /* 3. Try flat in vcdDir */
+    if (!foundVmc) {
+      const char *sbase = vcdInfo.normalized_serial[0] ? vcdInfo.normalized_serial : gameBase;
+      snprintf(testPath, sizeof(testPath), "%s%s.VMC0", vcdDir, sbase);
+      if (!tryFile(testPath)) {
+        snprintf(vmcDir, sizeof(vmcDir), "%.800s", vcdDir);
+        foundVmc = 1;
+      } else {
+        snprintf(testPath, sizeof(testPath), "%sSLOT0.VMC", vcdDir);
+        if (!tryFile(testPath)) {
+          snprintf(vmcDir, sizeof(vmcDir), "%.800s", vcdDir);
+          foundVmc = 1;
+        }
+      }
+    }
+
+    /* 4. Default to game subfolder */
+    if (!foundVmc) {
+      snprintf(vmcDir, sizeof(vmcDir), "%s%s/", vcdDir, gameBase);
     }
   }
 
-  if (tryFile(card1Path)) {
-    char testPath[PATH_MAX];
-    snprintf(testPath, sizeof(testPath), "%.800s%.64s.VMC1", vmcDir, gameBase);
-    if (!tryFile(testPath)) {
-      snprintf(card1Path, sizeof(card1Path), "%s", testPath);
+  const char *vmcBase = vcdInfo.normalized_serial[0] ? vcdInfo.normalized_serial : gameBase;
+  char testCard[PATH_MAX];
+
+  /* Resolve card 0 */
+  snprintf(testCard, sizeof(testCard), "%sSLOT0.VMC", vmcDir);
+  if (!tryFile(testCard)) {
+    snprintf(card0Path, sizeof(card0Path), "%s", testCard);
+  } else {
+    snprintf(testCard, sizeof(testCard), "%s%s.VMC0", vmcDir, vmcBase);
+    if (!tryFile(testCard)) {
+      snprintf(card0Path, sizeof(card0Path), "%s", testCard);
     } else {
-      snprintf(testPath, sizeof(testPath), "%.800sSLOT1.VMC", vmcDir);
-      if (!tryFile(testPath))
-        snprintf(card1Path, sizeof(card1Path), "%s", testPath);
+      snprintf(testCard, sizeof(testCard), "%s%s.VMC0", vmcDir, gameBase);
+      if (!tryFile(testCard)) {
+        snprintf(card0Path, sizeof(card0Path), "%s", testCard);
+      } else {
+        if (strcmp(vmcDir, vcdDir) != 0) {
+          snprintf(card0Path, sizeof(card0Path), "%sSLOT0.VMC", vmcDir);
+        } else {
+          snprintf(card0Path, sizeof(card0Path), "%s%s.VMC0", vmcDir, vmcBase);
+        }
+      }
+    }
+  }
+
+  /* Resolve card 1 */
+  snprintf(testCard, sizeof(testCard), "%sSLOT1.VMC", vmcDir);
+  if (!tryFile(testCard)) {
+    snprintf(card1Path, sizeof(card1Path), "%s", testCard);
+  } else {
+    snprintf(testCard, sizeof(testCard), "%s%s.VMC1", vmcDir, vmcBase);
+    if (!tryFile(testCard)) {
+      snprintf(card1Path, sizeof(card1Path), "%s", testCard);
+    } else {
+      snprintf(testCard, sizeof(testCard), "%s%s.VMC1", vmcDir, gameBase);
+      if (!tryFile(testCard)) {
+        snprintf(card1Path, sizeof(card1Path), "%s", testCard);
+      } else {
+        if (strcmp(vmcDir, vcdDir) != 0) {
+          snprintf(card1Path, sizeof(card1Path), "%sSLOT1.VMC", vmcDir);
+        } else {
+          snprintf(card1Path, sizeof(card1Path), "%s%s.VMC1", vmcDir, vmcBase);
+        }
+      }
     }
   }
 
@@ -578,10 +658,18 @@ int launchPOPS(int argc, char *argv[]) {
             compat->patch_offset, compat->patch_val);
   }
 
-  /* Check for game TROJAN_0..9 fixes in game and VMC directories */
+  /* Check for game TROJAN_0..9 fixes in game, VMC, and memory card directories */
   char trojanPath[PATH_MAX];
-  const char *trojanDirs[2] = { vcdDir, vmcDir };
-  int trojanDirCount = (strcmp(vcdDir, vmcDir) == 0) ? 1 : 2;
+  const char *trojanDirs[6];
+  int trojanDirCount = 0;
+  if (vcdDir && vcdDir[0])
+    trojanDirs[trojanDirCount++] = vcdDir;
+  if (vmcDir && vmcDir[0] && (!vcdDir || strcmp(vcdDir, vmcDir) != 0))
+    trojanDirs[trojanDirCount++] = vmcDir;
+  trojanDirs[trojanDirCount++] = "mc0:/POPSTARTER/";
+  trojanDirs[trojanDirCount++] = "mc1:/POPSTARTER/";
+  trojanDirs[trojanDirCount++] = "mc0:/POPS/";
+  trojanDirs[trojanDirCount++] = "mc1:/POPS/";
 
   for (int td = 0; td < trojanDirCount; ++td) {
     for (int slot = 0; slot <= 9; ++slot) {
