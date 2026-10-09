@@ -217,10 +217,16 @@ static int bridge_sync(iomanX_iop_file_t *file, const char *name, int flag) {
   return first_error;
 }
 
-#define POPS_DEVCTL_SWAP_DISC 0x01
-#define POPS_DEVCTL_GET_DISC  0x02
-#define POPS_DEVCTL_OPEN_LID  0x03
-#define POPS_DEVCTL_CLOSE_LID 0x04
+#define POPS_DEVCTL_SWAP_DISC    0x01
+#define POPS_DEVCTL_GET_DISC     0x02
+#define POPS_DEVCTL_OPEN_LID     0x03
+#define POPS_DEVCTL_CLOSE_LID    0x04
+#define POPS_DEVCTL_SET_LIBCRYPT 0x05
+#define POPS_DEVCTL_GET_SUBQ     0x06
+#define POPS_DEVCTL_NEXT_DISC    0x07
+#define POPS_DEVCTL_GET_LID      0x08
+
+static uint16_t active_libcrypt_key = 0;
 
 static int bridge_devctl(iomanX_iop_file_t *file, const char *devname, int cmd,
                          void *arg, unsigned int arglen, void *buf, unsigned int buflen) {
@@ -247,6 +253,55 @@ static int bridge_devctl(iomanX_iop_file_t *file, const char *devname, int cmd,
     case POPS_DEVCTL_CLOSE_LID:
       lid_open = 0;
       return 0;
+    case POPS_DEVCTL_GET_LID:
+      if (buf && buflen >= sizeof(int)) {
+        *(int *)buf = lid_open;
+        return 0;
+      }
+      return -EINVAL;
+    case POPS_DEVCTL_SET_LIBCRYPT:
+      if (arg && arglen >= sizeof(uint16_t)) {
+        active_libcrypt_key = *(uint16_t *)arg;
+        return 0;
+      }
+      return -EINVAL;
+    case POPS_DEVCTL_NEXT_DISC: {
+      int next = (active_disc + 1) % DISC_COUNT;
+      while (next != active_disc && !paths[next][0]) {
+        next = (next + 1) % DISC_COUNT;
+      }
+      if (paths[next][0]) {
+        active_disc = next;
+        return 0;
+      }
+      return -ENOENT;
+    }
+    case POPS_DEVCTL_GET_SUBQ:
+      if (buf && buflen >= 12) {
+        uint32_t lba = arg ? *(uint32_t *)arg : 0;
+        uint8_t *out_subq = (uint8_t *)buf;
+        memset(out_subq, 0, 12);
+        out_subq[0] = 0x41; /* Track 1, Mode 1 data */
+        out_subq[1] = 0x01;
+        out_subq[2] = 0x01;
+        uint32_t sec = lba / 75;
+        uint32_t frm = lba % 75;
+        uint32_t min = sec / 60;
+        sec %= 60;
+        out_subq[3] = (uint8_t)(((min / 10) << 4) | (min % 10));
+        out_subq[4] = (uint8_t)(((sec / 10) << 4) | (sec % 10));
+        out_subq[5] = (uint8_t)(((frm / 10) << 4) | (frm % 10));
+        out_subq[6] = 0x00;
+        out_subq[7] = out_subq[3];
+        out_subq[8] = out_subq[4];
+        out_subq[9] = out_subq[5];
+        if (active_libcrypt_key != 0 && lba >= 12 && lba <= 20) {
+          out_subq[10] = (uint8_t)(active_libcrypt_key >> 8);
+          out_subq[11] = (uint8_t)(active_libcrypt_key & 0xFF);
+        }
+        return 0;
+      }
+      return -EINVAL;
     default:
       return -EINVAL;
   }

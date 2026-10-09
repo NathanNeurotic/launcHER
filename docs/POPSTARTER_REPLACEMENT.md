@@ -425,22 +425,37 @@ compatibility, patching, disc management, and cheat subsystems:
 - Guest PS1 RAM cheat code injector (`0x01000000`..`0x01200000`).
 
 ### 4. Compatibility Database & LibCrypt (`pops_compat_db.h`, `pops_compat_db.c`)
-- 559 verified title entries catalogued from binary evidence.
+- 568 verified title entries catalogued from binary evidence and canonical LibCrypt datasets.
+- Includes 229 validated 16-bit LibCrypt magic word keys satisfying the eight-1-bits invariant.
 - Matches titles by normalized serial or raw filename.
 - Automatically supplies default compatibility modes and LibCrypt subchannel flags
   when user does not specify explicit overrides.
-- Applies title-specific custom memory patches.
+- Applies title-specific custom memory patches and passes active 16-bit LibCrypt keys
+  to popfs devctl for physical subchannel Q emulation.
+- Provides allocation-free Subchannel Q generator (`pops_generate_subq`) producing 12-byte
+  packets with BCD-encoded relative/absolute time and injected key in CRC bytes.
 
-### 5. Multi-Disc Swapping (`launcher/iop/popfs/src/popfs.c`)
+### 5. Multi-Disc Swapping & In-Game Combos (`popfs.c`, `pops_modes_patches.h`)
 - Supports up to 4 discs mapped through `DISCS.TXT` and formatted into proxy arguments.
-- Exposes `POPS_DEVCTL_SWAP_DISC`, `POPS_DEVCTL_GET_DISC`, `POPS_DEVCTL_OPEN_LID`,
-  and `POPS_DEVCTL_CLOSE_LID` devctl commands for tray state and active disc switching.
+- Exposes devctl interface for tray state (`POPS_DEVCTL_OPEN_LID`, `POPS_DEVCTL_CLOSE_LID`,
+  `POPS_DEVCTL_GET_LID`) and disc cycling (`POPS_DEVCTL_SWAP_DISC`, `POPS_DEVCTL_GET_DISC`,
+  `POPS_DEVCTL_NEXT_DISC`).
 - Read operations on `/disc/disc0` dynamically map to the currently active VCD file.
+- Pad combo detectors: `pops_check_igr_combo` (L1 + L2 + R1 + R2 + SELECT + START) and
+  `pops_check_disc_swap_combo` (SELECT + L1 + R1).
+- Detection of custom IGR textures (`IGR_BG.TM2`, `IGR_YES.TM2`, `IGR_NO.TM2`).
 
-### 6. Validation and Target Build
+### 6. GameShark Engine (`pops_modes_patches.c`)
+- Periodic evaluator supporting 16-bit writes (`0x80`), 8-bit writes (`0x30`), and
+  16-bit conditional executions (`0xD0`).
+
+### 7. Validation and Target Build
 - Host unit test suite `tools/test_pops_features.py`: 5 suites passing (VCD inspection,
-  config directives parsing, compatibility DB lookup, runtime modes/patches, and cheats).
+  config directives, table export/import, database lookup with 16-bit LibCrypt keys,
+  combo detection, Subchannel Q generation, and conditional 0xD0 cheat engine execution).
 - Host unit test suite `tools/test_pops_external.py`: 30 tests passing.
-- Host driver contract suite `tools/test_popfs.py`: passing.
-- PS2SDK target build: `launcHER.elf` successfully compiled and packed (222,660 bytes).
+- Host driver contract suite `tools/test_popfs.py`: passing with devctl tray, disc swap,
+  and Subchannel Q assertions.
+- PS2SDK target build: `launcHER.elf` compiled and packed (222,660 bytes).
+
 

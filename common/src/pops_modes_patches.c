@@ -160,21 +160,78 @@ int pops_apply_libcrypt_bypass(void *staged_core, size_t core_size) {
   return 0;
 }
 
-int pops_apply_cheats(void *ps1_ram_base, const PopsCheatEntry *cheats, uint16_t cheat_count) {
+int pops_check_igr_combo(uint16_t buttons_active_low) {
+  uint16_t pressed = (uint16_t)(~buttons_active_low);
+  return ((pressed & POPS_IGR_COMBO) == POPS_IGR_COMBO);
+}
+
+int pops_check_disc_swap_combo(uint16_t buttons_active_low) {
+  uint16_t pressed = (uint16_t)(~buttons_active_low);
+  return ((pressed & POPS_SWAP_COMBO) == POPS_SWAP_COMBO);
+}
+
+int pops_generate_subq(uint32_t lba, uint16_t libcrypt_key, uint8_t out_subq[12]) {
+  if (!out_subq)
+    return -EINVAL;
+
+  memset(out_subq, 0, 12);
+  out_subq[0] = 0x41; /* Track 1, Mode 1 data */
+  out_subq[1] = 0x01;
+  out_subq[2] = 0x01;
+
+  uint32_t sec = lba / 75;
+  uint32_t frm = lba % 75;
+  uint32_t min = sec / 60;
+  sec %= 60;
+
+  uint8_t m_bcd = (uint8_t)(((min / 10) << 4) | (min % 10));
+  uint8_t s_bcd = (uint8_t)(((sec / 10) << 4) | (sec % 10));
+  uint8_t f_bcd = (uint8_t)(((frm / 10) << 4) | (frm % 10));
+
+  out_subq[3] = m_bcd;
+  out_subq[4] = s_bcd;
+  out_subq[5] = f_bcd;
+  out_subq[6] = 0x00;
+  out_subq[7] = m_bcd;
+  out_subq[8] = s_bcd;
+  out_subq[9] = f_bcd;
+
+  if (libcrypt_key != 0 && lba >= 12 && lba <= 20) {
+    out_subq[10] = (uint8_t)(libcrypt_key >> 8);
+    out_subq[11] = (uint8_t)(libcrypt_key & 0xFF);
+  }
+  return 0;
+}
+
+int pops_cheat_engine_tick(void *ps1_ram_base, const PopsCheatEntry *cheats, uint16_t cheat_count) {
   if (!ps1_ram_base || !cheats || cheat_count == 0)
     return 0;
 
-  for (uint16_t i = 0; i < cheat_count; ++i) {
+  uint16_t i = 0;
+  while (i < cheat_count) {
     uint32_t addr = cheats[i].address & 0x001FFFFF;
-    if (cheats[i].type == 0x80) {
-      /* 16-bit constant write */
+    uint8_t type = cheats[i].type;
+
+    if (type == 0xD0) {
+      uint16_t cur = *(uint16_t *)((uint8_t *)ps1_ram_base + addr);
+      if (cur != cheats[i].value) {
+        i += 2;
+        continue;
+      }
+      i++;
+      continue;
+    } else if (type == 0x80) {
       *(uint16_t *)((uint8_t *)ps1_ram_base + addr) = cheats[i].value;
-    } else if (cheats[i].type == 0x30) {
-      /* 8-bit constant write */
+    } else if (type == 0x30) {
       *(uint8_t *)((uint8_t *)ps1_ram_base + addr) = (uint8_t)cheats[i].value;
     }
+    i++;
   }
   return 0;
+}
+
+int pops_apply_cheats(void *ps1_ram_base, const PopsCheatEntry *cheats, uint16_t cheat_count) {
+  return pops_cheat_engine_tick(ps1_ram_base, cheats, cheat_count);
 }
 
 int pops_apply_all_config_patches(void *staged_core, size_t core_size, const PopsConfig *cfg) {

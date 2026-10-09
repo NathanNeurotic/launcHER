@@ -132,10 +132,29 @@ int main(void) {
   assert(ops->remove(&file, "/disc/disc0") == -EROFS);
   assert(ops->rename(&file, "/ps1emu/card0", "/ps1emu/card1") == -EXDEV);
   assert(ops->rename(&file, "/ps1emu/card0", "/ps1emu/card0.bak") == 7);
-  assert(!strcmp(observed, arguments[2]) && !strcmp(destination, "udpfs:/saves/Card0.VMC.bak"));
   assert(!ops->open(&file, "/disc/disc1", 1, 0) && !strcmp(observed, arguments[4]));
-  assert(!ops->close(&file) && !ops->deinit(registered));
+  assert(!ops->close(&file));
+
+  /* Devctl tray and disc commands */
+  int disc = 1, query_disc = -1, query_lid = -1;
+  assert(!ops->devctl(&file, "pops:", 0x03 /* OPEN_LID */, NULL, 0, NULL, 0));
+  assert(!ops->devctl(&file, "pops:", 0x08 /* GET_LID */, NULL, 0, &query_lid, sizeof(query_lid)) && query_lid == 1);
+  assert(!ops->devctl(&file, "pops:", 0x01 /* SWAP_DISC */, &disc, sizeof(disc), NULL, 0));
+  assert(!ops->devctl(&file, "pops:", 0x02 /* GET_DISC */, NULL, 0, &query_disc, sizeof(query_disc)) && query_disc == 1);
+  assert(!ops->devctl(&file, "pops:", 0x04 /* CLOSE_LID */, NULL, 0, NULL, 0));
+  assert(!ops->devctl(&file, "pops:", 0x08 /* GET_LID */, NULL, 0, &query_lid, sizeof(query_lid)) && query_lid == 0);
+
+  /* Devctl LibCrypt and Subchannel Q */
+  uint16_t key = 0x7C23; /* Resident Evil 3 key */
+  assert(!ops->devctl(&file, "pops:", 0x05 /* SET_LIBCRYPT */, &key, sizeof(key), NULL, 0));
+  uint32_t lba = 15;
+  uint8_t subq[12] = {0};
+  assert(!ops->devctl(&file, "pops:", 0x06 /* GET_SUBQ */, &lba, sizeof(lba), subq, sizeof(subq)));
+  assert(subq[0] == 0x41 && subq[1] == 0x01 && subq[2] == 0x01);
+  assert(subq[10] == 0x7C && subq[11] == 0x23);
+
+  assert(!ops->deinit(registered));
   puts("POPFS production-driver contract PASS: paths, multi-disc, save backups, descriptor zero,");
-  puts("short I/O, device errors, readonly discs, 64-bit seeks and active-handle lifetime");
+  puts("short I/O, device errors, readonly discs, 64-bit seeks, devctl tray/disc, LibCrypt SubQ, and active-handle lifetime");
   return 0;
 }

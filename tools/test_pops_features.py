@@ -41,6 +41,7 @@ class PopsCompatEntry(c.Structure):
         ("title", c.c_char_p),
         ("default_modes", c.c_uint8),
         ("has_libcrypt", c.c_uint8),
+        ("libcrypt_key", c.c_uint16),
         ("patch_offset", c.c_uint32),
         ("patch_val", c.c_uint32),
     ]
@@ -100,6 +101,14 @@ class FeatureTests(unittest.TestCase):
         LIB.pops_apply_libcrypt_bypass.restype = c.c_int
         LIB.pops_apply_cheats.argtypes = [c.c_void_p, c.POINTER(CheatEntry), c.c_uint16]
         LIB.pops_apply_cheats.restype = c.c_int
+        LIB.pops_check_igr_combo.argtypes = [c.c_uint16]
+        LIB.pops_check_igr_combo.restype = c.c_int
+        LIB.pops_check_disc_swap_combo.argtypes = [c.c_uint16]
+        LIB.pops_check_disc_swap_combo.restype = c.c_int
+        LIB.pops_generate_subq.argtypes = [c.c_uint32, c.c_uint16, c.POINTER(c.c_uint8 * 12)]
+        LIB.pops_generate_subq.restype = c.c_int
+        LIB.pops_cheat_engine_tick.argtypes = [c.c_void_p, c.POINTER(CheatEntry), c.c_uint16]
+        LIB.pops_cheat_engine_tick.restype = c.c_int
         LIB.pops_vcd_normalize_serial.argtypes = [c.c_char_p, c.c_char_p, c.c_size_t]
         LIB.pops_vcd_normalize_serial.restype = c.c_int
         LIB.pops_vcd_inspect_path.argtypes = [c.c_char_p, c.POINTER(PopsVcdInfo)]
@@ -263,7 +272,14 @@ class FeatureTests(unittest.TestCase):
         self.assertEqual(entry.serial.decode("ascii"), "SCES-01492")
         self.assertEqual(entry.title.decode("ascii"), "MediEvil")
         self.assertEqual(entry.has_libcrypt, 1)
+        self.assertEqual(entry.libcrypt_key, 0xD16A)
         self.assertTrue(entry.default_modes & 0x01)  # Mode 1
+
+        # Resident Evil 3 (SLES-02530)
+        entry_re3 = LIB.pops_compat_db_lookup(b"SLES-02530")
+        self.assertTrue(bool(entry_re3))
+        self.assertEqual(entry_re3.contents.has_libcrypt, 1)
+        self.assertEqual(entry_re3.contents.libcrypt_key, 0x7C23)
 
         # Lookup by raw PS1 serial
         entry_ptr2 = LIB.pops_compat_db_lookup(b"SCES_014.92")
@@ -313,15 +329,35 @@ class FeatureTests(unittest.TestCase):
         val_lcret = struct.unpack_from("<I", buf, 0x0020CFB0 - 0x00200000)[0]
         self.assertEqual(val_lcret, 0x24020000)
 
-        # Test GameShark cheat RAM injector
+        # Test Controller IGR and Disc Swap combo checkers
+        igr_active_low = (~(0x0400 | 0x0100 | 0x0800 | 0x0200 | 0x0001 | 0x0008)) & 0xFFFF
+        self.assertEqual(LIB.pops_check_igr_combo(0xFFFF), 0)
+        self.assertEqual(LIB.pops_check_igr_combo(igr_active_low), 1)
+
+        swap_active_low = (~(0x0001 | 0x0400 | 0x0800)) & 0xFFFF
+        self.assertEqual(LIB.pops_check_disc_swap_combo(0xFFFF), 0)
+        self.assertEqual(LIB.pops_check_disc_swap_combo(swap_active_low), 1)
+
+        # Test Subchannel Q generator
+        subq = (c.c_uint8 * 12)()
+        self.assertEqual(LIB.pops_generate_subq(15, 0x7C23, c.byref(subq)), 0)
+        self.assertEqual(subq[0], 0x41)
+        self.assertEqual(subq[1], 0x01)
+        self.assertEqual(subq[2], 0x01)
+        self.assertEqual(subq[10], 0x7C)
+        self.assertEqual(subq[11], 0x23)
+
+        # Test GameShark cheat RAM injector with 0xD0 conditional execution
         ram_size = 0x200000
         ram_buf = bytearray(ram_size)
         ram_ptr = (c.c_uint8 * ram_size).from_buffer(ram_buf)
-        cheats_arr = (CheatEntry * 2)(
-            CheatEntry(0x0009A120, 0x1234, 0x80),
-            CheatEntry(0x0009A124, 0x56, 0x30),
+        cheats_arr = (CheatEntry * 4)(
+            CheatEntry(0x0009A120, 0x1234, 0x80),  # write 0x1234 to 0x9A120
+            CheatEntry(0x0009A120, 0x1234, 0xD0),  # if *(u16 *)0x9A120 == 0x1234:
+            CheatEntry(0x0009A124, 0x56, 0x30),    #   write 0x56 to 0x9A124
+            CheatEntry(0x0009A120, 0x9999, 0xD0),  # if *(u16 *)0x9A120 == 0x9999 (false):
         )
-        res = LIB.pops_apply_cheats(ram_ptr, cheats_arr, 2)
+        res = LIB.pops_cheat_engine_tick(ram_ptr, cheats_arr, 4)
         self.assertEqual(res, 0)
         self.assertEqual(struct.unpack_from("<H", ram_buf, 0x9A120)[0], 0x1234)
         self.assertEqual(ram_buf[0x9A124], 0x56)

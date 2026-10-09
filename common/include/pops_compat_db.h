@@ -13,6 +13,7 @@ typedef struct {
   const char *title;
   uint8_t default_modes; /* Bitmask of compatibility modes (1 << (mode - 1)) */
   uint8_t has_libcrypt;  /* 1 if title requires LibCrypt subchannel bypass */
+  uint16_t libcrypt_key; /* 16-bit LibCrypt magic word key (0 if none) */
   uint32_t patch_offset; /* Target POPS address for custom patch (0 if none) */
   uint32_t patch_val;    /* 32-bit patch value */
 } PopsCompatEntry;

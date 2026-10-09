@@ -71,12 +71,34 @@ KNOWN_MODES = {
     "SLES-02529": 0x01, "SLUS-00923": 0x01, "SLPS-02300": 0x01,
 }
 
+def popcount(v: int) -> int:
+    return bin(v).count("1")
+
 def main():
     repo_root = Path("C:/Users/natha/Github/REPOP")
     db_md = repo_root / "docs/COMPATIBILITY_DATABASE.md"
+    libcrypt_md = repo_root / "DKWDRV/upstream/docs/files/libcrypt.md"
+
     if not db_md.exists():
         print(f"Error: {db_md} not found", file=sys.stderr)
         sys.exit(1)
+
+    # 1. Parse LibCrypt canonical database
+    lib_keys = {}
+    if libcrypt_md.exists():
+        for line in libcrypt_md.read_text(encoding="utf-8", errors="replace").splitlines():
+            if line.startswith("|") and not line.startswith("| :") and not line.startswith("| Game"):
+                parts = [x.strip() for x in line.split("|")[1:-1]]
+                if len(parts) >= 3 and parts[1].isdigit():
+                    raw_s = parts[0]
+                    norm_s = f"{raw_s[:4]}-{raw_s[4:]}" if len(raw_s) == 9 else raw_s
+                    key = int(parts[1])
+                    title = parts[2].replace('"', '\\"')
+                    # Validate 8-bit invariant
+                    if key > 0 and popcount(key) == 8:
+                        lib_keys[norm_s] = (key, title)
+                    elif key == 0:
+                        lib_keys[norm_s] = (0, title)
 
     with open(db_md, "r", encoding="utf-8") as f:
         text = f.read()
@@ -95,25 +117,32 @@ def main():
                     s = raw_s.strip()
                     if s and s not in seen_serials:
                         seen_serials.add(s)
-                        is_libcrypt = 1 if (s in LIBCRYPT_SERIES or "LibCrypt" in title) else 0
+                        has_lib = 1 if (s in lib_keys or s in LIBCRYPT_SERIES or "LibCrypt" in title) else 0
+                        key = lib_keys.get(s, (0, ""))[0]
                         mode = KNOWN_MODES.get(s, 0)
-                        if is_libcrypt:
+                        if has_lib:
                             mode |= 0x20  # Mode 6 (LibCrypt subchannel bypass)
-                        entries.append((s, title, mode, is_libcrypt))
+                        entries.append((s, title, mode, has_lib, key))
+
+    # Add any remaining LibCrypt titles not in the main compatibility table
+    for s, (key, title) in lib_keys.items():
+        if s not in seen_serials:
+            seen_serials.add(s)
+            entries.append((s, title, 0x20, 1, key))
 
     # Sort entries by serial for binary search
     entries.sort(key=lambda e: e[0])
 
     out_file = Path("common/src/pops_compat_db.c")
     with open(out_file, "w", encoding="utf-8") as out:
-        out.write('/* Auto-generated compatibility database from COMPATIBILITY_DATABASE.md */\n')
+        out.write('/* Auto-generated compatibility database from COMPATIBILITY_DATABASE.md and libcrypt.md */\n')
         out.write('#include "pops_compat_db.h"\n')
         out.write('#include <ctype.h>\n')
         out.write('#include <string.h>\n\n')
 
         out.write('static const PopsCompatEntry s_compat_entries[] = {\n')
-        for s, title, mode, libcrypt in entries:
-            out.write(f'  {{ "{s}", "{title}", 0x{mode:02X}, {libcrypt}, 0, 0 }},\n')
+        for s, title, mode, libcrypt, key in entries:
+            out.write(f'  {{ "{s}", "{title}", 0x{mode:02X}, {libcrypt}, 0x{key:04X}, 0, 0 }},\n')
         out.write('};\n\n')
 
         out.write(f'#define COMPAT_ENTRY_COUNT {len(entries)}\n\n')
