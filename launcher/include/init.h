@@ -21,7 +21,8 @@ int initModules(DeviceType device);
 int initModulesAny(DeviceType devices);
 
 /* After external POPS IOP reboot: load selected backends and the proxy without
- * another reset. Core must be unmodified and identified; volumes still need
+ * another reset. Core must have passed boot planning before guarded patching;
+ * its embedded SIO2 module is revalidated here. Volumes still need
  * mounting before POPS entry. Arguments are packed NUL-terminated IRX strings.
  * Requires POPS_CORE_STORAGE_BRIDGE at entry to avoid loading SIO2 twice. */
 int initPopsServices(DeviceType devices, const void *core, size_t coreSize,

@@ -72,6 +72,9 @@ typedef struct {
 /* SHA256 of bounded dependency images; no allocation. Digest assigned on success. */
 int pops_image_sha256(const void *file, size_t size, uint8_t digest[32]);
 int pops_core_image_identify(const void *core, size_t size);
+/* Identify only the embedded Sony SIO2 module after guarded core patching.
+ * Boot planning must still identify the full unmodified core first. */
+int pops_core_sio2_identify(const void *core, size_t size);
 
 enum {
   POPS_CORE_HDD_CHECK = 1u << 0,

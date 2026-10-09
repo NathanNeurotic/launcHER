@@ -105,6 +105,18 @@ int pops_core_image_identify(const void *core, size_t size) {
   return matches(core, size, core_hash) ? POPS_FILE_OK : POPS_FILE_GUARD;
 }
 
+int pops_core_sio2_identify(const void *core, size_t size) {
+  if (!core)
+    return POPS_FILE_INVALID;
+  if (size != CORE_SIZE)
+    return POPS_FILE_UNSUPPORTED;
+  /* Measured from the embedded module in the SHA256-identified reference core.
+   * Core patches may change EE instructions, but must not change this IRX. */
+  return matches((const uint8_t *)core + 0xcbbc0, 0x1999,
+                 "1964b83bcc8c0cab9dfcf9b9637e0e313e69c23fd5c73408fe889ace91f13708")
+           ? POPS_FILE_OK : POPS_FILE_GUARD;
+}
+
 static int iop_profile(const void *file, size_t size, int loose,
                         PopsIopVariant *variant) {
   PopsIopImage info;

@@ -106,6 +106,8 @@ def check_boot_staging(plan, source, iop=None, original_writes=None):
     core = ram.raw[core_start:bss_start]
     if hashlib.sha256(core).hexdigest() != '38ecd425324a1244e90ae68b927496b9af511fd0ed89761199fb6eb699e71ab0':
         raise RuntimeError("Staged core differs from the measured loaded image")
+    if LIB.pops_core_sio2_identify(core, len(core)):
+        raise RuntimeError("Reference embedded SIO2 module rejected")
     expected_iop = iop if iop is not None else source[plan.iop_offset:]
     if reboot.raw[:plan.iop_size] != expected_iop:
         raise RuntimeError("Reboot image was not preserved separately")
@@ -163,6 +165,16 @@ def check_boot_staging(plan, source, iop=None, original_writes=None):
     patched = ram.raw
     if LIB.pops_core_patches_stage(0x100000, ram, ram_size, 0x3f) != -4 or ram.raw != patched:
         raise RuntimeError("Core patch reapplication did not fail closed")
+    patched_core = ram.raw[core_start:bss_start]
+    if LIB.pops_core_image_identify(patched_core, len(patched_core)) != -4:
+        raise RuntimeError("Patched core incorrectly accepted as pristine")
+    if LIB.pops_core_sio2_identify(patched_core, len(patched_core)):
+        raise RuntimeError("EE core patches incorrectly invalidate untouched SIO2")
+    corrupted_sio2 = bytearray(patched_core)
+    corrupted_sio2[0xcbbc0] ^= 1
+    if LIB.pops_core_sio2_identify(bytes(corrupted_sio2), len(corrupted_sio2)) != -4:
+        raise RuntimeError("Modified SIO2 module accepted after core patching")
+    print("Post-patch SIO2 identity PASS: patched core accepted, modified IRX rejected")
     print("Guarded core patch staging PASS: original byte widths, rejection without mutation")
 
 
@@ -220,6 +232,12 @@ def inspect_elf(data):
 
 
 class InspectorTests(unittest.TestCase):
+    def test_embedded_sio2_rejects_unknown_or_truncated_core(self):
+        self.assertEqual(LIB.pops_core_sio2_identify(None, 0), INVALID)
+        self.assertEqual(LIB.pops_core_sio2_identify(b'x', 1), UNSUPPORTED)
+        unknown = c.create_string_buffer(0x302e60)
+        self.assertEqual(LIB.pops_core_sio2_identify(unknown, len(unknown)), -4)
+
     def test_core_patch_bounds_flags_and_unknown_identity(self):
         memory = c.create_string_buffer(0x302e60)
         before = memory.raw
@@ -651,6 +669,7 @@ def main():
                                       c.c_size_t, c.POINTER(BootBuffers)]
     LIB.pops_core_patches_stage.argtypes = [c.c_uint32, c.c_void_p, c.c_size_t, c.c_uint32]
     LIB.pops_core_image_identify.argtypes = [c.c_void_p, c.c_size_t]
+    LIB.pops_core_sio2_identify.argtypes = [c.c_void_p, c.c_size_t]
     LIB.pops_format_proxy_args.argtypes = [
         c.c_char_p, c.c_size_t,
         c.c_char_p, c.c_char_p, c.c_char_p,

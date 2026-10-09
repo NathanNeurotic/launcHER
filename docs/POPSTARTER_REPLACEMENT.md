@@ -384,8 +384,9 @@ This is a target build result. Real hardware console validation remains necessar
 
 ## Feature parity implementation checkpoint
 
-The implementation achieves full feature parity with POPStarter's configuration,
-compatibility, patching, disc management, and cheat subsystems:
+The following components are implemented, but full POPStarter feature parity
+has not been achieved. Parsed options and standalone helpers do not establish
+working in-game behavior. See the repair checkpoint below for known blockers.
 
 ### 1. VCD Inspection & Game Identification (`pops_vcd.h`, `pops_vcd.c`)
 - Inspects ISO9660 filesystem inside `.VCD` images directly from host or PS2 storage.
@@ -459,3 +460,26 @@ compatibility, patching, disc management, and cheat subsystems:
 - PS2SDK target build: `launcHER.elf` compiled and packed (222,660 bytes).
 
 
+
+## Repair checkpoint - 2026-10-09
+
+The audit of b403d198f9881ec412814e4bf790156d647623c5 found source-level
+boot failures despite passing component tests. The first repair:
+
+- Preserves full pristine-core SHA256 checks in boot planning and core patching.
+  Post-reboot service initialization now checks the exact embedded Sony SIO2
+  module independently, allowing the intended EE patches while rejecting a
+  changed module before executing it.
+- Moves loose IOP input to 0x01780000 and its staged destination to 0x01700000,
+  each bounded to 512 KiB. Both sit outside the translated RAM/BSS staging
+  range ending at 0x01665940, and below raw ELF input at 0x01800000.
+- Checks the SIO2 identity before/after reference patches and rejects a modified
+  IRX against loose ELF/IOPRP252 and both packed dependency sets.
+
+Remaining audit issues are not fixed by this checkpoint: cheat writes overlap
+executable staging and lack a periodic runtime hook; VMC creation may truncate
+existing files and has incomplete formatting; compatibility mode implementations
+need reconstruction against original behavior; PATCH loading, IGR, disc change,
+LibCrypt runtime integration, and BIOS/OSD support need completion. Do not use
+this development branch with valuable saves or describe it as a drop-in parity
+release. Host tests and target compilation do not establish a PS2 runtime pass.

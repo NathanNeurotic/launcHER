@@ -311,9 +311,9 @@ int initPopsServices(DeviceType devices, const void *core, size_t coreSize,
   if (!proxyArguments || !argumentSize || argumentSize > 6 * 256 ||
       proxyArguments[argumentSize - 1] != '\0')
     return -EINVAL;
-  /* Fail before loading anything if the external embedded module ranges are
-   * not those of the measured, unmodified core. The caller patches it later. */
-  ret = pops_core_image_identify(core, coreSize);
+  /* Boot planning and core patching already verified the pristine core. Check
+   * the module we execute independently: EE patching changes the core hash. */
+  ret = pops_core_sio2_identify(core, coreSize);
   if (ret)
     return -EINVAL;
   sceSifInitRpc(0);

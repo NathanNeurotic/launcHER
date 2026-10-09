@@ -30,7 +30,9 @@ extern const char pops_trampoline_code[];
 extern const char pops_trampoline_code_end[];
 
 #define POPS_LOAD_RAW_BUF   ((void *)0x01800000)
-#define POPS_LOAD_IOP_BUF   ((void *)0x01400000)
+#define POPS_LOAD_IOP_BUF   ((void *)0x01780000)
+#define POPS_STAGE_IOP_BUF  ((void *)0x01700000)
+#define POPS_IOP_MAX_SIZE   0x00080000
 #define POPS_STAGE_BUF      ((void *)POPS_STAGING_BASE)
 #define POPS_LOAD_MAX_SIZE  (8 * 1024 * 1024)
 
@@ -914,7 +916,7 @@ int launchPOPS(int argc, char *argv[]) {
       msg("POPS: Failed reading %s: %d\n", popsPath, res);
       return res;
     }
-    res = readFullFile(ioprpPath, POPS_LOAD_IOP_BUF, POPS_LOAD_MAX_SIZE, &iopSize);
+    res = readFullFile(ioprpPath, POPS_LOAD_IOP_BUF, POPS_IOP_MAX_SIZE, &iopSize);
     if (res) {
       msg("POPS: Failed reading %s: %d\n", ioprpPath, res);
       return res;
@@ -933,8 +935,11 @@ int launchPOPS(int argc, char *argv[]) {
     buffers.ram_size = plan.bss_address + plan.bss_size - 0x100000;
     buffers.scratchpad = (void *)0x01f80000;
     buffers.scratchpad_size = plan.scratchpad_size;
-    buffers.iop = (void *)((uintptr_t)POPS_STAGE_BUF + plan.core_size);
-    buffers.iop_size = plan.iop_size;
+    /* The translated low-RAM/core/BSS staging span ends at 0x01665940.
+     * Keep both IOP source and destination above that span and below raw ELF
+     * input at 0x01800000. Neither may alias RAM cleared by boot_stage_elf. */
+    buffers.iop = POPS_STAGE_IOP_BUF;
+    buffers.iop_size = POPS_IOP_MAX_SIZE;
 
     res = pops_boot_stage_elf(POPS_LOAD_RAW_BUF, elfSize, POPS_LOAD_IOP_BUF,
                               iopSize, &buffers);
