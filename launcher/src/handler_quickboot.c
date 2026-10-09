@@ -160,11 +160,33 @@ int handleQuickboot(char *cnfPath) {
         prefixLen = (size_t)(separator - cnfPath) + 1;
     }
 
-    if (prefixLen + sizeof(quickbootName) > sizeof(resolvedPath))
-      return -ENOENT;
+    if (prefixLen > 0) {
+      if (prefixLen + sizeof(quickbootName) > sizeof(resolvedPath))
+        return -ENOENT;
+      memcpy(resolvedPath, cnfPath, prefixLen);
+      memcpy(resolvedPath + prefixLen, quickbootName, sizeof(quickbootName));
+    } else {
+      // Bare ELF title without directory or device (e.g. "Crash.ELF" or "PP.Crash.ELF").
+      char baseTitle[64] = {0};
+      int pfx = PREFIX_NONE;
+      if (pops_is_pp_prefix(cnfPath)) {
+        const char *pstart = strrchr(cnfPath, '/');
+        const char *bstart = strrchr(cnfPath, '\\');
+        if (bstart && (!pstart || bstart > pstart)) pstart = bstart;
+        if (!pstart) pstart = strrchr(cnfPath, ':');
+        pstart = pstart ? pstart + 1 : cnfPath;
 
-    memcpy(resolvedPath, cnfPath, prefixLen);
-    memcpy(resolvedPath + prefixLen, quickbootName, sizeof(quickbootName));
+        const char *dot = strrchr(pstart, '.');
+        size_t blen = dot ? (size_t)(dot - pstart) : strlen(pstart);
+        if (blen >= sizeof(baseTitle)) blen = sizeof(baseTitle) - 1;
+        memcpy(baseTitle, pstart, blen);
+        baseTitle[blen] = '\0';
+
+        snprintf(resolvedPath, sizeof(resolvedPath), "hdd0:%s:pfs:/%s", baseTitle, quickbootName);
+      } else {
+        snprintf(resolvedPath, sizeof(resolvedPath), "hdd0:__.POPS:pfs:/%s", quickbootName);
+      }
+    }
   } else {
     // Explicit CNF/CFG paths still work exactly as supplied.
     if (strlen(cnfPath) >= sizeof(resolvedPath))
@@ -176,21 +198,49 @@ int handleQuickboot(char *cnfPath) {
 
   int isHDD = 0;
   DeviceType dtype = guessDeviceType(cnfPath);
+  if (dtype == Device_None) {
+    dtype = guessDeviceType(originalTarget);
+    if (dtype == Device_None && (pops_is_pp_prefix(originalTarget) || !strchr(originalTarget, ':')))
+      dtype = Device_APA;
+  }
   if (dtype == Device_APA)
     isHDD = 1;
 
   int res;
   if (isHDD) {
     dtype = Device_APA;
-    if ((res = initPFS(cnfPath, Device_None)))
+    res = initPFS(cnfPath, Device_None);
+    if (res) {
+      char candidates[16][512];
+      int candidateCount = pops_resolve_candidate_targets(originalTarget, NULL, candidates, 16);
+      for (int c = 0; c < candidateCount; ++c) {
+        char *vcdArgv[1] = { candidates[c] };
+        if (launchPath(1, vcdArgv) == 0)
+          return 0;
+      }
       return res;
+    }
   } else {
-    // launcHER's own folder named the generic massN: way (an OPL or RiptOPL APPS launch): find out which
-    // device that is, then carry on exactly as for a launch that named it. An explicit CNF path keeps
-    // launcHER's own meaning of mass, USB.
-    if (!isConfig && dtype == Device_USB && !strncmp(cnfPath, "mass", 4) &&
-        (res = resolveMassPath(resolvedPath, sizeof(resolvedPath), &dtype)))
+    PopsBdmaMode bdmaMode = pops_detect_bdma_mode();
+    if (bdmaMode == POPS_BDMA_MMCE) {
+      dtype = Device_MMCE;
+    } else if (bdmaMode == POPS_BDMA_ATA) {
+      dtype = Device_ATA;
+    } else if (bdmaMode == POPS_BDMA_MX4SIO) {
+      dtype = Device_MX4SIO;
+    } else if (bdmaMode == POPS_BDMA_ILINK) {
+      dtype = Device_iLink;
+    } else if (!isConfig && dtype == Device_USB && !strncmp(cnfPath, "mass", 4) &&
+               (res = resolveMassPath(resolvedPath, sizeof(resolvedPath), &dtype))) {
+      char candidates[16][512];
+      int candidateCount = pops_resolve_candidate_targets(originalTarget, NULL, candidates, 16);
+      for (int c = 0; c < candidateCount; ++c) {
+        char *vcdArgv[1] = { candidates[c] };
+        if (launchPath(1, vcdArgv) == 0)
+          return 0;
+      }
       return res;
+    }
     if (dtype == Device_None)
       return -ENODEV;
 
@@ -214,6 +264,10 @@ int handleQuickboot(char *cnfPath) {
   DPRINTF("Opening %s\n", cnfPath);
   FILE *file = fopen(cnfPath, "r");
   int delayAttempts = DELAY_ATTEMPTS; // Max number of attempts
+  if (!isConfig && (pops_is_xx_prefix(originalTarget) || pops_is_sb_prefix(originalTarget) ||
+                    pops_is_pp_prefix(originalTarget) || !strchr(originalTarget, ':'))) {
+    delayAttempts = 1;
+  }
   while (!file) {
     sleep(1);
     delayAttempts--;
@@ -237,8 +291,26 @@ int handleQuickboot(char *cnfPath) {
             probePath[0] = '\0';
           }
         } else {
-          if (guessDeviceType(cand) == dtype) {
-            snprintf(probePath, sizeof(probePath), "%s", cand);
+          DeviceType candType = guessDeviceType(cand);
+          int typeMatches = (candType == dtype) ||
+            ((dtype == Device_USB || dtype == Device_ATA || dtype == Device_MX4SIO || dtype == Device_iLink) &&
+             (candType == Device_USB || candType == Device_ATA || candType == Device_MX4SIO || candType == Device_iLink));
+          if (typeMatches) {
+            if (!strncmp(cand, "mass:/", 6)) {
+              snprintf(probePath, sizeof(probePath), "mass0:%s", cand + 5);
+            } else if (!strncmp(cand, "mx4sio:/", 8)) {
+              snprintf(probePath, sizeof(probePath), "mx4sio0:%s", cand + 7);
+            } else if (!strncmp(cand, "ata:/", 5)) {
+              snprintf(probePath, sizeof(probePath), "ata0:%s", cand + 4);
+            } else if (!strncmp(cand, "ilink:/", 7)) {
+              snprintf(probePath, sizeof(probePath), "ilink0:%s", cand + 6);
+            } else if (!strncmp(cand, "smb:/", 5)) {
+              snprintf(probePath, sizeof(probePath), "smb0:%s", cand + 4);
+            } else if (!strncmp(cand, "mmce:/", 6)) {
+              snprintf(probePath, sizeof(probePath), "mmce0:%s", cand + 5);
+            } else {
+              snprintf(probePath, sizeof(probePath), "%s", cand);
+            }
           } else {
             probePath[0] = '\0';
           }

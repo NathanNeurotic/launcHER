@@ -15,6 +15,7 @@ typedef enum {
   POPS_BDMA_ATA,
   POPS_BDMA_MX4SIO,
   POPS_BDMA_MMCE,
+  POPS_BDMA_ILINK,
   POPS_BDMA_GENERIC
 } PopsBdmaMode;
 
@@ -39,6 +40,9 @@ int pops_get_active_xx_launch(void);
 
 /* Checks if path or title filename contains the SB. prefix */
 int pops_is_sb_prefix(const char *path);
+
+/* Checks if path or title filename contains the PP. or __. single-game partition prefix */
+int pops_is_pp_prefix(const char *path);
 
 /* Global tracker for active SB. launch context */
 void pops_set_active_sb_launch(int active);

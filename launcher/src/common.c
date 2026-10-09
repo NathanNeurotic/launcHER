@@ -243,8 +243,13 @@ int parseAPAPath(const char *path, char *mountPart, size_t partSize, const char 
   if (pfsToken && (!partEnd || pfsToken < partEnd))
     partEnd = pfsToken;
 
-  if (!partEnd)
+  if (!partEnd) {
     partEnd = partStart + strlen(partStart);
+    const char *ext = strrchr(partStart, '.');
+    if (ext && (!strcasecmp(ext, ".elf") || !strcasecmp(ext, ".vcd"))) {
+      partEnd = ext;
+    }
+  }
 
   size_t partLen = (size_t)(partEnd - partStart);
   if (partLen == 0)
@@ -307,7 +312,7 @@ DeviceType guessDeviceType(const char *path) {
     return Device_UDPFS;
 #endif
 #ifdef APA
-  } else if (!strncmp("hdd", path, 3) || path[0] == '+' || !strncmp("pfs", path, 3) || !strncmp("__", path, 2) || strstr(path, ":pfs")) {
+  } else if (!strncmp("hdd", path, 3) || path[0] == '+' || !strncmp("pfs", path, 3) || !strncmp("__", path, 2) || !strncasecmp("pp.", path, 3) || strstr(path, ":pfs")) {
     return Device_APA;
 #endif
 #ifdef CDROM
@@ -350,17 +355,57 @@ char *normalizePath(char *path, DeviceType type) {
     break;
   }
   case Device_MemoryCard:
-  case Device_MMCE:
   case Device_CDROM:
   case Device_UDPFS:
-  case Device_ATA:
   case Device_XFROM:
-  case Device_MX4SIO:
-  case Device_iLink:
   case Device_UDPBD:
-  case Device_SMB:
     strncat(pathbuffer, path, PATH_MAX - 6);
     break;
+  case Device_MMCE: {
+    const char *colon = strchr(path, ':');
+    if (colon && colon == path + 4) {
+      snprintf(pathbuffer, sizeof(pathbuffer), "mmce0:%s", colon + 1);
+    } else {
+      strncat(pathbuffer, path, PATH_MAX - 6);
+    }
+    break;
+  }
+  case Device_ATA: {
+    const char *colon = strchr(path, ':');
+    if (colon && colon == path + 3) {
+      snprintf(pathbuffer, sizeof(pathbuffer), "ata0:%s", colon + 1);
+    } else {
+      strncat(pathbuffer, path, PATH_MAX - 6);
+    }
+    break;
+  }
+  case Device_MX4SIO: {
+    const char *colon = strchr(path, ':');
+    if (colon && colon == path + 6) {
+      snprintf(pathbuffer, sizeof(pathbuffer), "mx4sio0:%s", colon + 1);
+    } else {
+      strncat(pathbuffer, path, PATH_MAX - 6);
+    }
+    break;
+  }
+  case Device_iLink: {
+    const char *colon = strchr(path, ':');
+    if (colon && colon == path + 5) {
+      snprintf(pathbuffer, sizeof(pathbuffer), "ilink0:%s", colon + 1);
+    } else {
+      strncat(pathbuffer, path, PATH_MAX - 6);
+    }
+    break;
+  }
+  case Device_SMB: {
+    const char *colon = strchr(path, ':');
+    if (colon && colon == path + 3) {
+      snprintf(pathbuffer, sizeof(pathbuffer), "smb0:%s", colon + 1);
+    } else {
+      strncat(pathbuffer, path, PATH_MAX - 6);
+    }
+    break;
+  }
   // BDM USB
   case Device_USB:
     char devNumber = path[3]; // usb

@@ -674,6 +674,12 @@ int launchPOPS(int argc, char *argv[]) {
       strncpy(resolvedVcd, norm, sizeof(resolvedVcd) - 1);
       resolvedVcd[sizeof(resolvedVcd) - 1] = '\0';
     }
+  } else {
+    char *norm = normalizePath(resolvedVcd, device);
+    if (norm) {
+      strncpy(resolvedVcd, norm, sizeof(resolvedVcd) - 1);
+      resolvedVcd[sizeof(resolvedVcd) - 1] = '\0';
+    }
   }
 
   int isSbLaunch = pops_get_active_sb_launch() || (device == Device_SMB);

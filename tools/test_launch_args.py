@@ -101,6 +101,18 @@ lib.pops_has_external_usb_modules.restype = c.c_int
 lib.pops_has_smb_stack.argtypes = []
 lib.pops_has_smb_stack.restype = c.c_int
 
+# PP. prefix check
+lib.pops_is_pp_prefix.argtypes = [c.c_char_p]
+lib.pops_is_pp_prefix.restype = c.c_int
+
+assert lib.pops_is_pp_prefix(b"PP.Crash Bandicoot.ELF") == 1
+assert lib.pops_is_pp_prefix(b"__.Hidden Game.ELF") == 1
+assert lib.pops_is_pp_prefix(b"PP.Crash") == 1
+assert lib.pops_is_pp_prefix(b"Crash Bandicoot.ELF") == 0
+assert lib.pops_is_pp_prefix(b"XX.Crash Bandicoot.ELF") == 0
+assert lib.pops_is_pp_prefix(b"SB.Crash Bandicoot.ELF") == 0
+assert lib.pops_is_pp_prefix(None) == 0
+
 # BDMA mode parsing tests
 lib.pops_parse_bdma_mode.argtypes = [c.c_char_p]
 lib.pops_parse_bdma_mode.restype = c.c_int
@@ -113,10 +125,12 @@ assert lib.pops_parse_bdma_mode(b"MX4SIO") == 3
 assert lib.pops_parse_bdma_mode(b"mc2sio") == 3
 assert lib.pops_parse_bdma_mode(b"MMCE") == 4
 assert lib.pops_parse_bdma_mode(b"mmce1") == 4
+assert lib.pops_parse_bdma_mode(b"ILINK") == 5
+assert lib.pops_parse_bdma_mode(b"ilink0") == 5
 assert lib.pops_parse_bdma_mode(b"USB") == 1
 assert lib.pops_parse_bdma_mode(b"fat32") == 1
-assert lib.pops_parse_bdma_mode(b"GENERIC") == 5
-assert lib.pops_parse_bdma_mode(b"bdma") == 5
+assert lib.pops_parse_bdma_mode(b"GENERIC") == 6
+assert lib.pops_parse_bdma_mode(b"bdma") == 6
 assert lib.pops_parse_bdma_mode(b"unknown") == 0
 assert lib.pops_parse_bdma_mode(b"# comment") == 0
 assert lib.pops_parse_bdma_mode(None) == 0
@@ -152,10 +166,18 @@ with tempfile.TemporaryDirectory() as tmpdir:
 
     mode_file.unlink()
 
+    # bdma_config.txt (RiptOPL marker) with ata and ilink
+    cfg_marker = pop_dir / "bdma_config.txt"
+    cfg_marker.write_text("ata\n")
+    assert lib.pops_detect_bdma_mode() == 2
+    cfg_marker.write_text("ilink\n")
+    assert lib.pops_detect_bdma_mode() == 5
+    cfg_marker.unlink()
+
     # Presence of driver: bdm_assault.irx -> GENERIC
     driver_file = pop_dir / "bdm_assault.irx"
     driver_file.write_bytes(b"\x00" * 16)
-    assert lib.pops_detect_bdma_mode() == 5
+    assert lib.pops_detect_bdma_mode() == 6
 
     driver_file.unlink()
 
@@ -241,11 +263,12 @@ assert cands[1] == 'mmce0:/POPS/IMAGE.VCD', cands
 assert cands[2] == 'mmce0:/Crash Bandicoot.VCD', cands
 assert cands[3] == 'mmce1:/POPS/Crash Bandicoot.VCD', cands
 
-# 9. Generic BDMA mode with XX. prefix: probes USB, ATA, MX4SIO, MMCE
-cands = resolve_bdma('mass0:/APPS/XX.Crash Bandicoot.ELF', None, 5)
+# 9. Generic BDMA mode with XX. prefix: probes USB, ATA, MX4SIO, iLink, MMCE
+cands = resolve_bdma('mass0:/APPS/XX.Crash Bandicoot.ELF', None, 6)
 assert cands[0] == 'mass0:/POPS/Crash Bandicoot.VCD', cands
 assert 'ata:/POPS/Crash Bandicoot.VCD' in cands, cands
 assert 'mx4sio:/POPS/Crash Bandicoot.VCD' in cands, cands
+assert 'ilink:/POPS/Crash Bandicoot.VCD' in cands, cands
 assert 'mmce0:/POPS/Crash Bandicoot.VCD' in cands, cands
 
 # 10. SB. prefix (SMB network share)
@@ -261,5 +284,42 @@ assert cands[1] == 'smb0:/Crash Bandicoot.VCD', cands
 assert cands[2] == 'smb:/POPS/Crash Bandicoot.VCD', cands
 assert lib.pops_get_active_sb_launch() == 1
 lib.pops_set_active_sb_launch(0)
+
+# 12. RiptOPL BDM selector: bare mass:/POPS/XX.<title>.ELF expands to mass0: and mass:
+cands = resolve('mass:/POPS/XX.Crash Bandicoot.ELF', None)
+assert 'mass0:/POPS/Crash Bandicoot.VCD' in cands, cands
+assert 'mass:/POPS/Crash Bandicoot.VCD' in cands, cands
+
+# 13. RiptOPL SMB selector: bare smb:/POPS/SB.<title>.ELF
+cands = resolve('smb:/POPS/SB.Crash Bandicoot.ELF', None)
+assert cands[0] == 'smb0:/POPS/Crash Bandicoot.VCD', cands
+assert 'smb:/POPS/Crash Bandicoot.VCD' in cands, cands
+
+# 14. RiptOPL APA HDD single-game partition: PP.<title>.ELF
+cands = resolve('PP.Crash Bandicoot.ELF', None)
+assert cands[0] == 'hdd0:PP.Crash Bandicoot:pfs:/Crash Bandicoot.VCD', cands
+assert cands[1] == 'hdd0:PP.Crash Bandicoot:pfs:/IMAGE.VCD', cands
+assert 'pfs0:/Crash Bandicoot.VCD' in cands, cands
+assert 'hdd0:__.POPS:pfs:/Crash Bandicoot.VCD' in cands, cands
+
+# 15. RiptOPL APA HDD hidden single-game partition: __.<title>.ELF
+cands = resolve('__.Hidden Game.ELF', None)
+assert cands[0] == 'hdd0:__.Hidden Game:pfs:/Hidden Game.VCD', cands
+assert cands[1] == 'hdd0:__.Hidden Game:pfs:/IMAGE.VCD', cands
+assert 'pfs0:/Hidden Game.VCD' in cands, cands
+
+# 16. RiptOPL APA HDD pooled-container game: <title>.ELF
+cands = resolve('Crash Bandicoot.ELF', None)
+assert cands[0] == 'hdd0:__.POPS:pfs:/Crash Bandicoot.VCD', cands
+assert cands[1] == 'hdd0:__.POPS:pfs:/IMAGE.VCD', cands
+assert 'pfs0:/Crash Bandicoot.VCD' in cands, cands
+assert 'hdd0:PP.Crash Bandicoot:pfs:/Crash Bandicoot.VCD' in cands, cands
+
+# 17. i.Link BDMA mode with XX. prefix
+cands = resolve_bdma('mass0:/APPS/launcHER.elf', 'XX.Crash Bandicoot', 5)
+assert cands[0] == 'ilink:/POPS/Crash Bandicoot.VCD', cands
+assert cands[1] == 'ilink:/POPS/IMAGE.VCD', cands
+assert cands[2] == 'ilink:/Crash Bandicoot.VCD', cands
+assert 'ilink0:/POPS/Crash Bandicoot.VCD' in cands, cands
 
 print('Launcher argv compatibility PASS: duplicated self paths, partition identity, explicit targets, malformed argv, pops candidate resolution, bdma detection and routing')

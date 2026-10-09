@@ -83,6 +83,7 @@ static void add_candidate(char candidates[][512], int max_candidates, int *count
 #define PREFIX_NONE 0
 #define PREFIX_XX   1
 #define PREFIX_SB   2
+#define PREFIX_PP   3
 
 static void extract_base_name(const char *path, char *base, size_t base_size, int *prefix_type) {
   const char *name, *bname, *dot;
@@ -105,6 +106,12 @@ static void extract_base_name(const char *path, char *base, size_t base_size, in
   } else if ((name[0] == 'S' || name[0] == 's') && (name[1] == 'B' || name[1] == 'b') && name[2] == '.') {
     if (prefix_type) *prefix_type = PREFIX_SB;
     name += 3;
+  } else if ((name[0] == 'P' || name[0] == 'p') && (name[1] == 'P' || name[1] == 'p') && name[2] == '.') {
+    if (prefix_type) *prefix_type = PREFIX_PP;
+    name += 3;
+  } else if (name[0] == '_' && name[1] == '_' && name[2] == '.') {
+    if (prefix_type) *prefix_type = PREFIX_PP;
+    name += 3;
   }
 
   dot = strrchr(name, '.');
@@ -114,6 +121,13 @@ static void extract_base_name(const char *path, char *base, size_t base_size, in
     memcpy(base, name, len);
     base[len] = '\0';
   }
+}
+
+int pops_is_pp_prefix(const char *path) {
+  int prefix_type = PREFIX_NONE;
+  if (!path || !path[0]) return 0;
+  extract_base_name(path, NULL, 0, &prefix_type);
+  return prefix_type == PREFIX_PP;
 }
 
 static void extract_parent_dir(const char *path, char *dir, size_t dir_size) {
@@ -187,6 +201,10 @@ PopsBdmaMode pops_parse_bdma_mode(const char *str) {
       str_iequal(tok, "MASS") || str_iequal(tok, "MASS0") || str_iequal(tok, "MASS1")) {
     return POPS_BDMA_USB;
   }
+  if (str_iequal(tok, "ILINK") || str_iequal(tok, "ILINK0") || str_iequal(tok, "ILINK1") ||
+      str_iequal(tok, "1394") || str_iequal(tok, "FIREWIRE")) {
+    return POPS_BDMA_ILINK;
+  }
   if (str_iequal(tok, "BDMA") || str_iequal(tok, "GENERIC") || str_iequal(tok, "ALL")) {
     return POPS_BDMA_GENERIC;
   }
@@ -245,6 +263,7 @@ PopsBdmaMode pops_detect_bdma_mode(void) {
   size_t m, d, drv;
 
   static const char *marker_files[] = {
+    "bdma_config.txt",
     "bdma_mode.txt",
     ".pldr_bdma_mode",
     "bdma_device.txt",
@@ -499,13 +518,66 @@ int pops_resolve_candidate_targets_bdma(const char *launcher_path, const char *a
   }
 
   /* Dispatch candidates based on prefix and BDMA mode */
+  if (prefix_type == PREFIX_PP) {
+    /* PP. or __. single-game partition prefix */
+    char partName[96];
+    const char *pstart = strrchr(arg ? arg : launcher_path, '/');
+    const char *bstart = strrchr(arg ? arg : launcher_path, '\\');
+    if (bstart && (!pstart || bstart > pstart)) pstart = bstart;
+    if (!pstart) pstart = strrchr(arg ? arg : launcher_path, ':');
+    pstart = pstart ? pstart + 1 : (arg ? arg : launcher_path);
+
+    if (pstart[0] == '_' && pstart[1] == '_')
+      snprintf(partName, sizeof(partName), "__.%s", baseTitle);
+    else
+      snprintf(partName, sizeof(partName), "PP.%s", baseTitle);
+
+    snprintf(buf, sizeof(buf), "hdd0:%s:pfs:/%s.VCD", partName, baseTitle);
+    add_candidate(candidates, max_candidates, &count, buf);
+    snprintf(buf, sizeof(buf), "hdd0:%s:pfs:/IMAGE.VCD", partName);
+    add_candidate(candidates, max_candidates, &count, buf);
+    snprintf(buf, sizeof(buf), "hdd0:%s:pfs:/%s.VCD", partName, partName);
+    add_candidate(candidates, max_candidates, &count, buf);
+
+    snprintf(buf, sizeof(buf), "pfs0:/%s.VCD", baseTitle);
+    add_candidate(candidates, max_candidates, &count, buf);
+    snprintf(buf, sizeof(buf), "pfs0:/IMAGE.VCD");
+    add_candidate(candidates, max_candidates, &count, buf);
+    snprintf(buf, sizeof(buf), "pfs0:/%s.VCD", partName);
+    add_candidate(candidates, max_candidates, &count, buf);
+
+    snprintf(buf, sizeof(buf), "hdd0:__.POPS:pfs:/%s.VCD", baseTitle);
+    add_candidate(candidates, max_candidates, &count, buf);
+    snprintf(buf, sizeof(buf), "hdd0:__.POPS:pfs:/IMAGE.VCD");
+    add_candidate(candidates, max_candidates, &count, buf);
+
+    snprintf(buf, sizeof(buf), "mass0:/POPS/%s.VCD", baseTitle);
+    add_candidate(candidates, max_candidates, &count, buf);
+    return count;
+  }
+
   if (prefix_type == PREFIX_NONE) {
     /* No prefix and no CNF: default to POPS APA partition first */
     snprintf(buf, sizeof(buf), "hdd0:__.POPS:pfs:/%s.VCD", baseTitle);
     add_candidate(candidates, max_candidates, &count, buf);
     add_candidate(candidates, max_candidates, &count, "hdd0:__.POPS:pfs:/IMAGE.VCD");
+    snprintf(buf, sizeof(buf), "pfs0:/%s.VCD", baseTitle);
+    add_candidate(candidates, max_candidates, &count, buf);
+    snprintf(buf, sizeof(buf), "pfs0:/IMAGE.VCD");
+    add_candidate(candidates, max_candidates, &count, buf);
+
+    snprintf(buf, sizeof(buf), "hdd0:PP.%s:pfs:/%s.VCD", baseTitle, baseTitle);
+    add_candidate(candidates, max_candidates, &count, buf);
+    snprintf(buf, sizeof(buf), "hdd0:PP.%s:pfs:/IMAGE.VCD", baseTitle);
+    add_candidate(candidates, max_candidates, &count, buf);
 
     if (dirBuf[0]) {
+      if (!strncmp(dirBuf, "mass:", 5)) {
+        snprintf(buf, sizeof(buf), "mass0:%s/%s.VCD", dirBuf + 5, baseTitle);
+        add_candidate(candidates, max_candidates, &count, buf);
+        snprintf(buf, sizeof(buf), "mass0:%s/IMAGE.VCD", dirBuf + 5);
+        add_candidate(candidates, max_candidates, &count, buf);
+      }
       snprintf(buf, sizeof(buf), "%s/%s.VCD", dirBuf, baseTitle);
       add_candidate(candidates, max_candidates, &count, buf);
       snprintf(buf, sizeof(buf), "%s/IMAGE.VCD", dirBuf);
@@ -513,6 +585,14 @@ int pops_resolve_candidate_targets_bdma(const char *launcher_path, const char *a
     }
 
     if (devPrefix[0]) {
+      if (!strncmp(devPrefix, "mass:", 5)) {
+        snprintf(buf, sizeof(buf), "mass0:/POPS/%s.VCD", baseTitle);
+        add_candidate(candidates, max_candidates, &count, buf);
+        snprintf(buf, sizeof(buf), "mass0:/POPS/IMAGE.VCD");
+        add_candidate(candidates, max_candidates, &count, buf);
+        snprintf(buf, sizeof(buf), "mass0:/%s.VCD", baseTitle);
+        add_candidate(candidates, max_candidates, &count, buf);
+      }
       snprintf(buf, sizeof(buf), "%s/POPS/%s.VCD", devPrefix, baseTitle);
       add_candidate(candidates, max_candidates, &count, buf);
       snprintf(buf, sizeof(buf), "%s/POPS/IMAGE.VCD", devPrefix);
@@ -529,8 +609,6 @@ int pops_resolve_candidate_targets_bdma(const char *launcher_path, const char *a
     add_candidate(candidates, max_candidates, &count, buf);
     snprintf(buf, sizeof(buf), "mc1:/POPS/%s.VCD", baseTitle);
     add_candidate(candidates, max_candidates, &count, buf);
-    snprintf(buf, sizeof(buf), "hdd0:__.POPS:pfs:/%s.VCD", baseTitle);
-    add_candidate(candidates, max_candidates, &count, buf);
     return count;
   }
 
@@ -541,6 +619,8 @@ int pops_resolve_candidate_targets_bdma(const char *launcher_path, const char *a
     snprintf(buf, sizeof(buf), "smb0:/%s.VCD", baseTitle);
     add_candidate(candidates, max_candidates, &count, buf);
     snprintf(buf, sizeof(buf), "smb:/POPS/%s.VCD", baseTitle);
+    add_candidate(candidates, max_candidates, &count, buf);
+    snprintf(buf, sizeof(buf), "smb:/%s.VCD", baseTitle);
     add_candidate(candidates, max_candidates, &count, buf);
 
     if (dirBuf[0]) {
@@ -567,6 +647,8 @@ int pops_resolve_candidate_targets_bdma(const char *launcher_path, const char *a
     add_candidate(candidates, max_candidates, &count, buf);
     snprintf(buf, sizeof(buf), "ata0:/%s.VCD", baseTitle);
     add_candidate(candidates, max_candidates, &count, buf);
+    snprintf(buf, sizeof(buf), "mass0:/POPS/%s.VCD", baseTitle);
+    add_candidate(candidates, max_candidates, &count, buf);
     if (dirBuf[0] && !strncmp(dirBuf, "ata", 3)) {
       snprintf(buf, sizeof(buf), "%s/%s.VCD", dirBuf, baseTitle);
       add_candidate(candidates, max_candidates, &count, buf);
@@ -584,7 +666,28 @@ int pops_resolve_candidate_targets_bdma(const char *launcher_path, const char *a
     add_candidate(candidates, max_candidates, &count, buf);
     snprintf(buf, sizeof(buf), "mx4sio0:/%s.VCD", baseTitle);
     add_candidate(candidates, max_candidates, &count, buf);
+    snprintf(buf, sizeof(buf), "mass0:/POPS/%s.VCD", baseTitle);
+    add_candidate(candidates, max_candidates, &count, buf);
     if (dirBuf[0] && !strncmp(dirBuf, "mx4sio", 6)) {
+      snprintf(buf, sizeof(buf), "%s/%s.VCD", dirBuf, baseTitle);
+      add_candidate(candidates, max_candidates, &count, buf);
+      snprintf(buf, sizeof(buf), "%s/IMAGE.VCD", dirBuf);
+      add_candidate(candidates, max_candidates, &count, buf);
+    }
+  } else if (bdma_mode == POPS_BDMA_ILINK) {
+    /* i.Link (IEEE1394) backend */
+    snprintf(buf, sizeof(buf), "ilink:/POPS/%s.VCD", baseTitle);
+    add_candidate(candidates, max_candidates, &count, buf);
+    add_candidate(candidates, max_candidates, &count, "ilink:/POPS/IMAGE.VCD");
+    snprintf(buf, sizeof(buf), "ilink:/%s.VCD", baseTitle);
+    add_candidate(candidates, max_candidates, &count, buf);
+    snprintf(buf, sizeof(buf), "ilink0:/POPS/%s.VCD", baseTitle);
+    add_candidate(candidates, max_candidates, &count, buf);
+    snprintf(buf, sizeof(buf), "ilink0:/%s.VCD", baseTitle);
+    add_candidate(candidates, max_candidates, &count, buf);
+    snprintf(buf, sizeof(buf), "mass0:/POPS/%s.VCD", baseTitle);
+    add_candidate(candidates, max_candidates, &count, buf);
+    if (dirBuf[0] && !strncmp(dirBuf, "ilink", 5)) {
       snprintf(buf, sizeof(buf), "%s/%s.VCD", dirBuf, baseTitle);
       add_candidate(candidates, max_candidates, &count, buf);
       snprintf(buf, sizeof(buf), "%s/IMAGE.VCD", dirBuf);
@@ -602,8 +705,10 @@ int pops_resolve_candidate_targets_bdma(const char *launcher_path, const char *a
     add_candidate(candidates, max_candidates, &count, "mmce1:/POPS/IMAGE.VCD");
     snprintf(buf, sizeof(buf), "mmce1:/%s.VCD", baseTitle);
     add_candidate(candidates, max_candidates, &count, buf);
+    snprintf(buf, sizeof(buf), "mass0:/POPS/%s.VCD", baseTitle);
+    add_candidate(candidates, max_candidates, &count, buf);
   } else if (bdma_mode == POPS_BDMA_GENERIC) {
-    /* Generic BDMA driver presence: probe USB, ATA, MX4SIO, MMCE */
+    /* Generic BDMA driver presence: probe USB, ATA, MX4SIO, iLink, MMCE */
     snprintf(buf, sizeof(buf), "mass0:/POPS/%s.VCD", baseTitle);
     add_candidate(candidates, max_candidates, &count, buf);
     snprintf(buf, sizeof(buf), "mass0:/%s.VCD", baseTitle);
@@ -616,6 +721,10 @@ int pops_resolve_candidate_targets_bdma(const char *launcher_path, const char *a
     add_candidate(candidates, max_candidates, &count, buf);
     snprintf(buf, sizeof(buf), "mx4sio:/%s.VCD", baseTitle);
     add_candidate(candidates, max_candidates, &count, buf);
+    snprintf(buf, sizeof(buf), "ilink:/POPS/%s.VCD", baseTitle);
+    add_candidate(candidates, max_candidates, &count, buf);
+    snprintf(buf, sizeof(buf), "ilink:/%s.VCD", baseTitle);
+    add_candidate(candidates, max_candidates, &count, buf);
     snprintf(buf, sizeof(buf), "mmce0:/POPS/%s.VCD", baseTitle);
     add_candidate(candidates, max_candidates, &count, buf);
     snprintf(buf, sizeof(buf), "mmce1:/POPS/%s.VCD", baseTitle);
@@ -624,6 +733,12 @@ int pops_resolve_candidate_targets_bdma(const char *launcher_path, const char *a
 
   /* Adjacent directory and device prefix priorities (standard for USB/local launches) */
   if (dirBuf[0]) {
+    if (!strncmp(dirBuf, "mass:", 5)) {
+      snprintf(buf, sizeof(buf), "mass0:%s/%s.VCD", dirBuf + 5, baseTitle);
+      add_candidate(candidates, max_candidates, &count, buf);
+      snprintf(buf, sizeof(buf), "mass0:%s/IMAGE.VCD", dirBuf + 5);
+      add_candidate(candidates, max_candidates, &count, buf);
+    }
     snprintf(buf, sizeof(buf), "%s/%s.VCD", dirBuf, baseTitle);
     add_candidate(candidates, max_candidates, &count, buf);
     snprintf(buf, sizeof(buf), "%s/IMAGE.VCD", dirBuf);
@@ -631,6 +746,14 @@ int pops_resolve_candidate_targets_bdma(const char *launcher_path, const char *a
   }
 
   if (devPrefix[0]) {
+    if (!strncmp(devPrefix, "mass:", 5)) {
+      snprintf(buf, sizeof(buf), "mass0:/POPS/%s.VCD", baseTitle);
+      add_candidate(candidates, max_candidates, &count, buf);
+      snprintf(buf, sizeof(buf), "mass0:/POPS/IMAGE.VCD");
+      add_candidate(candidates, max_candidates, &count, buf);
+      snprintf(buf, sizeof(buf), "mass0:/%s.VCD", baseTitle);
+      add_candidate(candidates, max_candidates, &count, buf);
+    }
     snprintf(buf, sizeof(buf), "%s/POPS/%s.VCD", devPrefix, baseTitle);
     add_candidate(candidates, max_candidates, &count, buf);
     snprintf(buf, sizeof(buf), "%s/POPS/IMAGE.VCD", devPrefix);

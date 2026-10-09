@@ -34,7 +34,7 @@ int main(int argc, char *argv[]) {
   // Try to guess the device type using argv[0]
   if (!strncmp(argv[0], "mc1", 3))
     settings.mcHint = 1;
-  if (!strncmp(argv[0], "pfs", 3) || !strncmp(argv[0], "hdd", 3) || argv[0][0] == '+' || !strncmp(argv[0], "__", 2) || strstr(argv[0], ":pfs"))
+  if (!strncmp(argv[0], "pfs", 3) || !strncmp(argv[0], "hdd", 3) || argv[0][0] == '+' || !strncmp(argv[0], "__", 2) || !strncasecmp(argv[0], "pp.", 3) || strstr(argv[0], ":pfs"))
     settings.deviceHint = Device_APA;
   if (!strncmp(argv[0], "xfrom", 5))
     settings.deviceHint = Device_XFROM;
