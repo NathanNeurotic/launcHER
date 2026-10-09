@@ -210,6 +210,23 @@ int pops_is_xx_prefix(const char *path) {
   return prefix_type == PREFIX_XX;
 }
 
+static int s_active_sb_launch = 0;
+
+void pops_set_active_sb_launch(int active) {
+  s_active_sb_launch = active;
+}
+
+int pops_get_active_sb_launch(void) {
+  return s_active_sb_launch;
+}
+
+int pops_is_sb_prefix(const char *path) {
+  int prefix_type = PREFIX_NONE;
+  if (!path || !path[0]) return 0;
+  extract_base_name(path, NULL, 0, &prefix_type);
+  return prefix_type == PREFIX_SB;
+}
+
 static char s_bdma_test_root[384] = {0};
 
 void pops_set_bdma_test_root(const char *root) {
@@ -314,6 +331,102 @@ PopsBdmaMode pops_detect_bdma_mode(void) {
   return POPS_BDMA_NONE;
 }
 
+int pops_has_external_usb_modules(void) {
+  char path[1024];
+  FILE *f;
+  size_t d, drv;
+
+  static const char *usb_files[] = {
+    "USBD.IRX",
+    "usbd.irx",
+    "USBHDFSD.IRX",
+    "usbhdfsd.irx"
+  };
+  static const char *dirs[] = {
+    "mc0:/POPSTARTER/",
+    "mc1:/POPSTARTER/",
+    "mc0:/POPS/",
+    "mc1:/POPS/"
+  };
+
+  if (s_bdma_test_root[0]) {
+    for (drv = 0; drv < sizeof(usb_files)/sizeof(usb_files[0]); ++drv) {
+      snprintf(path, sizeof(path), "%s/POPSTARTER/%s", s_bdma_test_root, usb_files[drv]);
+      f = fopen(path, "r");
+      if (!f) {
+        snprintf(path, sizeof(path), "%s/%s", s_bdma_test_root, usb_files[drv]);
+        f = fopen(path, "r");
+      }
+      if (f) {
+        fclose(f);
+        return 1;
+      }
+    }
+  } else {
+    for (d = 0; d < sizeof(dirs)/sizeof(dirs[0]); ++d) {
+      for (drv = 0; drv < sizeof(usb_files)/sizeof(usb_files[0]); ++drv) {
+        snprintf(path, sizeof(path), "%s%s", dirs[d], usb_files[drv]);
+        f = fopen(path, "r");
+        if (f) {
+          fclose(f);
+          return 1;
+        }
+      }
+    }
+  }
+
+  return 0;
+}
+
+int pops_has_smb_stack(void) {
+  char path[1024];
+  FILE *f;
+  size_t d, fl;
+
+  static const char *smb_files[] = {
+    "SMBCONFIG.DAT",
+    "smbconfig.dat",
+    "SMBMAN.IRX",
+    "smbman.irx",
+    "PS2NETFS.IRX",
+    "ps2netfs.irx"
+  };
+  static const char *dirs[] = {
+    "mc0:/POPSTARTER/",
+    "mc1:/POPSTARTER/",
+    "mc0:/POPS/",
+    "mc1:/POPS/"
+  };
+
+  if (s_bdma_test_root[0]) {
+    for (fl = 0; fl < sizeof(smb_files)/sizeof(smb_files[0]); ++fl) {
+      snprintf(path, sizeof(path), "%s/POPSTARTER/%s", s_bdma_test_root, smb_files[fl]);
+      f = fopen(path, "r");
+      if (!f) {
+        snprintf(path, sizeof(path), "%s/%s", s_bdma_test_root, smb_files[fl]);
+        f = fopen(path, "r");
+      }
+      if (f) {
+        fclose(f);
+        return 1;
+      }
+    }
+  } else {
+    for (d = 0; d < sizeof(dirs)/sizeof(dirs[0]); ++d) {
+      for (fl = 0; fl < sizeof(smb_files)/sizeof(smb_files[0]); ++fl) {
+        snprintf(path, sizeof(path), "%s%s", dirs[d], smb_files[fl]);
+        f = fopen(path, "r");
+        if (f) {
+          fclose(f);
+          return 1;
+        }
+      }
+    }
+  }
+
+  return 0;
+}
+
 int pops_resolve_candidate_targets_bdma(const char *launcher_path, const char *arg,
                                         char candidates[][512], int max_candidates,
                                         PopsBdmaMode bdma_mode) {
@@ -381,6 +494,8 @@ int pops_resolve_candidate_targets_bdma(const char *launcher_path, const char *a
 
   if (prefix_type == PREFIX_XX) {
     pops_set_active_xx_launch(1);
+  } else if (prefix_type == PREFIX_SB) {
+    pops_set_active_sb_launch(1);
   }
 
   /* Dispatch candidates based on prefix and BDMA mode */

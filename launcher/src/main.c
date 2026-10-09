@@ -71,6 +71,8 @@ int main(int argc, char *argv[]) {
 
   if (pops_is_xx_prefix(launcherPath) || pops_is_xx_prefix(argv[0]))
     pops_set_active_xx_launch(1);
+  if (pops_is_sb_prefix(launcherPath) || pops_is_sb_prefix(argv[0]))
+    pops_set_active_sb_launch(1);
 
   char *p = strrchr(argv[0], '.');
   if (p && (!strcasecmp(p, ".cfg") || !strcasecmp(p, ".cnf")))

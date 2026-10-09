@@ -134,6 +134,8 @@ int handleQuickboot(char *cnfPath) {
   originalTarget[sizeof(originalTarget) - 1] = '\0';
   if (pops_is_xx_prefix(originalTarget))
     pops_set_active_xx_launch(1);
+  if (pops_is_sb_prefix(originalTarget))
+    pops_set_active_sb_launch(1);
   char resolvedPath[PATH_MAX] = {0};
 
   // When quickboot is entered through an ELF path, always load launcHER.CNF

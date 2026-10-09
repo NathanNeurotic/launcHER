@@ -217,22 +217,19 @@ arg=-dev9=NIC</code></pre>
 
 <ol class="checklist">
   <li><b>No Prefix (Default POPS APA):</b> An executable named <code>Crash Bandicoot.ELF</code> without a prefix defaults to the internal HDD APA partition: <code>hdd0:__.POPS:pfs:/Crash Bandicoot.VCD</code>, followed by adjacent directory checks.</li>
-  <li><b>BDMA and Storage Prefix (<code>XX.</code>):</b> Executables named with an <code>XX.</code> prefix (such as <code>XX.Crash Bandicoot.ELF</code>) inspect BDMA settings on memory card (<code>mc0:/POPSTARTER/bdma_mode.txt</code>, <code>mc1:/POPSTARTER/bdma_mode.txt</code>, or <code>.pldr_bdma_mode</code>). When configured, launcHER routes to the designated backend:
+  <li><b>BDMA and Storage Prefix (<code>XX.</code>):</b> Executables named with an <code>XX.</code> prefix (such as <code>XX.Crash Bandicoot.ELF</code>) check memory card directories (<code>mc0:/POPSTARTER/</code>, <code>mc1:/POPSTARTER/</code>) for external drivers and BDMA markers:
     <ul>
-      <li><code>ATA</code> or <code>EXFAT</code>: Internal exFAT HDD (<code>ata:/POPS/&lt;Game&gt;.VCD</code>).</li>
-      <li><code>MX4SIO</code>: SD card in memory card slot (<code>mx4sio:/POPS/&lt;Game&gt;.VCD</code>).</li>
-      <li><code>MMCE</code>: Memory Card SD adapter (<code>mmce0:/POPS/&lt;Game&gt;.VCD</code>).</li>
-      <li><code>USB</code> or default: USB mass storage (<code>mass0:/POPS/&lt;Game&gt;.VCD</code>).</li>
+      <li>When external drivers (<code>USBD.IRX</code>, <code>USBHDFSD.IRX</code>, <code>bdm_assault.irx</code>, <code>BDM.IRX</code>, <code>MX4SIO.IRX</code>, <code>ATA.IRX</code>, <code>MMCE.IRX</code>) exist in <code>mc?:/POPSTARTER/</code>, launcHER skips internal USB modules and uses the external drivers.</li>
+      <li>When external modules are not present, launcHER loads its built-in modules for USB POPS launches.</li>
+      <li>When BDMA mode markers (<code>bdma_mode.txt</code>) exist, launcHER routes targets to the designated hardware backend: <code>ATA</code> / <code>EXFAT</code> (<code>ata:/POPS/&lt;Game&gt;.VCD</code>), <code>MX4SIO</code> (<code>mx4sio:/POPS/&lt;Game&gt;.VCD</code>), <code>MMCE</code> (<code>mmce0:/POPS/&lt;Game&gt;.VCD</code>), or <code>USB</code> (<code>mass0:/POPS/&lt;Game&gt;.VCD</code>).</li>
     </ul>
-    When BDMA driver binaries (<code>bdm_assault.irx</code>, <code>BDM.IRX</code>, <code>USBD.IRX</code>, <code>USBHDFSD.IRX</code>) exist without a mode marker, launcHER probes USB, ATA, MX4SIO, and MMCE in sequence.
-    On an <code>XX.</code> launch where BDMA is present, launcHER loads and uses those BDMA driver modules on the IOP. If BDMA is not present on an <code>XX.</code> launch, launcHER uses its native built-in drivers.
   </li>
-  <li><b>SMB Prefix (<code>SB.</code>):</b> Executables named with an <code>SB.</code> prefix (such as <code>SB.Crash Bandicoot.ELF</code>) route to SMB network shares (<code>smb0:/POPS/&lt;Game&gt;.VCD</code>).</li>
+  <li><b>SMB Network Prefix (<code>SB.</code>):</b> Executables named with an <code>SB.</code> prefix (such as <code>SB.Crash Bandicoot.ELF</code>) load the POPStarter SMB network stack from <code>mc?:/POPSTARTER/</code> (<code>PS2DEV9.IRX</code>, <code>SMAP.IRX</code>, <code>PS2IP.IRX</code>, <code>SMBMAN.IRX</code>, <code>PS2NETFS.IRX</code>). launcHER applies static IP settings from <code>IPCONFIG.DAT</code>, reads share settings from <code>SMBCONFIG.DAT</code>, and launches <code>smb0:/POPS/&lt;Game&gt;.VCD</code>.</li>
   <li><b>Matching Title Priority:</b> launcHER verifies <code>&lt;Game&gt;.VCD</code> before checking generic <code>IMAGE.VCD</code>.</li>
 </ol>
 
 <p>
-  This maintains POPStarter directory conventions and leverages existing BDMAssault installations when available, while providing built-in drivers for systems without external modules.
+  This maintains POPStarter directory conventions and leverages existing memory card installations while providing built-in drivers for systems without external modules.
 </p>
 
 <h3>Method C: Direct Command-Line Invocation</h3>

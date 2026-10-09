@@ -74,6 +74,33 @@ lib.pops_set_active_xx_launch(1)
 assert lib.pops_get_active_xx_launch() == 1
 lib.pops_set_active_xx_launch(0)
 
+# SB. prefix check and active launch tracking
+lib.pops_is_sb_prefix.argtypes = [c.c_char_p]
+lib.pops_is_sb_prefix.restype = c.c_int
+lib.pops_set_active_sb_launch.argtypes = [c.c_int]
+lib.pops_set_active_sb_launch.restype = None
+lib.pops_get_active_sb_launch.argtypes = []
+lib.pops_get_active_sb_launch.restype = c.c_int
+
+assert lib.pops_is_sb_prefix(b"SB.Crash Bandicoot.ELF") == 1
+assert lib.pops_is_sb_prefix(b"smb0:/POPS/SB.Crash Bandicoot.ELF") == 1
+assert lib.pops_is_sb_prefix(b"SB.Crash") == 1
+assert lib.pops_is_sb_prefix(b"Crash Bandicoot.ELF") == 0
+assert lib.pops_is_sb_prefix(b"XX.Crash Bandicoot.ELF") == 0
+assert lib.pops_is_sb_prefix(None) == 0
+
+lib.pops_set_active_sb_launch(0)
+assert lib.pops_get_active_sb_launch() == 0
+lib.pops_set_active_sb_launch(1)
+assert lib.pops_get_active_sb_launch() == 1
+lib.pops_set_active_sb_launch(0)
+
+# External USB and SMB stack checks
+lib.pops_has_external_usb_modules.argtypes = []
+lib.pops_has_external_usb_modules.restype = c.c_int
+lib.pops_has_smb_stack.argtypes = []
+lib.pops_has_smb_stack.restype = c.c_int
+
 # BDMA mode parsing tests
 lib.pops_parse_bdma_mode.argtypes = [c.c_char_p]
 lib.pops_parse_bdma_mode.restype = c.c_int
@@ -105,6 +132,8 @@ with tempfile.TemporaryDirectory() as tmpdir:
     lib.pops_set_bdma_test_root(str(td).encode())
     # Empty dir: NONE
     assert lib.pops_detect_bdma_mode() == 0
+    assert lib.pops_has_external_usb_modules() == 0
+    assert lib.pops_has_smb_stack() == 0
 
     # bdma_mode.txt with ATA
     pop_dir = td / "POPSTARTER"
@@ -129,6 +158,18 @@ with tempfile.TemporaryDirectory() as tmpdir:
     assert lib.pops_detect_bdma_mode() == 5
 
     driver_file.unlink()
+
+    # External USB drivers presence
+    usbd_file = pop_dir / "USBD.IRX"
+    usbd_file.write_bytes(b"\x00" * 16)
+    assert lib.pops_has_external_usb_modules() == 1
+    usbd_file.unlink()
+
+    # SMB stack presence
+    smb_file = pop_dir / "SMBCONFIG.DAT"
+    smb_file.write_text("192.168.1.69:445 PS2SMB\nuser\npass\n")
+    assert lib.pops_has_smb_stack() == 1
+    smb_file.unlink()
 
     # Reset test root
     lib.pops_set_bdma_test_root(None)
@@ -212,5 +253,13 @@ cands = resolve('smb0:/POPS/SB.Crash Bandicoot.ELF', None)
 assert cands[0] == 'smb0:/POPS/Crash Bandicoot.VCD', cands
 assert cands[1] == 'smb0:/Crash Bandicoot.VCD', cands
 assert cands[2] == 'smb:/POPS/Crash Bandicoot.VCD', cands
+
+# 11. SB. prefix in argument: routes to SMB network share
+cands = resolve('mass0:/APPS/launcHER.elf', 'SB.Crash Bandicoot')
+assert cands[0] == 'smb0:/POPS/Crash Bandicoot.VCD', cands
+assert cands[1] == 'smb0:/Crash Bandicoot.VCD', cands
+assert cands[2] == 'smb:/POPS/Crash Bandicoot.VCD', cands
+assert lib.pops_get_active_sb_launch() == 1
+lib.pops_set_active_sb_launch(0)
 
 print('Launcher argv compatibility PASS: duplicated self paths, partition identity, explicit targets, malformed argv, pops candidate resolution, bdma detection and routing')

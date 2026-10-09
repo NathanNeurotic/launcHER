@@ -151,6 +151,9 @@ int launchPath(int argc, char *argv[]) {
     ret = handleGenericPath(Device_XFROM, argc, argv);
     break;
 #endif
+  case Device_SMB:
+    ret = handleGenericPath(Device_SMB, argc, argv);
+    break;
   case Device_ROM:
     ret = execROMPath(argc, argv);
     break;
@@ -315,6 +318,8 @@ DeviceType guessDeviceType(const char *path) {
   } else if (!strncmp("xfrom", path, 5)) {
     return Device_XFROM;
 #endif
+  } else if (!strncmp("smb", path, 3)) {
+    return Device_SMB;
   } else if (!strncmp("rom", path, 3))
     return Device_ROM;
 
@@ -353,6 +358,7 @@ char *normalizePath(char *path, DeviceType type) {
   case Device_MX4SIO:
   case Device_iLink:
   case Device_UDPBD:
+  case Device_SMB:
     strncat(pathbuffer, path, PATH_MAX - 6);
     break;
   // BDM USB

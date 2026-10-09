@@ -1,8 +1,9 @@
-
 #include "init.h"
 #include "common.h"
 #include "dprintf.h"
 #include "pops_external.h"
+#include "launch_args.h"
+#include "handler_pops.h"
 #include <ctype.h>
 #include <fcntl.h>
 #include <iopcontrol.h>
@@ -252,6 +253,11 @@ static int loadModuleList(DeviceType device, int tolerant, int sonySio2) {
       continue;
     if (sonySio2 && !strcmp(moduleList[i].name, "sio2man"))
       continue;
+    if (sonySio2 && pops_has_external_usb_modules() &&
+        (!strcmp(moduleList[i].name, "usbd_mini") || !strcmp(moduleList[i].name, "usbmass_bd_mini"))) {
+      DPRINTF("POPS: Skipping internal %s; using external drivers from mc?:/POPSTARTER/\n", moduleList[i].name);
+      continue;
+    }
 
     // If module has an arugment function, execute it
     if (moduleList[i].argumentFunction != NULL) {
@@ -295,6 +301,9 @@ static int loadModuleList(DeviceType device, int tolerant, int sonySio2) {
   }
 
   fileXioInit();
+  if (device & Device_SMB) {
+    pops_load_smb_stack(NULL, NULL);
+  }
   currentDevice = device;
   return 0;
 }

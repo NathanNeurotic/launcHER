@@ -27,12 +27,25 @@ void pops_set_bdma_test_root(const char *root);
 /* Checks if BDMA is present in memory card directories (mc0:/POPSTARTER/, mc1:/POPSTARTER/, etc.) */
 PopsBdmaMode pops_detect_bdma_mode(void);
 
+/* Checks if external USB drivers (USBD.IRX / USBHDFSD.IRX) exist in memory card directories */
+int pops_has_external_usb_modules(void);
+
 /* Checks if path or title filename contains the XX. prefix */
 int pops_is_xx_prefix(const char *path);
 
 /* Global tracker for active XX. launch context */
 void pops_set_active_xx_launch(int active);
 int pops_get_active_xx_launch(void);
+
+/* Checks if path or title filename contains the SB. prefix */
+int pops_is_sb_prefix(const char *path);
+
+/* Global tracker for active SB. launch context */
+void pops_set_active_sb_launch(int active);
+int pops_get_active_sb_launch(void);
+
+/* Checks if external SMB stack configuration or drivers exist in memory card directories */
+int pops_has_smb_stack(void);
 
 /* Resolves candidate VCD target paths from launcher binary name or explicit game argument.
  * Without an explicit prefix (XX./SB.) and without a CNF, defaults to POPS APA (hdd0:__.POPS:pfs:/).

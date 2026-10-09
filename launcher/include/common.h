@@ -32,6 +32,7 @@ typedef enum {
   //
   Device_XFROM = (1 << 12),
   Device_Optional = (1 << 13), // Marks that the module is not required for the launcher to work properly
+  Device_SMB = (1 << 14),
 } DeviceType;
 
 typedef enum {

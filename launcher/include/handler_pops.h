@@ -16,4 +16,7 @@ int findPopsDependencies(const char *vcdPath, char *popsPath, size_t popsPathSiz
 // Loads custom user modules (MODULE_0..9.IRX, peripheral IRXs, MODULES.TXT)
 int pops_load_custom_modules(const char *vcdDir, const char *vmcDir);
 
+// Loads SMB network protocol stack from memory card for SB. launches
+int pops_load_smb_stack(const char *vcdDir, const char *vmcDir);
+
 #endif
