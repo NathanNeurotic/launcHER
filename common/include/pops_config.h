@@ -81,6 +81,12 @@ int pops_config_load_cheats(PopsConfig *cfg, const char *filepath);
  * in candidate directories (game VCD directory and VMC directory). */
 int pops_config_discover(PopsConfig *cfg, const char *vcd_dir, const char *game_base);
 
+/* Import configuration from verified 32-byte POPStarter configuration table ($410 - $42F) */
+int pops_config_load_table(PopsConfig *cfg, const uint8_t table[32]);
+
+/* Export configuration to 32-byte POPStarter configuration table ($410 - $42F) */
+void pops_config_export_table(const PopsConfig *cfg, uint8_t table[32]);
+
 #ifdef __cplusplus
 }
 #endif

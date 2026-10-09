@@ -273,3 +273,55 @@ int pops_config_discover(PopsConfig *cfg, const char *vcd_dir, const char *game_
 
   return 0;
 }
+
+int pops_config_load_table(PopsConfig *cfg, const uint8_t table[32]) {
+  if (!cfg || !table)
+    return -EINVAL;
+
+  cfg->hdtv_fix = (table[2] != 0);
+  for (int i = 0; i < 8; ++i) {
+    if (table[8 + i]) {
+      cfg->compat_modes |= (1 << i);
+    }
+  }
+  cfg->no_boot = (table[17] != 0);
+  if (table[18] == 0) {
+    cfg->no_igr = 1;
+  }
+  if (table[26] == 0x02) {
+    cfg->video_mode = POPS_VMODE_480P;
+  } else if (table[26] == 0x00) {
+    cfg->video_mode = POPS_VMODE_NOPAL;
+  }
+  return 0;
+}
+
+void pops_config_export_table(const PopsConfig *cfg, uint8_t table[32]) {
+  if (!cfg || !table)
+    return;
+
+  static const uint8_t defaults[32] = {
+    0xFF, 0x00, 0x00, 0x02, 0x40, 0x00, 0x03, 0x01,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x01, 0x00, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+    0x01, 0x00, 0x01, 0x01, 0x01, 0x01, 0x01, 0x03
+  };
+  memcpy(table, defaults, 32);
+
+  table[2] = cfg->hdtv_fix ? 0x01 : 0x00;
+  for (int i = 0; i < 8; ++i) {
+    if (cfg->compat_modes & (1 << i)) {
+      table[8 + i] = 0x01;
+    }
+  }
+  table[17] = cfg->no_boot ? 0x01 : 0x00;
+  if (cfg->no_igr) {
+    table[18] = 0x00;
+  }
+  if (cfg->video_mode == POPS_VMODE_480P) {
+    table[26] = 0x02;
+  } else if (cfg->video_mode == POPS_VMODE_NOPAL) {
+    table[26] = 0x00;
+  }
+}
+

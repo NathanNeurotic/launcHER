@@ -79,6 +79,10 @@ class FeatureTests(unittest.TestCase):
         LIB.pops_config_init.argtypes = [c.POINTER(PopsConfig)]
         LIB.pops_config_parse_line.argtypes = [c.POINTER(PopsConfig), c.c_char_p]
         LIB.pops_config_parse_line.restype = c.c_int
+        LIB.pops_config_load_table.argtypes = [c.POINTER(PopsConfig), c.POINTER(c.c_uint8 * 32)]
+        LIB.pops_config_load_table.restype = c.c_int
+        LIB.pops_config_export_table.argtypes = [c.POINTER(PopsConfig), c.POINTER(c.c_uint8 * 32)]
+        LIB.pops_config_export_table.restype = None
         LIB.pops_compat_db_lookup.argtypes = [c.c_char_p]
         LIB.pops_compat_db_lookup.restype = c.POINTER(PopsCompatEntry)
         LIB.pops_compat_db_count.restype = c.c_size_t
@@ -229,6 +233,24 @@ class FeatureTests(unittest.TestCase):
         self.assertEqual(cfg.cheats[0].address, 0x09A120)
         self.assertEqual(cfg.cheats[0].value, 0x0004)
         self.assertEqual(cfg.cheats[0].type, 0x80)
+
+        # 32-byte table export and reload
+        tbl = (c.c_uint8 * 32)()
+        LIB.pops_config_export_table(c.byref(cfg), c.byref(tbl))
+        self.assertEqual(tbl[2], 1)   # hdtv_fix
+        self.assertEqual(tbl[9], 1)   # mode 2
+        self.assertEqual(tbl[11], 1)  # mode 4
+        self.assertEqual(tbl[17], 1)  # no_boot ($421)
+        self.assertEqual(tbl[18], 0)  # no_igr ($422)
+
+        cfg2 = PopsConfig()
+        LIB.pops_config_init(c.byref(cfg2))
+        self.assertEqual(LIB.pops_config_load_table(c.byref(cfg2), c.byref(tbl)), 0)
+        self.assertEqual(cfg2.hdtv_fix, 1)
+        self.assertTrue(cfg2.compat_modes & (1 << 1))
+        self.assertTrue(cfg2.compat_modes & (1 << 3))
+        self.assertEqual(cfg2.no_boot, 1)
+        self.assertEqual(cfg2.no_igr, 1)
 
     def test_compat_db_lookup(self):
         count = LIB.pops_compat_db_count()
