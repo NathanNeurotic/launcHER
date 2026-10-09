@@ -53,6 +53,27 @@ check([self, None], None)
 check([''], None)
 assert lib.launcher_normalize_args(0, None) == -1
 
+# XX. prefix check and active launch tracking
+lib.pops_is_xx_prefix.argtypes = [c.c_char_p]
+lib.pops_is_xx_prefix.restype = c.c_int
+lib.pops_set_active_xx_launch.argtypes = [c.c_int]
+lib.pops_set_active_xx_launch.restype = None
+lib.pops_get_active_xx_launch.argtypes = []
+lib.pops_get_active_xx_launch.restype = c.c_int
+
+assert lib.pops_is_xx_prefix(b"XX.Crash Bandicoot.ELF") == 1
+assert lib.pops_is_xx_prefix(b"mass0:/APPS/XX.Crash Bandicoot.ELF") == 1
+assert lib.pops_is_xx_prefix(b"XX.Crash") == 1
+assert lib.pops_is_xx_prefix(b"Crash Bandicoot.ELF") == 0
+assert lib.pops_is_xx_prefix(b"SB.Crash Bandicoot.ELF") == 0
+assert lib.pops_is_xx_prefix(None) == 0
+
+lib.pops_set_active_xx_launch(0)
+assert lib.pops_get_active_xx_launch() == 0
+lib.pops_set_active_xx_launch(1)
+assert lib.pops_get_active_xx_launch() == 1
+lib.pops_set_active_xx_launch(0)
+
 # BDMA mode parsing tests
 lib.pops_parse_bdma_mode.argtypes = [c.c_char_p]
 lib.pops_parse_bdma_mode.restype = c.c_int

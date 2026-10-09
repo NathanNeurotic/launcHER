@@ -193,6 +193,23 @@ PopsBdmaMode pops_parse_bdma_mode(const char *str) {
   return POPS_BDMA_NONE;
 }
 
+static int s_active_xx_launch = 0;
+
+void pops_set_active_xx_launch(int active) {
+  s_active_xx_launch = active;
+}
+
+int pops_get_active_xx_launch(void) {
+  return s_active_xx_launch;
+}
+
+int pops_is_xx_prefix(const char *path) {
+  int prefix_type = PREFIX_NONE;
+  if (!path || !path[0]) return 0;
+  extract_base_name(path, NULL, 0, &prefix_type);
+  return prefix_type == PREFIX_XX;
+}
+
 static char s_bdma_test_root[384] = {0};
 
 void pops_set_bdma_test_root(const char *root) {
@@ -360,6 +377,10 @@ int pops_resolve_candidate_targets_bdma(const char *launcher_path, const char *a
       return 0;
   } else {
     return 0;
+  }
+
+  if (prefix_type == PREFIX_XX) {
+    pops_set_active_xx_launch(1);
   }
 
   /* Dispatch candidates based on prefix and BDMA mode */

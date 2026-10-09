@@ -69,6 +69,9 @@ int main(int argc, char *argv[]) {
   if (!argv[0])
     fail("Invalid argv[0]");
 
+  if (pops_is_xx_prefix(launcherPath) || pops_is_xx_prefix(argv[0]))
+    pops_set_active_xx_launch(1);
+
   char *p = strrchr(argv[0], '.');
   if (p && (!strcasecmp(p, ".cfg") || !strcasecmp(p, ".cnf")))
     // If argv[1] is a CNF/CFG file, try to load it

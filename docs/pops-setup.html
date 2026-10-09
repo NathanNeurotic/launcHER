@@ -224,14 +224,15 @@ arg=-dev9=NIC</code></pre>
       <li><code>MMCE</code>: Memory Card SD adapter (<code>mmce0:/POPS/&lt;Game&gt;.VCD</code>).</li>
       <li><code>USB</code> or default: USB mass storage (<code>mass0:/POPS/&lt;Game&gt;.VCD</code>).</li>
     </ul>
-    When BDMA driver binaries (<code>bdm_assault.irx</code>, <code>BDM.IRX</code>, <code>USBD.IRX</code>) exist without a mode marker, launcHER probes USB, ATA, MX4SIO, and MMCE in sequence.
+    When BDMA driver binaries (<code>bdm_assault.irx</code>, <code>BDM.IRX</code>, <code>USBD.IRX</code>, <code>USBHDFSD.IRX</code>) exist without a mode marker, launcHER probes USB, ATA, MX4SIO, and MMCE in sequence.
+    On an <code>XX.</code> launch where BDMA is present, launcHER loads and uses those BDMA driver modules on the IOP. If BDMA is not present on an <code>XX.</code> launch, launcHER uses its native built-in drivers.
   </li>
   <li><b>SMB Prefix (<code>SB.</code>):</b> Executables named with an <code>SB.</code> prefix (such as <code>SB.Crash Bandicoot.ELF</code>) route to SMB network shares (<code>smb0:/POPS/&lt;Game&gt;.VCD</code>).</li>
   <li><b>Matching Title Priority:</b> launcHER verifies <code>&lt;Game&gt;.VCD</code> before checking generic <code>IMAGE.VCD</code>.</li>
 </ol>
 
 <p>
-  This maintains POPStarter directory conventions without requiring BDMAssault driver binaries or Sony modules beyond the standard POPS emulator package.
+  This maintains POPStarter directory conventions and leverages existing BDMAssault installations when available, while providing built-in drivers for systems without external modules.
 </p>
 
 <h3>Method C: Direct Command-Line Invocation</h3>
