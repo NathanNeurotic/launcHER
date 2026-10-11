@@ -606,6 +606,29 @@ int pops_load_custom_modules(const char *vcdDir, const char *vmcDir) {
   return 0;
 }
 
+static int pops_probe_live_storage(void) {
+  const char *paths[] = {"pops0:IMAGE.VCD", "pops0:ps1emu/card0",
+                         "pops0:ps1emu/card1"};
+  for (int i = 0; i < 3; ++i) {
+    int fd = fileXioOpen(paths[i], i ? FIO_O_RDWR : FIO_O_RDONLY);
+    if (fd < 0)
+      return fd;
+    int status = 0;
+    if (i == 0) {
+      char check[16] __attribute__((aligned(64)));
+      int n = fileXioRead(fd, check, sizeof(check));
+      if (n != sizeof(check))
+        status = n < 0 ? n : -EIO;
+    }
+    int closed = fileXioClose(fd);
+    if (!status && closed < 0)
+      status = closed;
+    if (status)
+      return status;
+  }
+  return 0;
+}
+
 int launchPOPS(int argc, char *argv[]) {
   if (argc < 1 || !argv || !argv[0] || !argv[0][0]) {
     msg("POPS: Invalid launch arguments\n");
