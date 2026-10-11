@@ -727,3 +727,21 @@ shadow real APA/PFS and corrupt or misroute HDD accesses. We discarded an
 unused experimental EE proxy-mode argument change pending reliable driver
 enumeration and original IOPCD path/operation traces. The working `pops`
 namespace is intentionally not presented as complete Sony `pfs` parity.
+
+### Independent resolver state and partial IOP reads
+
+Consecutive `SB.` / `XX.` / unprefixed launch resolutions previously left
+earlier `s_active_sb_launch` and `s_active_xx_launch` globals enabled. That
+could incorrectly route a later USB game through SMB, require the IOX package,
+or load network drivers unexpectedly after a prior failed launch. The
+resolver now atomically defines the new prefix intent by clearing the
+unselected mode; explicit `SB.` or `XX.` targets also override the other
+mode without discarding an intentionally inherited launcher-prefix context.
+The host launcher-argument tests exercise multiple resolutions in one
+process, not just isolated games.
+
+The post-reboot POPFS disc probe previously classified a short positive
+`fileXioRead` result as failure, unlike the VCD metadata inspector. It
+now loops over the remaining byte count with a bounded read and keeps the
+read destination aligned for IOP RPC. It still fails on EOF, negative I/O
+status or impossible length. No game data is written by the probe.
