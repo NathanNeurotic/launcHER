@@ -96,6 +96,8 @@ class FeatureTests(unittest.TestCase):
         LIB.pops_compat_db_count.restype = c.c_size_t
         LIB.pops_apply_compat_modes.argtypes = [c.c_void_p, c.c_size_t, c.c_uint8]
         LIB.pops_apply_compat_modes.restype = c.c_int
+        LIB.pops_apply_all_config_patches.argtypes = [c.c_void_p, c.c_size_t, c.POINTER(PopsConfig)]
+        LIB.pops_apply_all_config_patches.restype = c.c_int
         LIB.pops_apply_video_overrides.argtypes = [c.c_void_p, c.c_size_t, c.c_uint8, c.c_uint8, c.c_int16, c.c_int16]
         LIB.pops_apply_video_overrides.restype = c.c_int
         LIB.pops_apply_smooth.argtypes = [c.c_void_p, c.c_size_t]
@@ -126,6 +128,43 @@ class FeatureTests(unittest.TestCase):
         LIB.pops_vcd_normalize_serial.restype = c.c_int
         LIB.pops_vcd_inspect_path.argtypes = [c.c_char_p, c.POINTER(PopsVcdInfo)]
         LIB.pops_vcd_inspect_path.restype = c.c_int
+
+    def test_config_patch_preflight_is_atomic(self):
+        # A compatibility-mode write is valid in this small buffer, but a
+        # separately requested visual patch needs the complete POPS core.
+        # Rejection must precede any mode mutation.
+        cfg = PopsConfig()
+        LIB.pops_config_init(c.byref(cfg))
+        cfg.compat_modes = 1
+        cfg.smooth = 1
+        small = bytearray(0x180000)
+        struct.pack_into("<I", small, 0x00210318 - 0x00200000, 0x8F828228)
+        struct.pack_into("<I", small, 0x0021032C - 0x00200000, 0x1443FFFA)
+        buf = (c.c_uint8 * len(small)).from_buffer(small)
+        before = bytes(small)
+        self.assertLess(LIB.pops_apply_all_config_patches(buf, len(small), c.byref(cfg)), 0)
+        self.assertEqual(small, before)
+
+        # PAL/NTSC writes a late word at 0x00502770. Previous code could
+        # update earlier mode bytes, ignore the late write error and return 0.
+        cfg = PopsConfig()
+        LIB.pops_config_init(c.byref(cfg))
+        cfg.video_mode = 1
+        almost = bytearray(0x302000)
+        ptr = (c.c_uint8 * len(almost)).from_buffer(almost)
+        before = bytes(almost)
+        self.assertLess(LIB.pops_apply_video_overrides(ptr, len(almost),
+                        1, 0, 0, 0), 0)
+        self.assertEqual(almost, before)
+        self.assertLess(LIB.pops_apply_all_config_patches(ptr, len(almost),
+                        c.byref(cfg)), 0)
+        self.assertEqual(almost, before)
+
+        # Reject out-of-range video modes without touching the core.
+        cfg.video_mode = 255
+        self.assertEqual(LIB.pops_apply_all_config_patches(
+            ptr, len(almost), c.byref(cfg)), -95)
+        self.assertEqual(almost, before)
 
     def test_vcd_serial_normalization(self):
         norm = c.create_string_buffer(32)

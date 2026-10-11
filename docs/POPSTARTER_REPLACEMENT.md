@@ -528,3 +528,16 @@ Video, LibCrypt and BIOS helper patches remain separately unverified.
   commented lines; short SYSTEM.CNF reads cannot yield partial identifiers.
   Synthetic fixtures cover mixed-case BOOT assignments and decoy lines.
 - These checks cover metadata and proxy contracts, not Sony runtime disc I/O.
+
+## Optional-core-patch failure atomicity — 2026-10-11
+
+- Validates the full memory window needed for requested optional video and
+  visual patches before mutating any compatibility-mode instructions. PAL/NTSC
+  conversion touches a late POPS-core word at 0x00502770, which the original
+  helper could silently fail to write while returning success after changing
+  earlier bytes. Undersized core buffers now reject without partial writes.
+- The configuration dispatcher propagates helper failures rather than always
+  returning success, and rejects unsupported video-mode values.
+- This is **bounds/error-handling correctness**, not proof that the listed
+  speculative graphics/BIOS/LibCrypt patch values match original POPStarter.
+  Source-measured guards and actual console testing remain required.

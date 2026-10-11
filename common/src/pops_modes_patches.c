@@ -121,6 +121,15 @@ int pops_apply_video_overrides(void *staged_core, size_t core_size,
                                int16_t x_offset, int16_t y_offset) {
   if (!staged_core || core_size < 0x250000)
     return -EINVAL;
+  if (video_mode > POPS_VMODE_240P)
+    return -ENOTSUP;
+  /* PAL/NTSC conversion writes the 0x00502770 word near the end of the
+   * verified core. Refuse the entire request before making earlier writes
+   * if that last site is not present in the caller-owned buffer. */
+  if ((video_mode == POPS_VMODE_PAL2NTSC ||
+       video_mode == POPS_VMODE_NTSC2PAL) &&
+      core_size < (size_t)(0x00502770 - POPS_CORE_BASE_ADDR + 4))
+    return -ERANGE;
 
   /* PAL to NTSC conversion */
   if (video_mode == POPS_VMODE_PAL2NTSC) {
@@ -336,33 +345,60 @@ int pops_apply_cheats(void *ps1_ram_base, const PopsCheatEntry *cheats, uint16_t
 }
 
 int pops_apply_all_config_patches(void *staged_core, size_t core_size, const PopsConfig *cfg) {
+  int result;
+  int video_requested, auxiliary_requested;
   if (!staged_core || !cfg)
     return -EINVAL;
 
+  video_requested = cfg->video_mode || cfg->hdtv_fix ||
+                    cfg->x_offset || cfg->y_offset;
+  auxiliary_requested = video_requested || cfg->smooth || cfg->widescreen ||
+                        cfg->dither_off || cfg->fast_mips || cfg->slow_mips ||
+                        cfg->no_boot;
+
+  /* These are mutually dependent writes to the staged executable. Fail
+   * before applying an otherwise valid compatibility mode when any selected
+   * later helper would reject this memory window. */
+  if (cfg->compat_modes & ((1 << 5) | (1 << 7)))
+    return -ENOTSUP;
+  if (cfg->video_mode > POPS_VMODE_240P)
+    return -ENOTSUP;
+  if (auxiliary_requested && core_size < 0x250000)
+    return -EINVAL;
+  if ((cfg->video_mode == POPS_VMODE_PAL2NTSC ||
+       cfg->video_mode == POPS_VMODE_NTSC2PAL) &&
+      core_size < (size_t)(0x00502770 - POPS_CORE_BASE_ADDR + 4))
+    return -ERANGE;
+
   if (cfg->compat_modes) {
-    int result = pops_apply_compat_modes(staged_core, core_size, cfg->compat_modes);
+    result = pops_apply_compat_modes(staged_core, core_size, cfg->compat_modes);
     if (result)
       return result;
   }
-
-  if (cfg->video_mode || cfg->hdtv_fix || cfg->x_offset || cfg->y_offset)
-    pops_apply_video_overrides(staged_core, core_size, cfg->video_mode, cfg->hdtv_fix,
-                               cfg->x_offset, cfg->y_offset);
-
-  if (cfg->smooth)
-    pops_apply_smooth(staged_core, core_size);
-
-  if (cfg->widescreen)
-    pops_apply_widescreen(staged_core, core_size);
-
-  if (cfg->dither_off)
-    pops_apply_dither_off(staged_core, core_size);
-
-  if (cfg->fast_mips || cfg->slow_mips)
-    pops_apply_throttling(staged_core, core_size, cfg->fast_mips, cfg->slow_mips);
-
-  if (cfg->no_boot)
-    pops_apply_bios_shell(staged_core, core_size);
-
+  if (video_requested) {
+    result = pops_apply_video_overrides(staged_core, core_size, cfg->video_mode,
+                                        cfg->hdtv_fix, cfg->x_offset, cfg->y_offset);
+    if (result) return result;
+  }
+  if (cfg->smooth) {
+    result = pops_apply_smooth(staged_core, core_size);
+    if (result) return result;
+  }
+  if (cfg->widescreen) {
+    result = pops_apply_widescreen(staged_core, core_size);
+    if (result) return result;
+  }
+  if (cfg->dither_off) {
+    result = pops_apply_dither_off(staged_core, core_size);
+    if (result) return result;
+  }
+  if (cfg->fast_mips || cfg->slow_mips) {
+    result = pops_apply_throttling(staged_core, core_size, cfg->fast_mips, cfg->slow_mips);
+    if (result) return result;
+  }
+  if (cfg->no_boot) {
+    result = pops_apply_bios_shell(staged_core, core_size);
+    if (result) return result;
+  }
   return 0;
 }
