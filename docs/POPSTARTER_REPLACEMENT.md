@@ -639,3 +639,40 @@ legacy HDD name `IMAGE0.VCD` is supported as another exact alias. Host tests
 verify open, getstat, read-only rejection and switch behavior. These aliases
 are *not* a `pfs0:` device, and do not prove that the actual Sony POPS/IOPCD
 runtime uses this custom namespace or its underlying VCD sector semantics.
+
+## Evidence-directed VCD and runtime-storage checkpoint — 2026-10-11
+
+The original VCD author describes the 1 MiB TOC header, optional version
+marker at byte 0x400, duplicated size fields at 0x408 and 0x40C, and
+contiguous 2352-byte payload from byte 0x100000:
+https://www.psx-place.com/threads/vcd-extra-header.25054/
+This is higher-confidence evidence than REPOP's experimental `POPS_VCD`
+BAT header reconstruction. The independent metadata inspector accepts
+headered VCDs without a recognized marker by finding ISO9660 PVD at the
+documented payload offset. It also handles positive short reads from a
+streaming backend. Host tests cover both cases.
+
+Archived POPStarter VMC instructions confirm the external filenames
+`SLOT0.VMC` and `SLOT1.VMC`, with `VMCDIR.TXT` choosing the containing
+directory:
+https://nathanneurotic.github.io/POPSLoader/multidisc.html
+POPFS now maps these exact standard card aliases, including `.bak`
+variants, to the configured card0/card1 backends without touching the
+original `ps1emu/cardN` aliases. The launch-time live-storage probe now
+opens the documented aliases for read/write, while opening and reading
+`pops0:IMAGE.VCD` read-only. This detects broken file forwarding and
+unavailable write access after the external IOP reset but before the POPS
+trampoline; it does not test actual card writes.
+
+When `DISCS.TXT` names optional discs, the launch now rejects truncated
+paths and verifies that *every listed disc* can be opened before the IOP
+reboot. Missing secondary discs no longer cause a late file open error only
+after transfer to Sony POPS.
+
+**Blocking Sony interface issue:** The actual PS2 POPStarter wrapper
+registers a `pfs:` service; the present driver registers `pops:` only.
+A device alias must never hijack or unregister the genuine Sony/APA `pfs`
+driver, especially on HDD. Do not claim replacement parity until the
+original IOPCD import/file-service contract, mount behavior and safe
+non-APA namespace registration are verified with on-console traces. A
+working POPFS bridge probe does not establish that Sony IOPCD uses it.
