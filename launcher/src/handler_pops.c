@@ -854,10 +854,19 @@ int launchPOPS(int argc, char *argv[]) {
 
   if (cfg.disc_count > 1) {
     for (int d = 1; d < cfg.disc_count && d < POPS_MAX_DISCS; ++d) {
+      int length;
       if (strchr(cfg.discs[d], ':') || cfg.discs[d][0] == '/' || cfg.discs[d][0] == '\\') {
-        snprintf(discPaths[d], sizeof(discPaths[d]), "%s", cfg.discs[d]);
+        length = snprintf(discPaths[d], sizeof(discPaths[d]), "%s", cfg.discs[d]);
       } else {
-        snprintf(discPaths[d], sizeof(discPaths[d]), "%s%s", vcdDir, cfg.discs[d]);
+        length = snprintf(discPaths[d], sizeof(discPaths[d]), "%s%s", vcdDir, cfg.discs[d]);
+      }
+      if (length < 0 || (size_t)length >= sizeof(discPaths[d])) {
+        msg("POPS: Disc %d path is too long\n", d + 1);
+        return -ENAMETOOLONG;
+      }
+      if (tryFile(discPaths[d])) {
+        msg("POPS: Disc %d not readable: %s\n", d + 1, discPaths[d]);
+        return -ENOENT;
       }
       discArgs[d] = discPaths[d];
       DPRINTF("POPS: Disc %d mapped to %s\n", d + 1, discPaths[d]);
