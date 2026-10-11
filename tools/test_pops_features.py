@@ -246,7 +246,7 @@ class FeatureTests(unittest.TestCase):
         boot_lines = (b"# BOOT = cdrom0:\\\\FAKE_999.99;1\r\n"
                       b"BOOT2 = cdrom0:\\\\WRONG_999.99;1\r\n"
                       b"  boot = cdrom0:\\\\SLUS_008.70;1\r\n")
-        modified[cnf_offset:cnf_offset+2048] = boot_lines.ljust(2048, b'\\0')
+        modified[cnf_offset:cnf_offset+2048] = boot_lines.ljust(2048, b'\0')
         # Directory record defines a 64-byte SYSTEM.CNF, so extend its extent
         # before testing all three lines.
         struct.pack_into("<I", modified, 17 * sector_size + data_offset + 10, len(boot_lines))
