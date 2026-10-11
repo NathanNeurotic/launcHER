@@ -14,6 +14,18 @@ static uint32_t read_u32_le(const uint8_t *p) {
          ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
 }
 
+/* Read backends may return a short positive read without reaching EOF. */
+static int read_exact(void *user, PopsVcdReadFn reader, void *buf, size_t size) {
+  size_t offset = 0;
+  while (offset < size) {
+    int got = reader(user, (uint8_t *)buf + offset, size - offset);
+    if (got <= 0 || (size_t)got > size - offset)
+      return -EIO;
+    offset += (size_t)got;
+  }
+  return 0;
+}
+
 int pops_vcd_normalize_serial(const char *raw, char *normalized, size_t norm_size) {
   if (!raw || !normalized || norm_size < 12)
     return -EINVAL;
@@ -103,7 +115,7 @@ int pops_vcd_inspect_stream(void *user, PopsVcdReadFn read_fn, PopsVcdSeekFn see
   uint32_t image_offset = 0;
   uint8_t signature[4];
   if (seek_fn(user, 0x400, SEEK_SET) >= 0 &&
-      read_fn(user, signature, sizeof(signature)) == (int)sizeof(signature) &&
+      !read_exact(user, read_fn, signature, sizeof(signature)) &&
       (!memcmp(signature, "kHn", 3) || !memcmp(signature, "SPOP", 4)))
     image_offset = POPS_VCD_HEADER_SIZE;
 
@@ -111,7 +123,7 @@ int pops_vcd_inspect_stream(void *user, PopsVcdReadFn read_fn, PopsVcdSeekFn see
   uint8_t header[32];
   if (seek_fn(user, image_offset, SEEK_SET) < 0)
     return -EIO;
-  if (read_fn(user, header, sizeof(header)) != (int)sizeof(header))
+  if (read_exact(user, read_fn, header, sizeof(header)))
     return -EIO;
 
   uint32_t sector_size = POPS_VCD_RAW_SECTOR_SIZE;
@@ -137,7 +149,7 @@ int pops_vcd_inspect_stream(void *user, PopsVcdReadFn read_fn, PopsVcdSeekFn see
     return -EIO;
 
   uint8_t pvd[2048];
-  if (read_fn(user, pvd, sizeof(pvd)) != (int)sizeof(pvd))
+  if (read_exact(user, read_fn, pvd, sizeof(pvd)))
     return -EIO;
 
   /* The 1 MiB VCD TOC's signature at 0x400 is optional. Retry the
@@ -145,7 +157,7 @@ int pops_vcd_inspect_stream(void *user, PopsVcdReadFn read_fn, PopsVcdSeekFn see
   int valid = pvd[0] == 1 && !memcmp(&pvd[1], "CD001", 5) && pvd[6] == 1;
   if (!valid && sector_size == POPS_VCD_RAW_SECTOR_SIZE && data_offset != 16) {
     if (seek_fn(user, (int64_t)image_offset + 16 * sector_size + 16, SEEK_SET) >= 0 &&
-        read_fn(user, pvd, sizeof(pvd)) == (int)sizeof(pvd) &&
+        !read_exact(user, read_fn, pvd, sizeof(pvd)) &&
         pvd[0] == 1 && !memcmp(&pvd[1], "CD001", 5) && pvd[6] == 1) {
       data_offset = 16;
       valid = 1;
@@ -157,7 +169,7 @@ int pops_vcd_inspect_stream(void *user, PopsVcdReadFn read_fn, PopsVcdSeekFn see
       int64_t position = (int64_t)POPS_VCD_HEADER_SIZE +
                          (int64_t)16 * POPS_VCD_RAW_SECTOR_SIZE + offsets[i];
       if (seek_fn(user, position, SEEK_SET) >= 0 &&
-          read_fn(user, pvd, sizeof(pvd)) == (int)sizeof(pvd) &&
+          !read_exact(user, read_fn, pvd, sizeof(pvd)) &&
           pvd[0] == 1 && !memcmp(&pvd[1], "CD001", 5) && pvd[6] == 1) {
         image_offset = POPS_VCD_HEADER_SIZE;
         sector_size = POPS_VCD_RAW_SECTOR_SIZE;
@@ -199,7 +211,7 @@ int pops_vcd_inspect_stream(void *user, PopsVcdReadFn read_fn, PopsVcdSeekFn see
     int64_t dir_offset = (int64_t)image_offset + ((int64_t)root_lba + s) * sector_size + data_offset;
     if (seek_fn(user, dir_offset, SEEK_SET) < 0)
       break;
-    if (read_fn(user, dir_buf, sizeof(dir_buf)) != (int)sizeof(dir_buf))
+    if (read_exact(user, read_fn, dir_buf, sizeof(dir_buf)))
       break;
 
     uint32_t pos = 0;
@@ -242,10 +254,9 @@ int pops_vcd_inspect_stream(void *user, PopsVcdReadFn read_fn, PopsVcdSeekFn see
 
   uint32_t read_len = sys_size > 2048 ? 2048 : sys_size;
   char cnf_buf[2049];
-  int nread = read_fn(user, cnf_buf, read_len);
-  if (nread != (int)read_len)
+  if (read_exact(user, read_fn, cnf_buf, read_len))
     return -EIO;
-  cnf_buf[nread] = '\0';
+  cnf_buf[read_len] = '\0';
 
   /* Match only the BOOT assignment at the start of a non-comment line.
    * A substring search can accidentally select BOOT2 (PS2) or a comment. */
