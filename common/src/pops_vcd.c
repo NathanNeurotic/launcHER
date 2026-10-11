@@ -140,22 +140,37 @@ int pops_vcd_inspect_stream(void *user, PopsVcdReadFn read_fn, PopsVcdSeekFn see
   if (read_fn(user, pvd, sizeof(pvd)) != (int)sizeof(pvd))
     return -EIO;
 
-  /* Verify PVD volume descriptor: Type 1, Identifier "CD001" */
-  if (pvd[0] != 0x01 || memcmp(&pvd[1], "CD001", 5) != 0 || pvd[6] != 1) {
-    /* If failed and was raw 2352, try alternative offset 16 */
-    if (sector_size == POPS_VCD_RAW_SECTOR_SIZE && data_offset != 16) {
+  /* The 1 MiB VCD TOC's signature at 0x400 is optional. Retry the
+   * documented raw-sector payload position if headerless probing fails. */
+  int valid = pvd[0] == 1 && !memcmp(&pvd[1], "CD001", 5) && pvd[6] == 1;
+  if (!valid && sector_size == POPS_VCD_RAW_SECTOR_SIZE && data_offset != 16) {
+    if (seek_fn(user, (int64_t)image_offset + 16 * sector_size + 16, SEEK_SET) >= 0 &&
+        read_fn(user, pvd, sizeof(pvd)) == (int)sizeof(pvd) &&
+        pvd[0] == 1 && !memcmp(&pvd[1], "CD001", 5) && pvd[6] == 1) {
       data_offset = 16;
-      pvd_file_offset = (int64_t)image_offset + (int64_t)16 * sector_size + data_offset;
-      if (seek_fn(user, pvd_file_offset, SEEK_SET) < 0 ||
-          read_fn(user, pvd, sizeof(pvd)) != (int)sizeof(pvd) ||
-          pvd[0] != 0x01 || memcmp(&pvd[1], "CD001", 5) != 0 || pvd[6] != 1) {
-        return -EINVAL;
-      }
-      info->data_offset = data_offset;
-    } else {
-      return -EINVAL;
+      valid = 1;
     }
   }
+  if (!valid && image_offset == 0) {
+    static const uint32_t offsets[2] = {24, 16};
+    for (unsigned i = 0; i < 2 && !valid; ++i) {
+      int64_t position = (int64_t)POPS_VCD_HEADER_SIZE +
+                         (int64_t)16 * POPS_VCD_RAW_SECTOR_SIZE + offsets[i];
+      if (seek_fn(user, position, SEEK_SET) >= 0 &&
+          read_fn(user, pvd, sizeof(pvd)) == (int)sizeof(pvd) &&
+          pvd[0] == 1 && !memcmp(&pvd[1], "CD001", 5) && pvd[6] == 1) {
+        image_offset = POPS_VCD_HEADER_SIZE;
+        sector_size = POPS_VCD_RAW_SECTOR_SIZE;
+        data_offset = offsets[i];
+        valid = 1;
+      }
+    }
+  }
+  if (!valid)
+    return -EINVAL;
+  info->image_offset = image_offset;
+  info->sector_size = sector_size;
+  info->data_offset = data_offset;
 
   /* Root directory record is located at PVD offset 156 (0x9C) */
   const uint8_t *root_record = &pvd[156];
