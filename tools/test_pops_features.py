@@ -271,6 +271,15 @@ class FeatureTests(unittest.TestCase):
             self.assertEqual(info.raw_serial.decode("ascii"), "cdrom0:\\SLUS_008.70;1")
             self.assertEqual(info.normalized_serial.decode("ascii"), "SLUS-00870")
 
+        toc[0x400:0x404] = b"NONE"
+        temp_vcd.write_bytes(toc + bare_disc)
+        info = PopsVcdInfo()
+        self.assertEqual(LIB.pops_vcd_inspect_path(
+            str(temp_vcd).encode("utf-8"), c.byref(info)), 0)
+        self.assertEqual(info.image_offset, 0x100000)
+        self.assertEqual(info.normalized_serial.decode("ascii"), "SLUS-00870")
+
+        toc[0x400:0x404] = b"SPOP"
         # A recognized header without its complete disc cannot be reinterpreted
         # as a headerless ISO image or produce a spurious serial.
         temp_vcd.write_bytes(toc)
