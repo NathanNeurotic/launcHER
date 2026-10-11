@@ -771,6 +771,11 @@ int launchPOPS(int argc, char *argv[]) {
   extractDirectory(vcdPath, vcdDir, sizeof(vcdDir));
   extractGameBase(vcdPath, gameBase, sizeof(gameBase));
 
+  /* The config path must never be silently shortened into another title. */
+  if (strlen(vcdDir) + strlen(gameBase) + 2 > PATH_MAX) {
+    msg("POPS: Game configuration path is too long\n");
+    return -ENAMETOOLONG;
+  }
   char gameConfigDir[PATH_MAX];
   snprintf(gameConfigDir, sizeof(gameConfigDir), "%s%s/", vcdDir, gameBase);
 
@@ -797,15 +802,26 @@ int launchPOPS(int argc, char *argv[]) {
     }
   }
 
+  /* All card candidates below fit within vcdDir + one optional folder +
+   * one basename + extension. Reject the whole operation if any may
+   * truncate: an abbreviated VMC path could collide with another game's
+   * save and must never be used. Account for two longest name components,
+   * the folder separator, .VMC[0-1]/SLOT[0-1].VMC and the NUL byte. */
+  size_t longestName = strlen(gameBase);
+  if (strlen(vcdInfo.normalized_serial) > longestName)
+    longestName = strlen(vcdInfo.normalized_serial);
+  if (strlen(cfg.vmc_dir) > longestName)
+    longestName = strlen(cfg.vmc_dir);
+  if (strlen(vcdDir) + 2 * longestName + 16 >= PATH_MAX) {
+    msg("POPS: Virtual memory card paths exceed the device path limit\n");
+    return -ENAMETOOLONG;
+  }
+
   /* Resolve VMC destination directory */
   char vmcDir[PATH_MAX] = {0};
   if (cfg.vmc_dir[0]) {
-    if (strchr(cfg.vmc_dir, ':')) {
-      snprintf(vmcDir, sizeof(vmcDir), "%.800s%s", cfg.vmc_dir,
-               cfg.vmc_dir[strlen(cfg.vmc_dir) - 1] == '/' ? "" : "/");
-    } else {
-      snprintf(vmcDir, sizeof(vmcDir), "%.700s%.128s/", vcdDir, cfg.vmc_dir);
-    }
+    /* VMCDIR is already validated as one relative folder name. */
+    snprintf(vmcDir, sizeof(vmcDir), "%s%s/", vcdDir, cfg.vmc_dir);
   } else {
     /* Probe candidate VMC locations:
      * 1. Subfolder <vcdDir>/<gameBase>/ (standard POPStarter convention)
@@ -843,12 +859,12 @@ int launchPOPS(int argc, char *argv[]) {
       const char *sbase = vcdInfo.normalized_serial[0] ? vcdInfo.normalized_serial : gameBase;
       snprintf(testPath, sizeof(testPath), "%s%s.VMC0", vcdDir, sbase);
       if (!tryFile(testPath)) {
-        snprintf(vmcDir, sizeof(vmcDir), "%.800s", vcdDir);
+        snprintf(vmcDir, sizeof(vmcDir), "%s", vcdDir);
         foundVmc = 1;
       } else {
         snprintf(testPath, sizeof(testPath), "%sSLOT0.VMC", vcdDir);
         if (!tryFile(testPath)) {
-          snprintf(vmcDir, sizeof(vmcDir), "%.800s", vcdDir);
+          snprintf(vmcDir, sizeof(vmcDir), "%s", vcdDir);
           foundVmc = 1;
         }
       }
