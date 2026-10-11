@@ -778,3 +778,43 @@ subchannel position and CRCs in game-specific sector patterns near minutes
 3 and 9. Likewise, a single-track synthetic Q is insufficient for actual
 multi-track CDDA. Hardware/I/O traces and authentic subchannel data remain
 required before declaring those features compatible.
+
+## PFS reference evidence and save/disc safeguards — 2026-10-11
+
+### What REPOP's original wrapper actually establishes
+
+I inspected the 8,237-byte `popstarter/PFS_WRAP.BIN` from the private
+`NathanNeurotic/REPOP` reference tree (Git blob SHA:
+`48dc44e02fddd90bac8b88fcc9a8dd33273cc2df`).
+Its IOP ELF exposes the *legacy* `ioman` import name at file offset
+0x4dc, `mass:/POPS/%s` at 0x650, and `PFS Wrapper` at 0x660.
+That directly grounds the concern that our `popfs` module presently
+registers `pops` via `iomanX`, which may not satisfy Sony's legacy
+`pfs0:`/IOPCD calls even when `pops0:IMAGE.VCD` opens successfully.
+
+These strings alone do **not** prove the complete call ABI, nor that a
+later r13 embedded wrapper uses the same imports. No legacy driver was
+hijacked or re-registered and no binary from REPOP was committed.
+Before a safe alias or hook can ship, capture the original IOPCD
+open/mount/read/read-ahead behavior and prove the IOMAN versus IOMANX
+export relationship for the selected Sony IOPRP.
+
+### Never truncate a VMC path into another game's save
+
+Game-config/VMC candidate paths previously used unchecked `snprintf`
+and explicit `%.700s`/`%.800s` cuts. Long game directories could thus
+silently redirect a save to a different, truncated path. The launcher
+now checks the game-config path length and conservatively budgets for
+the directory, optional subfolder, serial/game basename, separators
+and extension **before** any VMC path is selected or new file created.
+The fixed-length cuts have been replaced by full-path composition.
+An excessive path fails with `-ENAMETOOLONG`. A host source-level
+regression check verifies the guards precede card resolution.
+
+### Report an unavailable alternate disc
+
+POPFS `NEXT_DISC` previously returned zero for a single-disc game,
+despite leaving the same disc active. It now returns `-ENOENT` if no
+different configured disc exists. The production IOP driver fixture
+verifies both that error and unchanged selection; real alternate-disc
+swapping and open-handle protection retain their existing behavior.
