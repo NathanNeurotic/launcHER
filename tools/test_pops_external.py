@@ -314,9 +314,11 @@ class InspectorTests(unittest.TestCase):
                 self.assertEqual(LIB.pops_iop_image_find_module(
                     image, len(image), invalid,
                     c.byref(offset), c.byref(size)), INVALID)
-            self.assertEqual(LIB.pops_iop_image_find_module(
+            self.assertNotEqual(LIB.pops_iop_image_find_module(
                 image[:-1], len(image) - 1, b'LOADCORE',
-                c.byref(offset), c.byref(size)), INVALID)
+                c.byref(offset), c.byref(size)), 0)
+            self.assertEqual((offset.value, size.value),
+                             (((reset_length + 15) & ~15) + 96, 7))
 
     def test_iop_image_rejects_unbounded_or_inconsistent_directory(self):
         data = self.iop_image()
