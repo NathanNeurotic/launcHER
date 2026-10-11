@@ -615,3 +615,12 @@ Direct PS2SDK code inspection also established:
 
 Source-order host checks guard these error-handling contracts. Build and host
 tests still cannot demonstrate correct IOPCD/PFS service wiring on real PS2.
+
+### Protected-game failure accounting
+
+A missing/broken POPFS LibCrypt devctl handler previously yielded a misleading
+success log and continued into the POPS trampoline with the requested key
+uninstalled. The launcher now checks the IOP `fileXioDevctl` result and
+rejects the launch if a database-identified protected game cannot configure
+its requested key. This validates the **error boundary only**; the actual
+Sony IOPCD subchannel signaling contract is not yet proven.

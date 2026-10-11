@@ -602,6 +602,14 @@ class InspectorTests(unittest.TestCase):
             buf, 512, *paths, None), RANGE)
         self.assertEqual(buf.raw, before)
 
+    def test_libcrypt_configuration_checks_iop_result(self):
+        launcher = (ROOT / "launcher/src/handler_pops.c").read_text()
+        start = launcher.index('res = fileXioDevctl("pops:", 0x05')
+        end = launcher.index("DPRINTF(\"POPS: Configured popfs LibCrypt", start)
+        section = launcher[start:end]
+        assert "if (res < 0)" in section
+        assert "return res;" in section
+
     def test_reboot_and_rpc_failures_are_not_reported_as_success(self):
         launcher = (ROOT / "launcher/src/handler_pops.c").read_text()
         init = (ROOT / "launcher/src/init.c").read_text()

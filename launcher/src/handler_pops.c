@@ -1077,7 +1077,12 @@ int launchPOPS(int argc, char *argv[]) {
   /* Forward verified LibCrypt magic key to popfs for Subchannel Q emulation */
   if (compat && compat->has_libcrypt && compat->libcrypt_key != 0) {
     uint16_t lkey = compat->libcrypt_key;
-    fileXioDevctl("pops:", 0x05 /* POPS_DEVCTL_SET_LIBCRYPT */, &lkey, sizeof(lkey), NULL, 0);
+    res = fileXioDevctl("pops:", 0x05 /* POPS_DEVCTL_SET_LIBCRYPT */,
+                        &lkey, sizeof(lkey), NULL, 0);
+    if (res < 0) {
+      msg("POPS: Failed to install required LibCrypt key: %d\n", res);
+      return res;
+    }
     DPRINTF("POPS: Configured popfs LibCrypt subchannel emulation (key 0x%04X)\n", lkey);
   }
 
