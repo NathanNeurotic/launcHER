@@ -334,7 +334,9 @@ static int bridge_devctl(iomanX_iop_file_t *file, const char *devname, int cmd,
       CpuResumeIntr(state);
       if (busy)
         return -EBUSY;
-      return paths[next][0] ? 0 : -ENOENT;
+      /* A single-disc configuration must not acknowledge a swap to
+       * the same disc. The caller needs a reliable no-alternate signal. */
+      return next != old && paths[next][0] ? 0 : -ENOENT;
     }
     case POPS_DEVCTL_GET_SUBQ:
       if (arg && arglen < sizeof(uint32_t))

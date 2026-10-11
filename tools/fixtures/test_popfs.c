@@ -85,6 +85,17 @@ int main(void) {
   assert(registered && !strcmp(registered->name, "pops"));
   ops = registered->ops;
 
+  /* With no alternative media, NEXT_DISC must report ENOENT and keep disc0
+   * selected rather than returning a false success for a no-op. */
+  char saved_second_disc[PATH_LIMIT];
+  memcpy(saved_second_disc, paths[1], sizeof(saved_second_disc));
+  paths[1][0] = 0;
+  int unchanged_disc = -1;
+  assert(ops->devctl(&file, "pops:", 0x07, NULL, 0, NULL, 0) == -ENOENT);
+  assert(!ops->devctl(&file, "pops:", 0x02, NULL, 0, &unchanged_disc,
+                      sizeof(unchanged_disc)) && unchanged_disc == 0);
+  memcpy(paths[1], saved_second_disc, sizeof(saved_second_disc));
+
   next_open = 0; /* Descriptor zero must be represented and closed correctly. */
   assert(!ops->open(&file, "/disc/disc0", 1, 0644));
   assert(!strcmp(observed, arguments[1]) && open_flags == 1 && open_mode == 0644);
