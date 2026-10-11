@@ -394,7 +394,11 @@ int pops_load_smb_stack(const char *vcdDir, const char *vmcDir) {
       snprintf(modPath, sizeof(modPath), "%s%s", searchDirs[d], dev9Drivers[i]);
       if (!tryFile(modPath)) {
         DPRINTF("POPS: Loading DEV9 module %s\n", modPath);
-        SifLoadModule(modPath, 0, NULL);
+        int module = SifLoadModule(modPath, 0, NULL);
+        if (module < 0) {
+          DPRINTF("POPS: DEV9 load rejected %s (%d)\n", modPath, module);
+          continue;
+        }
         loadedDev9 = 1;
         break;
       }
@@ -410,7 +414,11 @@ int pops_load_smb_stack(const char *vcdDir, const char *vmcDir) {
       snprintf(modPath, sizeof(modPath), "%s%s", searchDirs[d], smapDrivers[i]);
       if (!tryFile(modPath)) {
         DPRINTF("POPS: Loading SMAP module %s\n", modPath);
-        SifLoadModule(modPath, 0, NULL);
+        int module = SifLoadModule(modPath, 0, NULL);
+        if (module < 0) {
+          DPRINTF("POPS: SMAP load rejected %s (%d)\n", modPath, module);
+          continue;
+        }
         loadedSmap = 1;
         break;
       }
@@ -432,7 +440,11 @@ int pops_load_smb_stack(const char *vcdDir, const char *vmcDir) {
       snprintf(modPath, sizeof(modPath), "%s%s", searchDirs[d], ps2ipDrivers[i]);
       if (!tryFile(modPath)) {
         DPRINTF("POPS: Loading PS2IP module %s (args: %s)\n", modPath, ipArgPtr ? ipArgPtr : "none");
-        SifLoadModule(modPath, ipArgLen, ipArgPtr);
+        int module = SifLoadModule(modPath, ipArgLen, ipArgPtr);
+        if (module < 0) {
+          DPRINTF("POPS: PS2IP load rejected %s (%d)\n", modPath, module);
+          continue;
+        }
         loadedPs2ip = 1;
         break;
       }
@@ -448,7 +460,11 @@ int pops_load_smb_stack(const char *vcdDir, const char *vmcDir) {
       snprintf(modPath, sizeof(modPath), "%s%s", searchDirs[d], smbmanDrivers[i]);
       if (!tryFile(modPath)) {
         DPRINTF("POPS: Loading SMBMAN module %s\n", modPath);
-        SifLoadModule(modPath, 0, NULL);
+        int module = SifLoadModule(modPath, 0, NULL);
+        if (module < 0) {
+          DPRINTF("POPS: SMBMAN load rejected %s (%d)\n", modPath, module);
+          continue;
+        }
         loadedSmbman = 1;
         break;
       }
@@ -464,7 +480,11 @@ int pops_load_smb_stack(const char *vcdDir, const char *vmcDir) {
       snprintf(modPath, sizeof(modPath), "%s%s", searchDirs[d], ps2netfsDrivers[i]);
       if (!tryFile(modPath)) {
         DPRINTF("POPS: Loading PS2NETFS module %s\n", modPath);
-        SifLoadModule(modPath, 0, NULL);
+        int module = SifLoadModule(modPath, 0, NULL);
+        if (module < 0) {
+          DPRINTF("POPS: PS2NETFS load rejected %s (%d)\n", modPath, module);
+          continue;
+        }
         loadedNetfs = 1;
         break;
       }
@@ -1106,7 +1126,11 @@ int launchPOPS(int argc, char *argv[]) {
   /* If this is an SB. launch or SMB device, load the SMB network stack */
   if (isSbLaunch) {
     DPRINTF("POPS: Loading SMB stack for SB. launch\n");
-    pops_load_smb_stack(vcdDir, vmcDir);
+    res = pops_load_smb_stack(vcdDir, vmcDir);
+    if (res) {
+      msg("POPS: Required SMB driver stack unavailable after reboot: %d\n", res);
+      return res;
+    }
   }
 
   /* Load user-supplied custom IRX modules and peripheral drivers */
