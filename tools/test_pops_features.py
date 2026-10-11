@@ -291,6 +291,26 @@ class FeatureTests(unittest.TestCase):
         self.assertNotEqual(LIB.pops_vcd_inspect_path(
             str(temp_vcd).encode("utf-8"), c.byref(info)), 0)
 
+        cursor = [0]
+        @self.Reader
+        def read_in_chunks(user, dst, amount):
+            n = min(int(amount), 13, len(bare_disc) - cursor[0])
+            if n > 0:
+                c.memmove(dst, bare_disc[cursor[0]:cursor[0]+n], n)
+                cursor[0] += n
+            return n
+        @self.Seeker
+        def seek_in_memory(user, offset, whence):
+            dest = offset if whence == 0 else cursor[0] + offset
+            if dest < 0:
+                return -1
+            cursor[0] = dest
+            return dest
+        info = PopsVcdInfo()
+        self.assertEqual(LIB.pops_vcd_inspect_stream(
+            c.c_void_p(1), read_in_chunks, seek_in_memory, c.byref(info)), 0)
+        self.assertEqual(info.normalized_serial.decode('ascii'), 'SLUS-00870')
+
         # A BOOT2 line and commented BOOT assignments are not PS1 boot keys.
         # The BOOT parser must honor line boundaries and exact directive names.
         modified = bytearray(bare_disc)
