@@ -649,9 +649,17 @@ static int pops_probe_live_storage(void) {
     int status = 0;
     if (i == 0) {
       char check[16] __attribute__((aligned(64)));
-      int n = fileXioRead(fd, check, sizeof(check));
-      if (n != sizeof(check))
-        status = n < 0 ? n : -EIO;
+      int remaining = sizeof(check);
+      /* IOP storage backends may return partial positive reads. Probe
+       * actual delivery to EOF/error, keeping the destination aligned. */
+      while (remaining > 0) {
+        int n = fileXioRead(fd, check, remaining);
+        if (n <= 0 || n > remaining) {
+          status = n < 0 ? n : -EIO;
+          break;
+        }
+        remaining -= n;
+      }
     }
     int closed = fileXioClose(fd);
     if (!status && closed < 0)
