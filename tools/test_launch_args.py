@@ -283,7 +283,18 @@ assert cands[0] == 'smb0:/POPS/Crash Bandicoot.VCD', cands
 assert cands[1] == 'smb0:/Crash Bandicoot.VCD', cands
 assert cands[2] == 'smb:/POPS/Crash Bandicoot.VCD', cands
 assert lib.pops_get_active_sb_launch() == 1
-lib.pops_set_active_sb_launch(0)
+assert lib.pops_get_active_xx_launch() == 0
+
+# Each new resolution must clear the previously active prefix mode.
+resolve('mass0:/APPS/XX.Crash Bandicoot.ELF', None)
+assert lib.pops_get_active_xx_launch() == 1
+assert lib.pops_get_active_sb_launch() == 0
+resolve('smb0:/POPS/SB.Crash Bandicoot.ELF', None)
+assert lib.pops_get_active_xx_launch() == 0
+assert lib.pops_get_active_sb_launch() == 1
+resolve('mass0:/APPS/Crasher.ELF', 'Crash Bandicoot')
+assert lib.pops_get_active_xx_launch() == 0
+assert lib.pops_get_active_sb_launch() == 0
 
 # 12. RiptOPL BDM selector: bare mass:/POPS/XX.<title>.ELF expands to mass0: and mass:
 cands = resolve('mass:/POPS/XX.Crash Bandicoot.ELF', None)
