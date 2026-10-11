@@ -45,14 +45,6 @@ int pops_format_proxy_args(char *buffer, size_t capacity,
                            const char *disc0, const char *card0, const char *card1,
                            const char *disc1, const char *disc2, const char *disc3);
 
-/* Explicit opt-in for non-APA virtual pfs: bridging.
- * Fail if a backing image also resides on pfs: to prevent recursive I/O.
- * With bridge_pfs=0 the standard (APA-safe) popfs argument ABI is unchanged. */
-int pops_format_proxy_args_ex(char *buffer, size_t capacity,
-                              const char *disc0, const char *card0, const char *card1,
-                              const char *disc1, const char *disc2, const char *disc3,
-                              int bridge_pfs);
-
 /* Initialize PopsTrampolineArgs with validated addresses and arguments.
  * Ensures all pointers stay within low memory / bram. Returns 0 on success. */
 int pops_trampoline_args_init(PopsTrampolineArgs *out, const PopsBootPlan *plan,
