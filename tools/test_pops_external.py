@@ -679,7 +679,9 @@ class InspectorTests(unittest.TestCase):
     def test_post_reboot_storage_gates_trampoline(self):
         text = (ROOT / 'launcher/src/handler_pops.c').read_text()
         self.assertIn('fileXioOpen(paths[i]', text)
-        self.assertIn('fileXioRead(fd, check, sizeof(check))', text)
+        self.assertIn('fileXioRead(fd, check, remaining)', text)
+        self.assertIn('remaining -= n;', text)
+        self.assertIn('if (n <= 0 || n > remaining)', text)
         self.assertIn('fileXioClose(fd)', text)
         verify = text.index('res = pops_probe_live_storage();')
         boot = text.index('pops_trampoline_args_init(', verify)
