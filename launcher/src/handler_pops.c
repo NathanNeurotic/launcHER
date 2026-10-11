@@ -1034,6 +1034,21 @@ int launchPOPS(int argc, char *argv[]) {
     rebootIop = buffers.iop;
   }
 
+  /* This is a read-only diagnostic, not a PFS wrapper: EE paths in the
+   * verified core are already patched to pops:, while original IOPCD may
+   * independently reference legacy ioman/pfs0:. Expose which modules the
+   * selected ROMDIR actually contains to narrow the hardware trace. */
+  {
+    size_t moduleOffset = 0, moduleSize = 0;
+    int found = pops_iop_image_find_module(rebootIop, plan.iop_size, "IOPCD",
+                                           &moduleOffset, &moduleSize);
+    if (!found)
+      DPRINTF("POPS: IOPRP IOPCD ROMDIR module offset=%u size=%u\\n",
+              (unsigned)moduleOffset, (unsigned)moduleSize);
+    else
+      DPRINTF("POPS: No standalone IOPCD in selected IOPRP (%d); EE embedded module may load it\\n", found);
+  }
+
   /* Verify staging memory layout */
   res = pops_bootstrap_verify_layout(POPS_STAGING_BASE, plan.core_size + plan.iop_size, &plan);
   if (res) {

@@ -818,3 +818,22 @@ despite leaving the same disc active. It now returns `-ENOENT` if no
 different configured disc exists. The production IOP driver fixture
 verifies both that error and unchanged selection; real alternate-disc
 swapping and open-handle protection retain their existing behavior.
+
+### ROMDIR evidence collection without a PFS override
+
+Audit correction: the reference EE core's `POPS_CORE_STORAGE_BRIDGE`
+patch already rewrites eight exact, SHA256-guarded literal `pfs0` and
+`pfs1` references into `pops`. The full staged image is compared byte
+for byte in host preflight tests. This satisfies the **known EE-side**
+filename aliases; it does not prove that independently loaded Sony IOPCD
+uses the same names or file manager imports.
+
+An exact-name ROMDIR module locator is now available on the externally
+identified Sony IOPRP image. It reuses the existing bounds-checked ROMDIR
+validator and returns the module's original offset and size without
+touching its bytes or accepting substrings. A diagnostic before IOP reset
+reports whether `IOPCD` is a standalone module in the selected image.
+Synthetic ROMDIR fixtures cover padded RESET extents, exact module slices,
+unavailable modules, bad names, truncated images and output preservation
+on error. This prepares evidence collection for the remaining IOP-side
+PFS/IOPCD contract without changing the genuine APA driver.

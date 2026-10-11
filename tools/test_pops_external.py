@@ -289,6 +289,35 @@ class InspectorTests(unittest.TestCase):
                               result.extinfo_size, result.files),
                              ((reset_size + 15) & ~15, 80, 4, 4))
 
+    def test_romdir_module_locator_reports_exact_validated_payload(self):
+        LIB.pops_iop_image_find_module.argtypes = [
+            c.c_void_p, c.c_size_t, c.c_char_p,
+            c.POINTER(c.c_size_t), c.POINTER(c.c_size_t)]
+        LIB.pops_iop_image_find_module.restype = c.c_int
+        for reset_length in (0, 23):
+            image = self.iop_image(reset_length)
+            offset = c.c_size_t(1234)
+            size = c.c_size_t(9876)
+            self.assertEqual(LIB.pops_iop_image_find_module(
+                image, len(image), b'LOADCORE',
+                c.byref(offset), c.byref(size)), 0)
+            self.assertEqual(offset.value, ((reset_length + 15) & ~15) + 96)
+            self.assertEqual(size.value, 7)
+            self.assertEqual(image[offset.value:offset.value + size.value],
+                             b'module!')
+            self.assertEqual(LIB.pops_iop_image_find_module(
+                image, len(image), b'IOPCD',
+                c.byref(offset), c.byref(size)), UNSUPPORTED)
+            self.assertEqual((offset.value, size.value),
+                             (((reset_length + 15) & ~15) + 96, 7))
+            for invalid in (b'', b'01234567890'):
+                self.assertEqual(LIB.pops_iop_image_find_module(
+                    image, len(image), invalid,
+                    c.byref(offset), c.byref(size)), INVALID)
+            self.assertEqual(LIB.pops_iop_image_find_module(
+                image[:-1], len(image) - 1, b'LOADCORE',
+                c.byref(offset), c.byref(size)), INVALID)
+
     def test_iop_image_rejects_unbounded_or_inconsistent_directory(self):
         data = self.iop_image()
         for malformed in (data[:-1], word(data, 28, 0xfffffff0),

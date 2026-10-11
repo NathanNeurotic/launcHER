@@ -69,3 +69,40 @@ int pops_iop_image_inspect(const void *file, size_t size, PopsIopImage *out) {
   *out = info;
   return POPS_FILE_OK;
 }
+
+/* The ROMDIR validator above establishes that every padded data extent fits
+ * in the image, that names do not repeat and that the final entry terminates.
+ * Use exactly that validated layout to locate an individual module by its
+ * 10-byte ROMDIR name, without searching arbitrary binary substrings. */
+int pops_iop_image_find_module(const void *file, size_t size, const char *name,
+                               size_t *module_offset, size_t *module_size) {
+  PopsIopImage info;
+  uint8_t query[10] = {0};
+  const uint8_t *directory;
+  size_t data_offset = 0;
+  size_t length;
+  int status;
+  if (!file || !name || !module_offset || !module_size)
+    return POPS_FILE_INVALID;
+  length = strlen(name);
+  if (!length || length > sizeof(query))
+    return POPS_FILE_INVALID;
+  memcpy(query, name, length);
+  status = pops_iop_image_inspect(file, size, &info);
+  if (status)
+    return status;
+  directory = (const uint8_t *)file + info.directory_offset;
+  for (unsigned i = 0; i < info.files; ++i) {
+    const uint8_t *entry = directory + i * 16;
+    size_t entry_size = read32(entry + 12);
+    if (!memcmp(entry, query, sizeof(query))) {
+      if (!entry_size)
+        return POPS_FILE_UNSUPPORTED;
+      *module_offset = data_offset;
+      *module_size = entry_size;
+      return POPS_FILE_OK;
+    }
+    data_offset += (entry_size + 15) & ~(size_t)15;
+  }
+  return POPS_FILE_UNSUPPORTED;
+}

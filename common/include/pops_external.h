@@ -45,6 +45,12 @@ typedef struct {
  * The final file need not have alignment padding beyond its actual data. */
 int pops_iop_image_inspect(const void *file, size_t size, PopsIopImage *out);
 
+/* Find the exact ROMDIR payload extent for a named IOP module without
+ * modifying the verified reboot image. Not finding a module is allowed:
+ * the original POPS core may embed/load some IRXs itself. */
+int pops_iop_image_find_module(const void *file, size_t size, const char *name,
+                               size_t *module_offset, size_t *module_size);
+
 typedef enum {
   POPS_SOURCE_LOOSE_ELF,
   POPS_SOURCE_DECODED_PAK
