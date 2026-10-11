@@ -610,6 +610,14 @@ class InspectorTests(unittest.TestCase):
         assert "if (res < 0)" in section
         assert "return res;" in section
 
+    def test_truncated_vcd_preflight_is_fatal(self):
+        source = (ROOT / 'launcher/src/handler_pops.c').read_text()
+        begin = source.index('res = pops_vcd_inspect_path(')
+        end = source.index('/* Resolve directory, base name', begin)
+        check = source[begin:end]
+        self.assertIn('if (res == -EIO)', check)
+        self.assertIn('return res;', check)
+
     def test_post_reboot_storage_gates_trampoline(self):
         text = (ROOT / 'launcher/src/handler_pops.c').read_text()
         self.assertIn('fileXioOpen(paths[i]', text)
