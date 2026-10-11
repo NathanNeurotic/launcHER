@@ -980,22 +980,37 @@ int launchPOPS(int argc, char *argv[]) {
       if (!tryFile(trojanPath)) {
         size_t trojanSize = 0;
         void *trojanBuf = (void *)0x01f00000;
-        if (!readFullFile(trojanPath, trojanBuf, 0x100000, &trojanSize)) {
-          PopsContainer trojanCont;
-          if (!pops_container_inspect(trojanBuf, trojanSize, &trojanCont) &&
-              trojanCont.kind == POPS_CONTAINER_TROJAN) {
-            uint32_t expected[3] = {0};
-            /* Read expected hook words from staged core */
-            if (trojanCont.hook >= POPS_CORE_ADDR &&
-                trojanCont.hook + 12 <= POPS_CORE_ADDR + plan.core_size) {
-              uint32_t hookOff = trojanCont.hook - POPS_CORE_ADDR;
-              memcpy(expected, (const char *)stagedCore + hookOff, sizeof(expected));
-              pops_container_stage(trojanBuf, trojanSize, POPS_CORE_ADDR,
-                                   (void *)stagedCore, plan.core_size, expected, 3);
-              DPRINTF("POPS: Applied %s\n", trojanPath);
-            }
-          }
+        PopsContainerPlan trojanPlan;
+        uint32_t expected[3] = {0};
+        size_t guardWords;
+
+        res = readFullFile(trojanPath, trojanBuf, 0x100000, &trojanSize);
+        if (res) {
+          msg("POPS: Cannot read TROJAN %s: %d\n", trojanPath, res);
+          return res;
         }
+        res = pops_container_plan(trojanBuf, trojanSize, POPS_CORE_ADDR,
+                                  plan.core_size, &trojanPlan);
+        if (res || trojanPlan.container.kind != POPS_CONTAINER_TROJAN ||
+            trojanPlan.container.slot != slot) {
+          msg("POPS: Invalid TROJAN slot/contents in %s\n", trojanPath);
+          return res ? res : -EINVAL;
+        }
+
+        /* The stager requires two guard words for ordinary 4/8-byte hooks,
+         * three only for 12-byte hooks. Passing three to every TROJAN caused
+         * ordinary patches to be silently rejected and falsely logged. */
+        guardWords = trojanPlan.hook_size > 8 ? 3 : 2;
+        memcpy(expected, (const uint8_t *)stagedCore + trojanPlan.hook_offset,
+               guardWords * sizeof(expected[0]));
+        res = pops_container_stage(trojanBuf, trojanSize, POPS_CORE_ADDR,
+                                   (void *)stagedCore, plan.core_size,
+                                   expected, guardWords);
+        if (res) {
+          msg("POPS: TROJAN stage rejected %s: %d\n", trojanPath, res);
+          return res;
+        }
+        DPRINTF("POPS: Applied %s\n", trojanPath);
       }
     }
   }

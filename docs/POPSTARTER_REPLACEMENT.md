@@ -475,3 +475,23 @@ This establishes patch-write parity for the original DAT_009b9d48 == 0 path.
 It does not establish the mapping/lifecycle of that original state global,
 original caller ordering across config sources, or in-game compatibility.
 Video, LibCrypt and BIOS helper patches remain separately unverified.
+
+## Runtime boundary hardening checkpoint - 2026-10-11
+
+- Fixed a production caller/stager contract mismatch: ordinary TROJAN hooks
+  require **two** verified hook words while 12-byte hooks require three. The
+  caller previously passed three unconditionally, ignored staging errors, and
+  logged attempted patches as successful. The launcher now plans each payload,
+  matches the numbered file to the embedded slot, supplies the correct number
+  of words, checks read/stage results and reports failures rather than proceeding
+  as if the patch had been installed.
+- Proxy argument packing now rejects invalid or skipped optional disc paths
+  rather than silently dropping a disc and changing slot mapping.
+- Staging bounds checking now uses subtraction without 32-bit size truncation;
+  host tests cover 4 GiB wraparound attempts. popfs disc-control and SubQ
+  devctls reject non-null input buffers shorter than the required structure.
+- These are host-verifiable consistency and memory-safety corrections only.
+  Existing slot precedence, independently sourced hook guards, PATCH dispatch,
+  runtime file services, game boot and console save persistence still require
+  separate validation. Neither a passing host suite nor PS2SDK compilation
+  qualifies this as a POPStarter-compatible release.

@@ -550,6 +550,19 @@ class InspectorTests(unittest.TestCase):
         tokens = buf.raw[:written].split(b'\0')
         self.assertEqual(tokens[:5], [b"popfs", b"mass0:/Game.VCD", b"mass0:/SLOT0.VMC", b"mass0:/SLOT1.VMC", b"mass0:/Disc2.VCD"])
 
+        # Invalid optional discs must never be silently ignored/remapped.
+        for discs in [(None, b"mass0:/third.VCD", None),
+                      (b"mass0:/second.VCD", None, b"mass0:/fourth.VCD"),
+                      (b"missing-colon", None, None),
+                      (b"mass0:/second.VCD", b"pops0:/recursive", None),
+                      (b"mass0:/second.VCD", b"mass0:/third.VCD", b"no-colon")]:
+            c.memset(buf, 0x5A, len(buf))
+            before = buf.raw
+            self.assertEqual(LIB.pops_format_proxy_args(
+                buf, 1024, b"mass0:/Game.VCD", b"mass0:/SLOT0.VMC",
+                b"mass0:/SLOT1.VMC", *discs), INVALID)
+            self.assertEqual(buf.raw, before)
+
     def test_trampoline_args_init_and_layout(self):
         plan = BootPlan()
         plan.entry = 0x00200008
@@ -582,6 +595,9 @@ class InspectorTests(unittest.TestCase):
         self.assertEqual(LIB.pops_bootstrap_verify_layout(0x00800000, 0x100000, c.byref(plan)), RANGE)
         # Staging buffer exceeding 32 MiB
         self.assertEqual(LIB.pops_bootstrap_verify_layout(0x01F00000, 0x200000, c.byref(plan)), RANGE)
+        # A 32-bit cast of the requested size used to wrap away 4 GiB.
+        self.assertEqual(LIB.pops_bootstrap_verify_layout(0x01000000, 0x100000000, c.byref(plan)), RANGE)
+        self.assertEqual(LIB.pops_bootstrap_verify_layout(0xFFFFFFFF, 0x100, c.byref(plan)), RANGE)
 
 
 def check_corpus(root):

@@ -139,6 +139,7 @@ int main(void) {
   int disc = 1, query_disc = -1, query_lid = -1;
   assert(!ops->devctl(&file, "pops:", 0x03 /* OPEN_LID */, NULL, 0, NULL, 0));
   assert(!ops->devctl(&file, "pops:", 0x08 /* GET_LID */, NULL, 0, &query_lid, sizeof(query_lid)) && query_lid == 1);
+  assert(ops->devctl(&file, "pops:", 0x01 /* SWAP_DISC */, &disc, 0, NULL, 0) == -EINVAL);
   assert(!ops->devctl(&file, "pops:", 0x01 /* SWAP_DISC */, &disc, sizeof(disc), NULL, 0));
   assert(!ops->devctl(&file, "pops:", 0x02 /* GET_DISC */, NULL, 0, &query_disc, sizeof(query_disc)) && query_disc == 1);
   assert(!ops->devctl(&file, "pops:", 0x04 /* CLOSE_LID */, NULL, 0, NULL, 0));
@@ -149,6 +150,7 @@ int main(void) {
   assert(!ops->devctl(&file, "pops:", 0x05 /* SET_LIBCRYPT */, &key, sizeof(key), NULL, 0));
   uint32_t lba = 15;
   uint8_t subq[12] = {0};
+  assert(ops->devctl(&file, "pops:", 0x06 /* GET_SUBQ */, &lba, 1, subq, sizeof(subq)) == -EINVAL);
   assert(!ops->devctl(&file, "pops:", 0x06 /* GET_SUBQ */, &lba, sizeof(lba), subq, sizeof(subq)));
   assert(subq[0] == 0x41 && subq[1] == 0x01 && subq[2] == 0x01);
   assert(subq[10] == 0x7C && subq[11] == 0x23);

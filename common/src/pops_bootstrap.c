@@ -42,14 +42,16 @@ int pops_format_proxy_args(char *buffer, size_t capacity,
   tokens[2] = card0;
   tokens[3] = card1;
 
-  if (disc1 && is_valid_device_path(disc1)) {
-    tokens[token_count++] = disc1;
-    if (disc2 && is_valid_device_path(disc2)) {
-      tokens[token_count++] = disc2;
-      if (disc3 && is_valid_device_path(disc3))
-        tokens[token_count++] = disc3;
-    }
-  }
+  /* Optional discs must be contiguous and individually valid. Dropping a bad
+   * entry silently would change the game's disc mapping after IOP reboot. */
+  if ((disc2 && !disc1) || (disc3 && !disc2) ||
+      (disc1 && !is_valid_device_path(disc1)) ||
+      (disc2 && !is_valid_device_path(disc2)) ||
+      (disc3 && !is_valid_device_path(disc3)))
+    return POPS_FILE_INVALID;
+  if (disc1) tokens[token_count++] = disc1;
+  if (disc2) tokens[token_count++] = disc2;
+  if (disc3) tokens[token_count++] = disc3;
 
   for (i = 0; i < token_count; ++i) {
     size_t len = strlen(tokens[i]) + 1;
@@ -102,16 +104,14 @@ int pops_trampoline_args_init(PopsTrampolineArgs *out, const PopsBootPlan *plan,
 
 int pops_bootstrap_verify_layout(uint32_t staging_base, size_t staging_size,
                                  const PopsBootPlan *plan) {
-  uint32_t staging_end;
-
   if (!plan || staging_size == 0)
     return POPS_FILE_INVALID;
 
-  if (staging_base < POPS_BSS_ADDR + POPS_BSS_SIZE)
-    return POPS_FILE_RANGE;
-
-  staging_end = staging_base + (uint32_t)staging_size;
-  if (staging_end > UINT32_C(0x02000000))
+  /* Subtract only after checking the base; adding/casting size to uint32_t
+   * would permit >=4 GiB sizes to wrap and appear safely inside EE RAM. */
+  if (staging_base < POPS_BSS_ADDR + POPS_BSS_SIZE ||
+      staging_base >= UINT32_C(0x02000000) ||
+      staging_size > UINT32_C(0x02000000) - staging_base)
     return POPS_FILE_RANGE;
 
   if (plan->core_address != POPS_CORE_ADDR ||

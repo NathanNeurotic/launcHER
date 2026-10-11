@@ -230,10 +230,10 @@ static uint16_t active_libcrypt_key = 0;
 
 static int bridge_devctl(iomanX_iop_file_t *file, const char *devname, int cmd,
                          void *arg, unsigned int arglen, void *buf, unsigned int buflen) {
-  (void)file; (void)devname; (void)arglen; (void)buflen;
+  (void)file; (void)devname;
   switch (cmd) {
     case POPS_DEVCTL_SWAP_DISC:
-      if (arg) {
+      if (arg && arglen >= sizeof(int)) {
         int disc = *(int *)arg;
         if (disc >= 0 && disc < DISC_COUNT && paths[disc][0]) {
           active_disc = disc;
@@ -277,6 +277,8 @@ static int bridge_devctl(iomanX_iop_file_t *file, const char *devname, int cmd,
       return -ENOENT;
     }
     case POPS_DEVCTL_GET_SUBQ:
+      if (arg && arglen < sizeof(uint32_t))
+        return -EINVAL;
       if (buf && buflen >= 12) {
         uint32_t lba = arg ? *(uint32_t *)arg : 0;
         uint8_t *out_subq = (uint8_t *)buf;
