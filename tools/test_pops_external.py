@@ -645,6 +645,20 @@ class InspectorTests(unittest.TestCase):
         self.assertIn("if (!forceIOPReset && ((currentDevice)&device))", init)
         self.assertIn("forceIOPReset = 0;", init)
 
+    def test_network_dependency_requires_iox_without_legacy_fallback(self):
+        source = (ROOT / "launcher/src/handler_pops.c").read_text()
+        probe = source.index("static int findPopsDependenciesForMode(")
+        iox = source.index('"%sPOPS_IOX.PAK"', probe)
+        guard = source.index("if (requireIox)", iox)
+        legacy = source.index('"%sPOPS.PAK"', guard)
+        self.assertLess(iox, guard)
+        self.assertLess(guard, legacy)
+        self.assertIn("continue;", source[guard:legacy])
+        self.assertIn("ioprpPath, ioprpPathSize, 0);", source)
+        launch = source.index("res = findPopsDependenciesForMode(", legacy)
+        self.assertIn("isSbLaunch", source[launch:launch+210])
+        self.assertIn("SMB launch requires POPS_IOX.PAK", source)
+
     def test_pops_smb_driver_loads_only_once_after_reboot(self):
         init = (ROOT / "launcher/src/init.c").read_text()
         launcher = (ROOT / "launcher/src/handler_pops.c").read_text()
