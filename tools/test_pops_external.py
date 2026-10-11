@@ -610,6 +610,16 @@ class InspectorTests(unittest.TestCase):
         assert "if (res < 0)" in section
         assert "return res;" in section
 
+    def test_post_reboot_storage_gates_trampoline(self):
+        text = (ROOT / 'launcher/src/handler_pops.c').read_text()
+        self.assertIn('fileXioOpen(paths[i]', text)
+        self.assertIn('fileXioRead(fd, check, sizeof(check))', text)
+        self.assertIn('fileXioClose(fd)', text)
+        verify = text.index('res = pops_probe_live_storage();')
+        boot = text.index('pops_trampoline_args_init(', verify)
+        self.assertLess(verify, boot)
+        self.assertIn('if (res)', text[verify:boot])
+
     def test_reboot_and_rpc_failures_are_not_reported_as_success(self):
         launcher = (ROOT / "launcher/src/handler_pops.c").read_text()
         init = (ROOT / "launcher/src/init.c").read_text()
