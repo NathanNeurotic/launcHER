@@ -305,9 +305,12 @@ static int loadModuleList(DeviceType device, int tolerant, int sonySio2) {
     msg("POPS: Cannot bind fileXio after IOP reset: %d\n", ret);
     return ret;
   }
-  if (device & Device_SMB) {
+  /* The POPS path (sonySio2) initializes SMB once, after the external
+   * IOP reboot, using the VCD/VMC search directories. Loading here as well
+   * causes duplicate IRX loads before their paths are available. Preserve
+   * the original generic launcher's SMB behavior unchanged. */
+  if ((device & Device_SMB) && !sonySio2)
     pops_load_smb_stack(NULL, NULL);
-  }
   currentDevice = device;
   return 0;
 }
