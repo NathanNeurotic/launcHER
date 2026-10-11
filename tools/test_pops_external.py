@@ -618,6 +618,23 @@ class InspectorTests(unittest.TestCase):
         self.assertIn('if (res == -EIO)', check)
         self.assertIn('return res;', check)
 
+    def test_vmc_path_components_cannot_be_silently_truncated(self):
+        source = (ROOT / "launcher/src/handler_pops.c").read_text()
+        paths = source.index("size_t longestName = strlen(gameBase);")
+        target = source.index('snprintf(vmcDir, sizeof(vmcDir)', paths)
+        card = source.index('snprintf(card0Path, sizeof(card0Path)', paths)
+        self.assertLess(paths, target)
+        self.assertLess(target, card)
+        self.assertIn("strlen(vcdDir) + 2 * longestName + 16 >= PATH_MAX",
+                      source[paths:target])
+        self.assertIn("return -ENAMETOOLONG;", source[paths:target])
+        self.assertNotIn('"%.700s', source)
+        self.assertNotIn('"%.800s', source)
+        # The game-configuration path must also be checked before snprintf.
+        config_guard = source.index("if (strlen(vcdDir) + strlen(gameBase) + 2 > PATH_MAX)")
+        config_build = source.index("snprintf(gameConfigDir, sizeof(gameConfigDir)")
+        self.assertLess(config_guard, config_build)
+
     def test_apa_first_launch_can_create_missing_vmc(self):
         source = (ROOT / "launcher/src/handler_pops.c").read_text()
         common = (ROOT / "launcher/src/common.c").read_text()
