@@ -10,11 +10,13 @@ extern "C" {
 
 #define POPS_VCD_RAW_SECTOR_SIZE  2352
 #define POPS_VCD_ISO_SECTOR_SIZE  2048
+#define POPS_VCD_HEADER_SIZE      0x100000 /* CUE2POPS / original Sony VCD */
 #define POPS_VCD_SERIAL_MAX       32
 
 typedef struct {
   uint32_t sector_size;
   uint32_t data_offset;
+  uint32_t image_offset; /* Header bytes preceding disc sectors (0 or 1 MiB). */
   uint32_t pvd_lba;
   uint32_t root_lba;
   uint32_t root_size;

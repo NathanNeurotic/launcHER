@@ -495,3 +495,21 @@ Video, LibCrypt and BIOS helper patches remain separately unverified.
   runtime file services, game boot and console save persistence still require
   separate validation. Neither a passing host suite nor PS2SDK compilation
   qualifies this as a POPStarter-compatible release.
+
+## VCD container inspection checkpoint - 2026-10-11
+
+- Fixed title serial detection on standard POPStarter/CUE2POPS VCDs. The older
+  metadata reader incorrectly inspected sector zero at file byte zero, as if
+  .VCD were a bare .BIN or ISO. CUE2POPS and legacy Sony variants place a
+  1 MiB TOC header before 2352-byte disc sectors (the familiar signatures
+  `kHn` and `SPOP` occur at file offset 0x400). PVD, root-directory and
+  SYSTEM.CNF reads now apply the container's 0x100000-byte payload offset.
+  The format is validated by synthetic headered images and headerless raw
+  fixtures. No proprietary disc content was committed.
+- Hardened bounded ISO9660 directory record parsing; rejects records too short
+  for fixed fields or containing names beyond their own record boundary.
+  Root-directory sector count and LBA arithmetic no longer overflow uint32.
+- This repairs metadata and serial-based compatibility lookup only. It does
+  not verify the POPS runtime's VCD sector-translation interface, mixed-mode
+  audio, CDDA seeking or any hardware game boot. Such parity claims still
+  require original-code tracing and on-console acceptance results.

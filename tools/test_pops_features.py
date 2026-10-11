@@ -55,6 +55,7 @@ class PopsVcdInfo(c.Structure):
     _fields_ = [
         ("sector_size", c.c_uint32),
         ("data_offset", c.c_uint32),
+        ("image_offset", c.c_uint32),
         ("pvd_lba", c.c_uint32),
         ("root_lba", c.c_uint32),
         ("root_size", c.c_uint32),
@@ -207,9 +208,48 @@ class FeatureTests(unittest.TestCase):
         self.assertEqual(res, 0)
         self.assertEqual(info.sector_size, 2352)
         self.assertEqual(info.data_offset, 24)
+        self.assertEqual(info.image_offset, 0)
         self.assertEqual(info.root_lba, 17)
         self.assertEqual(info.raw_serial.decode("ascii"), "cdrom0:\\SLUS_008.70;1")
         self.assertEqual(info.normalized_serial.decode("ascii"), "SLUS-00870")
+
+        # Real POPStarter/CUE2POPS VCDs prepend a 0x100000-byte TOC header.
+        # Both observed header families must leave sector/PVD/CNF addressing
+        # relative to the disc payload, not the beginning of the VCD file.
+        bare_disc = temp_vcd.read_bytes()
+        for marker in (b"kHn ", b"SPOP"):
+            toc = bytearray(0x100000)
+            toc[0x400:0x404] = marker
+            struct.pack_into("<II", toc, 0x408, total_sectors, total_sectors)
+            temp_vcd.write_bytes(toc + bare_disc)
+            info = PopsVcdInfo()
+            self.assertEqual(LIB.pops_vcd_inspect_path(
+                str(temp_vcd).encode("utf-8"), c.byref(info)), 0)
+            self.assertEqual(info.image_offset, 0x100000)
+            self.assertEqual(info.sector_size, 2352)
+            self.assertEqual(info.data_offset, 24)
+            self.assertEqual(info.raw_serial.decode("ascii"), "cdrom0:\\\\SLUS_008.70;1")
+            self.assertEqual(info.normalized_serial.decode("ascii"), "SLUS-00870")
+
+        # A recognized header without its complete disc cannot be reinterpreted
+        # as a headerless ISO image or produce a spurious serial.
+        temp_vcd.write_bytes(toc)
+        info = PopsVcdInfo()
+        self.assertNotEqual(LIB.pops_vcd_inspect_path(
+            str(temp_vcd).encode("utf-8"), c.byref(info)), 0)
+
+        # Reject short/malformed ISO directory records before reading fields
+        # outside their declared bounds, even when the rest of the sector is OK.
+        malformed = bytearray(bare_disc)
+        malformed[17 * sector_size + data_offset] = 20
+        temp_vcd.write_bytes(malformed)
+        self.assertEqual(LIB.pops_vcd_inspect_path(
+            str(temp_vcd).encode("utf-8"), c.byref(info)), -22)
+        malformed[17 * sector_size + data_offset] = 33
+        malformed[17 * sector_size + data_offset + 32] = 200
+        temp_vcd.write_bytes(malformed)
+        self.assertEqual(LIB.pops_vcd_inspect_path(
+            str(temp_vcd).encode("utf-8"), c.byref(info)), -22)
         temp_vcd.unlink()
 
     def test_cheat_disable_errors_and_redirected_configuration(self):
