@@ -364,9 +364,18 @@ int pops_config_load_vmcdir(PopsConfig *cfg, const char *filepath) {
     return errno ? -errno : -EIO;
   if (fgets(line, sizeof(line), f)) {
     char *start = trim_line(line);
-    if (strlen(start) >= sizeof(cfg->vmc_dir))
+    size_t length = strlen(start);
+    if (length > 103)
       result = -EOVERFLOW;
-    else if (*start)
+    else if (strpbrk(start, "/\\:") || !strcmp(start, ".") ||
+             !strcmp(start, ".."))
+      result = -EINVAL;
+    else {
+      char extra[2];
+      if (fgets(extra, sizeof(extra), f))
+        result = -EINVAL;
+    }
+    if (!result && *start)
       strcpy(cfg->vmc_dir, start);
   }
   return finish_file(f, result);
