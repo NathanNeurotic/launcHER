@@ -90,8 +90,9 @@ static void extractGameBase(const char *path, char *base, size_t base_size) {
   base[len] = '\0';
 }
 
-int findPopsDependencies(const char *vcdPath, char *popsPath, size_t popsPathSize,
-                         char *ioprpPath, size_t ioprpPathSize) {
+static int findPopsDependenciesForMode(const char *vcdPath, char *popsPath,
+                                       size_t popsPathSize, char *ioprpPath,
+                                       size_t ioprpPathSize, int requireIox) {
   char vcdDir[PATH_MAX] = {0};
   char devPrefix[16] = {0};
   char testPath[PATH_MAX] = {0};
@@ -139,6 +140,12 @@ int findPopsDependencies(const char *vcdPath, char *popsPath, size_t popsPathSiz
       return 0;
     }
 
+    /* The original r13 network mode requires the IOX package, even when
+     * a legacy POPS.PAK or loose HDD installation is available. Check every
+     * candidate directory for IOX before reporting the missing dependency. */
+    if (requireIox)
+      continue;
+
     /* 2. Try POPS.PAK */
     snprintf(testPath, sizeof(testPath), "%sPOPS.PAK", dir);
     if (!tryFile(testPath)) {
@@ -160,6 +167,12 @@ int findPopsDependencies(const char *vcdPath, char *popsPath, size_t popsPathSiz
   }
 
   return -ENOENT;
+}
+
+int findPopsDependencies(const char *vcdPath, char *popsPath, size_t popsPathSize,
+                         char *ioprpPath, size_t ioprpPathSize) {
+  return findPopsDependenciesForMode(vcdPath, popsPath, popsPathSize,
+                                      ioprpPath, ioprpPathSize, 0);
 }
 
 static int readFullFile(const char *path, void *buffer, size_t max_size, size_t *out_size) {
@@ -711,10 +724,13 @@ int launchPOPS(int argc, char *argv[]) {
 
   char popsPath[PATH_MAX] = {0};
   char ioprpPath[PATH_MAX] = {0};
-  res = findPopsDependencies(vcdPath, popsPath, sizeof(popsPath),
-                                 ioprpPath, sizeof(ioprpPath));
+  res = findPopsDependenciesForMode(vcdPath, popsPath, sizeof(popsPath),
+                                     ioprpPath, sizeof(ioprpPath), isSbLaunch);
   if (res) {
-    msg("POPS: Missing POPS dependencies\n(POPS.PAK, POPS_IOX.PAK or POPS.ELF+IOPRP252.IMG)\n");
+    if (isSbLaunch)
+      msg("POPS: SMB launch requires POPS_IOX.PAK (IOPRP2305A).\n");
+    else
+      msg("POPS: Missing POPS dependencies\n(POPS.PAK, POPS_IOX.PAK or POPS.ELF+IOPRP252.IMG)\n");
     return -ENOENT;
   }
 
