@@ -632,6 +632,7 @@ class InspectorTests(unittest.TestCase):
         # writable remount only after its own IOP reboot.
         self.assertIn("mountPFSMode(path, FIO_MT_RDONLY)", common)
         self.assertIn("mountPFSMode(path, FIO_MT_RDWR)", common)
+        self.assertIn("return res == 0 ? 0 : (res < 0 ? res : -ENODEV);", common)
         self.assertIn("if (res)", source[source.index("res = initPFS("):
                                          source.index("vcdPath = resolvedVcd;")])
 
