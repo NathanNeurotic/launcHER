@@ -676,3 +676,54 @@ driver, especially on HDD. Do not claim replacement parity until the
 original IOPCD import/file-service contract, mount behavior and safe
 non-APA namespace registration are verified with on-console traces. A
 working POPFS bridge probe does not establish that Sony IOPCD uses it.
+
+## External IOP handoff hardening — 2026-10-11
+
+### APA remount and recoverability
+
+The normal `mountPFS` helper mounts `pfs0:` read-only. After the external
+IOPRP reboot, the old mount cannot be assumed to survive, and live VMC
+verification must not run before mounting the backing partition. The POPS
+path now uses a separate `mountPFSWritable` helper (FIO_MT_RDWR), checks
+both early `initPFS` and post-reboot mount errors, and remounts **before**
+opening the POPFS disc and card aliases. The standard ELF launcher still
+uses the original read-only mount. Hardware must confirm game-partition
+layout, partition sharing, save writes and power-cycle persistence.
+
+The external IOP reboot also invalidates launcHER's device cache. The POPS
+service initialization marks `forceIOPReset` immediately, so a failed POPS
+launch cannot silently let the following normal launch reuse an IOP setup
+left behind by the Sony image.
+
+### Actual SMB module results and dependency compatibility
+
+The SMB helper previously treated finding an IRX on storage as a successful
+load, even when `SifLoadModule` returned a negative error. It now marks a
+module loaded only after a successful load and tries subsequent candidate
+locations if one fails. For POPS, the stack is loaded and checked after the
+reboot once, instead of making a second redundant call from generic module
+setup. The generic launcher device initialization behavior is preserved.
+
+The original r13 network release specifically requires `POPS_IOX.PAK`,
+rather than `POPS.PAK` or the loose `POPS.ELF` + IOPRP252 pair. This
+is documented by krHACKen in the 2015 beta and follow-up:
+https://www.psx-place.com/threads/ps1-popstarter-r13-wip-06-beta-20160918.10793/
+https://www.metagames-eu.com/forums/playstation-2/popstarter-revision-13-a-52-134569.html
+For an SB. / SMB launch, dependency discovery now scans **all** candidate
+locations for IOX and never silently falls back to an incompatible image.
+For USB/APA and other launch modes the previous discovery options remain.
+
+### Why the historical PFS_WRAP binary is not yet a drop-in driver
+
+Original release notes confirm the r13 beta 8 PFS wrapper was **rewritten
+and embedded** within POPStarter, no longer loaded from PFS_WRAP.BIN. The
+standalone REPOP `PFS_WRAP.BIN` is therefore not the latest r13 ABI:
+https://www.psx-place.com/threads/ps1-popstarter-r13-wip-06-beta-20160918.10793/
+
+The reference PS2SDK IOMANX `iomanX_AddDrv` implementation can register
+drivers without a duplicate-name check in its non-linked-list configuration.
+Consequently, simply adding a second device named `pfs` is unsafe: it could
+shadow real APA/PFS and corrupt or misroute HDD accesses. We discarded an
+unused experimental EE proxy-mode argument change pending reliable driver
+enumeration and original IOPCD path/operation traces. The working `pops`
+namespace is intentionally not presented as complete Sony `pfs` parity.
