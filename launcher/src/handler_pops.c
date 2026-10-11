@@ -1043,10 +1043,10 @@ int launchPOPS(int argc, char *argv[]) {
     int found = pops_iop_image_find_module(rebootIop, plan.iop_size, "IOPCD",
                                            &moduleOffset, &moduleSize);
     if (!found)
-      DPRINTF("POPS: IOPRP IOPCD ROMDIR module offset=%u size=%u\\n",
+      DPRINTF("POPS: IOPRP IOPCD ROMDIR module offset=%u size=%u\n",
               (unsigned)moduleOffset, (unsigned)moduleSize);
     else
-      DPRINTF("POPS: No standalone IOPCD in selected IOPRP (%d); EE embedded module may load it\\n", found);
+      DPRINTF("POPS: No standalone IOPCD in selected IOPRP (%d); EE embedded module may load it\n", found);
   }
 
   /* Verify staging memory layout */
