@@ -103,17 +103,29 @@ static int bridge_deinit(iomanX_iop_device_t *device) {
 
 static int bridge_open(iomanX_iop_file_t *file, const char *name, int flags, int mode) {
   char backing[PATH_LIMIT];
-  int index, fd;
+  int index, fd, state, error = 0;
   if (file->unit < 0 || file->unit > 1)
     return -ENODEV;
+  /* Resolve the disc0 alias and reserve the handle in the same critical
+   * section. Otherwise a concurrent SWAP_DISC could retarget the alias
+   * between resolution and reservation, leaving the old image open while
+   * active_disc already names the new one. Never hold this lock during I/O. */
+  CpuSuspendIntr(&state);
   index = resolve(name, backing);
   if (index < 0)
-    return index == -1 ? -EISDIR : index;
-  if (index < DISC_COUNT && flags != FIO_O_RDONLY)
-    return -EROFS;
-  if (index < DISC_COUNT && lid_open)
-    return -ENODEV;
-  count_add(1, index < DISC_COUNT); /* Reserve before blocking I/O. */
+    error = index == -1 ? -EISDIR : index;
+  else if (index < DISC_COUNT && flags != FIO_O_RDONLY)
+    error = -EROFS;
+  else if (index < DISC_COUNT && lid_open)
+    error = -ENODEV;
+  else {
+    ++active;
+    if (index < DISC_COUNT)
+      ++active_disc_handles;
+  }
+  CpuResumeIntr(state);
+  if (error)
+    return error;
   fd = iomanX_open(backing, flags, mode);
   if (fd < 0) {
     count_add(-1, index < DISC_COUNT);

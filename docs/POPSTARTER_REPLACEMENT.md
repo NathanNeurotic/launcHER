@@ -541,3 +541,12 @@ Video, LibCrypt and BIOS helper patches remain separately unverified.
 - This is **bounds/error-handling correctness**, not proof that the listed
   speculative graphics/BIOS/LibCrypt patch values match original POPStarter.
   Source-measured guards and actual console testing remain required.
+
+### Disc-switch/open concurrency refinement
+
+- POPFS now resolves the selected disc alias and reserves its live descriptor
+  under the same short IOP interrupt critical section. Without that pairing,
+  a concurrent disc swap could occur between alias resolution and descriptor
+  reservation, leaving the old disc opened under the new active disc number.
+  Underlying iomanX_open is performed after interrupts are restored. Resident
+  POPS caller/IOPCD disc switching still needs hardware proof.
