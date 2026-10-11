@@ -173,6 +173,17 @@ int main(void) {
   assert(!ops->open(&file, "/disc/disc1", 1, 0) && !strcmp(observed, arguments[4]));
   assert(!ops->close(&file));
 
+  /* Standard POPStarter memory card names resolve to the existing save pair. */
+  next_open = 63;
+  assert(!ops->open(&file, "SLOT0.VMC", 3, 0));
+  assert(!strcmp(observed, arguments[2]));
+  assert(!ops->close(&file));
+  next_open = 64;
+  assert(!ops->open(&file, "/SLOT1.VMC.bak", 3, 0));
+  assert(!strcmp(observed, "mmce1:/POPS/Game/Card1.VMC.bak"));
+  assert(!ops->close(&file));
+  assert(ops->open(&file, "SLOT2.VMC", 1, 0) == -ENOENT);
+
   /* Devctl tray and disc commands */
   int disc = 1, query_disc = -1, query_lid = -1;
   assert(!ops->devctl(&file, "pops:", 0x03 /* OPEN_LID */, NULL, 0, NULL, 0));
