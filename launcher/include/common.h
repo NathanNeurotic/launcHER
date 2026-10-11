@@ -84,6 +84,9 @@ int initPFS(char *path, DeviceType additionalDevices);
 int mountPFS(char *path);
 /* POPS-only APA remount after external IOP reboot, allowing saved VMC writes. */
 int mountPFSWritable(char *path);
+/* POPS-only transition from its initial read-only inspection mount to
+ * writable card initialization before the external IOP reboot. */
+int remountPFSWritable(char *path);
 
 // Unmounts the partition
 void deinitPFS();

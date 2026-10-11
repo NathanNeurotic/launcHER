@@ -618,6 +618,22 @@ class InspectorTests(unittest.TestCase):
         self.assertIn('if (res == -EIO)', check)
         self.assertIn('return res;', check)
 
+    def test_apa_first_launch_can_create_missing_vmc(self):
+        source = (ROOT / "launcher/src/handler_pops.c").read_text()
+        common = (ROOT / "launcher/src/common.c").read_text()
+        verify_patch = source.index("res = pops_core_patches_stage(")
+        writable = source.index("res = remountPFSWritable(")
+        card = source.index("res = pops_vmc_ensure(")
+        reset = source.index("res = SifIopRebootBuffer(")
+        self.assertLess(verify_patch, writable)
+        self.assertLess(writable, card)
+        self.assertLess(card, reset)
+        unmount = common.index("int remountPFSWritable(")
+        self.assertLess(common.index("fileXioUmount(PFS_MOUNTPOINT)", unmount),
+                        common.index("return mountPFSWritable(path);", unmount))
+        self.assertIn("if (res)", common[unmount:common.index(
+            "// Initializes APA-formatted", unmount)])
+
     def test_apa_remount_precedes_live_save_probe(self):
         source = (ROOT / "launcher/src/handler_pops.c").read_text()
         common = (ROOT / "launcher/src/common.c").read_text()

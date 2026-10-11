@@ -455,6 +455,22 @@ static int mountPFSMode(char *path, int flags) {
 int mountPFS(char *path) { return mountPFSMode(path, FIO_MT_RDONLY); }
 int mountPFSWritable(char *path) { return mountPFSMode(path, FIO_MT_RDWR); }
 
+/* POPS first needs the normal read-only mount for dependency verification,
+ * then a writable mount to create absent VMC images before the IOP reboot.
+ * The unmount result must not be discarded: a busy partition cannot be
+ * safely remounted over the same pfs0: mountpoint. */
+int remountPFSWritable(char *path) {
+#ifndef APA
+  (void)path;
+  return -ENODEV;
+#else
+  int res = fileXioUmount(PFS_MOUNTPOINT);
+  if (res)
+    return res < 0 ? res : -ENODEV;
+  return mountPFSWritable(path);
+#endif
+}
+
 // Initializes APA-formatted HDD and mounts the partition if specified
 int initPFS(char *path, DeviceType additionalDevices) {
 #ifndef APA

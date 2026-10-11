@@ -745,3 +745,18 @@ The post-reboot POPFS disc probe previously classified a short positive
 now loops over the remaining byte count with a bounded read and keeps the
 read destination aligned for IOP RPC. It still fails on EOF, negative I/O
 status or impossible length. No game data is written by the probe.
+
+### First-launch APA VMC creation gate — 2026-10-11
+
+A new PS1 game may have no existing `SLOT0.VMC`/`SLOT1.VMC`.
+The first APA mount was deliberately read-only for VCD/dependency probing;
+however `pops_vmc_ensure` runs **before** the external IOP reboot and
+creates missing save files. A writable remount only *after* reboot could
+never fix that first-launch failure.
+
+After all external dependency and core/TROJAN preflights pass, POPS now
+explicitly unmounts its old inspection partition and remounts it read-write
+before creating either save. A busy/failed unmount or mount is surfaced as
+an error. The existing post-reboot writable remount remains necessary
+because reboot discards the earlier mount. Normal APA ELF launch semantics
+remain read-only. Hardware testing must verify actual PFS write access.

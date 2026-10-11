@@ -1110,6 +1110,17 @@ int launchPOPS(int argc, char *argv[]) {
   /* Prepare card images only after external dependency identity and every
    * selected core/TROJAN patch has been validated. Failed preflight never
    * creates empty saves or touches existing cards. */
+  /* The initial APA mount was deliberately read-only for inspection.
+   * Newly created SLOT images require write access *before* the external
+   * IOP reset (the later writable remount alone is too late). */
+  if (device == Device_APA) {
+    res = remountPFSWritable((char *)argv[0]);
+    if (res) {
+      msg("POPS: APA remount for new VMCs failed: %d\n", res);
+      return res;
+    }
+  }
+
   /* Ensure backing save images exist before handoff */
   res = pops_vmc_ensure(card0Path);
   if (res) {
