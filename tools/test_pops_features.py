@@ -128,6 +128,10 @@ class FeatureTests(unittest.TestCase):
         LIB.pops_vcd_normalize_serial.restype = c.c_int
         LIB.pops_vcd_inspect_path.argtypes = [c.c_char_p, c.POINTER(PopsVcdInfo)]
         LIB.pops_vcd_inspect_path.restype = c.c_int
+        cls.Reader = c.CFUNCTYPE(c.c_int, c.c_void_p, c.c_void_p, c.c_size_t)
+        cls.Seeker = c.CFUNCTYPE(c.c_int64, c.c_void_p, c.c_int64, c.c_int)
+        LIB.pops_vcd_inspect_stream.argtypes = [c.c_void_p, cls.Reader, cls.Seeker, c.POINTER(PopsVcdInfo)]
+        LIB.pops_vcd_inspect_stream.restype = c.c_int
 
     def test_config_patch_preflight_is_atomic(self):
         # A compatibility-mode write is valid in this small buffer, but a
