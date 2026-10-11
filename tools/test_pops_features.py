@@ -284,6 +284,10 @@ class FeatureTests(unittest.TestCase):
         self.assertEqual(info.normalized_serial.decode("ascii"), "SLUS-00870")
 
         toc[0x400:0x404] = b"SPOP"
+        temp_vcd.write_bytes(toc + bare_disc[:-sector_size])
+        info = PopsVcdInfo()
+        self.assertNotEqual(LIB.pops_vcd_inspect_path(
+            str(temp_vcd).encode('utf-8'), c.byref(info)), 0)
         # A recognized header without its complete disc cannot be reinterpreted
         # as a headerless ISO image or produce a spurious serial.
         temp_vcd.write_bytes(toc)
