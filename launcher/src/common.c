@@ -432,25 +432,26 @@ char *normalizePath(char *path, DeviceType type) {
   return pathbuffer;
 }
 
-// Mounts the partition specified in path
-int mountPFS(char *path) {
+/* The normal ELF loader mounts read-only. POPS needs write access to
+ * memory-card images on the selected APA partition after its IOP reset. */
+static int mountPFSMode(char *path, int flags) {
 #ifndef APA
+  (void)path;
+  (void)flags;
   return -ENODEV;
 #else
   char mountPart[256];
-  if (parseAPAPath(path, mountPart, sizeof(mountPart), NULL) != 0 || mountPart[0] == '\0') {
+  if (!path || parseAPAPath(path, mountPart, sizeof(mountPart), NULL) != 0 ||
+      mountPart[0] == '\0')
     return -ENODEV;
-  }
-
-  // Mount the partition
-  DPRINTF("Mounting %s to %s\n", mountPart, PFS_MOUNTPOINT);
-  int res = fileXioMount(PFS_MOUNTPOINT, mountPart, FIO_MT_RDONLY);
-  if (res)
-    return -ENODEV;
-
-  return 0;
+  DPRINTF("Mounting %s to %s (flags %d)\n", mountPart, PFS_MOUNTPOINT, flags);
+  int res = fileXioMount(PFS_MOUNTPOINT, mountPart, flags);
+  return res < 0 ? res : 0;
 #endif
 }
+
+int mountPFS(char *path) { return mountPFSMode(path, FIO_MT_RDONLY); }
+int mountPFSWritable(char *path) { return mountPFSMode(path, FIO_MT_RDWR); }
 
 // Initializes APA-formatted HDD and mounts the partition if specified
 int initPFS(char *path, DeviceType additionalDevices) {
