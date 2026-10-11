@@ -698,7 +698,14 @@ int launchPOPS(int argc, char *argv[]) {
   /* Inspect target VCD ISO9660 filesystem for game serial */
   PopsVcdInfo vcdInfo;
   memset(&vcdInfo, 0, sizeof(vcdInfo));
-  if (pops_vcd_inspect_path(vcdPath, &vcdInfo) == 0 && vcdInfo.normalized_serial[0]) {
+  res = pops_vcd_inspect_path(vcdPath, &vcdInfo);
+  /* An absent/nonstandard SYSTEM.CNF does not prove the disc unusable, but
+   * a short read or a VCD smaller than its declared sector count does. */
+  if (res == -EIO) {
+    msg("POPS: VCD read or declared sector extent failed: %s\n", vcdPath);
+    return res;
+  }
+  if (!res && vcdInfo.normalized_serial[0]) {
     DPRINTF("POPS: Detected serial %s (raw %s)\n", vcdInfo.normalized_serial, vcdInfo.raw_serial);
   }
 
