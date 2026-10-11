@@ -635,6 +635,23 @@ class InspectorTests(unittest.TestCase):
         self.assertIn("if (res)", source[source.index("res = initPFS("):
                                          source.index("vcdPath = resolvedVcd;")])
 
+    def test_pops_smb_driver_loads_only_once_after_reboot(self):
+        init = (ROOT / "launcher/src/init.c").read_text()
+        launcher = (ROOT / "launcher/src/handler_pops.c").read_text()
+        # Generic launcher behavior is unaffected; only Sony POPS skips
+        # the early stack setup, and then checks the final load status.
+        self.assertIn("if ((device & Device_SMB) && !sonySio2)", init)
+        post = launcher.index("res = initPopsServices(")
+        smb = launcher.index("res = pops_load_smb_stack(vcdDir, vmcDir);", post)
+        self.assertLess(post, smb)
+        self.assertIn("return res;", launcher[smb:launcher.index(
+            "/* Load user-supplied custom IRX modules", smb)])
+        # File existence alone must never count as a loaded IRX.
+        for field in ("loadedDev9", "loadedSmap", "loadedPs2ip",
+                      "loadedSmbman", "loadedNetfs"):
+            point = launcher.index(field + " = 1;")
+            self.assertIn("if (module < 0)", launcher[point-210:point])
+
     def test_post_reboot_storage_gates_trampoline(self):
         text = (ROOT / 'launcher/src/handler_pops.c').read_text()
         self.assertIn('fileXioOpen(paths[i]', text)
