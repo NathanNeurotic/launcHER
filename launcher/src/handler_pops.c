@@ -670,10 +670,14 @@ int launchPOPS(int argc, char *argv[]) {
 
   const char *vcdPath = argv[0];
   int res;
-  if (pops_is_xx_prefix(vcdPath))
-    pops_set_active_xx_launch(1);
-  if (pops_is_sb_prefix(vcdPath))
-    pops_set_active_sb_launch(1);
+  const int directXx = pops_is_xx_prefix(vcdPath);
+  const int directSb = pops_is_sb_prefix(vcdPath);
+  if (directXx || directSb) {
+    /* An explicit prefix on the selected target overrides an earlier
+     * resolver context, never enabling XX and SB simultaneously. */
+    pops_set_active_xx_launch(directXx);
+    pops_set_active_sb_launch(directSb);
+  }
 
   DeviceType device = guessDeviceType(vcdPath);
 
