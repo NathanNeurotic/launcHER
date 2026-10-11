@@ -618,6 +618,23 @@ class InspectorTests(unittest.TestCase):
         self.assertIn('if (res == -EIO)', check)
         self.assertIn('return res;', check)
 
+    def test_apa_remount_precedes_live_save_probe(self):
+        source = (ROOT / "launcher/src/handler_pops.c").read_text()
+        common = (ROOT / "launcher/src/common.c").read_text()
+        setup = source.index("res = initPopsServices(")
+        remount = source.index("res = mountPFSWritable(", setup)
+        verify = source.index("res = pops_probe_live_storage();", setup)
+        enter = source.index("pops_trampoline_args_init(", setup)
+        self.assertLess(setup, remount)
+        self.assertLess(remount, verify)
+        self.assertLess(verify, enter)
+        # Normal APA ELF mounting stays read-only; POPS uses an explicit
+        # writable remount only after its own IOP reboot.
+        self.assertIn("mountPFSMode(path, FIO_MT_RDONLY)", common)
+        self.assertIn("mountPFSMode(path, FIO_MT_RDWR)", common)
+        self.assertIn("if (res)", source[source.index("res = initPFS("):
+                                         source.index("vcdPath = resolvedVcd;")])
+
     def test_post_reboot_storage_gates_trampoline(self):
         text = (ROOT / 'launcher/src/handler_pops.c').read_text()
         self.assertIn('fileXioOpen(paths[i]', text)
