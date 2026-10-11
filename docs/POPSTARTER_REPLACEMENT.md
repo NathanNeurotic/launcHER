@@ -760,3 +760,21 @@ before creating either save. A busy/failed unmount or mount is surfaced as
 an error. The existing post-reboot writable remount remains necessary
 because reboot discards the earlier mount. Normal APA ELF launch semantics
 remain read-only. Hardware testing must verify actual PFS write access.
+
+### Standard Q subchannel timing and CRC — 2026-10-11
+
+The previous synthetic Q builder duplicated track-relative MSF into the
+absolute time fields and produced zero CRC bytes for unprotected sectors.
+This is inconsistent with the Red Book/PlayStation position-Q structure.
+Both the EE host helper and the IOP POPFS devctl now encode absolute
+MSF as LBA+150 frames and track-relative time as LBA, with the standard
+inverted CRC-16/CCITT across Q0..Q9. The published Q at relative sector 0
+(`41 01 01 00 00 00 00 00 02 00 28 32`) is tested byte-for-byte.
+Reference: https://psx-spx.consoledev.net/cdromformat/
+
+The existing nonzero LibCrypt-key placeholder for selected low sectors is
+unchanged. It is *not* true LibCrypt support: real protections modify
+subchannel position and CRCs in game-specific sector patterns near minutes
+3 and 9. Likewise, a single-track synthetic Q is insufficient for actual
+multi-track CDDA. Hardware/I/O traces and authentic subchannel data remain
+required before declaring those features compatible.

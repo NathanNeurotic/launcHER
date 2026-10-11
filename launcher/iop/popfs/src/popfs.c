@@ -261,6 +261,23 @@ static int bridge_sync(iomanX_iop_file_t *file, const char *name, int flag) {
 #define POPS_DEVCTL_NEXT_DISC    0x07
 #define POPS_DEVCTL_GET_LID      0x08
 
+/* Red Book Subchannel Q CRC-16/CCITT, init 0, inverted, big-endian.
+ * Standard data-track Q uses track-relative MSF and absolute LBA+150 MSF.
+ * See psx-spx CD-ROM format (Q positional frames). */
+static uint16_t pops_subq_crc(const uint8_t q[12]) {
+  uint16_t crc = 0;
+  for (int i = 0; i < 10; ++i) {
+    crc ^= (uint16_t)q[i] << 8;
+    for (int bit = 0; bit < 8; ++bit)
+      crc = (uint16_t)((crc << 1) ^ ((crc & 0x8000) ? 0x1021 : 0));
+  }
+  return (uint16_t)~crc;
+}
+
+static uint8_t pops_bcd(uint32_t n) {
+  return (uint8_t)(((n / 10) << 4) | (n % 10));
+}
+
 static uint16_t active_libcrypt_key = 0;
 
 static int bridge_devctl(iomanX_iop_file_t *file, const char *devname, int cmd,
@@ -329,17 +346,18 @@ static int bridge_devctl(iomanX_iop_file_t *file, const char *devname, int cmd,
         out_subq[0] = 0x41; /* Track 1, Mode 1 data */
         out_subq[1] = 0x01;
         out_subq[2] = 0x01;
-        uint32_t sec = lba / 75;
-        uint32_t frm = lba % 75;
-        uint32_t min = sec / 60;
-        sec %= 60;
-        out_subq[3] = (uint8_t)(((min / 10) << 4) | (min % 10));
-        out_subq[4] = (uint8_t)(((sec / 10) << 4) | (sec % 10));
-        out_subq[5] = (uint8_t)(((frm / 10) << 4) | (frm % 10));
-        out_subq[6] = 0x00;
-        out_subq[7] = out_subq[3];
-        out_subq[8] = out_subq[4];
-        out_subq[9] = out_subq[5];
+        uint32_t relative_seconds = lba / 75;
+        uint32_t absolute_seconds = (lba + 150) / 75;
+        out_subq[3] = pops_bcd(relative_seconds / 60);
+        out_subq[4] = pops_bcd(relative_seconds % 60);
+        out_subq[5] = pops_bcd(lba % 75);
+        out_subq[6] = 0;
+        out_subq[7] = pops_bcd(absolute_seconds / 60);
+        out_subq[8] = pops_bcd(absolute_seconds % 60);
+        out_subq[9] = pops_bcd((lba + 150) % 75);
+        uint16_t crc = pops_subq_crc(out_subq);
+        out_subq[10] = (uint8_t)(crc >> 8);
+        out_subq[11] = (uint8_t)crc;
         if (active_libcrypt_key != 0 && lba >= 12 && lba <= 20) {
           out_subq[10] = (uint8_t)(active_libcrypt_key >> 8);
           out_subq[11] = (uint8_t)(active_libcrypt_key & 0xFF);

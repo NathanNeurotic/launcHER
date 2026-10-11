@@ -203,6 +203,20 @@ int main(void) {
   assert(!ops->devctl(&file, "pops:", 0x06 /* GET_SUBQ */, &lba, sizeof(lba), subq, sizeof(subq)));
   assert(subq[0] == 0x41 && subq[1] == 0x01 && subq[2] == 0x01);
   assert(subq[10] == 0x7C && subq[11] == 0x23);
+  /* Standard data-sector Q: relative LBA 0, absolute 00:02:00 and
+   * CRC16-CCITT = 0x2832 (known psx-spx reference frame). */
+  key = 0;
+  assert(!ops->devctl(&file, "pops:", 0x05, &key, sizeof(key), NULL, 0));
+  lba = 0;
+  assert(!ops->devctl(&file, "pops:", 0x06, &lba, sizeof(lba), subq, sizeof(subq)));
+  const uint8_t expected_q[12] = {
+      0x41, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x28, 0x32
+  };
+  assert(!memcmp(subq, expected_q, sizeof(subq)));
+  lba = 75;
+  assert(!ops->devctl(&file, "pops:", 0x06, &lba, sizeof(lba), subq, sizeof(subq)));
+  assert(subq[3] == 0 && subq[4] == 1 && subq[5] == 0);
+  assert(subq[7] == 0 && subq[8] == 3 && subq[9] == 0);
 
   assert(!ops->deinit(registered));
   puts("POPFS production-driver contract PASS: paths, multi-disc, save backups, descriptor zero,");

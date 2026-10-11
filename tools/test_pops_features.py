@@ -634,6 +634,13 @@ class FeatureTests(unittest.TestCase):
         self.assertEqual(subq[2], 0x01)
         self.assertEqual(subq[10], 0x7C)
         self.assertEqual(subq[11], 0x23)
+        # Unprotected standard track-1 position Q is CRC-protected, and
+        # absolute time starts at 00:02:00 when relative LBA = 0.
+        self.assertEqual(LIB.pops_generate_subq(0, 0, c.byref(subq)), 0)
+        self.assertEqual(bytes(subq), bytes.fromhex("410101000000000002002832"))
+        self.assertEqual(LIB.pops_generate_subq(75, 0, c.byref(subq)), 0)
+        self.assertEqual(tuple(subq[3:6]), (0x00, 0x01, 0x00))
+        self.assertEqual(tuple(subq[7:10]), (0x00, 0x03, 0x00))
 
         # Test GameShark cheat RAM injector with 0xD0..0xD3 and 0xE0..0xE1 conditionals
         ram_size = 0x200000

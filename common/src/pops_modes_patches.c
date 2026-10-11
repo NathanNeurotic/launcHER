@@ -238,6 +238,23 @@ int pops_check_disc_swap_combo(uint16_t buttons_active_low) {
   return ((pressed & POPS_SWAP_COMBO) == POPS_SWAP_COMBO);
 }
 
+/* Red Book Subchannel Q CRC-16/CCITT, init 0, inverted, big-endian.
+ * Standard data-track Q uses track-relative MSF and absolute LBA+150 MSF.
+ * See psx-spx CD-ROM format (Q positional frames). */
+static uint16_t pops_subq_crc(const uint8_t q[12]) {
+  uint16_t crc = 0;
+  for (int i = 0; i < 10; ++i) {
+    crc ^= (uint16_t)q[i] << 8;
+    for (int bit = 0; bit < 8; ++bit)
+      crc = (uint16_t)((crc << 1) ^ ((crc & 0x8000) ? 0x1021 : 0));
+  }
+  return (uint16_t)~crc;
+}
+
+static uint8_t pops_bcd(uint32_t n) {
+  return (uint8_t)(((n / 10) << 4) | (n % 10));
+}
+
 int pops_generate_subq(uint32_t lba, uint16_t libcrypt_key, uint8_t out_subq[12]) {
   if (!out_subq)
     return -EINVAL;
@@ -247,23 +264,22 @@ int pops_generate_subq(uint32_t lba, uint16_t libcrypt_key, uint8_t out_subq[12]
   out_subq[1] = 0x01;
   out_subq[2] = 0x01;
 
-  uint32_t sec = lba / 75;
-  uint32_t frm = lba % 75;
-  uint32_t min = sec / 60;
-  sec %= 60;
+  uint32_t relative_seconds = lba / 75;
+  uint32_t absolute_seconds = (lba + 150) / 75;
+  out_subq[3] = pops_bcd(relative_seconds / 60);
+  out_subq[4] = pops_bcd(relative_seconds % 60);
+  out_subq[5] = pops_bcd(lba % 75);
+  out_subq[6] = 0;
+  out_subq[7] = pops_bcd(absolute_seconds / 60);
+  out_subq[8] = pops_bcd(absolute_seconds % 60);
+  out_subq[9] = pops_bcd((lba + 150) % 75);
+  uint16_t crc = pops_subq_crc(out_subq);
+  out_subq[10] = (uint8_t)(crc >> 8);
+  out_subq[11] = (uint8_t)crc;
 
-  uint8_t m_bcd = (uint8_t)(((min / 10) << 4) | (min % 10));
-  uint8_t s_bcd = (uint8_t)(((sec / 10) << 4) | (sec % 10));
-  uint8_t f_bcd = (uint8_t)(((frm / 10) << 4) | (frm % 10));
-
-  out_subq[3] = m_bcd;
-  out_subq[4] = s_bcd;
-  out_subq[5] = f_bcd;
-  out_subq[6] = 0x00;
-  out_subq[7] = m_bcd;
-  out_subq[8] = s_bcd;
-  out_subq[9] = f_bcd;
-
+  /* Legacy key placeholder retained for compatibility with existing call
+   * sites. This is NOT verified LibCrypt subchannel reconstruction: actual
+   * protected sectors and CRC corruption patterns are game dependent. */
   if (libcrypt_key != 0 && lba >= 12 && lba <= 20) {
     out_subq[10] = (uint8_t)(libcrypt_key >> 8);
     out_subq[11] = (uint8_t)(libcrypt_key & 0xFF);
