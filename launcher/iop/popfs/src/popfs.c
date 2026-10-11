@@ -68,8 +68,16 @@ static int resolve(const char *name, char output[PATH_LIMIT]) {
   relative = normalized[0] == '/' ? normalized + 1 : normalized;
   if (!strcmp(relative, "ps1emu") || !strcmp(relative, "ps1emu/"))
     return -1;
-  if (!strncmp(relative, "disc/disc", 9) && relative[9] >= '0' &&
-      relative[9] < '0' + DISC_COUNT && !relative[10]) {
+  /* The POPS trampoline passes pops0:IMAGE.VCD, while the sector proxy also
+   * exposes /disc/disc0. Keep both names on the identical read-only backing
+   * descriptor; IMAGE0.VCD covers the legacy per-partition launch filename.
+   * This does not emulate Sony's separate pfs0: namespace. */
+  if (!strcmp(relative, "IMAGE.VCD") || !strcmp(relative, "IMAGE0.VCD")) {
+    index = 0;
+    if (active_disc > 0 && active_disc < DISC_COUNT && paths[active_disc][0])
+      index = active_disc;
+  } else if (!strncmp(relative, "disc/disc", 9) && relative[9] >= '0' &&
+             relative[9] < '0' + DISC_COUNT && !relative[10]) {
     index = relative[9] - '0';
     if (index == 0 && active_disc > 0 && active_disc < DISC_COUNT && paths[active_disc][0])
       index = active_disc;

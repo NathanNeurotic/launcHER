@@ -624,3 +624,18 @@ uninstalled. The launcher now checks the IOP `fileXioDevctl` result and
 rejects the launch if a database-identified protected game cannot configure
 its requested key. This validates the **error boundary only**; the actual
 Sony IOPCD subchannel signaling contract is not yet proven.
+
+## POPFS trampoline filename consistency — 2026-10-11
+
+The POPS trampoline passed `pops0:IMAGE.VCD` to the external core, but the
+POPS file bridge previously recognized only `/disc/disc0` through
+`/disc/disc3` (and virtual cards). The exact launch argument therefore
+could not be opened through the installed bridge, even if all drivers and
+backing files were otherwise healthy.
+
+The bridge now maps read-only `IMAGE.VCD` to the same configured active-disc
+path as `disc/disc0`, including after a successful disc switch. The standard
+legacy HDD name `IMAGE0.VCD` is supported as another exact alias. Host tests
+verify open, getstat, read-only rejection and switch behavior. These aliases
+are *not* a `pfs0:` device, and do not prove that the actual Sony POPS/IOPCD
+runtime uses this custom namespace or its underlying VCD sector semantics.

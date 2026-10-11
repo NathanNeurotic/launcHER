@@ -106,6 +106,23 @@ int main(void) {
   assert(!ops->deinit(registered) && ops->close(&file) == -EBADF);
   close_result = 0;
 
+  /* The EE trampoline passes pops0:IMAGE.VCD, not /disc/disc0.
+   * Legacy partition files use IMAGE0.VCD. Both share the same immutable
+   * backend and obey the same active-disc switch semantics. */
+  next_open = 17;
+  assert(!ops->open(&file, "IMAGE.VCD", 1, 0));
+  assert(!strcmp(observed, arguments[1]));
+  assert(ops->write(&file, data, 1) == -EROFS);
+  assert(!ops->close(&file));
+  next_open = 18;
+  assert(!ops->open(&file, "/IMAGE0.VCD", 1, 0));
+  assert(!strcmp(observed, arguments[1]));
+  assert(!ops->close(&file));
+  assert(!ops->getstat(&file, "IMAGE.VCD", &stat));
+  assert(!strcmp(observed, arguments[1]));
+  assert(ops->remove(&file, "IMAGE.VCD") == -EROFS);
+  assert(ops->open(&file, "IMAGE.VCD.bak", 1, 0) == -ENOENT);
+
   calls = 0;
   assert(ops->open(&file, "/disc/disc0", 3, 0) == -EROFS);
   assert(ops->open(&file, "/disc/disc2", 1, 0) == -ENOENT);
@@ -138,6 +155,10 @@ int main(void) {
   assert(!ops->devctl(&file, "pops:", 0x01, &requested, sizeof(requested), NULL, 0));
   assert(!ops->devctl(&file, "pops:", 0x02, NULL, 0, &selected, sizeof(selected)));
   assert(selected == 1);
+  next_open = 19;
+  assert(!ops->open(&file, "IMAGE.VCD", 1, 0));
+  assert(!strcmp(observed, arguments[4]));
+  assert(!ops->close(&file));
   requested = 0;
   assert(!ops->devctl(&file, "pops:", 0x01, &requested, sizeof(requested), NULL, 0));
   assert(!ops->sync(&file, "pops1:", 0) && sync_calls == 4);
