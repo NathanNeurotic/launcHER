@@ -184,6 +184,25 @@ int pops_vcd_inspect_stream(void *user, PopsVcdReadFn read_fn, PopsVcdSeekFn see
   info->sector_size = sector_size;
   info->data_offset = data_offset;
 
+  /* CUE2POPS stores the sector count twice in its TOC (0x408 and 0x40c).
+   * When present and seek-to-end is supported, reject files shorter than
+   * either declared disc length. Do not require these advisory fields: the
+   * original VCD marker and size words are not mandatory. */
+  if (image_offset == POPS_VCD_HEADER_SIZE) {
+    int64_t end = seek_fn(user, 0, SEEK_END);
+    uint8_t sizes[8];
+    if (end >= 0 && seek_fn(user, 0x408, SEEK_SET) >= 0 &&
+        !read_exact(user, read_fn, sizes, sizeof(sizes))) {
+      uint32_t count0 = read_u32_le(sizes);
+      uint32_t count1 = read_u32_le(sizes + 4);
+      if ((count0 && (uint64_t)end <
+             (uint64_t)image_offset + (uint64_t)count0 * 2352) ||
+          (count1 && (uint64_t)end <
+             (uint64_t)image_offset + (uint64_t)count1 * 2352))
+        return -EIO;
+    }
+  }
+
   /* Root directory record is located at PVD offset 156 (0x9C) */
   const uint8_t *root_record = &pvd[156];
   if (root_record[0] < 34 || !(root_record[25] & 0x02))
