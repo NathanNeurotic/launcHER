@@ -636,6 +636,7 @@ int launchPOPS(int argc, char *argv[]) {
   }
 
   const char *vcdPath = argv[0];
+  int res;
   if (pops_is_xx_prefix(vcdPath))
     pops_set_active_xx_launch(1);
   if (pops_is_sb_prefix(vcdPath))
@@ -650,7 +651,11 @@ int launchPOPS(int argc, char *argv[]) {
   if (device == Device_APA) {
     char *norm = normalizePath(resolvedVcd, Device_APA);
     if (norm) {
-      initPFS(resolvedVcd, Device_None);
+      res = initPFS(resolvedVcd, Device_None);
+      if (res) {
+        msg("POPS: Failed mounting APA game partition: %d\n", res);
+        return res;
+      }
       strncpy(resolvedVcd, norm, sizeof(resolvedVcd) - 1);
       resolvedVcd[sizeof(resolvedVcd) - 1] = '\0';
     }
@@ -686,7 +691,7 @@ int launchPOPS(int argc, char *argv[]) {
 
   char popsPath[PATH_MAX] = {0};
   char ioprpPath[PATH_MAX] = {0};
-  int res = findPopsDependencies(vcdPath, popsPath, sizeof(popsPath),
+  res = findPopsDependencies(vcdPath, popsPath, sizeof(popsPath),
                                  ioprpPath, sizeof(ioprpPath));
   if (res) {
     msg("POPS: Missing POPS dependencies\n(POPS.PAK, POPS_IOX.PAK or POPS.ELF+IOPRP252.IMG)\n");
@@ -1113,6 +1118,17 @@ int launchPOPS(int argc, char *argv[]) {
     sleep(cfg.usb_delay);
   }
 
+  /* IOP reboot invalidates the previous APA mount. Mount read/write
+   * before checking virtual saves; a read-only mount would make every VMC
+   * write fail despite the images existing on disk. Other ELF loads stay RO. */
+  if (device == Device_APA) {
+    res = mountPFSWritable((char *)argv[0]);
+    if (res) {
+      msg("POPS: Post-reboot APA remount failed: %d\n", res);
+      return res;
+    }
+  }
+
   /* Check the real IOP storage route before handing off to Sony POPS. */
   res = pops_probe_live_storage();
   if (res) {
@@ -1131,9 +1147,6 @@ int launchPOPS(int argc, char *argv[]) {
     }
     DPRINTF("POPS: Configured popfs LibCrypt subchannel emulation (key 0x%04X)\n", lkey);
   }
-
-  if (device == Device_APA)
-    mountPFS((char *)argv[0]);
 
   /* Set up low-memory execution trampoline below 1 MiB */
   PopsTrampolineArgs *targs = (PopsTrampolineArgs *)POPS_TRAMPOLINE_ARGS;
