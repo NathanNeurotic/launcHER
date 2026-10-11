@@ -511,11 +511,11 @@ int pops_resolve_candidate_targets_bdma(const char *launcher_path, const char *a
     return 0;
   }
 
-  if (prefix_type == PREFIX_XX) {
-    pops_set_active_xx_launch(1);
-  } else if (prefix_type == PREFIX_SB) {
-    pops_set_active_sb_launch(1);
-  }
+  /* Prefix mode belongs to this resolution, not the previous game.
+   * An SB. launch followed by XX./ordinary must not inherit the SMB flag
+   * and wrongly require POPS_IOX.PAK or reload network drivers. */
+  pops_set_active_xx_launch(prefix_type == PREFIX_XX);
+  pops_set_active_sb_launch(prefix_type == PREFIX_SB);
 
   /* Dispatch candidates based on prefix and BDMA mode */
   if (prefix_type == PREFIX_PP) {
