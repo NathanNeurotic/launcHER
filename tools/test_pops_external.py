@@ -635,6 +635,16 @@ class InspectorTests(unittest.TestCase):
         self.assertIn("if (res)", source[source.index("res = initPFS("):
                                          source.index("vcdPath = resolvedVcd;")])
 
+    def test_custom_iop_reset_invalidates_regular_device_cache(self):
+        init = (ROOT / "launcher/src/init.c").read_text()
+        check = init.index("int initPopsServices(")
+        cache = init.index("forceIOPReset = 1;", check)
+        loader = init.index("ret = loadModuleList(devices, 0, 1);", check)
+        self.assertLess(cache, loader)
+        # The normal loader checks this flag before reusing currentDevice.
+        self.assertIn("if (!forceIOPReset && ((currentDevice)&device))", init)
+        self.assertIn("forceIOPReset = 0;", init)
+
     def test_pops_smb_driver_loads_only_once_after_reboot(self):
         init = (ROOT / "launcher/src/init.c").read_text()
         launcher = (ROOT / "launcher/src/handler_pops.c").read_text()
