@@ -228,7 +228,7 @@ class FeatureTests(unittest.TestCase):
             self.assertEqual(info.image_offset, 0x100000)
             self.assertEqual(info.sector_size, 2352)
             self.assertEqual(info.data_offset, 24)
-            self.assertEqual(info.raw_serial.decode("ascii"), "cdrom0:\\\\SLUS_008.70;1")
+        self.assertEqual(info.raw_serial.decode("ascii"), "cdrom0:\\SLUS_008.70;1")
             self.assertEqual(info.normalized_serial.decode("ascii"), "SLUS-00870")
 
         # A recognized header without its complete disc cannot be reinterpreted
