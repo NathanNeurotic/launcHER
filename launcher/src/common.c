@@ -446,7 +446,9 @@ static int mountPFSMode(char *path, int flags) {
     return -ENODEV;
   DPRINTF("Mounting %s to %s (flags %d)\n", mountPart, PFS_MOUNTPOINT, flags);
   int res = fileXioMount(PFS_MOUNTPOINT, mountPart, flags);
-  return res < 0 ? res : 0;
+  /* The old helper treated every nonzero mount result as failure. Preserve
+   * that rule, while forwarding the IOP error code when it is negative. */
+  return res == 0 ? 0 : (res < 0 ? res : -ENODEV);
 #endif
 }
 
