@@ -1097,6 +1097,13 @@ int launchPOPS(int argc, char *argv[]) {
     sleep(cfg.usb_delay);
   }
 
+  /* Check the real IOP storage route before handing off to Sony POPS. */
+  res = pops_probe_live_storage();
+  if (res) {
+    msg("POPS: Post-reboot disc/VMC check failed: %d\n", res);
+    return res;
+  }
+
   /* Forward verified LibCrypt magic key to popfs for Subchannel Q emulation */
   if (compat && compat->has_libcrypt && compat->libcrypt_key != 0) {
     uint16_t lkey = compat->libcrypt_key;
