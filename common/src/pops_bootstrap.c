@@ -41,24 +41,22 @@ static int is_card_alias(const char *card, const char *other) {
   return 0;
 }
 
-int pops_format_proxy_args_ex(char *buffer, size_t capacity,
-                              const char *disc0, const char *card0, const char *card1,
-                              const char *disc1, const char *disc2, const char *disc3,
-                              int bridge_pfs) {
+int pops_format_proxy_args(char *buffer, size_t capacity,
+                           const char *disc0, const char *card0, const char *card1,
+                           const char *disc1, const char *disc2, const char *disc3) {
   const char *tokens[7];
   size_t token_count = 4;
   size_t offset = 0;
   size_t i;
 
-  if (!buffer || capacity < 64 || !disc0 || !card0 || !card1 ||
-      (bridge_pfs != 0 && bridge_pfs != 1))
+  if (!buffer || capacity < 64 || !disc0 || !card0 || !card1)
     return POPS_FILE_INVALID;
 
   if (!is_valid_device_path(disc0) || !is_valid_device_path(card0) ||
       !is_valid_device_path(card1))
     return POPS_FILE_INVALID;
 
-  tokens[0] = bridge_pfs ? "popfs+pfs" : "popfs";
+  tokens[0] = "popfs";
   tokens[1] = disc0;
   tokens[2] = card0;
   tokens[3] = card1;
@@ -73,21 +71,6 @@ int pops_format_proxy_args_ex(char *buffer, size_t capacity,
   if (disc1) tokens[token_count++] = disc1;
   if (disc2) tokens[token_count++] = disc2;
   if (disc3) tokens[token_count++] = disc3;
-
-  /* Registering a virtual pfs device would forward pfs backing paths
-   * into itself. Reject them on EE before the irreversible IOP reboot. */
-  if (bridge_pfs) {
-    for (i = 1; i < token_count; ++i) {
-      const char *p = tokens[i];
-      size_t j = 3;
-      if ((p[0] == 'p' || p[0] == 'P') &&
-          (p[1] == 'f' || p[1] == 'F') &&
-          (p[2] == 's' || p[2] == 'S')) {
-        while (p[j] >= '0' && p[j] <= '9') ++j;
-        if (p[j] == ':') return POPS_FILE_INVALID;
-      }
-    }
-  }
 
   /* card0/card1 must not overlap a disc, each other, or the other
    * backing path's backup. Keep the IOP driver as a second defense. */
@@ -115,13 +98,6 @@ int pops_format_proxy_args_ex(char *buffer, size_t capacity,
   }
 
   return (int)offset;
-}
-
-int pops_format_proxy_args(char *buffer, size_t capacity,
-                           const char *disc0, const char *card0, const char *card1,
-                           const char *disc1, const char *disc2, const char *disc3) {
-  return pops_format_proxy_args_ex(buffer, capacity, disc0, card0, card1,
-                                    disc1, disc2, disc3, 0);
 }
 
 int pops_trampoline_args_init(PopsTrampolineArgs *out, const PopsBootPlan *plan,
