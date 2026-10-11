@@ -318,6 +318,11 @@ static int loadModuleList(DeviceType device, int tolerant, int sonySio2) {
 int initPopsServices(DeviceType devices, const void *core, size_t coreSize,
                      const char *proxyArguments, uint32_t argumentSize) {
   int ret, moduleResult = 0;
+  /* A foreign IOPRP has replaced the regular launcher environment. If
+   * any subsequent POPS stage fails and control returns to launcHER, a
+   * normal launch must not treat the device cache as initialized. This
+   * remains set even after loadModuleList updates currentDevice. */
+  forceIOPReset = 1;
   if (!proxyArguments || !argumentSize || argumentSize > 6 * 256 ||
       proxyArguments[argumentSize - 1] != '\0')
     return -EINVAL;
