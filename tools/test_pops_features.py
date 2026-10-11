@@ -400,6 +400,15 @@ class FeatureTests(unittest.TestCase):
             path.write_text('X' * 128)
             self.assertLess(LIB.pops_config_load_vmcdir(c.byref(cfg), encoded), 0)
             self.assertEqual(cfg.vmc_dir, b'Keep')
+            for value in ('X' * 104, 'Shared\nOther', 'Saves:Other'):
+                path.write_text(value)
+                self.assertLess(LIB.pops_config_load_vmcdir(
+                    c.byref(cfg), encoded), 0)
+                self.assertEqual(cfg.vmc_dir, b'Keep')
+            path.write_text('Shared_Saves\n')
+            self.assertEqual(LIB.pops_config_load_vmcdir(c.byref(cfg), encoded), 0)
+            self.assertEqual(cfg.vmc_dir, b'Shared_Saves')
+            cfg.vmc_dir = b'Keep'
             path.write_text('\n')
             self.assertEqual(LIB.pops_config_load_vmcdir(c.byref(cfg), encoded), 0)
             self.assertEqual(cfg.vmc_dir, b'Keep')
