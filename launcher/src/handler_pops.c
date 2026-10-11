@@ -824,18 +824,6 @@ int launchPOPS(int argc, char *argv[]) {
     }
   }
 
-  /* Ensure backing save images exist before handoff */
-  res = pops_vmc_ensure(card0Path);
-  if (res) {
-    msg("POPS: Cannot prepare card %s: %d\n", card0Path, res);
-    return res;
-  }
-  res = pops_vmc_ensure(card1Path);
-  if (res) {
-    msg("POPS: Cannot prepare card %s: %d\n", card1Path, res);
-    return res;
-  }
-
   /* Map multi-disc paths from DISCS.TXT */
   char discPaths[POPS_MAX_DISCS][PATH_MAX];
   const char *discArgs[POPS_MAX_DISCS] = { vcdPath, NULL, NULL, NULL };
@@ -851,6 +839,18 @@ int launchPOPS(int argc, char *argv[]) {
       discArgs[d] = discPaths[d];
       DPRINTF("POPS: Disc %d mapped to %s\n", d + 1, discPaths[d]);
     }
+  }
+
+  /* Reject invalid disc/save backend paths before staging, creating cards or
+   * triggering the irreversible external IOP reboot. */
+  /* Format proxy arguments for popfs */
+  char proxyArgs[POPS_PROXY_ARGS_MAX];
+  int argLen = pops_format_proxy_args(proxyArgs, sizeof(proxyArgs),
+                                      discArgs[0], card0Path, card1Path,
+                                      discArgs[1], discArgs[2], discArgs[3]);
+  if (argLen <= 0) {
+    msg("POPS: Failed formatting proxy arguments\n");
+    return -EINVAL;
   }
 
   PopsBootPlan plan;
@@ -1015,6 +1015,21 @@ int launchPOPS(int argc, char *argv[]) {
     }
   }
 
+  /* Prepare card images only after external dependency identity and every
+   * selected core/TROJAN patch has been validated. Failed preflight never
+   * creates empty saves or touches existing cards. */
+  /* Ensure backing save images exist before handoff */
+  res = pops_vmc_ensure(card0Path);
+  if (res) {
+    msg("POPS: Cannot prepare card %s: %d\n", card0Path, res);
+    return res;
+  }
+  res = pops_vmc_ensure(card1Path);
+  if (res) {
+    msg("POPS: Cannot prepare card %s: %d\n", card1Path, res);
+    return res;
+  }
+
   /* Reboot IOP with verified external IOPRP image */
   DPRINTF("POPS: Rebooting IOP with external image (%u bytes)\n", plan.iop_size);
   res = SifIopRebootBuffer((void *)rebootIop, plan.iop_size);
@@ -1023,16 +1038,6 @@ int launchPOPS(int argc, char *argv[]) {
     return -EIO;
   }
   while (!SifIopSync()) {}
-
-  /* Format proxy arguments for popfs */
-  char proxyArgs[POPS_PROXY_ARGS_MAX];
-  int argLen = pops_format_proxy_args(proxyArgs, sizeof(proxyArgs),
-                                      discArgs[0], card0Path, card1Path,
-                                      discArgs[1], discArgs[2], discArgs[3]);
-  if (argLen <= 0) {
-    msg("POPS: Failed formatting proxy arguments\n");
-    return -EINVAL;
-  }
 
   /* Initialize post-reboot storage and popfs */
   res = initPopsServices(device, stagedCore, plan.core_size, proxyArgs, (uint32_t)argLen);

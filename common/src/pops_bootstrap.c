@@ -13,7 +13,10 @@ static int is_valid_device_path(const char *path) {
   }
   if (!i || i == len || !path[i + 1])
     return 0;
-  if (i >= 4 && !strncmp(path, "pops", 4)) {
+  if (i >= 4 && (path[0] == 'p' || path[0] == 'P') &&
+      (path[1] == 'o' || path[1] == 'O') &&
+      (path[2] == 'p' || path[2] == 'P') &&
+      (path[3] == 's' || path[3] == 'S')) {
     size_t j;
     for (j = 4; j < i && path[j] >= '0' && path[j] <= '9'; ++j) {}
     if (j == i)
@@ -53,10 +56,17 @@ int pops_format_proxy_args(char *buffer, size_t capacity,
   if (disc2) tokens[token_count++] = disc2;
   if (disc3) tokens[token_count++] = disc3;
 
+  /* Validate the entire packed size before writing any arguments. A late
+   * overflow must not expose a partially constructed module argument list. */
   for (i = 0; i < token_count; ++i) {
     size_t len = strlen(tokens[i]) + 1;
-    if (offset + len > capacity || offset + len > POPS_PROXY_ARGS_MAX)
+    if (len > capacity - offset || len > POPS_PROXY_ARGS_MAX - offset)
       return POPS_FILE_RANGE;
+    offset += len;
+  }
+  offset = 0;
+  for (i = 0; i < token_count; ++i) {
+    size_t len = strlen(tokens[i]) + 1;
     memcpy(buffer + offset, tokens[i], len);
     offset += len;
   }

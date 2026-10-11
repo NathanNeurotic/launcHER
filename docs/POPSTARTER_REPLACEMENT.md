@@ -550,3 +550,22 @@ Video, LibCrypt and BIOS helper patches remain separately unverified.
   reservation, leaving the old disc opened under the new active disc number.
   Underlying iomanX_open is performed after interrupts are restored. Resident
   POPS caller/IOPCD disc switching still needs hardware proof.
+
+## Reversible preflight before IOP reset — 2026-10-11
+
+- Packed POPFS arguments are validated **before** loading external dependencies
+  or modifying Sony POPS buffers, creating VMC files, or resetting the IOP.
+  Invalid paths and oversized argument lists now fail while the calling
+  launcher and its existing IOP environment are still available.
+- New VMC images are created only once dependency identity, core patching and
+  selected TROJAN staging have succeeded. Failure earlier in the launch no
+  longer leaves behind newly created blank saves. Existing VMC preservation
+  and failure propagation still follow the existing VMC implementation.
+- Reject all ASCII-case spellings of recursive `pops:` / `popsN:`
+  backing paths in both the EE formatter and IOP POPFS driver.
+- POPFS argument formatting now computes and validates the **complete** byte
+  count before writing to the destination buffer. Added host tests for
+  over-capacity failure without partial argument writes and production
+  source-order regression coverage for validation/VMC/IOP-reset sequencing.
+- This does not address failures occurring after the IOP reboot, nor prove
+  the POPS executable/IOP file-service ABI on an actual PlayStation 2.

@@ -41,7 +41,10 @@ static int valid_backend(const char *path) {
   if (!i || i == length || !path[i + 1])
     return 0;
   /* Prevent forwarding back into this namespace, including pops0:/... . */
-  if (i >= 4 && !strncmp(path, "pops", 4)) {
+  if (i >= 4 && (path[0] == 'p' || path[0] == 'P') &&
+      (path[1] == 'o' || path[1] == 'O') &&
+      (path[2] == 'p' || path[2] == 'P') &&
+      (path[3] == 's' || path[3] == 'S')) {
     size_t j;
     for (j = 4; j < i && path[j] >= '0' && path[j] <= '9'; ++j) {}
     if (j == i)
