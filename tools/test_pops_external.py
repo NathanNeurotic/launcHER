@@ -596,9 +596,10 @@ class InspectorTests(unittest.TestCase):
         before = buf.raw
         # All component paths are individually valid, but the combined packet
         # cannot fit the caller buffer. The writer must fail before copying.
-        path = b"mass0:/" + b"a" * 200
+        paths = [b"mass0:/" + bytes([letter]) * 200
+                 for letter in b"abcde"]
         self.assertEqual(LIB.pops_format_proxy_args(
-            buf, 512, path, path, path, path, path, None), RANGE)
+            buf, 512, *paths, None), RANGE)
         self.assertEqual(buf.raw, before)
 
     def test_launcher_preflight_order_is_before_iop_reset(self):
