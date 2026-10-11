@@ -171,6 +171,7 @@ class FeatureTests(unittest.TestCase):
                     # Root directory record at offset 156
                     root_rec = bytearray(34)
                     root_rec[0] = 34  # length
+                    root_rec[25] = 0x02  # directory flag
                     struct.pack_into("<I", root_rec, 2, 17)   # Root LBA = 17
                     struct.pack_into(">I", root_rec, 6, 17)
                     struct.pack_into("<I", root_rec, 10, 2048) # Root size = 2048
@@ -237,6 +238,23 @@ class FeatureTests(unittest.TestCase):
         info = PopsVcdInfo()
         self.assertNotEqual(LIB.pops_vcd_inspect_path(
             str(temp_vcd).encode("utf-8"), c.byref(info)), 0)
+
+        # A BOOT2 line and commented BOOT assignments are not PS1 boot keys.
+        # The BOOT parser must honor line boundaries and exact directive names.
+        modified = bytearray(bare_disc)
+        cnf_offset = 18 * sector_size + data_offset
+        boot_lines = (b"# BOOT = cdrom0:\\\\FAKE_999.99;1\r\n"
+                      b"BOOT2 = cdrom0:\\\\WRONG_999.99;1\r\n"
+                      b"  boot = cdrom0:\\\\SLUS_008.70;1\r\n")
+        modified[cnf_offset:cnf_offset+2048] = boot_lines.ljust(2048, b'\\0')
+        # Directory record defines a 64-byte SYSTEM.CNF, so extend its extent
+        # before testing all three lines.
+        struct.pack_into("<I", modified, 17 * sector_size + data_offset + 10, len(boot_lines))
+        temp_vcd.write_bytes(modified)
+        info = PopsVcdInfo()
+        self.assertEqual(LIB.pops_vcd_inspect_path(
+            str(temp_vcd).encode("utf-8"), c.byref(info)), 0)
+        self.assertEqual(info.normalized_serial.decode("ascii"), "SLUS-00870")
 
         # Reject short/malformed ISO directory records before reading fields
         # outside their declared bounds, even when the rest of the sector is OK.

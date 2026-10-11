@@ -513,3 +513,18 @@ Video, LibCrypt and BIOS helper patches remain separately unverified.
   not verify the POPS runtime's VCD sector-translation interface, mixed-mode
   audio, CDDA seeking or any hardware game boot. Such parity claims still
   require original-code tracing and on-console acceptance results.
+
+## Disc-handle integrity and SYSTEM.CNF accuracy — 2026-10-11
+
+- POPFS now tracks open/pending disc descriptors separately from save-card handles.
+  SWAP_DISC and NEXT_DISC refuse to switch while a disc file is open. A
+  successful disc change therefore cannot silently redirect the `disc0` alias
+  while the underlying live file descriptor still reads from the old image.
+  Card handles remain usable across disc changes. This is **not** resident
+  in-game disc-swap parity; it is a consistent failure boundary until POPS
+  close/reopen and the actual tray-event contract are implemented.
+- PS1 serial discovery now requires a valid ISO9660 root-directory record and
+  recognizes only non-comment `BOOT =` assignments. It skips `BOOT2` and
+  commented lines; short SYSTEM.CNF reads cannot yield partial identifiers.
+  Synthetic fixtures cover mixed-case BOOT assignments and decoy lines.
+- These checks cover metadata and proxy contracts, not Sony runtime disc I/O.

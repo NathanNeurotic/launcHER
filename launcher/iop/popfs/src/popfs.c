@@ -13,13 +13,18 @@ IRX_ID("launcHER_POP_filesystem", 1, 0);
  * No fallback to another image/device on an open or I/O failure. */
 static char paths[PATH_COUNT][PATH_LIMIT];
 static unsigned active;
+static unsigned active_disc_handles;
 static int active_disc;
 static int lid_open;
 
-static void count_add(int delta) {
+/* Reserve a disc descriptor before I/O starts, including a pending open.
+ * A disc change cannot retarget an already-open underlying file descriptor. */
+static void count_add(int delta, int is_disc) {
   int state;
   CpuSuspendIntr(&state);
   active += delta;
+  if (is_disc)
+    active_disc_handles += delta;
   CpuResumeIntr(state);
 }
 
@@ -108,10 +113,10 @@ static int bridge_open(iomanX_iop_file_t *file, const char *name, int flags, int
     return -EROFS;
   if (index < DISC_COUNT && lid_open)
     return -ENODEV;
-  count_add(1); /* Reserve before the underlying open can block. */
+  count_add(1, index < DISC_COUNT); /* Reserve before blocking I/O. */
   fd = iomanX_open(backing, flags, mode);
   if (fd < 0) {
-    count_add(-1);
+    count_add(-1, index < DISC_COUNT);
     return fd;
   }
   file->privdata = (void *)(((uintptr_t)(fd + 1) << 1) | (index < DISC_COUNT));
@@ -120,13 +125,15 @@ static int bridge_open(iomanX_iop_file_t *file, const char *name, int flags, int
 
 static int bridge_close(iomanX_iop_file_t *file) {
   int fd = file_fd(file), result;
+  int is_disc;
   if (fd < 0)
     return fd;
+  is_disc = ((uintptr_t)file->privdata & 1) != 0;
   result = iomanX_close(fd);
   /* IOMANX consumes a descriptor even when the driver's close reports failure.
    * Preserve that error, but do not leave an unreachable active handle. */
   file->privdata = NULL;
-  count_add(-1);
+  count_add(-1, is_disc);
   return result;
 }
 
@@ -234,11 +241,15 @@ static int bridge_devctl(iomanX_iop_file_t *file, const char *devname, int cmd,
   switch (cmd) {
     case POPS_DEVCTL_SWAP_DISC:
       if (arg && arglen >= sizeof(int)) {
-        int disc = *(int *)arg;
-        if (disc >= 0 && disc < DISC_COUNT && paths[disc][0]) {
+        int state, busy, disc = *(int *)arg;
+        if (disc < 0 || disc >= DISC_COUNT || !paths[disc][0])
+          return -EINVAL;
+        CpuSuspendIntr(&state);
+        busy = active_disc_handles != 0;
+        if (!busy)
           active_disc = disc;
-          return 0;
-        }
+        CpuResumeIntr(state);
+        return busy ? -EBUSY : 0;
       }
       return -EINVAL;
     case POPS_DEVCTL_GET_DISC:
@@ -266,15 +277,19 @@ static int bridge_devctl(iomanX_iop_file_t *file, const char *devname, int cmd,
       }
       return -EINVAL;
     case POPS_DEVCTL_NEXT_DISC: {
-      int next = (active_disc + 1) % DISC_COUNT;
-      while (next != active_disc && !paths[next][0]) {
+      int state, next, old, busy;
+      CpuSuspendIntr(&state);
+      old = active_disc;
+      next = (old + 1) % DISC_COUNT;
+      while (next != old && !paths[next][0])
         next = (next + 1) % DISC_COUNT;
-      }
-      if (paths[next][0]) {
+      busy = active_disc_handles != 0;
+      if (!busy && paths[next][0])
         active_disc = next;
-        return 0;
-      }
-      return -ENOENT;
+      CpuResumeIntr(state);
+      if (busy)
+        return -EBUSY;
+      return paths[next][0] ? 0 : -ENOENT;
     }
     case POPS_DEVCTL_GET_SUBQ:
       if (arg && arglen < sizeof(uint32_t))

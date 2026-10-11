@@ -141,14 +141,14 @@ int pops_vcd_inspect_stream(void *user, PopsVcdReadFn read_fn, PopsVcdSeekFn see
     return -EIO;
 
   /* Verify PVD volume descriptor: Type 1, Identifier "CD001" */
-  if (pvd[0] != 0x01 || memcmp(&pvd[1], "CD001", 5) != 0) {
+  if (pvd[0] != 0x01 || memcmp(&pvd[1], "CD001", 5) != 0 || pvd[6] != 1) {
     /* If failed and was raw 2352, try alternative offset 16 */
     if (sector_size == POPS_VCD_RAW_SECTOR_SIZE && data_offset != 16) {
       data_offset = 16;
       pvd_file_offset = (int64_t)image_offset + (int64_t)16 * sector_size + data_offset;
       if (seek_fn(user, pvd_file_offset, SEEK_SET) < 0 ||
           read_fn(user, pvd, sizeof(pvd)) != (int)sizeof(pvd) ||
-          pvd[0] != 0x01 || memcmp(&pvd[1], "CD001", 5) != 0) {
+          pvd[0] != 0x01 || memcmp(&pvd[1], "CD001", 5) != 0 || pvd[6] != 1) {
         return -EINVAL;
       }
       info->data_offset = data_offset;
@@ -159,6 +159,8 @@ int pops_vcd_inspect_stream(void *user, PopsVcdReadFn read_fn, PopsVcdSeekFn see
 
   /* Root directory record is located at PVD offset 156 (0x9C) */
   const uint8_t *root_record = &pvd[156];
+  if (root_record[0] < 34 || !(root_record[25] & 0x02))
+    return -EINVAL;
   uint32_t root_lba = read_u32_le(&root_record[2]);
   uint32_t root_size = read_u32_le(&root_record[10]);
 
@@ -201,7 +203,9 @@ int pops_vcd_inspect_stream(void *user, PopsVcdReadFn read_fn, PopsVcdSeekFn see
 
       /* Not a directory */
       if (!(flags & 0x02) && name_len >= 10) {
-        if (!strncasecmp(name, "SYSTEM.CNF", 10)) {
+        if (!strncasecmp(name, "SYSTEM.CNF", 10) &&
+            (name_len == 10 || (name_len >= 12 && name[10] == ';' &&
+                                 name[11] >= '0' && name[11] <= '9'))) {
           sys_lba = read_u32_le(&dir_buf[pos + 2]);
           sys_size = read_u32_le(&dir_buf[pos + 10]);
           found = 1;
@@ -222,38 +226,49 @@ int pops_vcd_inspect_stream(void *user, PopsVcdReadFn read_fn, PopsVcdSeekFn see
     return -EIO;
 
   uint32_t read_len = sys_size > 2048 ? 2048 : sys_size;
-  char cnf_buf[2048];
+  char cnf_buf[2049];
   int nread = read_fn(user, cnf_buf, read_len);
-  if (nread <= 0)
+  if (nread != (int)read_len)
     return -EIO;
-  cnf_buf[nread < 2048 ? nread : 2047] = '\0';
+  cnf_buf[nread] = '\0';
 
-  /* Search for "BOOT" */
-  char *boot_line = strstr(cnf_buf, "BOOT");
-  if (!boot_line)
-    boot_line = strstr(cnf_buf, "boot");
-  if (!boot_line)
-    return -ENOENT;
-
-  char *eq = strchr(boot_line, '=');
-  if (!eq)
-    return -EINVAL;
-  eq++;
-
-  while (*eq == ' ' || *eq == '\t')
-    eq++;
-
-  /* Find end of line */
-  char *line_end = strpbrk(eq, "\r\n");
-  if (line_end)
-    *line_end = '\0';
-
-  /* Save raw and normalized serials */
-  strncpy(info->raw_serial, eq, sizeof(info->raw_serial) - 1);
-  info->raw_serial[sizeof(info->raw_serial) - 1] = '\0';
-
-  return pops_vcd_normalize_serial(eq, info->normalized_serial,
-                                  sizeof(info->normalized_serial));
+  /* Match only the BOOT assignment at the start of a non-comment line.
+   * A substring search can accidentally select BOOT2 (PS2) or a comment. */
+  const char *line = cnf_buf;
+  while (*line) {
+    const char *end = line;
+    const char *start;
+    size_t value_length;
+    while (*end && *end != '\r' && *end != '\n')
+      ++end;
+    start = line;
+    while (start < end && (*start == ' ' || *start == '\t'))
+      ++start;
+    if (start < end && *start != '#' && *start != ';' &&
+        end - start >= 4 && !strncasecmp(start, "BOOT", 4)) {
+      const char *value = start + 4;
+      while (value < end && (*value == ' ' || *value == '\t'))
+        ++value;
+      if (value < end && *value == '=') {
+        ++value;
+        while (value < end && (*value == ' ' || *value == '\t'))
+          ++value;
+        while (end > value && (end[-1] == ' ' || end[-1] == '\t'))
+          --end;
+        value_length = (size_t)(end - value);
+        if (!value_length || value_length >= sizeof(info->raw_serial))
+          return -EINVAL;
+        memcpy(info->raw_serial, value, value_length);
+        info->raw_serial[value_length] = '\0';
+        return pops_vcd_normalize_serial(info->raw_serial, info->normalized_serial,
+                                          sizeof(info->normalized_serial));
+      }
+    }
+    line = end;
+    while (*line == '\r' || *line == '\n')
+      ++line;
+  }
+  return -ENOENT;
 }
 
 typedef struct {

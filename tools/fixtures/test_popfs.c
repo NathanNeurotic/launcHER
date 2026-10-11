@@ -85,6 +85,13 @@ int main(void) {
   assert(!ops->open(&file, "/disc/disc0", 1, 0644));
   assert(!strcmp(observed, arguments[1]) && open_flags == 1 && open_mode == 0644);
   assert(ops->deinit(registered) == -EBUSY);
+  /* A still-open disc handle cannot be retargeted by swapping the alias.
+   * Card descriptors may remain open during a disc change. */
+  int requested = 1, selected = -1;
+  assert(ops->devctl(&file, "pops:", 0x01, &requested, sizeof(requested), NULL, 0) == -EBUSY);
+  assert(ops->devctl(&file, "pops:", 0x07, NULL, 0, NULL, 0) == -EBUSY);
+  assert(!ops->devctl(&file, "pops:", 0x02, NULL, 0, &selected, sizeof(selected)));
+  assert(selected == 0);
   assert(ops->read(&file, data, 32) == 7 && io_fd == 0 && io_size == 32 && data[6] == 0x5a);
   operation = 0;
   assert(ops->write(&file, data, 32) == -EROFS && operation == 0);
@@ -123,6 +130,12 @@ int main(void) {
   assert(ops->read(&file, data, -1) == -EINVAL && ops->write(&file, NULL, 1) == -EINVAL);
   assert(!ops->close(&file));
   io_result = 7;
+  /* Card handles do not prohibit switching; only disc descriptors do. */
+  assert(!ops->devctl(&file, "pops:", 0x01, &requested, sizeof(requested), NULL, 0));
+  assert(!ops->devctl(&file, "pops:", 0x02, NULL, 0, &selected, sizeof(selected)));
+  assert(selected == 1);
+  requested = 0;
+  assert(!ops->devctl(&file, "pops:", 0x01, &requested, sizeof(requested), NULL, 0));
   assert(!ops->sync(&file, "pops1:", 0) && sync_calls == 4);
 
   assert(!ops->getstat(&file, "/ps1emu", &stat) && (stat.mode & FIO_S_IFDIR));
