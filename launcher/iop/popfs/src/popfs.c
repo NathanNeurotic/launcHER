@@ -81,6 +81,11 @@ static int resolve(const char *name, char output[PATH_LIMIT]) {
     index = relative[9] - '0';
     if (index == 0 && active_disc > 0 && active_disc < DISC_COUNT && paths[active_disc][0])
       index = active_disc;
+  } else if (!strncmp(relative, "SLOT", 4) &&
+             (relative[4] == '0' || relative[4] == '1') &&
+             (!strcmp(relative + 5, ".VMC") || !strcmp(relative + 5, ".VMC.bak"))) {
+    index = DISC_COUNT + relative[4] - '0';
+    backup = !strcmp(relative + 5, ".VMC.bak");
   } else if (!strncmp(relative, "ps1emu/card", 11) &&
              (relative[11] == '0' || relative[11] == '1') &&
              (!relative[12] || !strcmp(relative + 12, ".bak"))) {
