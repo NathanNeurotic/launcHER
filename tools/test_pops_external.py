@@ -567,6 +567,29 @@ class InspectorTests(unittest.TestCase):
                 b"mass0:/SLOT1.VMC", *discs), INVALID)
             self.assertEqual(buf.raw, before)
 
+    def test_proxy_alias_preflight_rejects_vmc_disc_collisions(self):
+        buf = c.create_string_buffer(1024)
+        disc = b"mass0:/POPS/Game.VCD"
+        card0 = b"mass0:/POPS/SLOT0.VMC"
+        card1 = b"mass0:/POPS/SLOT1.VMC"
+        for args in (
+            (disc, disc, card1, None, None, None),
+            (disc, card0, card0, None, None, None),
+            (disc, card0, card0 + b".bak", None, None, None),
+            (disc, card0 + b".bak", card0, None, None, None),
+            (disc, card0, card1, card1, None, None),
+            (disc, card0, card1, card0 + b".bak", None, None),
+        ):
+            c.memset(buf, 0x5A, len(buf))
+            before = buf.raw
+            self.assertEqual(LIB.pops_format_proxy_args(
+                buf, len(buf), *args), INVALID)
+            self.assertEqual(buf.raw, before)
+        # Multiple disc paths may be identical, matching current IOP policy,
+        # but they must not alias the save-card backing images.
+        self.assertGreater(LIB.pops_format_proxy_args(
+            buf, len(buf), disc, card0, card1, disc, None, None), 0)
+
     def test_proxy_capacity_failure_preserves_destination(self):
         buf = c.create_string_buffer(512)
         c.memset(buf, 0x5A, len(buf))

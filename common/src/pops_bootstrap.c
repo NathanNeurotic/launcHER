@@ -25,6 +25,22 @@ static int is_valid_device_path(const char *path) {
   return 1;
 }
 
+/* Avoid accidentally using a save image as a disc or as another card's
+ * .bak file. Mirror popfs IOP module-initialization alias rejection so these
+ * invalid requests fail before VMC creation and the external IOP reset. */
+static int is_card_alias(const char *card, const char *other) {
+  size_t card_len = strlen(card), other_len = strlen(other);
+  if (!strcmp(card, other))
+    return 1;
+  if (card_len == other_len + 4 &&
+      !strncmp(card, other, other_len) && !strcmp(card + other_len, ".bak"))
+    return 1;
+  if (other_len == card_len + 4 &&
+      !strncmp(other, card, card_len) && !strcmp(other + card_len, ".bak"))
+    return 1;
+  return 0;
+}
+
 int pops_format_proxy_args(char *buffer, size_t capacity,
                            const char *disc0, const char *card0, const char *card1,
                            const char *disc1, const char *disc2, const char *disc3) {
@@ -55,6 +71,16 @@ int pops_format_proxy_args(char *buffer, size_t capacity,
   if (disc1) tokens[token_count++] = disc1;
   if (disc2) tokens[token_count++] = disc2;
   if (disc3) tokens[token_count++] = disc3;
+
+  /* card0/card1 must not overlap a disc, each other, or the other
+   * backing path's backup. Keep the IOP driver as a second defense. */
+  for (i = 2; i <= 3; ++i) {
+    size_t j;
+    for (j = 1; j < token_count; ++j) {
+      if (i != j && is_card_alias(tokens[i], tokens[j]))
+        return POPS_FILE_INVALID;
+    }
+  }
 
   /* Validate the entire packed size before writing any arguments. A late
    * overflow must not expose a partially constructed module argument list. */

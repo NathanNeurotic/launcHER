@@ -569,3 +569,14 @@ Video, LibCrypt and BIOS helper patches remain separately unverified.
   source-order regression coverage for validation/VMC/IOP-reset sequencing.
 - This does not address failures occurring after the IOP reboot, nor prove
   the POPS executable/IOP file-service ABI on an actual PlayStation 2.
+
+### Save/disc path alias preflight
+
+- The EE POPFS argument formatter now mirrors the IOP POPFS driver's exact
+  same-path and `.bak` alias checks between both save cards and all disc
+  backing paths. Previously those would be rejected only when registering
+  the POPFS IOP driver **after** an irreversible IOP reboot and potentially
+  after VMC creation. They now fail in the reversible preflight.
+- Added tests verifying each rejected alias does not mutate the output buffer.
+  Deliberately does not invent case-insensitive/normalized path equivalence:
+  storage-specific aliases still require a measured filesystem policy.
