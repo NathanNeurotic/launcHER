@@ -607,8 +607,8 @@ int pops_load_custom_modules(const char *vcdDir, const char *vmcDir) {
 }
 
 static int pops_probe_live_storage(void) {
-  const char *paths[] = {"pops0:IMAGE.VCD", "pops0:ps1emu/card0",
-                         "pops0:ps1emu/card1"};
+  const char *paths[] = {"pops0:IMAGE.VCD", "pops0:SLOT0.VMC",
+                         "pops0:SLOT1.VMC"};
   for (int i = 0; i < 3; ++i) {
     int fd = fileXioOpen(paths[i], i ? FIO_O_RDWR : FIO_O_RDONLY);
     if (fd < 0)
