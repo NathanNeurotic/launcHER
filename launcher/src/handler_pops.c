@@ -1033,9 +1033,16 @@ int launchPOPS(int argc, char *argv[]) {
   /* Reboot IOP with verified external IOPRP image */
   DPRINTF("POPS: Rebooting IOP with external image (%u bytes)\n", plan.iop_size);
   res = SifIopRebootBuffer((void *)rebootIop, plan.iop_size);
-  if (!res && !(res = SifIopRebootBufferEncrypted((void *)rebootIop, plan.iop_size))) {
-    msg("POPS: IOP reboot failed\n");
-    return -EIO;
+  /* PS2SDK reports success as a positive value and can return -1 on
+   * failed ROMDRV staging. The old !res check treated -1 as success and
+   * then waited for a reboot that never actually completed. */
+  if (res <= 0) {
+    DPRINTF("POPS: Plain IOP reboot failed (%d), trying encrypted path\n", res);
+    res = SifIopRebootBufferEncrypted((void *)rebootIop, plan.iop_size);
+    if (res <= 0) {
+      msg("POPS: IOP reboot failed (plain/encrypted)\n");
+      return -EIO;
+    }
   }
   while (!SifIopSync()) {}
 

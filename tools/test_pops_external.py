@@ -602,6 +602,19 @@ class InspectorTests(unittest.TestCase):
             buf, 512, *paths, None), RANGE)
         self.assertEqual(buf.raw, before)
 
+    def test_reboot_and_rpc_failures_are_not_reported_as_success(self):
+        launcher = (ROOT / "launcher/src/handler_pops.c").read_text()
+        init = (ROOT / "launcher/src/init.c").read_text()
+        assert "if (res <= 0) {" in launcher.split(
+            "res = SifIopRebootBuffer((void *)rebootIop", 1)[1].split(
+            "while (!SifIopSync())", 1)[0]
+        assert "res = SifIopRebootBufferEncrypted(" in launcher
+        assert "if (ret < 0) {" in init.split(
+            "ret = fileXioInit();", 1)[1].split("currentDevice = device;", 1)[0]
+        # Prevent stale argument pointers if this code is run after another
+        # launch, reset or device-mode change.
+        assert "moduleList[i].argStr = NULL;" in init
+
     def test_launcher_preflight_order_is_before_iop_reset(self):
         source = (ROOT / "launcher/src/handler_pops.c").read_text()
         # Verify the production call sites, not merely the helper existence.

@@ -288,8 +288,11 @@ static int loadModuleList(DeviceType device, int tolerant, int sonySio2) {
     }
 
     // Clean up arguments
-    if (moduleList[i].argStr != NULL)
+    if (moduleList[i].argStr != NULL) {
       free(moduleList[i].argStr);
+      moduleList[i].argStr = NULL;
+      moduleList[i].argLength = 0;
+    }
 
     if (ret) {
       msg("ERROR: Failed to initialize module %s: %d\n", moduleList[i].name, ret);
@@ -297,7 +300,11 @@ static int loadModuleList(DeviceType device, int tolerant, int sonySio2) {
     }
   }
 
-  fileXioInit();
+  ret = fileXioInit();
+  if (ret < 0) {
+    msg("POPS: Cannot bind fileXio after IOP reset: %d\n", ret);
+    return ret;
+  }
   if (device & Device_SMB) {
     pops_load_smb_stack(NULL, NULL);
   }

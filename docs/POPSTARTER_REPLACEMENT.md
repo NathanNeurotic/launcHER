@@ -580,3 +580,38 @@ Video, LibCrypt and BIOS helper patches remain separately unverified.
 - Added tests verifying each rejected alias does not mutate the output buffer.
   Deliberately does not invent case-insensitive/normalized path equivalence:
   storage-specific aliases still require a measured filesystem policy.
+
+## REPOP cross-reference and post-reboot RPC contract — 2026-10-11
+
+Cross-checked private `NathanNeurotic/REPOP` (`main`) as a supporting
+reconstruction corpus, notably `docs/IRX_MODULES.md`,
+`docs/POPSTARTER_ARCHITECTURE.md`, `popstarter/src/pfs_wrap.c` and
+`popstarter/src/vcd_bat.c`. The latter reconstructed host implementation
+uses an unverified `POPS_VCD` header/BAT layout and the PFS wrapper prototype
+uses standard host `stdio`. **Neither is proof of the actual CUE2POPS VCD
+wire format or PS2 resident IOP filesystem ABI**. REPOP is useful for module
+roles and a source-forensics worklist but cannot replace binary/hardware
+validation. No reconstructed/proprietary binaries were copied.
+
+The original POPStarter PFS bridge is named `pfs`; launcHER's custom POPFS
+device is `pops`. Proving how the original Sony IOPCD/POPS runtime resolves
+its filename/service remains a **blocking parity issue**. No speculative
+aliasing of `pfs` or copying reconstructed VCD-BAT math was introduced.
+
+Direct PS2SDK code inspection also established:
+- `SifIopRebootBuffer` returns **positive 1 on success**, and returns **-1**
+  on a failed ROMDRV/IOP reboot payload installation. A negative result is
+  not success. The launcher used to treat -1 as success because it only retried
+  encrypted boot when the result was exactly zero. Both nonpositive outcomes
+  now require the encrypted fallback; if that also fails, the launch returns
+  an error instead of waiting for a nonexistent sync completion.
+- PS2SDK's reboot routine calls `SifLoadFileExit` and increments the reboot
+  counter; its `_SifLoadModuleBuffer` helper already calls
+  `SifLoadFileInit` and recognizes the reboot counter. No redundant
+  speculative loader RPC reset was added.
+- The post-reboot `fileXioInit()` RPC bind result is now checked, and failure
+  terminates service initialization. IOP module argument allocations are
+  nulled after being freed to avoid retaining dangling pointers on later calls.
+
+Source-order host checks guard these error-handling contracts. Build and host
+tests still cannot demonstrate correct IOPCD/PFS service wiring on real PS2.
