@@ -51,6 +51,18 @@ int pops_iop_image_inspect(const void *file, size_t size, PopsIopImage *out);
 int pops_iop_image_find_module(const void *file, size_t size, const char *name,
                                size_t *module_offset, size_t *module_size);
 
+/* Read-only hints from NUL-terminated module strings, NOT proof that an
+ * imported library or file path is executed. Only checks exact ROMDIR module
+ * bounds, never scans other modules or invents a missing IOPCD. */
+enum {
+  POPS_IOSTRING_IOMAN  = 1u << 0,
+  POPS_IOSTRING_IOMANX = 1u << 1,
+  POPS_IOSTRING_PFS    = 1u << 2,
+  POPS_IOSTRING_POPS   = 1u << 3
+};
+int pops_iop_image_probe_io_strings(const void *file, size_t size,
+                                    const char *module, uint32_t *flags);
+
 typedef enum {
   POPS_SOURCE_LOOSE_ELF,
   POPS_SOURCE_DECODED_PAK

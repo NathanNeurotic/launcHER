@@ -1042,10 +1042,19 @@ int launchPOPS(int argc, char *argv[]) {
     size_t moduleOffset = 0, moduleSize = 0;
     int found = pops_iop_image_find_module(rebootIop, plan.iop_size, "IOPCD",
                                            &moduleOffset, &moduleSize);
-    if (!found)
+    if (!found) {
+      uint32_t ioStrings = 0;
+      int scan = pops_iop_image_probe_io_strings(rebootIop, plan.iop_size,
+                                                 "IOPCD", &ioStrings);
       DPRINTF("POPS: IOPRP IOPCD ROMDIR module offset=%u size=%u\n",
               (unsigned)moduleOffset, (unsigned)moduleSize);
-    else
+      if (!scan)
+        DPRINTF("POPS: IOPCD bounded ASCII hints: ioman=%d iomanX=%d pfs=%d pops=%d (not import proof)\n",
+                !!(ioStrings & POPS_IOSTRING_IOMAN),
+                !!(ioStrings & POPS_IOSTRING_IOMANX),
+                !!(ioStrings & POPS_IOSTRING_PFS),
+                !!(ioStrings & POPS_IOSTRING_POPS));
+    } else
       DPRINTF("POPS: No standalone IOPCD in selected IOPRP (%d); EE embedded module may load it\n", found);
   }
 

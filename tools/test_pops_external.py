@@ -320,6 +320,37 @@ class InspectorTests(unittest.TestCase):
             self.assertEqual((offset.value, size.value),
                              (((reset_length + 15) & ~15) + 96, 7))
 
+    def test_iop_string_probe_is_bounded_and_never_mutates_output_on_error(self):
+        LIB.pops_iop_image_probe_io_strings.argtypes = [
+            c.c_void_p, c.c_size_t, c.c_char_p, c.POINTER(c.c_uint32)]
+        LIB.pops_iop_image_probe_io_strings.restype = c.c_int
+        def entry(name, ext, size):
+            return struct.pack("<10sHI", name, ext, size)
+        payload = b"\0ioman\0\0pfs0:IMAGE.VCD\0\0iomanX\0\0pops0:IMAGE.VCD\0"
+        directory = (entry(b"RESET", 4, 0) + entry(b"ROMDIR", 0, 80) +
+                     entry(b"EXTINFO", 0, 4) + entry(b"IOPCD", 0, len(payload)) +
+                     b"\0" * 16)
+        image = directory + b"\0" * 16 + payload
+        flags = c.c_uint32(0xDEADBEEF)
+        self.assertEqual(LIB.pops_iop_image_probe_io_strings(
+            image, len(image), b"IOPCD", c.byref(flags)), 0)
+        self.assertEqual(flags.value, 0x0F)
+        self.assertEqual(LIB.pops_iop_image_probe_io_strings(
+            image, len(image), b"MISSING", c.byref(flags)), UNSUPPORTED)
+        self.assertEqual(flags.value, 0x0F)
+        self.assertNotEqual(LIB.pops_iop_image_probe_io_strings(
+            image[:-1], len(image)-1, b"IOPCD", c.byref(flags)), 0)
+        self.assertEqual(flags.value, 0x0F)
+        self.assertEqual(LIB.pops_iop_image_probe_io_strings(
+            self.iop_image(), len(self.iop_image()), b"LOADCORE", c.byref(flags)), 0)
+        self.assertEqual(flags.value, 0)
+        # Similar-looking suffixes must not imply legacy imports.
+        payload2 = b"\0xxioman\0\0iomanX\0\0xxpfs0:IMAGE.VCD\0"
+        image2 = directory[:48] + entry(b"IOPCD", 0, len(payload2)) + b"\0"*16 + b"\0"*16 + payload2
+        self.assertEqual(LIB.pops_iop_image_probe_io_strings(
+            image2, len(image2), b"IOPCD", c.byref(flags)), 0)
+        self.assertEqual(flags.value, 0x02)
+
     def test_iop_image_rejects_unbounded_or_inconsistent_directory(self):
         data = self.iop_image()
         for malformed in (data[:-1], word(data, 28, 0xfffffff0),

@@ -106,3 +106,63 @@ int pops_iop_image_find_module(const void *file, size_t size, const char *name,
   }
   return POPS_FILE_UNSUPPORTED;
 }
+
+/* For a known IOPRP, collect bounded string-only evidence for the
+ * IOPCD/ioman hypothesis. These flags cannot prove runtime import binding:
+ * a dead string or an unpacked ELF's metadata may contain the same token. */
+static int module_has_literal(const uint8_t *bytes, size_t size,
+                              const char *literal) {
+  size_t length = strlen(literal);
+  if (length + 1 > size)
+    return 0;
+  for (size_t i = 0; i <= size - length - 1; ++i) {
+    if (!memcmp(bytes + i, literal, length) &&
+        bytes[i + length] == 0 &&
+        (i == 0 || bytes[i - 1] == 0))
+      return 1;
+  }
+  return 0;
+}
+
+static int module_has_path(const uint8_t *bytes, size_t size,
+                           const char *literal) {
+  size_t length = strlen(literal);
+  if (length > size)
+    return 0;
+  for (size_t i = 0; i <= size - length; ++i) {
+    if (!memcmp(bytes + i, literal, length) &&
+        (i == 0 || bytes[i - 1] == 0))
+      return 1;
+  }
+  return 0;
+}
+
+int pops_iop_image_probe_io_strings(const void *file, size_t size,
+                                    const char *module, uint32_t *flags) {
+  size_t offset = 0, module_size = 0;
+  uint32_t detected = 0;
+  int status;
+  if (!file || !module || !flags)
+    return POPS_FILE_INVALID;
+  status = pops_iop_image_find_module(file, size, module,
+                                      &offset, &module_size);
+  if (status)
+    return status;
+  if (offset > size || module_size > size - offset)
+    return POPS_FILE_RANGE;
+  const uint8_t *bytes = (const uint8_t *)file + offset;
+  if (module_has_literal(bytes, module_size, "ioman"))
+    detected |= POPS_IOSTRING_IOMAN;
+  if (module_has_literal(bytes, module_size, "iomanX") ||
+      module_has_literal(bytes, module_size, "iomanx"))
+    detected |= POPS_IOSTRING_IOMANX;
+  if (module_has_path(bytes, module_size, "pfs0:") ||
+      module_has_path(bytes, module_size, "pfs1:") ||
+      module_has_path(bytes, module_size, "pfs:"))
+    detected |= POPS_IOSTRING_PFS;
+  if (module_has_path(bytes, module_size, "pops0:") ||
+      module_has_path(bytes, module_size, "pops:"))
+    detected |= POPS_IOSTRING_POPS;
+  *flags = detected;
+  return POPS_FILE_OK;
+}

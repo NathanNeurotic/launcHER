@@ -854,3 +854,20 @@ IOP USB stack regardless of files on memory card. The regression test
 checks that both required conditions guard the skip. A future verified
 external IRX loader should require actual module-load success instead
 of filesystem presence before replacing built-in modules.
+
+### Read-only IOPCD file-manager evidence — 2026-10-11
+
+The ROMDIR module locator can now perform a bounded *string-hint* scan
+inside an explicitly named module payload. For a standalone `IOPCD`
+in a verified IOPRP, the launcher reports whether exact null-delimited
+`ioman` / `iomanX` import-name strings or path prefixes `pfs:` /
+`pops:` are present. No Sony binary is saved, extracted, patched, or
+committed. Negative results mean only that the literal strings were not
+present; positives are **not proof** that the IOP imported or executed
+those functions. The scan never crosses the validated ROMDIR file extent.
+Host fixtures cover exact matches, boundaries, absent modules, truncated
+images, and unchanged outputs on failure.
+
+This prepares accurate console diagnostics for the remaining Sony
+IOPCD/legacy IOMAN question. Neither an unsafe duplicate `pfs` driver
+nor a speculative import override was installed.
