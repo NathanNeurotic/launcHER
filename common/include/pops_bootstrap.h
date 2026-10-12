@@ -45,6 +45,15 @@ int pops_format_proxy_args(char *buffer, size_t capacity,
                            const char *disc0, const char *card0, const char *card1,
                            const char *disc1, const char *disc2, const char *disc3);
 
+/* Optional non-APA POPS IOP compatibility namespace.
+ * virtual_pfs=1 requires every disc/card backing path outside pfs: and
+ * selects an alias which must fail on any existing real pfs driver.
+ * The standard format function below remains ABI-compatible. */
+int pops_format_proxy_args_mode(char *buffer, size_t capacity,
+                                const char *disc0, const char *card0, const char *card1,
+                                const char *disc1, const char *disc2, const char *disc3,
+                                int virtual_pfs);
+
 /* Initialize PopsTrampolineArgs with validated addresses and arguments.
  * Ensures all pointers stay within low memory / bram. Returns 0 on success. */
 int pops_trampoline_args_init(PopsTrampolineArgs *out, const PopsBootPlan *plan,
