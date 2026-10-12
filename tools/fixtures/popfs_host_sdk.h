@@ -60,7 +60,9 @@ typedef struct _device {
 #define IOMANX_RETURN_VALUE(val) ((void *)&mock_ret_##val)
 int CpuSuspendIntr(int *state);
 int CpuResumeIntr(int state);
+iomanX_iop_device_t **iomanX_GetDeviceList(void);
 int iomanX_AddDrv(iomanX_iop_device_t *);
+int iomanX_DelDrv(const char *);
 int iomanX_open(const char *, int, ...);
 int iomanX_close(int);
 int iomanX_read(int, void *, int);
