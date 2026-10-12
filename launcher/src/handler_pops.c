@@ -954,9 +954,11 @@ int launchPOPS(int argc, char *argv[]) {
    * triggering the irreversible external IOP reboot. */
   /* Format proxy arguments for popfs */
   char proxyArgs[POPS_PROXY_ARGS_MAX];
-  int argLen = pops_format_proxy_args(proxyArgs, sizeof(proxyArgs),
-                                      discArgs[0], card0Path, card1Path,
-                                      discArgs[1], discArgs[2], discArgs[3]);
+  int virtualPfs = device != Device_APA;
+  int argLen = pops_format_proxy_args_mode(proxyArgs, sizeof(proxyArgs),
+                                           discArgs[0], card0Path, card1Path,
+                                           discArgs[1], discArgs[2], discArgs[3],
+                                           virtualPfs);
   if (argLen <= 0) {
     msg("POPS: Failed formatting proxy arguments\n");
     return -EINVAL;
