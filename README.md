@@ -151,9 +151,10 @@ Download the current release and copy:
 ```text
 launcHER.elf
 launcHER.CNF
+version.txt
 ```
 
-to the location from which you want to start launcHER.
+to the location from which you want to start launcHER. The `version.txt` file is optional at runtime; keep it with the ELF when reporting bugs so the exact build can be identified.
 
 Keep `launcHER.CNF` beside the launcHER ELF. Then edit `launcHER.CNF`, enable the storage profile matching **where Ember is stored**, and replace `<GAME_FOLDER>` with the actual folder name from `EMBER/games/`.
 
@@ -506,7 +507,8 @@ Each release provides:
 
 - **`launcHER.elf`** — the standalone launcher;
 - **`launcHER.CNF`** — an editable quickboot template with device examples;
-- **`launcHER.zip`** — ready-to-copy package containing the ELF and CNF;
+- **`version.txt`** — a one-line build identifier (`version=<12-character Git commit>` for rolling builds, or `version=vX.Y.Z` for tagged releases);
+- **`launcHER.zip`** — ready-to-copy package containing the ELF, CNF and version file;
 - GitHub's automatic **Source code (zip)** and **Source code (tar.gz)** archives.
 
 No KELF is required for normal launcHER use.
@@ -527,10 +529,11 @@ The finished package is generated under:
 ```text
 build/release/
 ├── launcHER.elf
-└── launcHER.CNF
+├── launcHER.CNF
+└── version.txt
 ```
 
-GitHub Actions additionally creates `launcHER.zip` from those two files for releases.
+GitHub Actions additionally creates `launcHER.zip` from those three files for releases. `version.txt` is regenerated on each build, so repeated builds after a commit do not reuse a stale identifier. A local build from a source archive without Git metadata uses `version=unknown`; CI rejects unknown versions for published packages.
 
 ---
 
@@ -549,7 +552,7 @@ If you encounter a problem, please include:
 - exact Ember location;
 - exact `launcHER.CNF`;
 - Ember version;
-- launcHER version;
+- launcHER version (the exact `version=...` line from `version.txt`);
 - game folder being launched;
 - what appears on screen before failure.
 
