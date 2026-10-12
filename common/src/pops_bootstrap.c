@@ -41,22 +41,41 @@ static int is_card_alias(const char *card, const char *other) {
   return 0;
 }
 
-int pops_format_proxy_args(char *buffer, size_t capacity,
-                           const char *disc0, const char *card0, const char *card1,
-                           const char *disc1, const char *disc2, const char *disc3) {
+/* A virtual PFS alias must never be its own backend; include HDD paths
+ * such as hdd0:PART:pfs:/... and numbered pfsN: mount names. */
+static int uses_pfs(const char *path) {
+  const char *p;
+  for (p = path; p && *p; ++p) {
+    const char *q;
+    if (p != path && p[-1] != ':') continue;
+    if (!((p[0] == 'p' || p[0] == 'P') &&
+          (p[1] == 'f' || p[1] == 'F') &&
+          (p[2] == 's' || p[2] == 'S'))) continue;
+    q = p + 3;
+    while (*q >= '0' && *q <= '9') ++q;
+    if (*q == ':') return 1;
+  }
+  return 0;
+}
+
+int pops_format_proxy_args_mode(char *buffer, size_t capacity,
+                                const char *disc0, const char *card0, const char *card1,
+                                const char *disc1, const char *disc2, const char *disc3,
+                                int virtual_pfs) {
   const char *tokens[7];
   size_t token_count = 4;
   size_t offset = 0;
   size_t i;
 
-  if (!buffer || capacity < 64 || !disc0 || !card0 || !card1)
+  if (!buffer || capacity < 64 || !disc0 || !card0 || !card1 ||
+      (virtual_pfs != 0 && virtual_pfs != 1))
     return POPS_FILE_INVALID;
 
   if (!is_valid_device_path(disc0) || !is_valid_device_path(card0) ||
       !is_valid_device_path(card1))
     return POPS_FILE_INVALID;
 
-  tokens[0] = "popfs";
+  tokens[0] = virtual_pfs ? "popfs+pfs" : "popfs";
   tokens[1] = disc0;
   tokens[2] = card0;
   tokens[3] = card1;
@@ -71,6 +90,14 @@ int pops_format_proxy_args(char *buffer, size_t capacity,
   if (disc1) tokens[token_count++] = disc1;
   if (disc2) tokens[token_count++] = disc2;
   if (disc3) tokens[token_count++] = disc3;
+
+  /* Prevent recursive IOP opens if the virtual pfs: namespace is enabled.
+   * This check precedes all writes to the argument packet. */
+  if (virtual_pfs) {
+    for (i = 1; i < token_count; ++i)
+      if (uses_pfs(tokens[i]))
+        return POPS_FILE_INVALID;
+  }
 
   /* card0/card1 must not overlap a disc, each other, or the other
    * backing path's backup. Keep the IOP driver as a second defense. */
@@ -98,6 +125,13 @@ int pops_format_proxy_args(char *buffer, size_t capacity,
   }
 
   return (int)offset;
+}
+
+int pops_format_proxy_args(char *buffer, size_t capacity,
+                           const char *disc0, const char *card0, const char *card1,
+                           const char *disc1, const char *disc2, const char *disc3) {
+  return pops_format_proxy_args_mode(buffer, capacity, disc0, card0, card1,
+                                      disc1, disc2, disc3, 0);
 }
 
 int pops_trampoline_args_init(PopsTrampolineArgs *out, const PopsBootPlan *plan,
