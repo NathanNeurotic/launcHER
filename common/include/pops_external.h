@@ -74,6 +74,13 @@ enum {
 int pops_iop_image_probe_io_imports(const void *file, size_t size,
                                     const char *module, uint32_t *imports);
 
+/* Inventory actual complete IRX import jump-stub indices (0..63)
+ * inside a validated ROMDIR module. These are declarations, NOT evidence
+ * of executed IOPCD calls. Outputs stay unchanged on failure. */
+int pops_iop_image_probe_io_ordinals(const void *file, size_t size,
+                                     const char *module, uint64_t *legacy,
+                                     uint64_t *extended);
+
 typedef enum {
   POPS_SOURCE_LOOSE_ELF,
   POPS_SOURCE_DECODED_PAK
