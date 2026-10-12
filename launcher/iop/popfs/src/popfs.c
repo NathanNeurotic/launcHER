@@ -79,6 +79,13 @@ static int resolve(const char *name, char output[PATH_LIMIT]) {
     index = 0;
     if (active_disc > 0 && active_disc < DISC_COUNT && paths[active_disc][0])
       index = active_disc;
+  } else if (!strncmp(relative, "IMAGE", 5) &&
+             relative[5] >= '1' && relative[5] < '0' + DISC_COUNT &&
+             !strcmp(relative + 6, ".VCD")) {
+    /* Historical partition-installed multi-disc layouts use IMAGE1.VCD
+     * and later numbered images. These map directly to configured slots.
+     * Preserve legacy dynamic IMAGE0/IMAGE aliases until IOPCD is traced. */
+    index = relative[5] - '0';
   } else if (!strncmp(relative, "disc/disc", 9) && relative[9] >= '0' &&
              relative[9] < '0' + DISC_COUNT && !relative[10]) {
     index = relative[9] - '0';
