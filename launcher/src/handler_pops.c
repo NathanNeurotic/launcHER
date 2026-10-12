@@ -645,6 +645,9 @@ static int pops_probe_live_storage(int virtualPfs) {
                          "pops0:SLOT1.VMC", "pfs0:IMAGE.VCD",
                          "pfs0:SLOT0.VMC", "pfs0:SLOT1.VMC"};
   int count = virtualPfs ? 6 : 3;
+  /* Compare actual bytes, not just successful opens. This catches a
+   * legacy PFS path unexpectedly selecting another disc or driver. */
+  uint8_t first_disc[16] = {0};
   for (int i = 0; i < count; ++i) {
     int fd = fileXioOpen(paths[i], i % 3 ? FIO_O_RDWR : FIO_O_RDONLY);
     if (fd < 0)
@@ -653,15 +656,26 @@ static int pops_probe_live_storage(int virtualPfs) {
     if (i % 3 == 0) {
       char check[16] __attribute__((aligned(64)));
       int remaining = sizeof(check);
-      /* IOP storage backends may return partial positive reads. Probe
-       * actual delivery to EOF/error, keeping the destination aligned. */
+      uint8_t received[sizeof(check)];
+      size_t copied = 0;
+      /* Keep the EE DMA target aligned, including when a backend returns
+       * a positive short read. Capture each chunk before reusing it. */
       while (remaining > 0) {
         int n = fileXioRead(fd, check, remaining);
         if (n <= 0 || n > remaining) {
           status = n < 0 ? n : -EIO;
           break;
         }
+        memcpy(received + copied, check, (size_t)n);
+        copied += (size_t)n;
         remaining -= n;
+      }
+      if (!status) {
+        if (i == 0)
+          memcpy(first_disc, received, sizeof(first_disc));
+        else if (virtualPfs && i == 3 &&
+                 memcmp(first_disc, received, sizeof(first_disc)) != 0)
+          status = -EIO;
       }
     }
     int closed = fileXioClose(fd);

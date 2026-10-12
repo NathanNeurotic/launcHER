@@ -996,3 +996,19 @@ write persistence, whether the historical IOMAN shim is initialized on
 the console, and performance. Do not merge until proven on PS2 hardware.
 REPOP contains the reproducible historical import study:
 https://github.com/NathanNeurotic/REPOP/blob/main/docs/POPSTARTER_PFS_WRAP_EVIDENCE.md
+
+### Verify virtual PFS disc identity before transfer — 2026-10-11
+
+The optional non-APA virtual PFS mode previously probed successful opens
+and 16-byte reads under `pops0:IMAGE.VCD` and `pfs0:IMAGE.VCD`,
+without confirming that they returned the **same** underlying image.
+The post-reboot probe now compares the actual bytes read by the two
+namespaces and fails on a mismatch before executing Sony POPS. Positive
+short reads are accumulated through a still-aligned EE DMA buffer; the
+probe never writes either disc or save data. Host assertions pin the
+comparison and its position before handoff.
+
+This is an identity sanity check on the first 16 bytes, not evidence
+that Sony IOPCD performs the correct 1 MiB header or 2352-byte sector
+translations. Complete sector-offset and real-hardware tests remain
+required.

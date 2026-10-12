@@ -908,6 +908,20 @@ class InspectorTests(unittest.TestCase):
             point = launcher.index(field + " = 1;")
             self.assertIn("if (module < 0)", launcher[point-210:point])
 
+    def test_virtual_pfs_disc_reads_match_pops_before_handoff(self):
+        source = (ROOT / "launcher/src/handler_pops.c").read_text()
+        begin = source.index("static int pops_probe_live_storage(")
+        end = source.index("int launchPOPS(", begin)
+        section = source[begin:end]
+        self.assertIn("uint8_t first_disc[16]", section)
+        self.assertIn("memcpy(received + copied, check, (size_t)n)", section)
+        self.assertIn("memcmp(first_disc, received, sizeof(first_disc)) != 0", section)
+        self.assertIn("status = -EIO;", section)
+        probe = source.index("res = pops_probe_live_storage(virtualPfs);")
+        handoff = source.index("pops_trampoline_args_init(targs", probe)
+        self.assertLess(probe, handoff)
+        self.assertIn("if (res)", source[probe:handoff])
+
     def test_post_reboot_storage_gates_trampoline(self):
         text = (ROOT / 'launcher/src/handler_pops.c').read_text()
         self.assertIn('fileXioOpen(paths[i]', text)
