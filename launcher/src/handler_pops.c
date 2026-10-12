@@ -214,6 +214,7 @@ static int readFullFile(const char *path, void *buffer, size_t max_size, size_t 
 static int pops_load_bdma_group(const char *role, const char *const *names,
                                 size_t nameCount, const char *const *dirs, int dirCount) {
   char path[PATH_MAX];
+  (void)role; /* DPRINTF can compile away in non-debug builds. */
   for (size_t n = 0; n < nameCount; ++n) {
     for (int d = 0; d < dirCount; ++d) {
       int length = snprintf(path, sizeof(path), "%s%s", dirs[d], names[n]);
@@ -1198,6 +1199,7 @@ int launchPOPS(int argc, char *argv[]) {
     DPRINTF("POPS: Loading BDMA modules for XX. launch\n");
     int loadedBdma = pops_load_bdma_drivers(vcdDir, vmcDir, bdmaMode);
     DPRINTF("POPS: External BDMA roles successfully installed: %d\n", loadedBdma);
+    (void)loadedBdma;
   }
 
   /* If this is an SB. launch or SMB device, load the SMB network stack */
