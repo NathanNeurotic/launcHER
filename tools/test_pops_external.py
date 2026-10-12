@@ -675,11 +675,11 @@ class InspectorTests(unittest.TestCase):
         c0, c1 = b"mass0:/SLOT0.VMC", b"mass0:/SLOT1.VMC"
         normal = LIB.pops_format_proxy_args(buf, len(buf), vcd, c0, c1, None, None, None)
         self.assertGreater(normal, 0)
-        self.assertEqual(buf.raw[:normal].split(b"\\0")[0], b"popfs")
+        self.assertEqual(buf.raw[:normal].split(bytes([0]))[0], b"popfs")
         mode = LIB.pops_format_proxy_args_mode(buf, len(buf), vcd, c0, c1,
                                                 None, None, None, 1)
         self.assertGreater(mode, 0)
-        self.assertEqual(buf.raw[:mode].split(b"\\0")[0], b"popfs+pfs")
+        self.assertEqual(buf.raw[:mode].split(bytes([0]))[0], b"popfs+pfs")
         for path in (b"pfs0:/Game.VCD", b"PFS:/Game.VCD",
                      b"hdd0:__common:pfs:/Game.VCD",
                      b"hdd0:__.POPS:PFS1:/Game.VCD"):
