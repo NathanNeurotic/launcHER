@@ -13,14 +13,19 @@ static int is_valid_device_path(const char *path) {
   }
   if (!i || i == len || !path[i + 1])
     return 0;
-  if (i >= 4 && (path[0] == 'p' || path[0] == 'P') &&
-      (path[1] == 'o' || path[1] == 'O') &&
-      (path[2] == 'p' || path[2] == 'P') &&
-      (path[3] == 's' || path[3] == 'S')) {
-    size_t j;
-    for (j = 4; j < i && path[j] >= '0' && path[j] <= '9'; ++j) {}
-    if (j == i)
-      return 0;
+  /* A nested popsN: token would feed the bridge back into itself,
+   * e.g. hdd0:PART:pops0:/image. Reject every device-token boundary. */
+  for (const char *part = path; *part; ++part) {
+    if (part != path && part[-1] != ':') continue;
+    if (strlen(part) < 5) continue;
+    if ((part[0] == 'p' || part[0] == 'P') &&
+        (part[1] == 'o' || part[1] == 'O') &&
+        (part[2] == 'p' || part[2] == 'P') &&
+        (part[3] == 's' || part[3] == 'S')) {
+      const char *q = part + 4;
+      while (*q >= '0' && *q <= '9') ++q;
+      if (*q == ':') return 0;
+    }
   }
   return 1;
 }

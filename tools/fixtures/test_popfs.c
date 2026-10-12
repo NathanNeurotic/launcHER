@@ -94,6 +94,10 @@ int main(void) {
   assert(popfs_start(4, arguments) == MODULE_NO_RESIDENT_END);
   arguments[1] = "PoPs:/recursive";
   assert(popfs_start(4, arguments) == MODULE_NO_RESIDENT_END);
+  arguments[1] = "hdd0:PART:pops0:/recursive";
+  assert(popfs_start(4, arguments) == MODULE_NO_RESIDENT_END);
+  arguments[1] = "hdd0:PART:POPS:/recursive";
+  assert(popfs_start(4, arguments) == MODULE_NO_RESIDENT_END);
   arguments[saved] = "mass7:/POPS/Game.VCD";
   arguments[2] = arguments[1];
   assert(popfs_start(5, arguments) == MODULE_NO_RESIDENT_END);

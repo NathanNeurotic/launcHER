@@ -645,6 +645,12 @@ class InspectorTests(unittest.TestCase):
         # Invalid backend paths (no colon or recursive pops:)
         self.assertEqual(LIB.pops_format_proxy_args(buf, 1024, b"invalid_path", b"mass0:/b", b"mass0:/c", None, None, None), INVALID)
         self.assertEqual(LIB.pops_format_proxy_args(buf, 1024, b"pops0:/nested", b"mass0:/b", b"mass0:/c", None, None, None), INVALID)
+        self.assertEqual(LIB.pops_format_proxy_args(
+            buf, 1024, b"hdd0:PART:pops0:/nested", b"mass0:/b",
+            b"mass0:/c", None, None, None), INVALID)
+        self.assertEqual(LIB.pops_format_proxy_args(
+            buf, 1024, b"hdd0:PART:POPS:/nested", b"mass0:/b",
+            b"mass0:/c", None, None, None), INVALID)
         for recursive in (b"POPS0:/recursive", b"PoPs:/recursive", b"Pops123:/recursive"):
             self.assertEqual(LIB.pops_format_proxy_args(
                 buf, 1024, recursive, b"mass0:/b", b"mass0:/c",

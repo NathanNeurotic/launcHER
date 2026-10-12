@@ -1012,3 +1012,14 @@ This is an identity sanity check on the first 16 bytes, not evidence
 that Sony IOPCD performs the correct 1 MiB header or 2352-byte sector
 translations. Complete sector-offset and real-hardware tests remain
 required.
+
+### Reject nested POPFS backend recursion — 2026-10-11
+
+Previously `popsN:` paths were rejected only when they appeared at
+the beginning of an explicit disc/card backend. Unusual partition-qualified
+paths such as `hdd0:PART:pops0:/image` bypassed the EE and IOP startup
+guards. Both now reject `popsN:` tokens at any colon-delimited device
+boundary before the proxy is registered or a file is opened. This is
+separate from the virtual-PFS recursion guard, and applies in ordinary
+`popfs` mode as well. Host tests exercise direct and nested mixed-case
+aliases without changing unrelated massN device handling.
