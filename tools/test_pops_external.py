@@ -391,6 +391,46 @@ class InspectorTests(unittest.TestCase):
             image2, len(image2), b"IOPCD", c.byref(mask)), 0)
         self.assertEqual(mask.value, 0)
 
+    def test_iopcd_import_ordinals_are_bounded_and_observational(self):
+        LIB.pops_iop_image_probe_io_ordinals.argtypes = [
+            c.c_void_p, c.c_size_t, c.c_char_p, c.POINTER(c.c_uint64),
+            c.POINTER(c.c_uint64)]
+        LIB.pops_iop_image_probe_io_ordinals.restype = c.c_int
+        def entry(name, ext, size):
+            return struct.pack("<10sHI", name, ext, size)
+        def table(name):
+            return struct.pack("<IIHH8s", 0x41e00000, 0, 0x0101, 0,
+                               name.ljust(8, b"\0"))
+        def stub(ordinal):
+            return struct.pack("<II", 0x03e00008, 0x24000000 | ordinal)
+        payload = (b"not-import\0".ljust(20, b"\0") +
+                   table(b"ioman") + stub(4) + stub(13) + stub(20) +
+                   b"\0" * 4 + table(b"iomanx") + stub(6) + stub(31) +
+                   b"\0" * 8)
+        directory = (entry(b"RESET", 4, 0) + entry(b"ROMDIR", 0, 80) +
+                     entry(b"EXTINFO", 0, 4) + entry(b"IOPCD", 0, len(payload)) +
+                     b"\0" * 16)
+        image = directory + b"\0" * 16 + payload
+        legacy = c.c_uint64(0xDEADBEEF)
+        extended = c.c_uint64(0xBADCAFE)
+        self.assertEqual(LIB.pops_iop_image_probe_io_ordinals(
+            image, len(image), b"IOPCD", c.byref(legacy), c.byref(extended)), 0)
+        self.assertEqual(legacy.value, (1 << 4) | (1 << 13) | (1 << 20))
+        self.assertEqual(extended.value, (1 << 6) | (1 << 31))
+        before = (legacy.value, extended.value)
+        self.assertEqual(LIB.pops_iop_image_probe_io_ordinals(
+            image, len(image), b"MISSING", c.byref(legacy), c.byref(extended)),
+            UNSUPPORTED)
+        self.assertEqual((legacy.value, extended.value), before)
+        self.assertNotEqual(LIB.pops_iop_image_probe_io_ordinals(
+            image[:-1], len(image) - 1, b"IOPCD",
+            c.byref(legacy), c.byref(extended)), 0)
+        self.assertEqual((legacy.value, extended.value), before)
+        self.assertEqual(LIB.pops_iop_image_probe_io_ordinals(
+            self.iop_image(), len(self.iop_image()), b"LOADCORE",
+            c.byref(legacy), c.byref(extended)), 0)
+        self.assertEqual((legacy.value, extended.value), (0, 0))
+
     def test_iop_image_rejects_unbounded_or_inconsistent_directory(self):
         data = self.iop_image()
         for malformed in (data[:-1], word(data, 28, 0xfffffff0),
