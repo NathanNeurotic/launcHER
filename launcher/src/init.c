@@ -250,9 +250,14 @@ static int loadModuleList(DeviceType device, int tolerant, int sonySio2) {
       continue;
     if (sonySio2 && !strcmp(moduleList[i].name, "sio2man"))
       continue;
-    if (sonySio2 && pops_has_external_usb_modules() &&
+    /* A loose external IRX on a memory card does not mean that driver was
+     * installed on the newly rebooted IOP. Preserve the normal USB stack
+     * unless this is an explicit XX./BDMA opt-in; otherwise POPFS can start
+     * with no live mass: device at all. Experimental XX behavior is retained. */
+    if (sonySio2 && (device & Device_USB) && pops_get_active_xx_launch() &&
+        pops_has_external_usb_modules() &&
         (!strcmp(moduleList[i].name, "usbd_mini") || !strcmp(moduleList[i].name, "usbmass_bd_mini"))) {
-      DPRINTF("POPS: Skipping internal %s; using external drivers from mc?:/POPSTARTER/\n", moduleList[i].name);
+      DPRINTF("POPS: XX. USB opt-in: external driver override for %s\n", moduleList[i].name);
       continue;
     }
 

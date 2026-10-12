@@ -837,3 +837,20 @@ Synthetic ROMDIR fixtures cover padded RESET extents, exact module slices,
 unavailable modules, bad names, truncated images and output preservation
 on error. This prepares evidence collection for the remaining IOP-side
 PFS/IOPCD contract without changing the genuine APA driver.
+
+### Plain USB must retain its built-in IOP drivers — 2026-10-11
+
+The prior post-reboot module loop suppressed both `usbd_mini` and
+`usbmass_bd_mini` whenever it found any external USB IRX filename under
+a memory-card POPStarter directory. Presence alone does not load that
+driver, and the external BDMA stage is not entered for a normal unprefixed
+USB game. As a result, the default POPFS I/O probe could fail simply
+because an unused driver file existed in the user's installation.
+
+The skip now applies only when `Device_USB` and the explicit `XX.`/BDMA
+override are selected, preserving the historical experimental external
+path for opt-in users. Ordinary USB launches always install their bundled
+IOP USB stack regardless of files on memory card. The regression test
+checks that both required conditions guard the skip. A future verified
+external IRX loader should require actual module-load success instead
+of filesystem presence before replacing built-in modules.

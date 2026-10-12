@@ -724,6 +724,20 @@ class InspectorTests(unittest.TestCase):
         self.assertIn("isSbLaunch", source[launch:launch+210])
         self.assertIn("SMB launch requires POPS_IOX.PAK", source)
 
+    def test_plain_usb_does_not_skip_built_in_driver_for_external_irx_file(self):
+        init = (ROOT / "launcher/src/init.c").read_text()
+        point = init.index("pops_has_external_usb_modules()")
+        start = init.rfind("if (sonySio2", 0, point)
+        end = init.index("continue;", point)
+        expr = init[start:end]
+        self.assertIn("(device & Device_USB)", expr)
+        self.assertIn("pops_get_active_xx_launch()", expr)
+        self.assertIn("usbd_mini", expr)
+        self.assertIn("usbmass_bd_mini", expr)
+        # A filename on MC alone must never suppress both built-in drivers.
+        self.assertLess(expr.index("pops_get_active_xx_launch()"),
+                        expr.index("pops_has_external_usb_modules()"))
+
     def test_pops_smb_driver_loads_only_once_after_reboot(self):
         init = (ROOT / "launcher/src/init.c").read_text()
         launcher = (ROOT / "launcher/src/handler_pops.c").read_text()
