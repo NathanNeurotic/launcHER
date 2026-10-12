@@ -281,7 +281,10 @@ static int loadModuleList(DeviceType device, int tolerant, int sonySio2) {
 
     if (ret >= 0)
       ret = 0;
-    if (iopret == 1)
+    /* For POPS, a failed IOP module's _start result can be negative even
+     * when SifExecModuleBuffer itself returns a successful module ID.
+     * Generic launch behavior remains unchanged for compatibility. */
+    if (iopret == 1 || (sonySio2 && iopret < 0))
       ret = iopret;
     if (moduleList[i].type & Device_Optional)
       ret = 0;

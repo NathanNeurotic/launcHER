@@ -894,3 +894,35 @@ nothing changes the registered IOMAN/IOMANX device set. The next
 implementation must still prove how the selected Sony IOPCD is loaded
 and whether its legacy `pfs0:` file operations are passed through the
 IOP file-manager compatibility shim.
+
+### Negative IOP module entry results — 2026-10-11
+
+When loading the necessary IOP modules after Sony's external reboot,
+`SifExecModuleBuffer` may report a successful EE RPC and module ID even
+though the invoked IOP module `_start` returned a negative error in
+`iopret`. The common module loop previously rejected only `iopret==1`,
+discarding other negative module-start failures. The POPS-specific loading
+path now propagates negative `iopret` values, failing before the POPS
+handoff when a needed IOP driver could not initialize. The generic ELF
+loader's historical result handling is unchanged.
+
+### PS2SDK legacy IOMAN hook evidence
+
+The default `ps2dev/ps2sdk` `iomanX` Makefile sets
+`IOMANX_ENABLE_LEGACY_IOMAN_HOOK`; `ioman_sbv.c` also enables
+`FULL_IOMAN`, forwarding legacy IOMAN exports to iomanX and migrating
+the existing driver/file tables. Thus a legacy `ioman` import in Sony
+IOPCD does **not** necessarily imply an incompatible file-manager ABI.
+It is still essential to verify the actual `iomanX.irx` built into
+the launcHER artifact, the Sony module's resolved imports, and *which
+filesystem device name* it opens; the hook does not automatically turn
+`pfs0:` into `pops0:`.
+
+Sources:
+https://github.com/ps2dev/ps2sdk/blob/master/iop/system/iomanx/Makefile
+https://github.com/ps2dev/ps2sdk/blob/master/iop/system/iomanx/src/ioman_sbv.c
+https://github.com/ps2dev/ps2sdk/blob/master/iop/kernel/include/irx.h
+
+The existing source-level safety rule remains: no duplicate `pfs`
+registration without a verified collision check, and no hijacking
+genuine APA/PFS.

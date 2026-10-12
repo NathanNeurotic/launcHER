@@ -771,6 +771,14 @@ class InspectorTests(unittest.TestCase):
         self.assertIn("if (res)", source[source.index("res = initPFS("):
                                          source.index("vcdPath = resolvedVcd;")])
 
+    def test_pops_does_not_ignore_negative_iop_module_start_result(self):
+        init = (ROOT / "launcher/src/init.c").read_text()
+        start = init.index("static int loadModuleList(")
+        check = init.index("if (iopret == 1 || (sonySio2 && iopret < 0))", start)
+        end = init.index("if (moduleList[i].type & Device_Optional)", check)
+        self.assertIn("ret = iopret;", init[check:end])
+        self.assertLess(check, end)
+
     def test_custom_iop_reset_invalidates_regular_device_cache(self):
         init = (ROOT / "launcher/src/init.c").read_text()
         check = init.index("int initPopsServices(")
