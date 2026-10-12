@@ -344,6 +344,37 @@ class FeatureTests(unittest.TestCase):
             self.assertEqual(LIB.pops_vcd_inspect_stream(
                 c.c_void_p(1), read_lied_seek, seek_lied_position, c.byref(info)), -5)
 
+        # The recognized container declares 20 sectors, but only 19 exist.
+        # A backend that falsely reports success at 0x408 must not cause the
+        # inspector to *skip* the sector-count integrity check.
+        short_vcd = bytes(toc) + bare_disc[:-sector_size]
+        cursor = [0]
+
+        @self.Reader
+        def read_bad_toc(user, dst, amount):
+            n = min(int(amount), 13, len(short_vcd) - cursor[0])
+            if n > 0:
+                c.memmove(dst, short_vcd[cursor[0]:cursor[0] + n], n)
+                cursor[0] += n
+            return n
+
+        @self.Seeker
+        def seek_bad_toc(user, offset, whence):
+            if whence == 2:
+                dest = len(short_vcd) + offset
+            elif whence == 0:
+                dest = offset
+            else:
+                dest = cursor[0] + offset
+            if dest < 0:
+                return -1
+            cursor[0] = dest
+            return dest - 1 if whence == 0 and dest == 0x408 else dest
+
+        info = PopsVcdInfo()
+        self.assertEqual(LIB.pops_vcd_inspect_stream(
+            c.c_void_p(1), read_bad_toc, seek_bad_toc, c.byref(info)), -5)
+
         # A BOOT2 line and commented BOOT assignments are not PS1 boot keys.
         # The BOOT parser must honor line boundaries and exact directive names.
         modified = bytearray(bare_disc)
