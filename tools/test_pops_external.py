@@ -669,6 +669,31 @@ class InspectorTests(unittest.TestCase):
                 b"mass0:/SLOT1.VMC", *discs), INVALID)
             self.assertEqual(buf.raw, before)
 
+    def test_virtual_pfs_argument_mode_is_explicit_and_nonrecursive(self):
+        buf = c.create_string_buffer(1024)
+        vcd = b"mass0:/POPS/Game.VCD"
+        c0, c1 = b"mass0:/SLOT0.VMC", b"mass0:/SLOT1.VMC"
+        normal = LIB.pops_format_proxy_args(buf, len(buf), vcd, c0, c1, None, None, None)
+        self.assertGreater(normal, 0)
+        self.assertEqual(buf.raw[:normal].split(b"\\0")[0], b"popfs")
+        mode = LIB.pops_format_proxy_args_mode(buf, len(buf), vcd, c0, c1,
+                                                None, None, None, 1)
+        self.assertGreater(mode, 0)
+        self.assertEqual(buf.raw[:mode].split(b"\\0")[0], b"popfs+pfs")
+        for path in (b"pfs0:/Game.VCD", b"PFS:/Game.VCD",
+                     b"hdd0:__common:pfs:/Game.VCD",
+                     b"hdd0:__.POPS:PFS1:/Game.VCD"):
+            c.memset(buf, 0x5A, len(buf))
+            before = buf.raw
+            self.assertEqual(LIB.pops_format_proxy_args_mode(buf, len(buf),
+                             path, c0, c1, None, None, None, 1), INVALID)
+            self.assertEqual(buf.raw, before)
+        self.assertEqual(LIB.pops_format_proxy_args_mode(buf, len(buf),
+                         vcd, c0, c1, None, None, None, 2), INVALID)
+        launcher = (ROOT / "launcher/src/handler_pops.c").read_text()
+        self.assertIn("int virtualPfs = device != Device_APA;", launcher)
+        self.assertIn("pops_format_proxy_args_mode(proxyArgs", launcher)
+
     def test_proxy_alias_preflight_rejects_vmc_disc_collisions(self):
         buf = c.create_string_buffer(1024)
         disc = b"mass0:/POPS/Game.VCD"
@@ -1042,7 +1067,11 @@ def main():
     LIB.pops_core_patches_stage.argtypes = [c.c_uint32, c.c_void_p, c.c_size_t, c.c_uint32]
     LIB.pops_core_image_identify.argtypes = [c.c_void_p, c.c_size_t]
     LIB.pops_core_sio2_identify.argtypes = [c.c_void_p, c.c_size_t]
-    LIB.pops_format_proxy_args.argtypes = [
+    LIB.pops_format_proxy_args_mode.argtypes = [
+    c.c_void_p, c.c_size_t, c.c_char_p, c.c_char_p, c.c_char_p,
+    c.c_char_p, c.c_char_p, c.c_char_p, c.c_int]
+LIB.pops_format_proxy_args_mode.restype = c.c_int
+LIB.pops_format_proxy_args.argtypes = [
         c.c_char_p, c.c_size_t,
         c.c_char_p, c.c_char_p, c.c_char_p,
         c.c_char_p, c.c_char_p, c.c_char_p
