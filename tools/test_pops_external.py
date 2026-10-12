@@ -936,7 +936,7 @@ class InspectorTests(unittest.TestCase):
     def test_launcher_preflight_order_is_before_iop_reset(self):
         source = (ROOT / "launcher/src/handler_pops.c").read_text()
         # Verify the production call sites, not merely the helper existence.
-        arg_position = source.index("int argLen = pops_format_proxy_args(")
+        arg_position = source.index("int argLen = pops_format_proxy_args_mode(")
         patch_position = source.index("res = pops_core_patches_stage(")
         save_position = source.index("res = pops_vmc_ensure(")
         reset_position = source.index("res = SifIopRebootBuffer(")
@@ -1068,10 +1068,10 @@ def main():
     LIB.pops_core_image_identify.argtypes = [c.c_void_p, c.c_size_t]
     LIB.pops_core_sio2_identify.argtypes = [c.c_void_p, c.c_size_t]
     LIB.pops_format_proxy_args_mode.argtypes = [
-    c.c_void_p, c.c_size_t, c.c_char_p, c.c_char_p, c.c_char_p,
-    c.c_char_p, c.c_char_p, c.c_char_p, c.c_int]
-LIB.pops_format_proxy_args_mode.restype = c.c_int
-LIB.pops_format_proxy_args.argtypes = [
+        c.c_void_p, c.c_size_t, c.c_char_p, c.c_char_p, c.c_char_p,
+        c.c_char_p, c.c_char_p, c.c_char_p, c.c_int]
+    LIB.pops_format_proxy_args_mode.restype = c.c_int
+    LIB.pops_format_proxy_args.argtypes = [
         c.c_char_p, c.c_size_t,
         c.c_char_p, c.c_char_p, c.c_char_p,
         c.c_char_p, c.c_char_p, c.c_char_p
