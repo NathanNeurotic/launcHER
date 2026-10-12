@@ -1093,6 +1093,16 @@ int launchPOPS(int argc, char *argv[]) {
         DPRINTF("POPS: IOPCD IRX import tables: legacy-ioman=%d iomanX=%d (execution unverified)\n",
                 !!(imports & POPS_IOIMPORT_IOMAN),
                 !!(imports & POPS_IOIMPORT_IOMANX));
+      uint64_t legacyOps = 0, extendedOps = 0;
+      int operationStatus = pops_iop_image_probe_io_ordinals(
+          rebootIop, plan.iop_size, "IOPCD", &legacyOps, &extendedOps);
+      if (!operationStatus)
+        DPRINTF("POPS: IOPCD declared I/O ordinals ioman=%08X:%08X iomanX=%08X:%08X (NOT execution proof)\n",
+                (unsigned)(legacyOps >> 32), (unsigned)legacyOps,
+                (unsigned)(extendedOps >> 32), (unsigned)extendedOps);
+      (void)legacyOps;
+      (void)extendedOps;
+      (void)operationStatus;
     } else
       DPRINTF("POPS: No standalone IOPCD in selected IOPRP (%d); EE embedded module may load it\n", found);
   }
