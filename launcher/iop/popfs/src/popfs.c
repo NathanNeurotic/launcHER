@@ -391,11 +391,51 @@ static iomanX_iop_device_ops_t operations = {
 static iomanX_iop_device_t device = {
   "pops", IOP_DT_FS | IOP_DT_FSEXT, 1, "launcHER POPS filesystem bridge", &operations
 };
+static iomanX_iop_device_t virtual_pfs = {
+  "pfs", IOP_DT_FS | IOP_DT_FSEXT, 1, "launcHER non-APA virtual PFS alias", &operations
+};
+
+/* The shipped ps2sdk iomanX.irx has the legacy IOMAN hook and a
+ * 32-slot device table. Its array-backed AddDrv does NOT detect duplicates. */
+#define POPFS_DEVICE_SLOTS 32
+static int driver_name_in_use(const char *name) {
+  iomanX_iop_device_t **list = iomanX_GetDeviceList();
+  int i;
+  if (!list) return 1;
+  for (i = 0; i < POPFS_DEVICE_SLOTS; ++i)
+    if (list[i] && !strcmp(list[i]->name, name)) return 1;
+  return 0;
+}
+
+static int pfs_backing(const char *path) {
+  const char *p;
+  for (p = path; p && *p; ++p) {
+    const char *q;
+    if (p != path && p[-1] != ':') continue;
+    if (!p[1] || !p[2]) continue;
+    if (!((p[0] == 'p' || p[0] == 'P') &&
+          (p[1] == 'f' || p[1] == 'F') &&
+          (p[2] == 's' || p[2] == 'S'))) continue;
+    q = p + 3;
+    while (*q >= '0' && *q <= '9') ++q;
+    if (*q == ':') return 1;
+  }
+  return 0;
+}
 
 int _start(int argc, char **argv) {
-  int i, result;
-  if (argc < 4 || argc > 7 || !argv)
+  int i, result, alias;
+  if (argc < 4 || argc > 7 || !argv || !argv[0])
     return MODULE_NO_RESIDENT_END;
+  alias = !strcmp(argv[0], "popfs+pfs");
+  if (!alias && strcmp(argv[0], "popfs"))
+    return MODULE_NO_RESIDENT_END;
+  /* A foreign pfs driver is never overwritten or unregistered. */
+  if (driver_name_in_use("pops") || (alias && driver_name_in_use("pfs")))
+    return MODULE_NO_RESIDENT_END;
+  for (i = 1; i < argc; ++i)
+    if (!argv[i] || !valid_backend(argv[i]) || (alias && pfs_backing(argv[i])))
+      return MODULE_NO_RESIDENT_END;
   memset(paths, 0, sizeof(paths));
   for (i = 1; i < argc; ++i) {
     int index = i == 1 ? 0 : (i < 4 ? DISC_COUNT + i - 2 : i - 3);
@@ -419,7 +459,14 @@ int _start(int argc, char **argv) {
     }
   }
   result = iomanX_AddDrv(&device);
-  return result < 0 ? MODULE_NO_RESIDENT_END : MODULE_RESIDENT_END;
+  if (result < 0)
+    return MODULE_NO_RESIDENT_END;
+  if (alias && iomanX_AddDrv(&virtual_pfs) < 0) {
+    /* Roll back only our own fresh registration. Never delete foreign PFS. */
+    iomanX_DelDrv("pops");
+    return MODULE_NO_RESIDENT_END;
+  }
+  return MODULE_RESIDENT_END;
 }
 
 #ifdef POPS_HOST_TEST
