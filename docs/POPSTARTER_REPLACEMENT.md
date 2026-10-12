@@ -1145,3 +1145,26 @@ Remaining evidence gate: capture actual selected Sony IOPCD calls
 through `ioman`/`iomanX` and compare the seek/read offsets to
 the *original* POPStarter route. Until measured, mount and sector
 translation behavior must remain unchanged.
+
+### Numbered secondary VCD aliases — 2026-10-11
+
+Legacy partition-installed multi-disc layouts document `IMAGE0.VCD` and
+`IMAGE1.VCD` in one APA/PFS partition (see POPSLoader's recovered
+[multi-disc documentation](https://nathanneurotic.github.io/POPSLoader/multidisc.html)).
+The proxy previously recognized `IMAGE.VCD` and `IMAGE0.VCD`
+but returned `-ENOENT` for explicitly numbered secondary images.
+It now accepts `IMAGE1.VCD`, `IMAGE2.VCD`, and `IMAGE3.VCD`,
+each resolved directly to the corresponding configured backing disc.
+All remain read-only. An unconfigured image, out-of-range suffix, or
+unexpected extension still fails closed.
+
+The existing dynamic `IMAGE.VCD` and `IMAGE0.VCD` aliases are unchanged:
+they follow the selected active disc. The independent `disc/discN`
+aliases also retain their previous behavior. Host checks cover
+secondary-image paths, missing slots, rejected writes/removal,
+and `IMAGE0.VCD` after a disc change.
+
+This is additive filename compatibility, **not** proof that Sony IOPCD
+requests `IMAGE1.VCD` or that the selected POPS build will use the
+private disc-swap devctl interface. The actual multi-disc file-open
+sequence and card sharing still need hardware/runtime tracing.
