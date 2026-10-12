@@ -640,15 +640,17 @@ int pops_load_custom_modules(const char *vcdDir, const char *vmcDir) {
   return 0;
 }
 
-static int pops_probe_live_storage(void) {
+static int pops_probe_live_storage(int virtualPfs) {
   const char *paths[] = {"pops0:IMAGE.VCD", "pops0:SLOT0.VMC",
-                         "pops0:SLOT1.VMC"};
-  for (int i = 0; i < 3; ++i) {
-    int fd = fileXioOpen(paths[i], i ? FIO_O_RDWR : FIO_O_RDONLY);
+                         "pops0:SLOT1.VMC", "pfs0:IMAGE.VCD",
+                         "pfs0:SLOT0.VMC", "pfs0:SLOT1.VMC"};
+  int count = virtualPfs ? 6 : 3;
+  for (int i = 0; i < count; ++i) {
+    int fd = fileXioOpen(paths[i], i % 3 ? FIO_O_RDWR : FIO_O_RDONLY);
     if (fd < 0)
       return fd;
     int status = 0;
-    if (i == 0) {
+    if (i % 3 == 0) {
       char check[16] __attribute__((aligned(64)));
       int remaining = sizeof(check);
       /* IOP storage backends may return partial positive reads. Probe
@@ -1267,7 +1269,7 @@ int launchPOPS(int argc, char *argv[]) {
   }
 
   /* Check the real IOP storage route before handing off to Sony POPS. */
-  res = pops_probe_live_storage();
+  res = pops_probe_live_storage(virtualPfs);
   if (res) {
     msg("POPS: Post-reboot disc/VMC check failed: %d\n", res);
     return res;
