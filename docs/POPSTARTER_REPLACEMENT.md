@@ -926,3 +926,16 @@ https://github.com/ps2dev/ps2sdk/blob/master/iop/kernel/include/irx.h
 The existing source-level safety rule remains: no duplicate `pfs`
 registration without a verified collision check, and no hijacking
 genuine APA/PFS.
+
+### Validate irreversible trampoline layout before IOP reset — 2026-10-11
+
+The previous launch path validated `PopsTrampolineArgs` and the fixed
+low-memory trampoline code length only *after* creating any missing VMCs,
+rebooting with the foreign IOPRP and reloading IOP modules. Invalid plan
+fields or unexpectedly large trampoline code would thus fail too late.
+The stage now performs a **side-effect-free stack copy** of the identical
+argument-layout validation and size bound after all core/TROJAN preflights,
+but before the APA writable remount, VMC creation or IOP reboot. The actual
+low-RAM trampoline args and code are still installed at the original,
+known-good point immediately before handoff; the late checks remain an
+additional guard. A source-order regression test pins both passes.

@@ -737,6 +737,22 @@ class InspectorTests(unittest.TestCase):
         config_build = source.index("snprintf(gameConfigDir, sizeof(gameConfigDir)")
         self.assertLess(config_guard, config_build)
 
+    def test_trampoline_layout_preflight_before_save_side_effects(self):
+        source = (ROOT / "launcher/src/handler_pops.c").read_text()
+        stage = source.index("res = pops_core_patches_stage(")
+        preflight = source.index("pops_trampoline_args_init(&handoffCheck")
+        bounds = source.index("handoffCodeSize > 0x180", preflight)
+        vmc = source.index("res = pops_vmc_ensure(")
+        reset = source.index("res = SifIopRebootBuffer(")
+        lowmem = source.index("pops_trampoline_args_init(targs", reset)
+        self.assertLess(stage, preflight)
+        self.assertLess(preflight, bounds)
+        self.assertLess(bounds, vmc)
+        self.assertLess(vmc, reset)
+        self.assertLess(reset, lowmem)
+        self.assertIn("return res;", source[preflight:bounds])
+        self.assertIn("return -EINVAL;", source[bounds:vmc])
+
     def test_apa_first_launch_can_create_missing_vmc(self):
         source = (ROOT / "launcher/src/handler_pops.c").read_text()
         common = (ROOT / "launcher/src/common.c").read_text()

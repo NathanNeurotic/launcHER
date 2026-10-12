@@ -1154,6 +1154,23 @@ int launchPOPS(int argc, char *argv[]) {
     }
   }
 
+  /* Check the unreturnable trampoline before touching save images or
+   * rebooting the IOP. Keep the actual low-RAM argument write immediately
+   * before handoff, because it must remain valid through the foreign reset. */
+  PopsTrampolineArgs handoffCheck;
+  res = pops_trampoline_args_init(&handoffCheck, &plan,
+                                   (uint32_t)(uintptr_t)stagedCore,
+                                   "pops0:IMAGE.VCD");
+  if (res) {
+    msg("POPS: Trampoline argument preflight failed: %d\n", res);
+    return res;
+  }
+  size_t handoffCodeSize = (size_t)(pops_trampoline_code_end - pops_trampoline_code);
+  if (!handoffCodeSize || handoffCodeSize > 0x180) {
+    msg("POPS: Trampoline code size is invalid before reboot\n");
+    return -EINVAL;
+  }
+
   /* Prepare card images only after external dependency identity and every
    * selected core/TROJAN patch has been validated. Failed preflight never
    * creates empty saves or touches existing cards. */
