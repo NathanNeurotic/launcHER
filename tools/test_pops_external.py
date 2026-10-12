@@ -876,7 +876,7 @@ class InspectorTests(unittest.TestCase):
         smb = launcher.index("res = pops_load_smb_stack(vcdDir, vmcDir);", post)
         self.assertLess(post, smb)
         self.assertIn("return res;", launcher[smb:launcher.index(
-            "/* Load user-supplied custom IRX modules", smb)])
+            "res = pops_load_custom_modules(vcdDir, vmcDir);", smb)])
         # File existence alone must never count as a loaded IRX.
         for field in ("loadedDev9", "loadedSmap", "loadedPs2ip",
                       "loadedSmbman", "loadedNetfs"):
