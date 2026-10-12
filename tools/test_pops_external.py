@@ -363,8 +363,8 @@ class InspectorTests(unittest.TestCase):
                              b"ioman")
         ext = struct.pack("<IIHH8s", 0x41e00000, 0, 0x0101, 0,
                           b"iomanx")
-        payload = (b"iomanx\0unrelated\0\0" + legacy +
-                   b"\0"*4 + ext + b"\0"*8)
+        payload = (b"iomanx\0unrelated\0\0".ljust(20, b"\0") +
+                   legacy + b"\0"*4 + ext + b"\0"*8)
         directory = (entry(b"RESET", 4, 0) + entry(b"ROMDIR", 0, 80) +
                      entry(b"EXTINFO", 0, 4) + entry(b"IOPCD", 0, len(payload)) +
                      b"\0"*16)
