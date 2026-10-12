@@ -5,6 +5,9 @@
 #include <string.h>
 #include <unistd.h>
 
+/* A nonnegative seek result is not proof that the requested file position
+ * was reached. Some backend implementations clamp or truncate offsets.
+ * Always compare absolute SEEK_SET results before reading sector metadata. */
 static const uint8_t s_cd_sync[12] = {
     0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00
 };
@@ -114,7 +117,7 @@ int pops_vcd_inspect_stream(void *user, PopsVcdReadFn read_fn, PopsVcdSeekFn see
    * both for compatibility and never apply ISO offsets to such images. */
   uint32_t image_offset = 0;
   uint8_t signature[4];
-  if (seek_fn(user, 0x400, SEEK_SET) >= 0 &&
+  if (seek_fn(user, 0x400, SEEK_SET) == 0x400 &&
       !read_exact(user, read_fn, signature, sizeof(signature)) &&
       (!memcmp(signature, "kHn", 3) || !memcmp(signature, "SPOP", 4) ||
        !memcmp(signature, "POPS", 4)))
@@ -122,7 +125,7 @@ int pops_vcd_inspect_stream(void *user, PopsVcdReadFn read_fn, PopsVcdSeekFn see
 
   /* 1. Detect sector layout at the start of the actual disc payload. */
   uint8_t header[32];
-  if (seek_fn(user, image_offset, SEEK_SET) < 0)
+  if (seek_fn(user, image_offset, SEEK_SET) != image_offset)
     return -EIO;
   if (read_exact(user, read_fn, header, sizeof(header)))
     return -EIO;
@@ -146,7 +149,7 @@ int pops_vcd_inspect_stream(void *user, PopsVcdReadFn read_fn, PopsVcdSeekFn see
 
   /* 2. Read Primary Volume Descriptor (LBA 16) */
   int64_t pvd_file_offset = (int64_t)image_offset + (int64_t)16 * sector_size + data_offset;
-  if (seek_fn(user, pvd_file_offset, SEEK_SET) < 0)
+  if (seek_fn(user, pvd_file_offset, SEEK_SET) != pvd_file_offset)
     return -EIO;
 
   uint8_t pvd[2048];
@@ -157,7 +160,8 @@ int pops_vcd_inspect_stream(void *user, PopsVcdReadFn read_fn, PopsVcdSeekFn see
    * documented raw-sector payload position if headerless probing fails. */
   int valid = pvd[0] == 1 && !memcmp(&pvd[1], "CD001", 5) && pvd[6] == 1;
   if (!valid && sector_size == POPS_VCD_RAW_SECTOR_SIZE && data_offset != 16) {
-    if (seek_fn(user, (int64_t)image_offset + 16 * sector_size + 16, SEEK_SET) >= 0 &&
+    if (seek_fn(user, (int64_t)image_offset + 16 * sector_size + 16, SEEK_SET) ==
+        (int64_t)image_offset + 16 * sector_size + 16 &&
         !read_exact(user, read_fn, pvd, sizeof(pvd)) &&
         pvd[0] == 1 && !memcmp(&pvd[1], "CD001", 5) && pvd[6] == 1) {
       data_offset = 16;
@@ -169,7 +173,7 @@ int pops_vcd_inspect_stream(void *user, PopsVcdReadFn read_fn, PopsVcdSeekFn see
     for (unsigned i = 0; i < 2 && !valid; ++i) {
       int64_t position = (int64_t)POPS_VCD_HEADER_SIZE +
                          (int64_t)16 * POPS_VCD_RAW_SECTOR_SIZE + offsets[i];
-      if (seek_fn(user, position, SEEK_SET) >= 0 &&
+      if (seek_fn(user, position, SEEK_SET) == position &&
           !read_exact(user, read_fn, pvd, sizeof(pvd)) &&
           pvd[0] == 1 && !memcmp(&pvd[1], "CD001", 5) && pvd[6] == 1) {
         image_offset = POPS_VCD_HEADER_SIZE;
@@ -192,7 +196,7 @@ int pops_vcd_inspect_stream(void *user, PopsVcdReadFn read_fn, PopsVcdSeekFn see
   if (image_offset == POPS_VCD_HEADER_SIZE) {
     int64_t end = seek_fn(user, 0, SEEK_END);
     uint8_t sizes[8];
-    if (end >= 0 && seek_fn(user, 0x408, SEEK_SET) >= 0 &&
+    if (end >= 0 && seek_fn(user, 0x408, SEEK_SET) == 0x408 &&
         !read_exact(user, read_fn, sizes, sizeof(sizes))) {
       uint32_t count0 = read_u32_le(sizes);
       uint32_t count1 = read_u32_le(sizes + 4);
@@ -229,7 +233,7 @@ int pops_vcd_inspect_stream(void *user, PopsVcdReadFn read_fn, PopsVcdSeekFn see
   uint8_t dir_buf[2048];
   for (uint32_t s = 0; s < sectors_to_read && !found; ++s) {
     int64_t dir_offset = (int64_t)image_offset + ((int64_t)root_lba + s) * sector_size + data_offset;
-    if (seek_fn(user, dir_offset, SEEK_SET) < 0)
+    if (seek_fn(user, dir_offset, SEEK_SET) != dir_offset)
       break;
     if (read_exact(user, read_fn, dir_buf, sizeof(dir_buf)))
       break;
@@ -269,7 +273,7 @@ int pops_vcd_inspect_stream(void *user, PopsVcdReadFn read_fn, PopsVcdSeekFn see
 
   /* 4. Read and parse SYSTEM.CNF */
   int64_t sys_offset = (int64_t)image_offset + (int64_t)sys_lba * sector_size + data_offset;
-  if (seek_fn(user, sys_offset, SEEK_SET) < 0)
+  if (seek_fn(user, sys_offset, SEEK_SET) != sys_offset)
     return -EIO;
 
   uint32_t read_len = sys_size > 2048 ? 2048 : sys_size;
