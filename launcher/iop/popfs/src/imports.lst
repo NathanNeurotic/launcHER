@@ -1,5 +1,7 @@
 iomanX_IMPORTS_start
+I_iomanX_GetDeviceList
 I_iomanX_AddDrv
+I_iomanX_DelDrv
 I_iomanX_open
 I_iomanX_close
 I_iomanX_read
