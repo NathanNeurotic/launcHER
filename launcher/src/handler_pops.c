@@ -560,7 +560,9 @@ int pops_load_custom_modules(const char *vcdDir, const char *vmcDir) {
 
   char vcdIrxDir[PATH_MAX] = {0};
   if (vcdDir && vcdDir[0]) {
-    snprintf(vcdIrxDir, sizeof(vcdIrxDir), "%sIRX/", vcdDir);
+    int length = snprintf(vcdIrxDir, sizeof(vcdIrxDir), "%sIRX/", vcdDir);
+    if (length < 0 || (size_t)length >= sizeof(vcdIrxDir))
+      return -ENAMETOOLONG;
     searchDirs[dirCount++] = vcdIrxDir;
   }
 
@@ -572,11 +574,14 @@ int pops_load_custom_modules(const char *vcdDir, const char *vmcDir) {
   /* 1. Load sequential custom modules: MODULE_0.IRX .. MODULE_9.IRX */
   for (int slot = 0; slot <= 9; ++slot) {
     for (int d = 0; d < dirCount; ++d) {
-      snprintf(modPath, sizeof(modPath), "%sMODULE_%d.IRX", searchDirs[d], slot);
+      int length = snprintf(modPath, sizeof(modPath), "%sMODULE_%d.IRX", searchDirs[d], slot);
+      if (length < 0 || (size_t)length >= sizeof(modPath))
+        return -ENAMETOOLONG;
       if (!tryFile(modPath)) {
         DPRINTF("POPS: Loading custom module %s\n", modPath);
         int res = SifLoadModule(modPath, 0, NULL);
-        DPRINTF("POPS: Module %s loaded (res %d)\n", modPath, res);
+        DPRINTF("POPS: Custom module %s start returned %d\n", modPath, res);
+        (void)res;
         break;
       }
     }
@@ -599,11 +604,15 @@ int pops_load_custom_modules(const char *vcdDir, const char *vmcDir) {
 
   for (int p = 0; p < numDrivers; ++p) {
     for (int d = 0; d < dirCount; ++d) {
-      snprintf(modPath, sizeof(modPath), "%s%s", searchDirs[d], peripheralDrivers[p]);
+      int length = snprintf(modPath, sizeof(modPath), "%s%s",
+                            searchDirs[d], peripheralDrivers[p]);
+      if (length < 0 || (size_t)length >= sizeof(modPath))
+        return -ENAMETOOLONG;
       if (!tryFile(modPath)) {
         DPRINTF("POPS: Loading peripheral driver %s\n", modPath);
         int res = SifLoadModule(modPath, 0, NULL);
-        DPRINTF("POPS: Driver %s loaded (res %d)\n", modPath, res);
+        DPRINTF("POPS: Peripheral driver %s start returned %d\n", modPath, res);
+        (void)res;
         break;
       }
     }
