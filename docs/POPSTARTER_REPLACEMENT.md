@@ -1116,3 +1116,32 @@ This change affects only VCD metadata identification. The runtime
 filesystem forwarder still exposes raw backing-file offsets: it does
 **not** adjust Sony IOPCD seeks or claim to emulate the original
 driver's sector-address translation without traced evidence.
+
+### Exact VCD seek positions and backing-offset invariants — 2026-10-11
+
+The metadata inspector previously treated any nonnegative `SEEK_SET`
+return as success, even when the backend had clamped or truncated the
+requested position. This could misidentify a disc or read ISO9660 data
+from a different sector. It now requires equality with each requested
+absolute byte position: the VCD signature, first sector, PVD, Mode 1
+fallback, markerless header probe, TOC sector-count fields, root
+directory, and `SYSTEM.CNF`. An incorrect required seek returns an
+error rather than guessing. When `SEEK_END` succeeds for a VCD
+container, failing to position/read the declared sector-count fields
+now also returns `-EIO`, instead of silently skipping the length
+integrity check.
+
+Host fixtures simulate a backend that reads the *correct bytes* but
+reports a nonmatching seek position, plus a truncated VCD whose TOC
+read would otherwise be skipped after a false-success seek. Both must
+be rejected. The IOP proxy contract additionally pins unmodified
+32-bit and 64-bit forwarding of raw file-byte offsets:
+`0x400` (TOC marker), `0x100000` (start of raw disc sectors), and
+`0x100000 + 16*2352 + 24` (sample ISO9660 PVD byte position).
+These are **validation examples, not a claim that Sony IOPCD issues
+those seeks or that the proxy should translate LBA into file offsets**.
+
+Remaining evidence gate: capture actual selected Sony IOPCD calls
+through `ioman`/`iomanX` and compare the seek/read offsets to
+the *original* POPStarter route. Until measured, mount and sector
+translation behavior must remain unchanged.
