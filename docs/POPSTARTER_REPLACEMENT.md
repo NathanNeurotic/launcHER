@@ -970,3 +970,29 @@ reporting. The launch fails on malformed manifests instead of running
 an unintended module, while optional missing entries and negative
 individual custom IRX start results retain their prior best-effort
 policy. No raw bytes from these files are treated as startup commands.
+
+### Non-APA virtual pfs0: runtime path candidate — 2026-10-11
+
+The verified PS2SDK iomanX variant used in launcHER exposes the original
+IOMAN compatibility hook and a 32-slot driver table. Its array-backed
+`AddDrv` does not check for duplicate names. launcHER now separately
+formats the opt-in `popfs+pfs` mode for **non-APA** POPS launches; it
+rejects direct or nested PFS-backed disc/save paths before VMC creation
+or reboot. The IOP driver examines the entire expected registry and refuses
+to install over any existing `pfs` or `pops` device. On a partial
+registration failure, it only rolls back the `pops` driver it just created.
+The original `popfs` mode continues to register the `pops` namespace alone,
+and true APA mounts keep their original `pfs:` driver.
+
+Before POPS control transfer, the EE live-storage probe now tests
+`pops0:IMAGE.VCD`, both virtual VMC aliases and, only if `popfs+pfs` is
+selected, `pfs0:IMAGE.VCD` and `pfs0:SLOT0/1.VMC`. It opens the disc
+read-only and memory cards read-write without actually altering card data.
+A missing/blocked legacy path therefore aborts visibly rather than
+black-screening after launch.
+
+**Unverified:** real Sony IOPCD mount contract, raw-sector semantics,
+write persistence, whether the historical IOMAN shim is initialized on
+the console, and performance. Do not merge until proven on PS2 hardware.
+REPOP contains the reproducible historical import study:
+https://github.com/NathanNeurotic/REPOP/blob/main/docs/POPSTARTER_PFS_WRAP_EVIDENCE.md
