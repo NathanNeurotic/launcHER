@@ -117,7 +117,13 @@ int pops_vcd_inspect_stream(void *user, PopsVcdReadFn read_fn, PopsVcdSeekFn see
    * both for compatibility and never apply ISO offsets to such images. */
   uint32_t image_offset = 0;
   uint8_t signature[4];
-  if (seek_fn(user, 0x400, SEEK_SET) == 0x400 &&
+  int64_t marker_seek = seek_fn(user, 0x400, SEEK_SET);
+  /* A failed *optional* marker probe can fall back to raw BIN/ISO.
+   * A nonnegative but incorrect seek position is a backend error and
+   * must not quietly reclassify a valid VCD as a bare disc image. */
+  if (marker_seek >= 0 && marker_seek != 0x400)
+    return -EIO;
+  if (marker_seek == 0x400 &&
       !read_exact(user, read_fn, signature, sizeof(signature)) &&
       (!memcmp(signature, "kHn", 3) || !memcmp(signature, "SPOP", 4) ||
        !memcmp(signature, "POPS", 4)))
