@@ -957,3 +957,16 @@ reported is actual successful external IRX starts, *not* proof that the
 requested physical medium is available. The post-reset POPFS disc and VMC
 open checks remain the final storage gate. Host source tests pin the
 one-success-per-role behavior. No BDMA functions were merged into EMBER.
+
+### Strict optional IRX manifest parsing — 2026-10-11
+
+`MODULES.TXT` and `IRX.TXT` previously duplicated a byte-by-byte
+line reader that silently discarded characters after 255 bytes, then
+could start an unrelated driver using the truncated path. Joining
+manifest directories and filenames could also truncate silently. The
+two formats now share a bounded reader with CRLF handling, explicit
+oversized-line rejection, full-path length checks and read/close error
+reporting. The launch fails on malformed manifests instead of running
+an unintended module, while optional missing entries and negative
+individual custom IRX start results retain their prior best-effort
+policy. No raw bytes from these files are treated as startup commands.

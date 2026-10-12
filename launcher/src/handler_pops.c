@@ -485,6 +485,68 @@ int pops_load_smb_stack(const char *vcdDir, const char *vmcDir) {
   return (loadedNetfs || loadedSmbman) ? 0 : -ENOENT;
 }
 
+/* Explicit manifest lines must not be silently shortened into another
+ * IRX filename. Keep absent optional entries nonfatal for compatibility. */
+static int pops_manifest_load_line(char *line, const char *directory) {
+  char path[PATH_MAX];
+  char *name = line;
+  while (*name && isspace((unsigned char)*name)) ++name;
+  char *end = name + strlen(name);
+  while (end > name && isspace((unsigned char)end[-1])) *--end = '\0';
+  if (!*name || *name == '#' || *name == ';')
+    return 0;
+  int length;
+  if (strchr(name, ':') || name[0] == '/' || name[0] == '\\')
+    length = snprintf(path, sizeof(path), "%s", name);
+  else
+    length = snprintf(path, sizeof(path), "%s%s", directory, name);
+  if (length < 0 || (size_t)length >= sizeof(path))
+    return -ENAMETOOLONG;
+  if (!tryFile(path)) {
+    int module = SifLoadModule(path, 0, NULL);
+    if (module < 0)
+      DPRINTF("POPS: Optional manifest IRX %s failed to start (%d)\n", path, module);
+  }
+  return 0;
+}
+
+/* One bounded parser for both MODULES.TXT and IRX.TXT. */
+static int pops_manifest_load_file(const char *path, const char *directory) {
+  int fd = open(path, O_RDONLY);
+  if (fd < 0)
+    return fd;
+  char line[256], ch;
+  size_t used = 0;
+  ssize_t n = 0;
+  int error = 0;
+  while ((n = read(fd, &ch, 1)) == 1) {
+    if (ch == '\r' || ch == '\n') {
+      if (used) {
+        line[used] = '\0';
+        error = pops_manifest_load_line(line, directory);
+        if (error)
+          break;
+        used = 0;
+      }
+    } else {
+      if (used == sizeof(line) - 1) {
+        error = -EOVERFLOW;
+        break;
+      }
+      line[used++] = ch;
+    }
+  }
+  if (!error && n < 0)
+    error = -EIO;
+  if (!error && used) {
+    line[used] = '\0';
+    error = pops_manifest_load_line(line, directory);
+  }
+  if (close(fd) < 0 && !error)
+    error = -EIO;
+  return error;
+}
+
 int pops_load_custom_modules(const char *vcdDir, const char *vmcDir) {
   char modPath[PATH_MAX];
   const char *searchDirs[8];
@@ -547,65 +609,21 @@ int pops_load_custom_modules(const char *vcdDir, const char *vmcDir) {
     }
   }
 
-  /* 3. Load modules from manifest files: MODULES.TXT / IRX.TXT */
-  static const char *manifestNames[] = { "MODULES.TXT", "IRX.TXT" };
+  /* 3. Load optional user manifests in the original directory order. */
+  static const char *manifestNames[] = {"MODULES.TXT", "IRX.TXT"};
   for (int m = 0; m < 2; ++m) {
     for (int d = 0; d < dirCount; ++d) {
-      snprintf(modPath, sizeof(modPath), "%s%s", searchDirs[d], manifestNames[m]);
-      if (!tryFile(modPath)) {
-        DPRINTF("POPS: Reading module manifest %s\n", modPath);
-        int fd = open(modPath, O_RDONLY);
-        if (fd >= 0) {
-          char lineBuf[256];
-          int lineIdx = 0;
-          char ch;
-          while (read(fd, &ch, 1) == 1) {
-            if (ch == '\r' || ch == '\n') {
-              if (lineIdx > 0) {
-                lineBuf[lineIdx] = '\0';
-                char *s = lineBuf;
-                while (*s && isspace((unsigned char)*s))
-                  s++;
-                if (*s && *s != '#' && *s != ';') {
-                  char target[PATH_MAX];
-                  if (strchr(s, ':') || *s == '/' || *s == '\\') {
-                    snprintf(target, sizeof(target), "%s", s);
-                  } else {
-                    snprintf(target, sizeof(target), "%s%s", searchDirs[d], s);
-                  }
-                  if (!tryFile(target)) {
-                    DPRINTF("POPS: Manifest loading %s\n", target);
-                    int res = SifLoadModule(target, 0, NULL);
-                    DPRINTF("POPS: Manifest loaded %s (res %d)\n", target, res);
-                  }
-                }
-                lineIdx = 0;
-              }
-            } else if (lineIdx < (int)sizeof(lineBuf) - 1) {
-              lineBuf[lineIdx++] = ch;
-            }
-          }
-          if (lineIdx > 0) {
-            lineBuf[lineIdx] = '\0';
-            char *s = lineBuf;
-            while (*s && isspace((unsigned char)*s))
-              s++;
-            if (*s && *s != '#' && *s != ';') {
-              char target[PATH_MAX];
-              if (strchr(s, ':') || *s == '/' || *s == '\\') {
-                snprintf(target, sizeof(target), "%s", s);
-              } else {
-                snprintf(target, sizeof(target), "%s%s", searchDirs[d], s);
-              }
-              if (!tryFile(target)) {
-                DPRINTF("POPS: Manifest loading %s\n", target);
-                int res = SifLoadModule(target, 0, NULL);
-                DPRINTF("POPS: Manifest loaded %s (res %d)\n", target, res);
-              }
-            }
-          }
-          close(fd);
-        }
+      int length = snprintf(modPath, sizeof(modPath), "%s%s",
+                            searchDirs[d], manifestNames[m]);
+      if (length < 0 || (size_t)length >= sizeof(modPath))
+        return -ENAMETOOLONG;
+      if (tryFile(modPath))
+        continue;
+      int status = pops_manifest_load_file(modPath, searchDirs[d]);
+      if (status) {
+        msg("POPS: Invalid or unreadable module manifest %s (%d)\n",
+            modPath, status);
+        return status;
       }
     }
   }
@@ -1212,8 +1230,13 @@ int launchPOPS(int argc, char *argv[]) {
     }
   }
 
-  /* Load user-supplied custom IRX modules and peripheral drivers */
-  pops_load_custom_modules(vcdDir, vmcDir);
+  /* Stop on malformed manifests rather than accidentally executing an
+   * unrelated IRX selected by a silently truncated filename. */
+  res = pops_load_custom_modules(vcdDir, vmcDir);
+  if (res) {
+    msg("POPS: Optional IRX manifest/path handling failed: %d\n", res);
+    return res;
+  }
 
   /* Apply USB delay if configured */
   if (cfg.usb_delay > 0) {

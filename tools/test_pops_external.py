@@ -833,6 +833,22 @@ class InspectorTests(unittest.TestCase):
         self.assertLess(expr.index("pops_get_active_xx_launch()"),
                         expr.index("pops_has_external_usb_modules()"))
 
+    def test_manifest_reader_never_executes_truncated_paths(self):
+        source = (ROOT / "launcher/src/handler_pops.c").read_text()
+        reader = source[source.index("static int pops_manifest_load_file("):
+                        source.index("int pops_load_custom_modules(", source.index(
+                            "static int pops_manifest_load_file("))]
+        self.assertIn("used == sizeof(line) - 1", reader)
+        self.assertIn("error = -EOVERFLOW;", reader)
+        self.assertIn("pops_manifest_load_line(line, directory)", reader)
+        self.assertIn("return -ENAMETOOLONG;", source[source.index(
+            "static int pops_manifest_load_line("):source.index(
+            "static int pops_manifest_load_file(")])
+        call = source.index("res = pops_load_custom_modules(vcdDir, vmcDir);")
+        self.assertIn("return res;", source[call:call+260])
+        self.assertNotIn("else if (lineIdx <", source)
+        self.assertNotIn("snprintf(target, sizeof(target)", source)
+
     def test_external_bdma_alternatives_start_once_per_role(self):
         source = (ROOT / "launcher/src/handler_pops.c").read_text()
         first = source.index("static int pops_load_bdma_group(")
