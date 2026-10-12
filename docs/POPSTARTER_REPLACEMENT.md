@@ -1038,3 +1038,17 @@ without writing to the target.
 Matching two 16-byte regions is still not a full-file hash, not
 proof of Sony IOPCD sector addressing and not a replacement for
 hardware tracing. This is an early alias sanity check.
+
+### Read-only Sony IOPCD flag compatibility — October 11, 2026
+
+The POPFS disc bridge previously rejected every `open` flag value except
+exact `FIO_O_RDONLY=1`. PS2SDK's I/O definitions permit read-only opens
+qualified with `FIO_O_NBLOCK=0x10` or `FIO_O_NOWAIT=0x8000`. Such
+opens are not writable and should not be rejected merely because an
+asynchronous bit is present. Disc opens now accept *only* those qualifiers
+alongside the required read access, while rejecting write, create, append,
+truncate, exclusive, and unknown flags. The backend receives the original
+flags. Virtual disc `getstat` also masks all write-permission bits even
+when its underlying VCD file is writable on the host device. The host
+driver fixture verifies permitted and forbidden flags and read-only stat
+reporting. Sony's precise flag patterns still require on-console tracing.

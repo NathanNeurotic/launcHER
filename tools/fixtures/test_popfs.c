@@ -141,6 +141,27 @@ int main(void) {
   assert(!ops->deinit(registered) && ops->close(&file) == -EBADF);
   close_result = 0;
 
+  const int forbidden_flags[] = {FIO_O_WRONLY, FIO_O_RDWR,
+      FIO_O_RDONLY | FIO_O_CREAT, FIO_O_RDONLY | FIO_O_TRUNC,
+      FIO_O_RDONLY | FIO_O_APPEND, FIO_O_RDONLY | FIO_O_EXCL,
+      FIO_O_RDONLY | FIO_O_NBLOCK | FIO_O_TRUNC, 0};
+  /* A legitimate Sony IOPCD read-only request can carry nonblocking
+   * qualifiers; never allow write, create, truncate or append flags. */
+  next_open = 52;
+  assert(!ops->open(&file, "IMAGE.VCD", FIO_O_RDONLY | FIO_O_NBLOCK, 0));
+  assert(open_flags == (FIO_O_RDONLY | FIO_O_NBLOCK));
+  assert(!ops->close(&file));
+  next_open = 53;
+  assert(!ops->open(&file, "IMAGE0.VCD", FIO_O_RDONLY | FIO_O_NOWAIT, 0));
+  assert(open_flags == (FIO_O_RDONLY | FIO_O_NOWAIT));
+  assert(!ops->close(&file));
+  calls = 0;
+  for (size_t i = 0; i < sizeof(forbidden_flags)/sizeof(forbidden_flags[0]); ++i)
+    assert(ops->open(&file, "IMAGE.VCD", forbidden_flags[i], 0) == -EROFS);
+  assert(calls == 0);
+  assert(!ops->getstat(&file, "IMAGE.VCD", &stat));
+  assert((stat.mode & (FIO_S_IWUSR | FIO_S_IWGRP | FIO_S_IWOTH)) == 0);
+
   /* The EE trampoline passes pops0:IMAGE.VCD, not /disc/disc0.
    * Legacy partition files use IMAGE0.VCD. Both share the same immutable
    * backend and obey the same active-disc switch semantics. */

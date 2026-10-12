@@ -120,6 +120,15 @@ static int bridge_deinit(iomanX_iop_device_t *device) {
   return busy ? -EBUSY : 0;
 }
 
+/* A read-only Sony CD file may be opened with asynchronous/nonblocking
+ * qualifiers. These do not grant write access; create/truncate/append and
+ * any unexpected flag remain forbidden for disc-backed descriptors. */
+static int disc_read_only_flags(int flags) {
+  const int permitted = FIO_O_RDONLY | FIO_O_NBLOCK | FIO_O_NOWAIT;
+  return (flags & (FIO_O_RDONLY | FIO_O_WRONLY)) == FIO_O_RDONLY &&
+         (flags & ~permitted) == 0;
+}
+
 static int bridge_open(iomanX_iop_file_t *file, const char *name, int flags, int mode) {
   char backing[PATH_LIMIT];
   int index, fd, state, error = 0;
@@ -133,7 +142,7 @@ static int bridge_open(iomanX_iop_file_t *file, const char *name, int flags, int
   index = resolve(name, backing);
   if (index < 0)
     error = index == -1 ? -EISDIR : index;
-  else if (index < DISC_COUNT && flags != FIO_O_RDONLY)
+  else if (index < DISC_COUNT && !disc_read_only_flags(flags))
     error = -EROFS;
   else if (index < DISC_COUNT && lid_open)
     error = -ENODEV;
@@ -209,7 +218,11 @@ static int bridge_stat(iomanX_iop_file_t *file, const char *name, iox_stat_t *st
     stat->mode = FIO_S_IFDIR | FIO_S_IRUSR | FIO_S_IWUSR | FIO_S_IXUSR;
     return 0;
   }
-  return index < 0 ? index : iomanX_getstat(backing, stat);
+  if (index < 0) return index;
+  int status = iomanX_getstat(backing, stat);
+  if (!status && index < DISC_COUNT)
+    stat->mode &= ~(FIO_S_IWUSR | FIO_S_IWGRP | FIO_S_IWOTH);
+  return status;
 }
 static int bridge_mkdir(iomanX_iop_file_t *file, const char *name, int mode) {
   char backing[PATH_LIMIT];
