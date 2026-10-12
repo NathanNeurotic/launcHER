@@ -14,10 +14,30 @@ static int sync_calls;
 static s64 seek_offset;
 static char observed[256], destination[256];
 static iomanX_iop_device_t *registered;
+static iomanX_iop_device_t *registered_drivers[32];
+static int fail_alias_add;
 
 int CpuSuspendIntr(int *state) { *state = critical; critical = 1; return 0; }
 int CpuResumeIntr(int state) { critical = state; return 0; }
-int iomanX_AddDrv(iomanX_iop_device_t *driver) { registered = driver; return 0; }
+iomanX_iop_device_t **iomanX_GetDeviceList(void) { return registered_drivers; }
+int iomanX_AddDrv(iomanX_iop_device_t *driver) {
+  if (fail_alias_add && !strcmp(driver->name, "pfs")) return -1;
+  for (int i = 0; i < 32; ++i)
+    if (!registered_drivers[i]) {
+      registered_drivers[i] = driver;
+      registered = driver;
+      return 0;
+    }
+  return -1;
+}
+int iomanX_DelDrv(const char *name) {
+  for (int i = 0; i < 32; ++i)
+    if (registered_drivers[i] && !strcmp(registered_drivers[i]->name, name)) {
+      registered_drivers[i] = NULL;
+      return 0;
+    }
+  return -1;
+}
 int iomanX_open(const char *path, int flags, ...) {
   va_list args;
   assert(!critical);
@@ -229,7 +249,37 @@ int main(void) {
   assert(subq[3] == 0 && subq[4] == 1 && subq[5] == 0);
   assert(subq[7] == 0 && subq[8] == 3 && subq[9] == 0);
 
-  assert(!ops->deinit(registered));
+  assert(!ops->deinit(&device));
+
+  /* A real PFS driver can sit past the first 16 legacy IOMAN slots.
+   * The optional alias must not overwrite it. */
+  char *alias_args[] = {"popfs+pfs", "mass7:/POPS/Game.VCD",
+                         "udpfs:/saves/Card0.VMC", "mmce1:/POPS/Game/Card1.VMC"};
+  assert(!iomanX_DelDrv("pops"));
+  iomanX_iop_device_t real_pfs = {"pfs", IOP_DT_FS, 1, "genuine PFS", &operations};
+  registered_drivers[24] = &real_pfs;
+  assert(popfs_start(4, alias_args) == MODULE_NO_RESIDENT_END);
+  assert(registered_drivers[24] == &real_pfs);
+  registered_drivers[24] = NULL;
+
+  /* Recursive PFS-backed paths are never accepted in virtual mode. */
+  alias_args[1] = "hdd0:__common:pfs:/Game.VCD";
+  assert(popfs_start(4, alias_args) == MODULE_NO_RESIDENT_END);
+  alias_args[1] = "PFS0:/Game.VCD";
+  assert(popfs_start(4, alias_args) == MODULE_NO_RESIDENT_END);
+  alias_args[1] = "mass7:/POPS/Game.VCD";
+
+  fail_alias_add = 1;
+  assert(popfs_start(4, alias_args) == MODULE_NO_RESIDENT_END);
+  assert(!registered_drivers[0]); /* rolls back our pops registration */
+  fail_alias_add = 0;
+  assert(popfs_start(4, alias_args) == MODULE_RESIDENT_END);
+  assert(registered_drivers[0] == &device);
+  assert(registered_drivers[1] == &virtual_pfs);
+  assert(!virtual_pfs.ops->open(&file, "IMAGE.VCD", FIO_O_RDONLY, 0));
+  assert(!virtual_pfs.ops->close(&file));
+  assert(!iomanX_DelDrv("pfs"));
+  assert(!iomanX_DelDrv("pops"));
   puts("POPFS production-driver contract PASS: paths, multi-disc, save backups, descriptor zero,");
   puts("short I/O, device errors, readonly discs, 64-bit seeks, devctl tray/disc, LibCrypt SubQ, and active-handle lifetime");
   return 0;
