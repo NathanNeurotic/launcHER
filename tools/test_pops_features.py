@@ -344,6 +344,32 @@ class FeatureTests(unittest.TestCase):
             self.assertEqual(LIB.pops_vcd_inspect_stream(
                 c.c_void_p(1), read_lied_seek, seek_lied_position, c.byref(info)), -5)
 
+        # Even an *optional* signature probe cannot treat an incorrect
+        # nonnegative SEEK_SET result as "marker absent" and then classify
+        # different bytes as a bare disc image.
+        memory_data = bare_disc
+        cursor = [0]
+
+        @self.Reader
+        def read_marker_lie(user, dst, amount):
+            n = min(int(amount), 13, len(memory_data) - cursor[0])
+            if n > 0:
+                c.memmove(dst, memory_data[cursor[0]:cursor[0] + n], n)
+                cursor[0] += n
+            return n
+
+        @self.Seeker
+        def seek_marker_lie(user, offset, whence):
+            dest = offset if whence == 0 else cursor[0] + offset
+            if dest < 0:
+                return -1
+            cursor[0] = dest
+            return 0x3ff if whence == 0 and dest == 0x400 else dest
+
+        info = PopsVcdInfo()
+        self.assertEqual(LIB.pops_vcd_inspect_stream(
+            c.c_void_p(1), read_marker_lie, seek_marker_lie, c.byref(info)), -5)
+
         # The recognized container declares 20 sectors, but only 19 exist.
         # A backend that falsely reports success at 0x408 must not cause the
         # inspector to *skip* the sector-count integrity check.
