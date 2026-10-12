@@ -203,3 +203,56 @@ int pops_iop_image_probe_io_imports(const void *file, size_t size,
   *imports = mask;
   return POPS_FILE_OK;
 }
+
+/* Read-only IRX import stub inventory. A real stub pair is
+ * jr ra (0x03e00008), addiu zero, zero, ordinal (0x240000NN).
+ * Every reported bit comes from a complete descriptor and aligned pair
+ * inside the selected validated ROMDIR module, not its neighbors. */
+int pops_iop_image_probe_io_ordinals(const void *file, size_t size,
+                                     const char *module, uint64_t *legacy,
+                                     uint64_t *extended) {
+  static const uint8_t iom[8] = {'i','o','m','a','n',0,0,0};
+  static const uint8_t iox[8] = {'i','o','m','a','n','x',0,0};
+  static const uint8_t iox_caps[8] = {'i','o','m','a','n','X',0,0};
+  size_t offset = 0, module_size = 0;
+  uint64_t legacy_bits = 0, extended_bits = 0;
+  int status;
+  if (!file || !module || !legacy || !extended)
+    return POPS_FILE_INVALID;
+  status = pops_iop_image_find_module(file, size, module,
+                                      &offset, &module_size);
+  if (status)
+    return status;
+  if (offset > size || module_size > size - offset)
+    return POPS_FILE_RANGE;
+  const uint8_t *bytes = (const uint8_t *)file + offset;
+  if (module_size >= 20) {
+    for (size_t pos = 0; pos <= module_size - 20; pos += 4) {
+      if (read32(bytes + pos) != UINT32_C(0x41e00000))
+        continue;
+      const uint8_t *name = bytes + pos + 12;
+      int target = !memcmp(name, iom, sizeof(iom)) ? 1 :
+        (!memcmp(name, iox, sizeof(iox)) ||
+         !memcmp(name, iox_caps, sizeof(iox_caps))) ? 2 : 0;
+      if (!target)
+        continue;
+      for (size_t stub = pos + 20; stub + 8 <= module_size; stub += 8) {
+        uint32_t jump = read32(bytes + stub);
+        uint32_t opcode = read32(bytes + stub + 4);
+        if (jump != UINT32_C(0x03e00008) ||
+            (opcode & UINT32_C(0xffff0000)) != UINT32_C(0x24000000))
+          break;
+        uint32_t ordinal = opcode & 0xffff;
+        if (ordinal < 64) {
+          if (target == 1)
+            legacy_bits |= UINT64_C(1) << ordinal;
+          else
+            extended_bits |= UINT64_C(1) << ordinal;
+        }
+      }
+    }
+  }
+  *legacy = legacy_bits;
+  *extended = extended_bits;
+  return POPS_FILE_OK;
+}
