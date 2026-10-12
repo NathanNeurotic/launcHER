@@ -190,6 +190,19 @@ int main(void) {
   assert(!ops->open(&file, "/IMAGE0.VCD", 1, 0));
   assert(!strcmp(observed, arguments[1]));
   assert(!ops->close(&file));
+  /* Direct secondary image names from partition-installed multi-disc
+   * layouts must map only to the configured backing slot, not active disc.
+   * The legacy IMAGE0.VCD active-disc alias remains unchanged. */
+  next_open = 81;
+  assert(!ops->open(&file, "IMAGE1.VCD", FIO_O_RDONLY, 0));
+  assert(!strcmp(observed, arguments[4]));
+  assert(!ops->close(&file));
+  assert(!ops->getstat(&file, "/IMAGE1.VCD", &stat));
+  assert(!strcmp(observed, arguments[4]));
+  assert(ops->open(&file, "IMAGE1.VCD", FIO_O_RDWR, 0) == -EROFS);
+  assert(ops->remove(&file, "IMAGE1.VCD") == -EROFS);
+  assert(ops->open(&file, "IMAGE2.VCD", FIO_O_RDONLY, 0) == -ENOENT);
+  assert(ops->open(&file, "IMAGE1.VCD.bak", FIO_O_RDONLY, 0) == -ENOENT);
   assert(!ops->getstat(&file, "IMAGE.VCD", &stat));
   assert(!strcmp(observed, arguments[1]));
   assert(ops->remove(&file, "IMAGE.VCD") == -EROFS);
