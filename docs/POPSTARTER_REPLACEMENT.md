@@ -1052,3 +1052,26 @@ flags. Virtual disc `getstat` also masks all write-permission bits even
 when its underlying VCD file is writable on the host device. The host
 driver fixture verifies permitted and forbidden flags and read-only stat
 reporting. Sony's precise flag patterns still require on-console tracing.
+
+### Selected IOPCD import-ordinal diagnostics — 2026-10-11
+
+REPOP's archived PFS wrapper now has a reproducible IRX import-ordinal
+inventory, beyond earlier free-standing `ioman` name strings:
+https://github.com/NathanNeurotic/REPOP/blob/main/docs/POPSTARTER_PFS_WRAP_EVIDENCE.md
+
+launcHER now identifies actual import *declarations* of the standalone
+`IOPCD` module within the selected, ROMDIR-validated Sony IOPRP. It
+walks aligned IRX import headers (`0x41e00000`), then only contiguous
+MIPS `jr ra` / `0x240000NN` import-stub pairs, producing separate
+64-bit masks for `ioman` and `iomanX`. Both masks are reported
+in debug logs before the external reboot. The parser refuses to read
+across a module's bounded ROMDIR extent, does not change imported files,
+and preserves caller output values on malformed or absent modules.
+Host tests cover both import libraries, missing modules, and truncated
+images.
+
+This may indicate whether an identified Sony IOPCD declares filesystem
+directory, mount, or stat APIs, narrowing the replacement's compatibility
+scope. **An imported function need never be called at runtime**; its
+presence is not proof of the full IOPCD/PFS forwarding ABI or a reason
+to override real APA/PFS.
