@@ -12,6 +12,7 @@ static int calls, next_open, close_result, io_result = 7;
 static int io_fd, io_size, open_flags, open_mode, operation, critical;
 static int sync_calls;
 static s64 seek_offset;
+static int seek_whence;
 static char observed[256], destination[256];
 static iomanX_iop_device_t *registered;
 static iomanX_iop_device_t *registered_drivers[32];
@@ -55,10 +56,10 @@ int iomanX_write(int fd, void *buffer, int size) {
   (void)buffer; io_fd = fd; io_size = size; operation = 2; return io_result;
 }
 int iomanX_lseek(int fd, int offset, int whence) {
-  (void)whence; io_fd = fd; seek_offset = offset; return offset;
+  io_fd = fd; seek_offset = offset; seek_whence = whence; return offset;
 }
 s64 iomanX_lseek64(int fd, s64 offset, int whence) {
-  (void)whence; io_fd = fd; seek_offset = offset; return offset;
+  io_fd = fd; seek_offset = offset; seek_whence = whence; return offset;
 }
 int iomanX_ioctl(int fd, int cmd, void *arg) { (void)cmd; (void)arg; io_fd = fd; return io_result; }
 int iomanX_ioctl2(int fd, int cmd, void *arg, unsigned len, void *out, unsigned outlen) {
@@ -139,8 +140,18 @@ int main(void) {
   assert(ops->read(&file, data, 32) == 7 && io_fd == 0 && io_size == 32 && data[6] == 0x5a);
   operation = 0;
   assert(ops->write(&file, data, 32) == -EROFS && operation == 0);
-  assert(ops->lseek64(&file, INT64_C(0x100000123), 0) == INT64_C(0x100000123));
-  assert(seek_offset == INT64_C(0x100000123));
+  /* VCD raw offsets must be forwarded byte-for-byte. The 1 MiB TOC,
+   * 2352-byte sectors, and ISO9660 payload offset are accounted for by
+   * the producer/caller; translating them here would double-offset discs.
+   * This asserts the proxy's behavior, not Sony IOPCD's live request ABI. */
+  const int raw_vcd_offsets[] = {0x400, 0x100000, 0x100000 + 16 * 2352 + 24};
+  for (size_t i = 0; i < sizeof(raw_vcd_offsets) / sizeof(raw_vcd_offsets[0]); ++i) {
+    int requested_offset = raw_vcd_offsets[i];
+    assert(ops->lseek(&file, requested_offset, SEEK_SET) == requested_offset);
+    assert(seek_offset == requested_offset && seek_whence == SEEK_SET && io_fd == 0);
+  }
+  assert(ops->lseek64(&file, INT64_C(0x100000123), SEEK_SET) == INT64_C(0x100000123));
+  assert(seek_offset == INT64_C(0x100000123) && seek_whence == SEEK_SET);
   close_result = -EIO;
   assert(ops->close(&file) == -EIO && io_fd == 0);
   assert(!ops->deinit(registered) && ops->close(&file) == -EBADF);
