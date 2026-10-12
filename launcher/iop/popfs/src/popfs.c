@@ -134,6 +134,10 @@ static int bridge_open(iomanX_iop_file_t *file, const char *name, int flags, int
   int index, fd, state, error = 0;
   if (file->unit < 0 || file->unit > 1)
     return -ENODEV;
+  /* Reopening the same IOMANX file object would orphan the first backing
+   * descriptor and permanently pin the active-disc count. */
+  if (file->privdata)
+    return -EBUSY;
   /* Resolve the disc0 alias and reserve the handle in the same critical
    * section. Otherwise a concurrent SWAP_DISC could retarget the alias
    * between resolution and reservation, leaving the old image open while
@@ -302,7 +306,9 @@ static int bridge_devctl(iomanX_iop_file_t *file, const char *devname, int cmd,
   switch (cmd) {
     case POPS_DEVCTL_SWAP_DISC:
       if (arg && arglen >= sizeof(int)) {
-        int state, busy, disc = *(int *)arg;
+        int state, busy, disc;
+        /* Devctl buffers need not be naturally aligned on MIPS. */
+        memcpy(&disc, arg, sizeof(disc));
         if (disc < 0 || disc >= DISC_COUNT || !paths[disc][0])
           return -EINVAL;
         CpuSuspendIntr(&state);
@@ -315,7 +321,11 @@ static int bridge_devctl(iomanX_iop_file_t *file, const char *devname, int cmd,
       return -EINVAL;
     case POPS_DEVCTL_GET_DISC:
       if (buf && buflen >= sizeof(int)) {
-        *(int *)buf = active_disc;
+        int state, disc;
+        CpuSuspendIntr(&state);
+        disc = active_disc;
+        CpuResumeIntr(state);
+        memcpy(buf, &disc, sizeof(disc));
         return 0;
       }
       return -EINVAL;
@@ -327,13 +337,19 @@ static int bridge_devctl(iomanX_iop_file_t *file, const char *devname, int cmd,
       return 0;
     case POPS_DEVCTL_GET_LID:
       if (buf && buflen >= sizeof(int)) {
-        *(int *)buf = lid_open;
+        int state, lid;
+        CpuSuspendIntr(&state);
+        lid = lid_open;
+        CpuResumeIntr(state);
+        memcpy(buf, &lid, sizeof(lid));
         return 0;
       }
       return -EINVAL;
     case POPS_DEVCTL_SET_LIBCRYPT:
       if (arg && arglen >= sizeof(uint16_t)) {
-        active_libcrypt_key = *(uint16_t *)arg;
+        uint16_t key;
+        memcpy(&key, arg, sizeof(key));
+        active_libcrypt_key = key;
         return 0;
       }
       return -EINVAL;
@@ -358,8 +374,15 @@ static int bridge_devctl(iomanX_iop_file_t *file, const char *devname, int cmd,
       if (arg && arglen < sizeof(uint32_t))
         return -EINVAL;
       if (buf && buflen >= 12) {
-        uint32_t lba = arg ? *(uint32_t *)arg : 0;
+        uint32_t lba = 0;
         uint8_t *out_subq = (uint8_t *)buf;
+        if (arg)
+          memcpy(&lba, arg, sizeof(lba));
+        /* Both Q time fields are two-digit BCD minutes. Reject positions
+         * past absolute 99:59:74 instead of wrapping LBA+150 or emitting
+         * corrupted track time and CRC. Never modify output on failure. */
+        if (lba > UINT32_C(449849))
+          return -ERANGE;
         memset(out_subq, 0, 12);
         out_subq[0] = 0x41; /* Track 1, Mode 1 data */
         out_subq[1] = 0x01;
