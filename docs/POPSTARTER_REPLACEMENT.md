@@ -1075,3 +1075,28 @@ directory, mount, or stat APIs, narrowing the replacement's compatibility
 scope. **An imported function need never be called at runtime**; its
 presence is not proof of the full IOPCD/PFS forwarding ABI or a reason
 to override real APA/PFS.
+
+### POPFS descriptor lifetime and SubQ range hardening — 2026-10-11
+
+The filesystem forwarder now rejects a second `open` on an IOMANX file
+object that already owns a backing descriptor (`-EBUSY`). This avoids
+orphaning the original file descriptor and permanently pinning the
+active-disc handle count. Its underlying read, write, and seek behavior
+is unchanged; this is a lifetime-safety guard, not a Sony IOPCD ABI claim.
+
+The proxy's private devctl arguments and results for disc selection,
+lid state, LibCrypt keys and SubQ sector requests are copied using
+`memcpy`, rather than dereferencing possibly unaligned 16- or 32-bit
+pointers on MIPS. Synthetic single-data-track SubQ is now restricted
+to LBA `0..449849`, corresponding to the largest two-digit absolute
+BCD MSF of `99:59:74` after the 150-frame lead-in. Invalid positions
+return `-ERANGE` without touching the caller's output, instead of
+overflowing or wrapping timestamp fields.
+
+The host production-driver fixture covers occupied-handle protection,
+unaligned commands and results, the upper representable SubQ frame,
+and unchanged output on an invalid LBA. **This does not establish the
+real selected Sony IOPCD call sequence, actual disc TOC and audio-track
+SubQ behavior, PFS mount semantics, or correct VCD sector offsets.**
+Do not shift raw VCD offsets, add speculative mount emulation, or
+advertise POPStarter boot parity based on these defensive changes.
