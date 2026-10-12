@@ -244,6 +244,10 @@ int main(void) {
   assert(!ops->open(&file, "IMAGE.VCD", 1, 0));
   assert(!strcmp(observed, arguments[4]));
   assert(!ops->close(&file));
+  next_open = 20;
+  assert(!ops->open(&file, "IMAGE0.VCD", 1, 0));
+  assert(!strcmp(observed, arguments[4])); /* existing dynamic alias */
+  assert(!ops->close(&file));
   requested = 0;
   assert(!ops->devctl(&file, "pops:", 0x01, &requested, sizeof(requested), NULL, 0));
   assert(!ops->sync(&file, "pops1:", 0) && sync_calls == 4);
