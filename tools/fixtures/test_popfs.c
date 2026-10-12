@@ -123,6 +123,11 @@ int main(void) {
   next_open = 0; /* Descriptor zero must be represented and closed correctly. */
   assert(!ops->open(&file, "/disc/disc0", 1, 0644));
   assert(!strcmp(observed, arguments[1]) && open_flags == 1 && open_mode == 0644);
+  /* Reopening an occupied file object must not lose descriptor zero or
+   * increment the handle reservation counter. */
+  calls = 0;
+  assert(ops->open(&file, "IMAGE.VCD", FIO_O_RDONLY, 0) == -EBUSY);
+  assert(calls == 0);
   assert(ops->deinit(registered) == -EBUSY);
   /* A still-open disc handle cannot be retargeted by swapping the alias.
    * Card descriptors may remain open during a disc change. */
@@ -249,10 +254,28 @@ int main(void) {
   assert(!ops->devctl(&file, "pops:", 0x02 /* GET_DISC */, NULL, 0, &query_disc, sizeof(query_disc)) && query_disc == 1);
   assert(!ops->devctl(&file, "pops:", 0x04 /* CLOSE_LID */, NULL, 0, NULL, 0));
   assert(!ops->devctl(&file, "pops:", 0x08 /* GET_LID */, NULL, 0, &query_lid, sizeof(query_lid)) && query_lid == 0);
+  /* MIPS must not dereference potentially unaligned devctl argument/output
+   * pointers as uint32_t or int pointers. Check both routes explicitly. */
+  unsigned char unaligned_disc[sizeof(int) + 2] = {0};
+  unsigned char unaligned_result[sizeof(int) + 2] = {0};
+  memcpy(unaligned_disc + 1, &disc, sizeof(disc));
+  assert(!ops->devctl(&file, "pops:", 0x01, unaligned_disc + 1,
+                      sizeof(disc), NULL, 0));
+  assert(!ops->devctl(&file, "pops:", 0x02, NULL, 0,
+                      unaligned_result + 1, sizeof(int)));
+  memcpy(&query_disc, unaligned_result + 1, sizeof(query_disc));
+  assert(query_disc == disc);
+  assert(!ops->devctl(&file, "pops:", 0x08, NULL, 0,
+                      unaligned_result + 1, sizeof(int)));
+  memcpy(&query_lid, unaligned_result + 1, sizeof(query_lid));
+  assert(query_lid == 0);
 
   /* Devctl LibCrypt and Subchannel Q */
   uint16_t key = 0x7C23; /* Resident Evil 3 key */
-  assert(!ops->devctl(&file, "pops:", 0x05 /* SET_LIBCRYPT */, &key, sizeof(key), NULL, 0));
+  unsigned char unaligned_key[sizeof(key) + 2] = {0};
+  memcpy(unaligned_key + 1, &key, sizeof(key));
+  assert(!ops->devctl(&file, "pops:", 0x05 /* SET_LIBCRYPT */,
+                      unaligned_key + 1, sizeof(key), NULL, 0));
   uint32_t lba = 15;
   uint8_t subq[12] = {0};
   assert(ops->devctl(&file, "pops:", 0x06 /* GET_SUBQ */, &lba, 1, subq, sizeof(subq)) == -EINVAL);
@@ -269,10 +292,27 @@ int main(void) {
       0x41, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x28, 0x32
   };
   assert(!memcmp(subq, expected_q, sizeof(subq)));
+  unsigned char unaligned_lba[sizeof(lba) + 2] = {0};
   lba = 75;
-  assert(!ops->devctl(&file, "pops:", 0x06, &lba, sizeof(lba), subq, sizeof(subq)));
+  memcpy(unaligned_lba + 1, &lba, sizeof(lba));
+  assert(!ops->devctl(&file, "pops:", 0x06, unaligned_lba + 1,
+                      sizeof(lba), subq, sizeof(subq)));
   assert(subq[3] == 0 && subq[4] == 1 && subq[5] == 0);
   assert(subq[7] == 0 && subq[8] == 3 && subq[9] == 0);
+  /* Highest representable Q absolute time: 99:59:74. Invalid LBA must
+   * neither overflow the lead-in addition nor mutate caller output. */
+  lba = 449849;
+  memcpy(unaligned_lba + 1, &lba, sizeof(lba));
+  assert(!ops->devctl(&file, "pops:", 0x06, unaligned_lba + 1,
+                      sizeof(lba), subq, sizeof(subq)));
+  assert(subq[7] == 0x99 && subq[8] == 0x59 && subq[9] == 0x74);
+  lba = UINT32_MAX;
+  memcpy(unaligned_lba + 1, &lba, sizeof(lba));
+  memset(subq, 0xa5, sizeof(subq));
+  assert(ops->devctl(&file, "pops:", 0x06, unaligned_lba + 1,
+                     sizeof(lba), subq, sizeof(subq)) == -ERANGE);
+  for (size_t i = 0; i < sizeof(subq); ++i)
+    assert(subq[i] == 0xa5);
 
   assert(!ops->deinit(&device));
 
