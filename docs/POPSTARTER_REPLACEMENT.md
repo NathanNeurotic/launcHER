@@ -871,3 +871,26 @@ images, and unchanged outputs on failure.
 This prepares accurate console diagnostics for the remaining Sony
 IOPCD/legacy IOMAN question. Neither an unsafe duplicate `pfs` driver
 nor a speculative import override was installed.
+
+### Structured IOP import-table evidence — 2026-10-11
+
+PS2SDK's `iop/kernel/include/irx.h` defines a packed IRX import table:
+32-bit magic `0x41e00000`, a linked-list pointer, version/mode words
+and an eight-byte library name. The archived REPOP `PFS_WRAP.BIN` places
+`ioman` in this exact pattern (the preceding magic is at `0x4d0`).
+These bytes are stronger evidence of a legacy import than a free-standing
+ASCII `ioman` string.
+
+A second read-only ROMDIR module probe now scans complete, aligned import
+table headers, reporting the exact `ioman` and `iomanX` library imports
+inside `IOPCD` when it is present in the user's verified IOPRP. Its
+output is a bitmask, left untouched on errors. Host fixtures cover import
+headers, names without valid headers, absent modules and truncated images.
+The diagnostic logs both source-string hints and structured import-table
+flags, explicitly distinguishing evidence from executed calls.
+
+No Sony dependencies or PFS wrapper binaries are added to Git, and
+nothing changes the registered IOMAN/IOMANX device set. The next
+implementation must still prove how the selected Sony IOPCD is loaded
+and whether its legacy `pfs0:` file operations are passed through the
+IOP file-manager compatibility shim.

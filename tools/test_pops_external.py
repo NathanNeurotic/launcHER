@@ -351,6 +351,46 @@ class InspectorTests(unittest.TestCase):
             image2, len(image2), b"IOPCD", c.byref(flags)), 0)
         self.assertEqual(flags.value, 0x02)
 
+    def test_iopcd_import_probe_requires_packed_import_magic(self):
+        LIB.pops_iop_image_probe_io_imports.argtypes = [
+            c.c_void_p, c.c_size_t, c.c_char_p, c.POINTER(c.c_uint32)]
+        LIB.pops_iop_image_probe_io_imports.restype = c.c_int
+        def entry(name, ext, size):
+            return struct.pack("<10sHI", name, ext, size)
+        # This is the exact ps2sdk IRX import-table layout; a textual
+        # 'iomanx' elsewhere in the module cannot fake an actual import.
+        legacy = struct.pack("<IIHH8s", 0x41e00000, 0, 0x0101, 0,
+                             b"ioman")
+        ext = struct.pack("<IIHH8s", 0x41e00000, 0, 0x0101, 0,
+                          b"iomanx")
+        payload = (b"iomanx\0unrelated\0\0" + legacy +
+                   b"\0"*4 + ext + b"\0"*8)
+        directory = (entry(b"RESET", 4, 0) + entry(b"ROMDIR", 0, 80) +
+                     entry(b"EXTINFO", 0, 4) + entry(b"IOPCD", 0, len(payload)) +
+                     b"\0"*16)
+        image = directory + b"\0"*16 + payload
+        mask = c.c_uint32(0xDEADBEEF)
+        self.assertEqual(LIB.pops_iop_image_probe_io_imports(
+            image, len(image), b"IOPCD", c.byref(mask)), 0)
+        self.assertEqual(mask.value, 3)
+        self.assertEqual(LIB.pops_iop_image_probe_io_imports(
+            image, len(image), b"NOT_FOUND", c.byref(mask)), UNSUPPORTED)
+        self.assertEqual(mask.value, 3)
+        self.assertNotEqual(LIB.pops_iop_image_probe_io_imports(
+            image[:-1], len(image)-1, b"IOPCD", c.byref(mask)), 0)
+        self.assertEqual(mask.value, 3)
+        # Names and import magic in unrelated modules must not match.
+        self.assertEqual(LIB.pops_iop_image_probe_io_imports(
+            self.iop_image(), len(self.iop_image()), b"LOADCORE", c.byref(mask)), 0)
+        self.assertEqual(mask.value, 0)
+        # A text-only name cannot pass the IRX descriptor check.
+        plain = b"\0ioman\0iomanx\0" + b"\0"*4
+        name = directory[:48] + entry(b"IOPCD", 0, len(plain)) + b"\0"*16
+        image2 = name + b"\0"*16 + plain
+        self.assertEqual(LIB.pops_iop_image_probe_io_imports(
+            image2, len(image2), b"IOPCD", c.byref(mask)), 0)
+        self.assertEqual(mask.value, 0)
+
     def test_iop_image_rejects_unbounded_or_inconsistent_directory(self):
         data = self.iop_image()
         for malformed in (data[:-1], word(data, 28, 0xfffffff0),

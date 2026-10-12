@@ -63,6 +63,17 @@ enum {
 int pops_iop_image_probe_io_strings(const void *file, size_t size,
                                     const char *module, uint32_t *flags);
 
+/* Recognize ps2sdk IRX IMPORT_MAGIC (0x41e00000) plus exact 8-byte
+ * library name inside a validated ROMDIR module. Unlike arbitrary string
+ * hints, these are actual import-table descriptors; they do not prove
+ * that a particular import stub was called during runtime. */
+enum {
+  POPS_IOIMPORT_IOMAN  = 1u << 0,
+  POPS_IOIMPORT_IOMANX = 1u << 1
+};
+int pops_iop_image_probe_io_imports(const void *file, size_t size,
+                                    const char *module, uint32_t *imports);
+
 typedef enum {
   POPS_SOURCE_LOOSE_ELF,
   POPS_SOURCE_DECODED_PAK

@@ -166,3 +166,40 @@ int pops_iop_image_probe_io_strings(const void *file, size_t size,
   *flags = detected;
   return POPS_FILE_OK;
 }
+
+/* ps2sdk iop/kernel/include/irx.h defines the packed IRX import table:
+ * magic (0x41e00000), next (4), version (2), mode (2), name[8].
+ * Report only a full header inside the selected ROMDIR module's real
+ * payload, never a matching name from another module or image padding.
+ * A present table is stronger evidence than an ASCII string but does not
+ * show which jump stub Sony's IOPCD actually executes. */
+int pops_iop_image_probe_io_imports(const void *file, size_t size,
+                                    const char *module, uint32_t *imports) {
+  static const uint8_t legacy[8] = {'i','o','m','a','n',0,0,0};
+  static const uint8_t extended[8] = {'i','o','m','a','n','x',0,0};
+  static const uint8_t extended_caps[8] = {'i','o','m','a','n','X',0,0};
+  size_t offset = 0, module_size = 0;
+  uint32_t mask = 0;
+  int status;
+  if (!file || !module || !imports)
+    return POPS_FILE_INVALID;
+  status = pops_iop_image_find_module(file, size, module,
+                                      &offset, &module_size);
+  if (status)
+    return status;
+  if (offset > size || module_size > size - offset)
+    return POPS_FILE_RANGE;
+  const uint8_t *bytes = (const uint8_t *)file + offset;
+  for (size_t i = 0; module_size >= 20 && i <= module_size - 20; i += 4) {
+    if (read32(bytes + i) != UINT32_C(0x41e00000))
+      continue;
+    const uint8_t *name = bytes + i + 12;
+    if (!memcmp(name, legacy, sizeof(legacy)))
+      mask |= POPS_IOIMPORT_IOMAN;
+    if (!memcmp(name, extended, sizeof(extended)) ||
+        !memcmp(name, extended_caps, sizeof(extended_caps)))
+      mask |= POPS_IOIMPORT_IOMANX;
+  }
+  *imports = mask;
+  return POPS_FILE_OK;
+}

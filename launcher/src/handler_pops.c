@@ -1054,6 +1054,13 @@ int launchPOPS(int argc, char *argv[]) {
                 !!(ioStrings & POPS_IOSTRING_IOMANX),
                 !!(ioStrings & POPS_IOSTRING_PFS),
                 !!(ioStrings & POPS_IOSTRING_POPS));
+      uint32_t imports = 0;
+      int importStatus = pops_iop_image_probe_io_imports(
+          rebootIop, plan.iop_size, "IOPCD", &imports);
+      if (!importStatus)
+        DPRINTF("POPS: IOPCD IRX import tables: legacy-ioman=%d iomanX=%d (execution unverified)\n",
+                !!(imports & POPS_IOIMPORT_IOMAN),
+                !!(imports & POPS_IOIMPORT_IOMANX));
     } else
       DPRINTF("POPS: No standalone IOPCD in selected IOPRP (%d); EE embedded module may load it\n", found);
   }
