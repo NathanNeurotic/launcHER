@@ -640,14 +640,15 @@ int pops_load_custom_modules(const char *vcdDir, const char *vmcDir) {
   return 0;
 }
 
-static int pops_probe_live_storage(int virtualPfs) {
+static int pops_probe_live_storage(int virtualPfs, uint32_t pvdSampleOffset) {
   const char *paths[] = {"pops0:IMAGE.VCD", "pops0:SLOT0.VMC",
                          "pops0:SLOT1.VMC", "pfs0:IMAGE.VCD",
                          "pfs0:SLOT0.VMC", "pfs0:SLOT1.VMC"};
   int count = virtualPfs ? 6 : 3;
   /* Compare actual bytes, not just successful opens. This catches a
    * legacy PFS path unexpectedly selecting another disc or driver. */
-  uint8_t first_disc[16] = {0};
+  uint8_t first_disc[2][16] = {{0}};
+  int discSamples = pvdSampleOffset ? 2 : 1;
   for (int i = 0; i < count; ++i) {
     int fd = fileXioOpen(paths[i], i % 3 ? FIO_O_RDWR : FIO_O_RDONLY);
     if (fd < 0)
@@ -655,27 +656,39 @@ static int pops_probe_live_storage(int virtualPfs) {
     int status = 0;
     if (i % 3 == 0) {
       char check[16] __attribute__((aligned(64)));
-      int remaining = sizeof(check);
-      uint8_t received[sizeof(check)];
-      size_t copied = 0;
-      /* Keep the EE DMA target aligned, including when a backend returns
-       * a positive short read. Capture each chunk before reusing it. */
-      while (remaining > 0) {
-        int n = fileXioRead(fd, check, remaining);
-        if (n <= 0 || n > remaining) {
-          status = n < 0 ? n : -EIO;
-          break;
+      /* A header alone may be identical across distinct VCDs. When ISO
+       * metadata was recognized also compare the volume-identifier bytes.
+       * Keep the EE DMA target aligned for every short positive read. */
+      for (int sample = 0; sample < discSamples && !status; ++sample) {
+        int remaining = sizeof(check);
+        uint8_t received[sizeof(check)];
+        size_t copied = 0;
+        if (sample) {
+          int offset = (int)pvdSampleOffset; /* validated below 2 MiB */
+          int position = fileXioLseek(fd, offset, SEEK_SET);
+          if (position != offset) {
+            status = position < 0 ? position : -EIO;
+            break;
+          }
         }
-        memcpy(received + copied, check, (size_t)n);
-        copied += (size_t)n;
-        remaining -= n;
-      }
-      if (!status) {
-        if (i == 0)
-          memcpy(first_disc, received, sizeof(first_disc));
-        else if (virtualPfs && i == 3 &&
-                 memcmp(first_disc, received, sizeof(first_disc)) != 0)
-          status = -EIO;
+        while (remaining > 0) {
+          int n = fileXioRead(fd, check, remaining);
+          if (n <= 0 || n > remaining) {
+            status = n < 0 ? n : -EIO;
+            break;
+          }
+          memcpy(received + copied, check, (size_t)n);
+          copied += (size_t)n;
+          remaining -= n;
+        }
+        if (!status) {
+          if (i == 0)
+            memcpy(first_disc[sample], received, sizeof(first_disc[sample]));
+          else if (virtualPfs && i == 3 &&
+                   memcmp(first_disc[sample], received,
+                          sizeof(first_disc[sample])) != 0)
+            status = -EIO;
+        }
       }
     }
     int closed = fileXioClose(fd);
@@ -1283,7 +1296,18 @@ int launchPOPS(int argc, char *argv[]) {
   }
 
   /* Check the real IOP storage route before handing off to Sony POPS. */
-  res = pops_probe_live_storage(virtualPfs);
+  /* Sample the ISO9660 volume ID at PVD byte 40, only after the
+   * metadata inspector established bounded supported sector geometry. */
+  uint32_t pvdSample = 0;
+  if (vcdInfo.root_lba && vcdInfo.pvd_lba == 16 &&
+      (vcdInfo.sector_size == POPS_VCD_RAW_SECTOR_SIZE ||
+       vcdInfo.sector_size == POPS_VCD_ISO_SECTOR_SIZE) &&
+      vcdInfo.image_offset <= POPS_VCD_HEADER_SIZE &&
+      vcdInfo.data_offset <= 24) {
+    pvdSample = vcdInfo.image_offset + 16 * vcdInfo.sector_size +
+                vcdInfo.data_offset + 40;
+  }
+  res = pops_probe_live_storage(virtualPfs, pvdSample);
   if (res) {
     msg("POPS: Post-reboot disc/VMC check failed: %d\n", res);
     return res;

@@ -1023,3 +1023,18 @@ boundary before the proxy is registered or a file is opened. This is
 separate from the virtual-PFS recursion guard, and applies in ordinary
 `popfs` mode as well. Host tests exercise direct and nested mixed-case
 aliases without changing unrelated massN device handling.
+
+### VCD volume fingerprint under both namespaces — 2026-10-11
+
+The first-byte comparison can miss misrouting between images with the
+same or similar TOC header. The non-APA post-reboot check now reads
+the initial 16 bytes and, when the preflight inspector located an
+ISO9660 primary volume descriptor, additionally seeks to its
+volume-identifier field and compares 16 bytes between `pops0:` and
+`pfs0:`. The seek is bounded by the accepted header/sector metadata.
+The EE DMA read buffer remains aligned, and partial reads are assembled
+without writing to the target.
+
+Matching two 16-byte regions is still not a full-file hash, not
+proof of Sony IOPCD sector addressing and not a replacement for
+hardware tracing. This is an early alias sanity check.
