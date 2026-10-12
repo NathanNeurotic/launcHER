@@ -261,7 +261,7 @@ class FeatureTests(unittest.TestCase):
         # Both observed header families must leave sector/PVD/CNF addressing
         # relative to the disc payload, not the beginning of the VCD file.
         bare_disc = temp_vcd.read_bytes()
-        for marker in (b"kHn ", b"SPOP"):
+        for marker in (b"kHn ", b"SPOP", b"POPS"):
             toc = bytearray(0x100000)
             toc[0x400:0x404] = marker
             struct.pack_into("<II", toc, 0x408, total_sectors, total_sectors)
@@ -283,17 +283,18 @@ class FeatureTests(unittest.TestCase):
         self.assertEqual(info.image_offset, 0x100000)
         self.assertEqual(info.normalized_serial.decode("ascii"), "SLUS-00870")
 
-        toc[0x400:0x404] = b"SPOP"
-        temp_vcd.write_bytes(toc + bare_disc[:-sector_size])
-        info = PopsVcdInfo()
-        self.assertNotEqual(LIB.pops_vcd_inspect_path(
-            str(temp_vcd).encode('utf-8'), c.byref(info)), 0)
-        # A recognized header without its complete disc cannot be reinterpreted
-        # as a headerless ISO image or produce a spurious serial.
-        temp_vcd.write_bytes(toc)
-        info = PopsVcdInfo()
-        self.assertNotEqual(LIB.pops_vcd_inspect_path(
-            str(temp_vcd).encode("utf-8"), c.byref(info)), 0)
+        # Neither Sony marker byte order may accept a truncated VCD or
+        # misidentify its header as a standalone ISO payload.
+        for marker in (b"SPOP", b"POPS"):
+            toc[0x400:0x404] = marker
+            temp_vcd.write_bytes(toc + bare_disc[:-sector_size])
+            info = PopsVcdInfo()
+            self.assertNotEqual(LIB.pops_vcd_inspect_path(
+                str(temp_vcd).encode('utf-8'), c.byref(info)), 0)
+            temp_vcd.write_bytes(toc)
+            info = PopsVcdInfo()
+            self.assertNotEqual(LIB.pops_vcd_inspect_path(
+                str(temp_vcd).encode("utf-8"), c.byref(info)), 0)
 
         cursor = [0]
         @self.Reader
