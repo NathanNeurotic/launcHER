@@ -196,8 +196,12 @@ int pops_vcd_inspect_stream(void *user, PopsVcdReadFn read_fn, PopsVcdSeekFn see
   if (image_offset == POPS_VCD_HEADER_SIZE) {
     int64_t end = seek_fn(user, 0, SEEK_END);
     uint8_t sizes[8];
-    if (end >= 0 && seek_fn(user, 0x408, SEEK_SET) == 0x408 &&
-        !read_exact(user, read_fn, sizes, sizeof(sizes))) {
+    if (end >= 0) {
+      /* A false-success seek or short header read must not bypass the
+       * declared sector-length check on a recognized VCD container. */
+      if (seek_fn(user, 0x408, SEEK_SET) != 0x408 ||
+          read_exact(user, read_fn, sizes, sizeof(sizes)))
+        return -EIO;
       uint32_t count0 = read_u32_le(sizes);
       uint32_t count1 = read_u32_le(sizes + 4);
       if ((count0 && (uint64_t)end <
