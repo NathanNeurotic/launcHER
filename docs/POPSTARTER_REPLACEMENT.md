@@ -1100,3 +1100,19 @@ real selected Sony IOPCD call sequence, actual disc TOC and audio-track
 SubQ behavior, PFS mount semantics, or correct VCD sector offsets.**
 Do not shift raw VCD offsets, add speculative mount emulation, or
 advertise POPStarter boot parity based on these defensive changes.
+
+### Historical VCD marker compatibility — 2026-10-11
+
+The CUE2POPS `kHn` marker and previously accepted `SPOP` marker at VCD
+offset `0x400` remain supported. The inspector additionally recognizes
+`POPS`, identified in the original author's historical description
+archived in REPOP's `POPSTARTER_PFS_WRAP_EVIDENCE.md`. Recognition
+retains the complete 1 MiB VCD header and 2352-byte sector addressing.
+The existing markerless-container fallback is unchanged. Regression
+tests cover all three accepted markers, the optional marker fallback,
+and incomplete `POPS`/`SPOP` images.
+
+This change affects only VCD metadata identification. The runtime
+filesystem forwarder still exposes raw backing-file offsets: it does
+**not** adjust Sony IOPCD seeks or claim to emulate the original
+driver's sector-address translation without traced evidence.
