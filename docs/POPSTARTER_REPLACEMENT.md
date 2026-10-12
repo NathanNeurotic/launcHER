@@ -1125,11 +1125,13 @@ requested position. This could misidentify a disc or read ISO9660 data
 from a different sector. It now requires equality with each requested
 absolute byte position: the VCD signature, first sector, PVD, Mode 1
 fallback, markerless header probe, TOC sector-count fields, root
-directory, and `SYSTEM.CNF`. An incorrect required seek returns an
-error rather than guessing. When `SEEK_END` succeeds for a VCD
-container, failing to position/read the declared sector-count fields
-now also returns `-EIO`, instead of silently skipping the length
-integrity check.
+directory, and `SYSTEM.CNF`. Even the optional 0x400 signature probe
+returns `-EIO` when its seek *reports* a nonnegative but incorrect
+position; a negative unsupported seek can still fall back to bare
+BIN/ISO probing. An incorrect required seek returns an error rather
+than guessing. When `SEEK_END` succeeds for a VCD container, failing
+to position/read the declared sector-count fields now also returns
+`-EIO`, instead of silently skipping the length integrity check.
 
 Host fixtures simulate a backend that reads the *correct bytes* but
 reports a nonmatching seek position, plus a truncated VCD whose TOC
