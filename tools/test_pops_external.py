@@ -938,7 +938,7 @@ class InspectorTests(unittest.TestCase):
         self.assertIn('"pfs0:SLOT0.VMC"', text)
         self.assertIn('"pfs0:SLOT1.VMC"', text)
         self.assertIn("int count = virtualPfs ? 6 : 3;", text)
-        self.assertIn("pops_probe_live_storage(virtualPfs);", text)
+        self.assertIn("pops_probe_live_storage(virtualPfs, pvdSample);", text)
         self.assertIn('fileXioRead(fd, check, remaining)', text)
         self.assertIn('remaining -= n;', text)
         self.assertIn('if (n <= 0 || n > remaining)', text)
