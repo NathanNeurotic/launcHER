@@ -109,14 +109,15 @@ int pops_vcd_inspect_stream(void *user, PopsVcdReadFn read_fn, PopsVcdSeekFn see
   memset(info, 0, sizeof(*info));
 
   /* POPStarter VCD files are not bare disc images: they have a 1 MiB TOC
-   * header. CUE2POPS marks offset 0x400 with "kHn" and older Sony VCD uses
-   * "SPOP". Keep raw BIN and ISO support for metadata probing, but never
-   * apply ISO sector addressing to a recognized VCD container. */
+   * header. CUE2POPS marks offset 0x400 with "kHn"; historical VCDs
+   * may use "POPS" or the already-supported "SPOP" byte order. Preserve
+   * both for compatibility and never apply ISO offsets to such images. */
   uint32_t image_offset = 0;
   uint8_t signature[4];
   if (seek_fn(user, 0x400, SEEK_SET) >= 0 &&
       !read_exact(user, read_fn, signature, sizeof(signature)) &&
-      (!memcmp(signature, "kHn", 3) || !memcmp(signature, "SPOP", 4)))
+      (!memcmp(signature, "kHn", 3) || !memcmp(signature, "SPOP", 4) ||
+       !memcmp(signature, "POPS", 4)))
     image_offset = POPS_VCD_HEADER_SIZE;
 
   /* 1. Detect sector layout at the start of the actual disc payload. */
