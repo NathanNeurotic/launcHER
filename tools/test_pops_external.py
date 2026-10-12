@@ -911,6 +911,11 @@ class InspectorTests(unittest.TestCase):
     def test_post_reboot_storage_gates_trampoline(self):
         text = (ROOT / 'launcher/src/handler_pops.c').read_text()
         self.assertIn('fileXioOpen(paths[i]', text)
+        self.assertIn('"pfs0:IMAGE.VCD"', text)
+        self.assertIn('"pfs0:SLOT0.VMC"', text)
+        self.assertIn('"pfs0:SLOT1.VMC"', text)
+        self.assertIn("int count = virtualPfs ? 6 : 3;", text)
+        self.assertIn("pops_probe_live_storage(virtualPfs);", text)
         self.assertIn('fileXioRead(fd, check, remaining)', text)
         self.assertIn('remaining -= n;', text)
         self.assertIn('if (n <= 0 || n > remaining)', text)
