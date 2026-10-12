@@ -833,6 +833,23 @@ class InspectorTests(unittest.TestCase):
         self.assertLess(expr.index("pops_get_active_xx_launch()"),
                         expr.index("pops_has_external_usb_modules()"))
 
+    def test_external_bdma_alternatives_start_once_per_role(self):
+        source = (ROOT / "launcher/src/handler_pops.c").read_text()
+        first = source.index("static int pops_load_bdma_group(")
+        check = source.index("if (module >= 0)", first)
+        after = source.index("return 1;", check)
+        self.assertLess(first, check)
+        self.assertLess(check, after)
+        self.assertIn("trying alternative", source[after:after+240])
+        selection = source[source.index("static int pops_load_bdma_drivers("):
+                           source.index("#undef POPS_BDMA_NAMES")]
+        # Different modules within one backend stack are separate roles.
+        for role in ('"DEV9"', '"ATA"', '"USBD"', '"USB filesystem"',
+                     '"USB BD bridge"', '"BDMA bridge"'):
+            self.assertIn(role, selection)
+        self.assertIn("pops_load_bdma_group(", selection)
+        self.assertIn("loadedBdma = pops_load_bdma_drivers(", source)
+
     def test_pops_smb_driver_loads_only_once_after_reboot(self):
         init = (ROOT / "launcher/src/init.c").read_text()
         launcher = (ROOT / "launcher/src/handler_pops.c").read_text()

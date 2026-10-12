@@ -206,115 +206,88 @@ static int readFullFile(const char *path, void *buffer, size_t max_size, size_t 
   return 0;
 }
 
-/* Load BDMA driver modules when an XX. launch is active and BDMA is present */
-static int pops_load_bdma_drivers(const char *vcdDir, const char *vmcDir, PopsBdmaMode mode) {
-  char modPath[PATH_MAX];
-  const char *searchDirs[8];
-  int dirCount = 0;
-
-  if (vmcDir && vmcDir[0])
-    searchDirs[dirCount++] = vmcDir;
-
-  if (vcdDir && vcdDir[0] && (!vmcDir || strcmp(vcdDir, vmcDir) != 0))
-    searchDirs[dirCount++] = vcdDir;
-
-  char vcdIrxDir[PATH_MAX] = {0};
-  if (vcdDir && vcdDir[0]) {
-    snprintf(vcdIrxDir, sizeof(vcdIrxDir), "%sIRX/", vcdDir);
-    searchDirs[dirCount++] = vcdIrxDir;
-  }
-
-  searchDirs[dirCount++] = "mc0:/POPSTARTER/";
-  searchDirs[dirCount++] = "mc1:/POPSTARTER/";
-  searchDirs[dirCount++] = "mc0:/POPS/";
-  searchDirs[dirCount++] = "mc1:/POPS/";
-
-  /* 1. Block Device Manager base module */
-  static const char *bdmCore[] = { "BDM.IRX", "bdm.irx" };
-  for (int i = 0; i < 2; ++i) {
+/* Driver names within one role are alternatives, not additional modules.
+ * Search installed locations and start at most one successful IRX per role.
+ * An explicit XX. mode may need several DIFFERENT roles (e.g. DEV9 + ATA).
+ * A failed optional driver never counts as installed; final storage probing
+ * still decides whether the requested VCD/card backends can actually open. */
+static int pops_load_bdma_group(const char *role, const char *const *names,
+                                size_t nameCount, const char *const *dirs, int dirCount) {
+  char path[PATH_MAX];
+  for (size_t n = 0; n < nameCount; ++n) {
     for (int d = 0; d < dirCount; ++d) {
-      snprintf(modPath, sizeof(modPath), "%s%s", searchDirs[d], bdmCore[i]);
-      if (!tryFile(modPath)) {
-        DPRINTF("POPS: Loading BDM module %s\n", modPath);
-        SifLoadModule(modPath, 0, NULL);
-        break;
+      int length = snprintf(path, sizeof(path), "%s%s", dirs[d], names[n]);
+      if (length < 0 || (size_t)length >= sizeof(path)) {
+        DPRINTF("POPS: BDMA %s candidate path too long\n", role);
+        continue;
       }
+      if (tryFile(path))
+        continue;
+      int module = SifLoadModule(path, 0, NULL);
+      if (module >= 0) {
+        DPRINTF("POPS: BDMA %s installed from %s (module %d)\n", role, path, module);
+        return 1;
+      }
+      DPRINTF("POPS: BDMA %s failed to load %s (%d), trying alternative\n",
+              role, path, module);
     }
   }
-
-  /* 2. Device hardware driver depending on BDMA mode */
-  if (mode == POPS_BDMA_MX4SIO || mode == POPS_BDMA_GENERIC) {
-    static const char *mx4sioDrivers[] = { "MX4SIO.IRX", "mx4sio.irx", "mx4sio_bd.irx" };
-    for (int i = 0; i < 3; ++i) {
-      for (int d = 0; d < dirCount; ++d) {
-        snprintf(modPath, sizeof(modPath), "%s%s", searchDirs[d], mx4sioDrivers[i]);
-        if (!tryFile(modPath)) {
-          DPRINTF("POPS: Loading MX4SIO driver %s\n", modPath);
-          SifLoadModule(modPath, 0, NULL);
-          break;
-        }
-      }
-    }
-  }
-
-  if (mode == POPS_BDMA_ATA || mode == POPS_BDMA_GENERIC) {
-    static const char *ataDrivers[] = { "ps2dev9.irx", "ATA.IRX", "ata.irx", "ata_bd.irx" };
-    for (int i = 0; i < 4; ++i) {
-      for (int d = 0; d < dirCount; ++d) {
-        snprintf(modPath, sizeof(modPath), "%s%s", searchDirs[d], ataDrivers[i]);
-        if (!tryFile(modPath)) {
-          DPRINTF("POPS: Loading ATA driver %s\n", modPath);
-          SifLoadModule(modPath, 0, NULL);
-          break;
-        }
-      }
-    }
-  }
-
-  if (mode == POPS_BDMA_MMCE || mode == POPS_BDMA_GENERIC) {
-    static const char *mmceDrivers[] = { "MMCE.IRX", "mmce.irx", "mmceman.irx" };
-    for (int i = 0; i < 3; ++i) {
-      for (int d = 0; d < dirCount; ++d) {
-        snprintf(modPath, sizeof(modPath), "%s%s", searchDirs[d], mmceDrivers[i]);
-        if (!tryFile(modPath)) {
-          DPRINTF("POPS: Loading MMCE driver %s\n", modPath);
-          SifLoadModule(modPath, 0, NULL);
-          break;
-        }
-      }
-    }
-  }
-
-  /* 3. USB driver set if USB or generic */
-  if (mode == POPS_BDMA_USB || mode == POPS_BDMA_GENERIC) {
-    static const char *usbDrivers[] = { "USBD.IRX", "usbd.irx", "USBHDFSD.IRX", "usbhdfsd.irx", "usbd_bd_assault.irx" };
-    for (int i = 0; i < 5; ++i) {
-      for (int d = 0; d < dirCount; ++d) {
-        snprintf(modPath, sizeof(modPath), "%s%s", searchDirs[d], usbDrivers[i]);
-        if (!tryFile(modPath)) {
-          DPRINTF("POPS: Loading USB driver %s\n", modPath);
-          SifLoadModule(modPath, 0, NULL);
-          break;
-        }
-      }
-    }
-  }
-
-  /* 4. BDMAssault bridge / hook module */
-  static const char *bdmaWrappers[] = { "bdm_assault.irx", "BDM_ASSAULT.IRX", "bdma.irx", "BDMA.IRX" };
-  for (int i = 0; i < 4; ++i) {
-    for (int d = 0; d < dirCount; ++d) {
-      snprintf(modPath, sizeof(modPath), "%s%s", searchDirs[d], bdmaWrappers[i]);
-      if (!tryFile(modPath)) {
-        DPRINTF("POPS: Loading BDMAssault bridge %s\n", modPath);
-        SifLoadModule(modPath, 0, NULL);
-        break;
-      }
-    }
-  }
-
   return 0;
 }
+
+#define POPS_BDMA_NAMES(array) (sizeof(array) / sizeof((array)[0]))
+
+static int pops_load_bdma_drivers(const char *vcdDir, const char *vmcDir, PopsBdmaMode mode) {
+  const char *dirs[8];
+  int dirCount = 0;
+  int loaded = 0;
+  char irxDir[PATH_MAX] = {0};
+  if (vmcDir && vmcDir[0]) dirs[dirCount++] = vmcDir;
+  if (vcdDir && vcdDir[0] && (!vmcDir || strcmp(vcdDir, vmcDir)))
+    dirs[dirCount++] = vcdDir;
+  if (vcdDir && vcdDir[0]) {
+    int n = snprintf(irxDir, sizeof(irxDir), "%sIRX/", vcdDir);
+    if (n > 0 && (size_t)n < sizeof(irxDir))
+      dirs[dirCount++] = irxDir;
+  }
+  dirs[dirCount++] = "mc0:/POPSTARTER/";
+  dirs[dirCount++] = "mc1:/POPSTARTER/";
+  dirs[dirCount++] = "mc0:/POPS/";
+  dirs[dirCount++] = "mc1:/POPS/";
+
+  static const char *const bdm[] = {"BDM.IRX", "bdm.irx"};
+  loaded += pops_load_bdma_group("BDM", bdm, POPS_BDMA_NAMES(bdm), dirs, dirCount);
+  if (mode == POPS_BDMA_MX4SIO || mode == POPS_BDMA_GENERIC) {
+    static const char *const mx4[] = {"MX4SIO.IRX", "mx4sio.irx", "mx4sio_bd.irx"};
+    loaded += pops_load_bdma_group("MX4SIO", mx4, POPS_BDMA_NAMES(mx4), dirs, dirCount);
+  }
+  if (mode == POPS_BDMA_ATA || mode == POPS_BDMA_GENERIC) {
+    static const char *const dev9[] = {"ps2dev9.irx", "PS2DEV9.IRX", "DEV9.IRX"};
+    static const char *const ata[] = {"ATA.IRX", "ata.irx", "ata_bd.irx"};
+    loaded += pops_load_bdma_group("DEV9", dev9, POPS_BDMA_NAMES(dev9), dirs, dirCount);
+    loaded += pops_load_bdma_group("ATA", ata, POPS_BDMA_NAMES(ata), dirs, dirCount);
+  }
+  if (mode == POPS_BDMA_MMCE || mode == POPS_BDMA_GENERIC) {
+    static const char *const mmce[] = {"MMCE.IRX", "mmce.irx", "mmceman.irx"};
+    loaded += pops_load_bdma_group("MMCE", mmce, POPS_BDMA_NAMES(mmce), dirs, dirCount);
+  }
+  if (mode == POPS_BDMA_USB || mode == POPS_BDMA_GENERIC) {
+    static const char *const usbCore[] = {"USBD.IRX", "usbd.irx"};
+    static const char *const usbFs[] = {"USBHDFSD.IRX", "usbhdfsd.irx"};
+    static const char *const usbBd[] = {"usbd_bd_assault.irx"};
+    loaded += pops_load_bdma_group("USBD", usbCore, POPS_BDMA_NAMES(usbCore), dirs, dirCount);
+    loaded += pops_load_bdma_group("USB filesystem", usbFs, POPS_BDMA_NAMES(usbFs), dirs, dirCount);
+    loaded += pops_load_bdma_group("USB BD bridge", usbBd, POPS_BDMA_NAMES(usbBd), dirs, dirCount);
+  }
+  static const char *const bridge[] = {
+    "bdm_assault.irx", "BDM_ASSAULT.IRX", "bdma.irx", "BDMA.IRX"
+  };
+  loaded += pops_load_bdma_group("BDMA bridge", bridge,
+                                 POPS_BDMA_NAMES(bridge), dirs, dirCount);
+  return loaded;
+}
+
+#undef POPS_BDMA_NAMES
 
 /* Helper to read IPCONFIG.DAT text from candidate folders */
 static int pops_read_ipconfig(const char *searchDirs[], int dirCount, char *outIp, size_t outSize) {
@@ -1223,7 +1196,8 @@ int launchPOPS(int argc, char *argv[]) {
   /* If this is an XX. launch with BDMA present, load and utilize the BDMA modules */
   if (useBdma) {
     DPRINTF("POPS: Loading BDMA modules for XX. launch\n");
-    pops_load_bdma_drivers(vcdDir, vmcDir, bdmaMode);
+    int loadedBdma = pops_load_bdma_drivers(vcdDir, vmcDir, bdmaMode);
+    DPRINTF("POPS: External BDMA roles successfully installed: %d\n", loadedBdma);
   }
 
   /* If this is an SB. launch or SMB device, load the SMB network stack */

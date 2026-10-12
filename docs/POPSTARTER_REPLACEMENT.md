@@ -939,3 +939,21 @@ but before the APA writable remount, VMC creation or IOP reboot. The actual
 low-RAM trampoline args and code are still installed at the original,
 known-good point immediately before handoff; the late checks remain an
 additional guard. A source-order regression test pins both passes.
+
+### External BDMA IRX role grouping — 2026-10-11
+
+The optional XX./BDMA stage previously loaded every existing case/name
+variant of each IRX even after the first succeeded. That could initialize
+the same hardware driver repeatedly, duplicate hooks or overwrite a working
+device namespace. An explicit role selector now loads the **first
+successfully started** candidate from the configured priority paths,
+falling back to another spelling/location only when startup fails. Separate
+functional layers remain separate: USB core, USB filesystem and BD
+bridge; DEV9 and ATA; BDM core and BDMA assault wrapper.
+
+Missing optional files remain nonfatal, as before, because a compatible
+driver may already be installed by the regular device stack. The count
+reported is actual successful external IRX starts, *not* proof that the
+requested physical medium is available. The post-reset POPFS disc and VMC
+open checks remain the final storage gate. Host source tests pin the
+one-success-per-role behavior. No BDMA functions were merged into EMBER.
