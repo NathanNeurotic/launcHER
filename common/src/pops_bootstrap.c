@@ -48,6 +48,7 @@ static int uses_pfs(const char *path) {
   for (p = path; p && *p; ++p) {
     const char *q;
     if (p != path && p[-1] != ':') continue;
+    if (!p[1] || !p[2]) continue;
     if (!((p[0] == 'p' || p[0] == 'P') &&
           (p[1] == 'f' || p[1] == 'F') &&
           (p[2] == 's' || p[2] == 'S'))) continue;
