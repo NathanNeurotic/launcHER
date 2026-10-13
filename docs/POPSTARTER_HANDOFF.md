@@ -12,7 +12,7 @@ including the actual 2,484-byte `PFS Wrapper r6a`. Sony's selected IOPCD is
 embedded in POPS.ELF, **not** a ROMDIR entry in the loose IOPRP252 image.
 Read `docs/POPS_IO_CONTRACT.md` for identities, locations and reproduction.
 The self-contained `tools/trace_original_pops_io.py` now executes the original
-IOPCD and wrapper with controlled imported services: 21 cases pass, including
+IOPCD and wrapper with controlled imported services: 26 cases pass, including
 TOC reads, aligned sector requests, descriptor zero, errors and close behavior.
 The metadata-only trace is committed under `docs/evidence/`. The wrapper forwards
 raw file-byte offsets; Sony IOPCD aligns the caller's supplied byte offset.
@@ -24,8 +24,21 @@ eight feature tests. The feature assertion now uses host `errno.ENOTSUP`
 instead of a Linux-only numeric value, so it also runs on Windows.
 The existing GCC PS2SDK Docker compile/link/pack also passed; it still reports
 pre-existing path-truncation warnings. Exact-head GitHub CI supersedes local
-dirty-checkout artifact identities. Next: trace the EE producer of the byte-offset
-field and validate devices/saves on console.
+dirty-checkout artifact identities.
+
+The original EE producer `FUN_00210090` now also ran unchanged in PCSX2:
+seven cases pass with both GCC and LLVM harnesses. It constructs
+`byte_offset = 0x100000 + LBA * 2352`, caps requests at 16 sectors, handles
+disc-end counts and cache hits, and rejects mismatched reply counts. Five
+observed EE tuples are replayed in the IOP probe. Preparation, overlap checks,
+isolated runner and metadata-only GCC/LLVM reports are all committed; no
+original-byte probe ELF/C array is distributed. Three synthetic input/layout
+guard tests are also in CI. See `docs/POPS_IO_CONTRACT.md` for exact reproduction.
+
+Next: establish actual post-reset Sony IOMAN/iomanX binding and module lifetimes,
+then one end-to-end device boot and VMC save/reload/power-cycle test. The native
+EE probe and modeled IOP route do not execute real SIF transport, a complete
+Sony IOP kernel or storage hardware. Do not introduce a second VCD offset remap.
 
 The older sections below are historical checkpoints, not current acceptance.
 

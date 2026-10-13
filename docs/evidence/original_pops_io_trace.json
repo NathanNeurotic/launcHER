@@ -4,7 +4,7 @@
   "pops_elf_sha256": "59df3389c4df88a572daa720b05507c52c34eddfa0031a6fbeec55e0c2d0fcb1",
   "wrapper_sha256": "c08a41c98301009bfd0d277dd974e244536fe0ec37df880501a919829ac21c0c",
   "iopcd_sha256": "ccdd60e1408b7dbc4a65e9fdad53b671e7acdb69fc5acc72704a952feacd58ae",
-  "case_count": 21,
+  "case_count": 26,
   "cases": [
     {
       "case": "open-and-TOC",
@@ -25,6 +25,8 @@
     {
       "case": "rdsector",
       "requested_byte_offset": 0,
+      "requested_lba": 16,
+      "request_source": "controlled byte-offset stimulus",
       "requested_sector_count": 1,
       "returned_bytes": 2560,
       "reported_skip": 0,
@@ -46,6 +48,8 @@
     {
       "case": "rdsector",
       "requested_byte_offset": 1024,
+      "requested_lba": 16,
+      "request_source": "controlled byte-offset stimulus",
       "requested_sector_count": 1,
       "returned_bytes": 2560,
       "reported_skip": 0,
@@ -67,6 +71,8 @@
     {
       "case": "rdsector",
       "requested_byte_offset": 1048576,
+      "requested_lba": 16,
+      "request_source": "controlled byte-offset stimulus",
       "requested_sector_count": 1,
       "returned_bytes": 2560,
       "reported_skip": 0,
@@ -88,6 +94,8 @@
     {
       "case": "rdsector",
       "requested_byte_offset": 1086232,
+      "requested_lba": 16,
+      "request_source": "controlled byte-offset stimulus",
       "requested_sector_count": 1,
       "returned_bytes": 3072,
       "reported_skip": 280,
@@ -109,6 +117,8 @@
     {
       "case": "rdsector",
       "requested_byte_offset": 1193047,
+      "requested_lba": 16,
+      "request_source": "controlled byte-offset stimulus",
       "requested_sector_count": 16,
       "returned_bytes": 37888,
       "reported_skip": 87,
@@ -130,6 +140,8 @@
     {
       "case": "rdsector",
       "requested_byte_offset": 1048576,
+      "requested_lba": 16,
+      "request_source": "controlled byte-offset stimulus",
       "requested_sector_count": 16,
       "returned_bytes": 37888,
       "reported_skip": 0,
@@ -151,6 +163,8 @@
     {
       "case": "rdsector",
       "requested_byte_offset": 1048832,
+      "requested_lba": 16,
+      "request_source": "controlled byte-offset stimulus",
       "requested_sector_count": 16,
       "returned_bytes": 38400,
       "reported_skip": 256,
@@ -172,6 +186,8 @@
     {
       "case": "rdsector",
       "requested_byte_offset": 1048576,
+      "requested_lba": 16,
+      "request_source": "controlled byte-offset stimulus",
       "requested_sector_count": 2,
       "returned_bytes": 5120,
       "reported_skip": 0,
@@ -187,6 +203,121 @@
           "fd": 7,
           "offset": 1048576,
           "size": 5120
+        }
+      ]
+    },
+    {
+      "case": "rdsector",
+      "requested_byte_offset": 1048576,
+      "requested_lba": 0,
+      "request_source": "native EE probe observation",
+      "requested_sector_count": 16,
+      "returned_bytes": 37888,
+      "reported_skip": 0,
+      "events": [
+        {
+          "op": "lseek",
+          "fd": 7,
+          "offset": 1048576,
+          "whence": 0
+        },
+        {
+          "op": "read",
+          "fd": 7,
+          "offset": 1048576,
+          "size": 37888
+        }
+      ]
+    },
+    {
+      "case": "rdsector",
+      "requested_byte_offset": 1086208,
+      "requested_lba": 16,
+      "request_source": "native EE probe observation",
+      "requested_sector_count": 16,
+      "returned_bytes": 38400,
+      "reported_skip": 256,
+      "events": [
+        {
+          "op": "lseek",
+          "fd": 7,
+          "offset": 1085952,
+          "whence": 0
+        },
+        {
+          "op": "read",
+          "fd": 7,
+          "offset": 1085952,
+          "size": 38400
+        }
+      ]
+    },
+    {
+      "case": "rdsector",
+      "requested_byte_offset": 3950944,
+      "requested_lba": 1234,
+      "request_source": "native EE probe observation",
+      "requested_sector_count": 16,
+      "returned_bytes": 38400,
+      "reported_skip": 352,
+      "events": [
+        {
+          "op": "lseek",
+          "fd": 7,
+          "offset": 3950592,
+          "whence": 0
+        },
+        {
+          "op": "read",
+          "fd": 7,
+          "offset": 3950592,
+          "size": 38400
+        }
+      ]
+    },
+    {
+      "case": "rdsector",
+      "requested_byte_offset": 12806224,
+      "requested_lba": 4999,
+      "request_source": "native EE probe observation",
+      "requested_sector_count": 2,
+      "returned_bytes": 5120,
+      "reported_skip": 80,
+      "events": [
+        {
+          "op": "lseek",
+          "fd": 7,
+          "offset": 12806144,
+          "whence": 0
+        },
+        {
+          "op": "read",
+          "fd": 7,
+          "offset": 12806144,
+          "size": 5120
+        }
+      ]
+    },
+    {
+      "case": "rdsector",
+      "requested_byte_offset": 12808576,
+      "requested_lba": 5000,
+      "request_source": "native EE probe observation",
+      "requested_sector_count": 1,
+      "returned_bytes": 3072,
+      "reported_skip": 384,
+      "events": [
+        {
+          "op": "lseek",
+          "fd": 7,
+          "offset": 12808192,
+          "whence": 0
+        },
+        {
+          "op": "read",
+          "fd": 7,
+          "offset": 12808192,
+          "size": 3072
         }
       ]
     },

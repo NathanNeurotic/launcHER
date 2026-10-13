@@ -274,11 +274,18 @@ def trace(main, pops):
             "changed original open/TOC sequence")
     cases.append({"case": "open-and-TOC", "events": route.events.copy()})
 
-    for offset, count in [(0, 1), (0x400, 1), (0x100000, 1),
-                          (0x100000 + 16 * 2352 + 24, 1), (0x123457, 16),
-                          (0x100000, 16), (0x100100, 16), (0x100000, 2)]:
+    requests = [(offset, count, 16, "controlled byte-offset stimulus")
+                for offset, count in [(0, 1), (0x400, 1), (0x100000, 1),
+                    (0x100000 + 16 * 2352 + 24, 1), (0x123457, 16),
+                    (0x100000, 16), (0x100100, 16), (0x100000, 2)]]
+    # Recorded unchanged R5900 FUN_00210090 request fields, measured with
+    # both GCC and LLVM probe harnesses in PCSX2. Transport remains modeled.
+    requests += [(offset, count, lba, "native EE probe observation") for lba, count, offset in [
+        (0, 16, 1048576), (16, 16, 1086208), (1234, 16, 3950944),
+        (4999, 2, 12806224), (5000, 1, 12808576)]]
+    for offset, count, lba, source in requests:
         route.events.clear()
-        result, skip = route.read_sectors(offset, count)
+        result, skip = route.read_sectors(offset, count, lba)
         aligned = offset & ~511
         length = (count * 2352 + (offset & 511) + 512) & ~511
         require(result == length and skip == offset & 511, "changed Sony read geometry")
@@ -289,6 +296,7 @@ def trace(main, pops):
         require(actual == bytes((aligned + i) % 251 for i in range(length)),
                 "original read did not forward synthetic backing bytes")
         cases.append({"case": "rdsector", "requested_byte_offset": offset,
+                      "requested_lba": lba, "request_source": source,
                       "requested_sector_count": count, "returned_bytes": result,
                       "reported_skip": skip, "events": route.events.copy()})
 

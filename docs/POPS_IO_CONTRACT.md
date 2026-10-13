@@ -67,7 +67,7 @@ needed to investigate the actual embedded IOPCD.
 
 ## Reproduction and remaining gate
 
-`tools/trace_original_pops_io.py` now reproduces **21 passing execution cases**
+`tools/trace_original_pops_io.py` now reproduces **26 passing execution cases**
 with the pinned external MAIN ELF and Sony POPS ELF. It independently decodes
 MAIN using liblzma and executes the original embedded wrapper and Sony IOPCD
 in separate MIPS32 Unicorn machines. Their allocated sections and GP retain
@@ -121,12 +121,75 @@ are included. The script rejects any changed input hash before execution and
 bounds each callback by both an instruction count and an emulation timeout.
 An unknown import or callback that fails to return aborts the probe.
 
-**Limits:** the EE producer of `request +12` is not executed here. The example
-offsets are controlled stimuli, not observed console traffic. IOP services,
+**Limits:** the EE producer of `request +12` is executed separately below;
+five of its observed tuples are replayed through the original IOP code. Other
+example offsets are controlled stimuli, not observed console traffic. IOP services,
 filesystem descriptor routing, semaphore success, delay and printf are modeled.
 This establishes original callback behavior under those inputs, not Sony's
 complete runtime, CDDA, media retries, actual kernel import binding or saves.
-The next boundary is EE request production and same-console device/save tests.
+The next boundary is actual kernel binding, whole-launch integration and
+same-console device/save tests.
+
+## Native R5900 request producer
+
+The selected Sony function `FUN_00210090`, original address
+`0x00210090..0x0021021b`, constructs the packet sent to IOPCD. A separate
+396-byte original-function probe preserves every instruction, including
+R5900 three-operand MULT, 64-bit register saves and branch-likely delay slots.
+Its complete function SHA256 is
+`4a38bbb0dc66fa28825f9765d03d62b6318dd657032ddf7d8489611c22a1f0d0`.
+It is **not** translated to a MIPS32 or x64 surrogate.
+
+Both GCC and LLVM probe harnesses built with local ps2build v2026.10.13 and
+passed seven cases in PCSX2 2.9.52.0. The same original function bytes execute
+at their original address with original GP `0x0050a670`. Track lookup,
+semaphore services, SIF RPC delivery and error logging are explicit doubles.
+Every linked probe PT_LOAD extent, including BSS, is checked for overlap with
+the injected function, service entry redirects and fixed globals before a run.
+PCSX2 uses a fresh isolated profile with both memory cards disabled.
+
+| LBA | Selected final sector | Observed count | Observed byte offset |
+| --- | --- | --- | --- |
+| 0 | 1000 | 16 | 1048576 |
+| 16 | 1000 | 16 | 1086208 |
+| 1234 | 5000 | 16 | 3950944 |
+| 4999 | 5000 | 2 | 12806224 |
+| 5000 | 5000 | 1 | 12808576 |
+
+These are original EE-produced `0x435056` requests. They establish the
+`0x100000 + LBA * 2352` byte offset before IOPCD's alignment, a 16-sector cap,
+and reduced counts at disc end under the supplied state. A cached read uses
+the existing buffer plus the sector delta without another RPC. A mismatched
+reply count returns NULL and clears the cached range. Both compiler harnesses
+observed the same fields. The five tuples above also pass through the original
+IOPCD/wrapper execution probe, preserving aligned file offsets and data bytes.
+
+Reproduction from this repository root (use a fresh local output directory):
+
+```text
+python tools/prepare_pops_io_request_probe.py --elf EXTERNAL/POPS.ELF --out build/io-request
+ps2build build -c build/io-request/ps2.yaml -o build/io-request/gcc --toolchain gcc
+ps2build build -c build/io-request/ps2.yaml -o build/io-request/llvm --toolchain llvm
+```
+
+Then run `tools/run_pops_io_request_probe.ps1` with `-Elf` pointing to the
+selected compiler's `bin/pops_io_request_probe.elf`, the existing local
+`-Pcsx2`, `-BiosDirectory` and `-BiosFilename`, and a fresh `-OutputDirectory`.
+The runner verifies injection layout automatically and bounds execution to
+45 seconds. It records only ELF/BIOS hashes, emulator version and stdout
+observations in `result.json`. `docs/evidence/original_pops_ee_io_probe.json`
+contains the measured GCC/LLVM metadata. **Generated C arrays and ELFs contain
+original code and must remain local under ignored build/, never uploaded.**
+
+The source-only guard suite `python tools/test_pops_io_probe.py` runs in CI
+without original inputs, checking identity rejection and every injection region
+against file-backed and BSS overlaps. Actual original-code runs need the user's
+external files and remain a separate validation level.
+
+**Remaining limits:** no actual SIF transport, Sony IOP kernel, audio-track
+lookup or physical device is exercised. Compiler agreement is harness evidence,
+not reconstructed-POPS parity or a hardware boot/save result. The measured
+offset ownership argues against adding another 1 MiB/2352-byte remap in POPFS.
 
 Use REPOP at the revision above in a separate reference checkout, preserving any
 ongoing REPOP development. With external binaries already available locally:
