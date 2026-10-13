@@ -1,4 +1,5 @@
 #include "init.h"
+#include "ipconfig_smap.h"
 #include "common.h"
 #include "dprintf.h"
 #include "pops_external.h"
@@ -407,42 +408,29 @@ void applyXPARAM(char *gameID) { SifExecModuleBuffer(xparam_irx, size_xparam_irx
 #if defined(UDPBD) || defined(UDPFS)
 // Builds IP address argument for SMAP module
 // using mc?:SYS-CONF/IPCONFIG.DAT from memory card
+/* Read the first IPv4 token, not a fixed number of characters. The normal
+ * IPCONFIG.DAT also contains netmask/gateway, while a 7-15 byte IP alone
+ * remains valid. Preserve the original 19-byte SMAP argument allocation. */
 char *initSMAPArguments(uint32_t *argLength) {
-  // Try to get IP from IPCONFIG.DAT
-  // The 'X' in "mcX" will be replaced with memory card number
   static char ipconfigPath[] = "mcX:/SYS-CONF/IPCONFIG.DAT";
-
-  int ipconfigFd, count;
-  char ipAddr[16]; // IP address will not be longer than 15 characters
-  for (char i = '0'; i < '2'; i++) {
-    ipconfigPath[2] = i;
-    // Attempt to open IPCONFIG.DAT
-    ipconfigFd = open(ipconfigPath, O_RDONLY);
-    if (ipconfigFd >= 0) {
-      count = read(ipconfigFd, ipAddr, sizeof(ipAddr) - 1);
-      close(ipconfigFd);
-      break;
-    }
+  char ipAddr[16], contents[64];
+  if (!argLength) return NULL;
+  for (char slot = '0'; slot <= '1'; ++slot) {
+    ipconfigPath[2] = slot;
+    int fd = open(ipconfigPath, O_RDONLY);
+    if (fd < 0) continue;
+    ssize_t n = read(fd, contents, sizeof(contents));
+    close(fd);
+    if (n <= 0 || !smap_parse_ipconfig(contents, (size_t)n, ipAddr))
+      continue;
+    char *argStr = calloc(19, sizeof(char));
+    if (!argStr) return NULL;
+    snprintf(argStr, 19, "ip=%s", ipAddr);
+    *argLength = 19;
+    return argStr;
   }
-
-  if ((ipconfigFd < 0) || (count < sizeof(ipAddr) - 1)) {
-    msg("ERROR: Failed to read IP address from IPCONFIG.DAT\n");
-    return NULL;
-  }
-
-  count = 0; // Reuse count as line index
-  // In case IP address is shorter than 15 chars
-  while (!isspace((unsigned char)ipAddr[count])) {
-    // Advance index until we read a whitespace character
-    count++;
-  }
-  ipAddr[count] = '\0';
-
-  char ipArg[19]; // 15 bytes for IP string + 3 bytes for 'ip='
-  *argLength = 19;
-  char *argStr = calloc(sizeof(char), 19);
-  snprintf(argStr, sizeof(ipArg), "ip=%s", ipAddr);
-  return argStr;
+  msg("ERROR: No valid console IPv4 in IPCONFIG.DAT on mc0:/mc1:\n");
+  return NULL;
 }
 #endif
 
