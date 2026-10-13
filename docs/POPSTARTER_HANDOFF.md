@@ -1,5 +1,21 @@
 # POPSTARTER replacement handoff — 2026-10-08
 
+## Current local continuation — October 13, 2026
+
+Local development was fast-forwarded to PR #23 head
+`472ae61a2f69d9f8eec7b8f3d9b77a4dc074b760`; pre-existing untracked scratch
+files were preserved. Continue committing and pushing on this same PR branch.
+
+The archived MAIN decoder now ran successfully. Its complete output also
+matches an independent liblzma decode. Eleven embedded IOP modules validate,
+including the actual 2,484-byte `PFS Wrapper r6a`. Sony's selected IOPCD is
+embedded in POPS.ELF, **not** a ROMDIR entry in the loose IOPRP252 image.
+Read `docs/POPS_IO_CONTRACT.md` for identities, locations and reproduction.
+Next: bounded original IOPCD/wrapper execution, then production bridge changes
+only where supported by those results. Console persistence remains unverified.
+
+The older sections below are historical checkpoints, not current acceptance.
+
 Branch: `codex/popstarter-replacement`, based on `EMBER` and including merged
 OPL argument compatibility PR #19 (`c616e0cdccc2af24fd2e4e956fff167f822da4bf`).
 This branch is unfinished development. Do not merge or publish it as working
