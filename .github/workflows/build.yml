@@ -47,7 +47,9 @@ jobs:
       - name: Package launcHER
         run: |
           cd build/release
-          zip -9 launcHER.zip launcHER.elf launcHER.CNF
+          grep -Eq '^version=([[:xdigit:]]{12}|v[0-9][0-9A-Za-z._-]*)$' version.txt
+          test "$(wc -l < version.txt)" -eq 1
+          zip -9 launcHER.zip launcHER.elf launcHER.CNF version.txt
 
       - name: Upload launcHER
         uses: actions/upload-artifact@v4
@@ -57,6 +59,7 @@ jobs:
           path: |
             build/release/launcHER.elf
             build/release/launcHER.CNF
+            build/release/version.txt
             build/release/launcHER.zip
 
   release:
@@ -84,6 +87,7 @@ jobs:
           files: |
             release/launcHER.elf
             release/launcHER.CNF
+            release/version.txt
             release/launcHER.zip
 
       - uses: "marvinpinto/action-automatic-releases@latest"
@@ -94,4 +98,5 @@ jobs:
           files: |
             release/launcHER.elf
             release/launcHER.CNF
+            release/version.txt
             release/launcHER.zip
