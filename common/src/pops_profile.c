@@ -117,6 +117,23 @@ int pops_core_sio2_identify(const void *core, size_t size) {
            ? POPS_FILE_OK : POPS_FILE_GUARD;
 }
 
+int pops_core_iopcd_probe_io_ordinals(const void *core, size_t size,
+                                      uint64_t *legacy, uint64_t *extended) {
+  if (!core || !legacy || !extended)
+    return POPS_FILE_INVALID;
+  if (size != CORE_SIZE)
+    return POPS_FILE_UNSUPPORTED;
+  /* POPS.ELF file offset 0xfb820 maps to loaded-core offset 0xfa820.
+   * The exact module is shared by every accepted loose/packed core profile.
+   * Keep its identity independent of intended EE configuration patches. */
+  const uint8_t *module = (const uint8_t *)core + 0xfa820;
+  const size_t module_size = 0x3e4f;
+  if (!matches(module, module_size,
+      "ccdd60e1408b7dbc4a65e9fdad53b671e7acdb69fc5acc72704a952feacd58ae"))
+    return POPS_FILE_GUARD;
+  return pops_iop_module_probe_io_ordinals(module, module_size, legacy, extended);
+}
+
 static int iop_profile(const void *file, size_t size, int loose,
                         PopsIopVariant *variant) {
   PopsIopImage info;

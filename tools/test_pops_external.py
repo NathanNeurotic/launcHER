@@ -108,6 +108,21 @@ def check_boot_staging(plan, source, iop=None, original_writes=None):
         raise RuntimeError("Staged core differs from the measured loaded image")
     if LIB.pops_core_sio2_identify(core, len(core)):
         raise RuntimeError("Reference embedded SIO2 module rejected")
+    def check_iopcd(image, expected=0):
+        legacy, extended = c.c_uint64(0x12345678), c.c_uint64(0x87654321)
+        status = LIB.pops_core_iopcd_probe_io_ordinals(
+            image, len(image), c.byref(legacy), c.byref(extended))
+        if status != expected:
+            raise RuntimeError(f"Embedded IOPCD identity status {status} != {expected}")
+        masks = (0x170, 0) if not expected else (0x12345678, 0x87654321)
+        if (legacy.value, extended.value) != masks:
+            raise RuntimeError("Wrong embedded IOPCD imports or mutated failure outputs")
+    check_iopcd(core)
+    # Exact module identity must reject changes anywhere in its full extent.
+    for offset in (0xfa820, 0xfa820 + 0x3e4f - 1):
+        altered_iopcd = bytearray(core)
+        altered_iopcd[offset] ^= 1
+        check_iopcd(bytes(altered_iopcd), -4)
     expected_iop = iop if iop is not None else source[plan.iop_offset:]
     if reboot.raw[:plan.iop_size] != expected_iop:
         raise RuntimeError("Reboot image was not preserved separately")
@@ -166,6 +181,8 @@ def check_boot_staging(plan, source, iop=None, original_writes=None):
     if LIB.pops_core_patches_stage(0x100000, ram, ram_size, 0x3f) != -4 or ram.raw != patched:
         raise RuntimeError("Core patch reapplication did not fail closed")
     patched_core = ram.raw[core_start:bss_start]
+    check_iopcd(patched_core)
+    print("Embedded IOPCD identity/imports PASS: open/close/read/lseek, patched EE, full-IRX guards")
     if LIB.pops_core_image_identify(patched_core, len(patched_core)) != -4:
         raise RuntimeError("Patched core incorrectly accepted as pristine")
     if LIB.pops_core_sio2_identify(patched_core, len(patched_core)):
@@ -232,6 +249,16 @@ def inspect_elf(data):
 
 
 class InspectorTests(unittest.TestCase):
+    def test_embedded_iopcd_rejects_unknown_or_truncated_core_without_output(self):
+        legacy, extended = c.c_uint64(123), c.c_uint64(456)
+        for image, length, expected in ((None, 0, INVALID), (b'x', 1, UNSUPPORTED),
+                (c.create_string_buffer(0x302e60), 0x302e60, -4)):
+            self.assertEqual(LIB.pops_core_iopcd_probe_io_ordinals(
+                image, length, c.byref(legacy), c.byref(extended)), expected)
+            self.assertEqual((legacy.value, extended.value), (123, 456))
+        self.assertEqual(LIB.pops_core_iopcd_probe_io_ordinals(
+            b'x', 1, None, c.byref(extended)), INVALID)
+
     def test_embedded_sio2_rejects_unknown_or_truncated_core(self):
         self.assertEqual(LIB.pops_core_sio2_identify(None, 0), INVALID)
         self.assertEqual(LIB.pops_core_sio2_identify(b'x', 1), UNSUPPORTED)
@@ -430,6 +457,21 @@ class InspectorTests(unittest.TestCase):
             self.iop_image(), len(self.iop_image()), b"LOADCORE",
             c.byref(legacy), c.byref(extended)), 0)
         self.assertEqual((legacy.value, extended.value), (0, 0))
+
+        # Standalone module scanning uses its own explicit extent, independent
+        # of ROMDIR. Truncating the last stub cannot consume the next module.
+        self.assertEqual(LIB.pops_iop_module_probe_io_ordinals(
+            payload, len(payload), c.byref(legacy), c.byref(extended)), 0)
+        self.assertEqual(legacy.value, (1 << 4) | (1 << 13) | (1 << 20))
+        self.assertEqual(extended.value, (1 << 6) | (1 << 31))
+        prefix = table(b"ioman") + stub(8)
+        self.assertEqual(LIB.pops_iop_module_probe_io_ordinals(
+            prefix, len(prefix) - 1, c.byref(legacy), c.byref(extended)), 0)
+        self.assertEqual((legacy.value, extended.value), (0, 0))
+        legacy.value, extended.value = 123, 456
+        self.assertEqual(LIB.pops_iop_module_probe_io_ordinals(
+            None, 0, c.byref(legacy), c.byref(extended)), INVALID)
+        self.assertEqual((legacy.value, extended.value), (123, 456))
 
     def test_iop_image_rejects_unbounded_or_inconsistent_directory(self):
         data = self.iop_image()
@@ -1135,6 +1177,10 @@ def main():
     LIB.pops_core_patches_stage.argtypes = [c.c_uint32, c.c_void_p, c.c_size_t, c.c_uint32]
     LIB.pops_core_image_identify.argtypes = [c.c_void_p, c.c_size_t]
     LIB.pops_core_sio2_identify.argtypes = [c.c_void_p, c.c_size_t]
+    for name in ("pops_core_iopcd_probe_io_ordinals", "pops_iop_module_probe_io_ordinals"):
+        getattr(LIB, name).argtypes = [c.c_void_p, c.c_size_t,
+                                      c.POINTER(c.c_uint64), c.POINTER(c.c_uint64)]
+        getattr(LIB, name).restype = c.c_int
     LIB.pops_format_proxy_args_mode.argtypes = [
         c.c_void_p, c.c_size_t, c.c_char_p, c.c_char_p, c.c_char_p,
         c.c_char_p, c.c_char_p, c.c_char_p, c.c_int]

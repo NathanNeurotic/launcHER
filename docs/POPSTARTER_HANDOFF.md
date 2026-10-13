@@ -16,8 +16,16 @@ IOPCD and wrapper with controlled imported services: 21 cases pass, including
 TOC reads, aligned sector requests, descriptor zero, errors and close behavior.
 The metadata-only trace is committed under `docs/evidence/`. The wrapper forwards
 raw file-byte offsets; Sony IOPCD aligns the caller's supplied byte offset.
-Next: production diagnostics for the **core-embedded** IOPCD, trace the EE
-producer of the byte-offset field, and validate devices/saves on console.
+Production diagnostics now hash and inspect the **core-embedded** IOPCD before
+patching/reset, and the POPFS host fixture replays the observed read/seek tuples.
+Local validation passed: 56 external-core tests plus all three real dependency
+sets, POPFS, VMC, 64 supported/192 unsupported mode masks, launch arguments and
+eight feature tests. The feature assertion now uses host `errno.ENOTSUP`
+instead of a Linux-only numeric value, so it also runs on Windows.
+The existing GCC PS2SDK Docker compile/link/pack also passed; it still reports
+pre-existing path-truncation warnings. Exact-head GitHub CI supersedes local
+dirty-checkout artifact identities. Next: trace the EE producer of the byte-offset
+field and validate devices/saves on console.
 
 The older sections below are historical checkpoints, not current acceptance.
 

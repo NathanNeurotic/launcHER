@@ -81,6 +81,11 @@ int pops_iop_image_probe_io_ordinals(const void *file, size_t size,
                                      const char *module, uint64_t *legacy,
                                      uint64_t *extended);
 
+/* The same bounded import-stub scan for a standalone module payload. Caller
+ * establishes its identity/extent first; a match is not execution evidence. */
+int pops_iop_module_probe_io_ordinals(const void *module, size_t size,
+                                      uint64_t *legacy, uint64_t *extended);
+
 typedef enum {
   POPS_SOURCE_LOOSE_ELF,
   POPS_SOURCE_DECODED_PAK
@@ -111,6 +116,12 @@ int pops_core_image_identify(const void *core, size_t size);
 /* Identify only the embedded Sony SIO2 module after guarded core patching.
  * Boot planning must still identify the full unmodified core first. */
 int pops_core_sio2_identify(const void *core, size_t size);
+/* Identify the selected core's complete embedded Sony IOPCD by SHA256 before
+ * inventorying its I/O imports. EE patches outside the module are allowed;
+ * full pristine-core identity remains a boot-planning prerequisite.
+ * Output masks are unchanged on failure; this does not load/execute a module. */
+int pops_core_iopcd_probe_io_ordinals(const void *core, size_t size,
+                                      uint64_t *legacy, uint64_t *extended);
 
 enum {
   POPS_CORE_HDD_CHECK = 1u << 0,

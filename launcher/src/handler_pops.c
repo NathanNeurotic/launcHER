@@ -1066,10 +1066,26 @@ int launchPOPS(int argc, char *argv[]) {
     rebootIop = buffers.iop;
   }
 
-  /* This is a read-only diagnostic, not a PFS wrapper: EE paths in the
-   * verified core are already patched to pops:, while original IOPCD may
-   * independently reference legacy ioman/pfs0:. Expose which modules the
-   * selected ROMDIR actually contains to narrow the hardware trace. */
+  /* Sony's selected IOPCD lives in the verified staged core, not the loose
+   * IOPRP ROMDIR. Verify its complete identity and report its actual imports
+   * before any core/config/TROJAN writes or IOP reset. Import declarations
+   * alone do not establish console execution or a filesystem mount protocol. */
+  {
+    uint64_t legacyOps = 0, extendedOps = 0;
+    res = pops_core_iopcd_probe_io_ordinals((const void *)stagedCore,
+                                            plan.core_size, &legacyOps,
+                                            &extendedOps);
+    if (res) {
+      msg("POPS: Embedded IOPCD identity/import inspection failed: %d\n", res);
+      return res;
+    }
+    DPRINTF("POPS: Verified core-embedded IOPCD I/O ordinals ioman=%08X:%08X iomanX=%08X:%08X (declarations only)\n",
+            (unsigned)(legacyOps >> 32), (unsigned)legacyOps,
+            (unsigned)(extendedOps >> 32), (unsigned)extendedOps);
+  }
+
+  /* Retain the separate read-only ROMDIR diagnostics for other dependency
+   * images; absence here does not mean the core-embedded IOPCD is missing. */
   {
     size_t moduleOffset = 0, moduleSize = 0;
     int found = pops_iop_image_find_module(rebootIop, plan.iop_size, "IOPCD",

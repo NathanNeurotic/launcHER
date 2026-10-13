@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import ctypes as c
+import errno
 import os
 import struct
 import subprocess
@@ -167,7 +168,7 @@ class FeatureTests(unittest.TestCase):
         # Reject out-of-range video modes without touching the core.
         cfg.video_mode = 255
         self.assertEqual(LIB.pops_apply_all_config_patches(
-            ptr, len(almost), c.byref(cfg)), -95)
+            ptr, len(almost), c.byref(cfg)), -errno.ENOTSUP)
         self.assertEqual(almost, before)
 
     def test_vcd_serial_normalization(self):

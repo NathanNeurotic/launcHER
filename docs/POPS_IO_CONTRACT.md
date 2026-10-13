@@ -96,6 +96,20 @@ The selected IOPCD's exact IOMAN imports are open/close/read/lseek. Its callback
 and the original wrapper route exercised here do not call mount/umount. This
 does not answer whether other EE or IOP code mounts real HDD/PFS volumes.
 
+The production launch path now independently hashes this complete embedded
+IOPCD at **loaded-core offset `0xfa820`**, size `0x3e4f`, before reporting its
+declared I/O masks (`ioman=0x170`, `iomanX=0`). This is distinct from ELF file
+offset `0xfb820`: the loadable segment's file offset is `0x1000`. The old ROMDIR
+diagnostics remain separate. Rejected identity leaves masks untouched and
+aborts before configuration/core/TROJAN patches, save creation or IOP reset.
+
+Host checks exercise unknown/truncated cores and both ends of the exact IRX;
+external checks pass against loose ELF/IOPRP252, POPS.PAK and POPS_IOX.PAK, with
+intended EE patches outside the IRX still accepted. The production POPFS fixture
+also replays the recorded original seek/read argument pairs without translation.
+This adds evidence-backed diagnostics and regression coverage, not new mount
+or sector-remapping semantics.
+
 ```text
 python -m pip install unicorn
 python tools/trace_original_pops_io.py --popstarter POPSLoader/bin/POPSLDR/PROFILES/MAIN/POPSTARTER.ELF --pops-elf EXTERNAL/POPS.ELF --json build/original-io-trace.json

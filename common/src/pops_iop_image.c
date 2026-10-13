@@ -211,11 +211,7 @@ int pops_iop_image_probe_io_imports(const void *file, size_t size,
 int pops_iop_image_probe_io_ordinals(const void *file, size_t size,
                                      const char *module, uint64_t *legacy,
                                      uint64_t *extended) {
-  static const uint8_t iom[8] = {'i','o','m','a','n',0,0,0};
-  static const uint8_t iox[8] = {'i','o','m','a','n','x',0,0};
-  static const uint8_t iox_caps[8] = {'i','o','m','a','n','X',0,0};
   size_t offset = 0, module_size = 0;
-  uint64_t legacy_bits = 0, extended_bits = 0;
   int status;
   if (!file || !module || !legacy || !extended)
     return POPS_FILE_INVALID;
@@ -225,7 +221,21 @@ int pops_iop_image_probe_io_ordinals(const void *file, size_t size,
     return status;
   if (offset > size || module_size > size - offset)
     return POPS_FILE_RANGE;
-  const uint8_t *bytes = (const uint8_t *)file + offset;
+  return pops_iop_module_probe_io_ordinals((const uint8_t *)file + offset,
+                                           module_size, legacy, extended);
+}
+
+int pops_iop_module_probe_io_ordinals(const void *module, size_t module_size,
+                                      uint64_t *legacy, uint64_t *extended) {
+  static const uint8_t iom[8] = {'i','o','m','a','n',0,0,0};
+  static const uint8_t iox[8] = {'i','o','m','a','n','x',0,0};
+  static const uint8_t iox_caps[8] = {'i','o','m','a','n','X',0,0};
+  uint64_t legacy_bits = 0, extended_bits = 0;
+  if (!module || !legacy || !extended)
+    return POPS_FILE_INVALID;
+  if (module_size > POPS_PAK_MAX_SIZE)
+    return POPS_FILE_RANGE;
+  const uint8_t *bytes = module;
   if (module_size >= 20) {
     for (size_t pos = 0; pos <= module_size - 20; pos += 4) {
       if (read32(bytes + pos) != UINT32_C(0x41e00000))

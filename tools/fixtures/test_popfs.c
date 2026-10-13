@@ -150,6 +150,23 @@ int main(void) {
     assert(ops->lseek(&file, requested_offset, SEEK_SET) == requested_offset);
     assert(seek_offset == requested_offset && seek_whence == SEEK_SET && io_fd == 0);
   }
+  /* Recorded original IOPCD -> embedded wrapper transactions, reproduced by
+   * trace_original_pops_io.py. The forwarder must preserve these actual IOP
+   * callback arguments, including 512-byte alignment and an extra read block.
+   * Controlled stimuli are not a trace of the EE caller or physical console. */
+  static const struct { int offset, length; } original_reads[] = {
+    {0, 2560}, {0x400, 2560}, {0x100000, 2560}, {0x109200, 3072},
+    {0x123400, 37888}, {0x100000, 37888}, {0x100000, 38400}, {0x100000, 5120}
+  };
+  /* The small mock buffer is sufficient: this backend deliberately returns
+   * only seven bytes. Pin forwarding and positive short-read propagation. */
+  assert(ops->read(&file, data, 1024) == 7 && io_size == 1024);
+  for (size_t i = 0; i < sizeof(original_reads) / sizeof(original_reads[0]); ++i) {
+    assert(ops->lseek(&file, original_reads[i].offset, SEEK_SET) == original_reads[i].offset);
+    assert(seek_offset == original_reads[i].offset && seek_whence == SEEK_SET && io_fd == 0);
+    assert(ops->read(&file, data, original_reads[i].length) == 7);
+    assert(io_size == original_reads[i].length && io_fd == 0);
+  }
   assert(ops->lseek64(&file, INT64_C(0x100000123), SEEK_SET) == INT64_C(0x100000123));
   assert(seek_offset == INT64_C(0x100000123) && seek_whence == SEEK_SET);
   close_result = -EIO;
