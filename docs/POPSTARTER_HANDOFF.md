@@ -11,8 +11,13 @@ matches an independent liblzma decode. Eleven embedded IOP modules validate,
 including the actual 2,484-byte `PFS Wrapper r6a`. Sony's selected IOPCD is
 embedded in POPS.ELF, **not** a ROMDIR entry in the loose IOPRP252 image.
 Read `docs/POPS_IO_CONTRACT.md` for identities, locations and reproduction.
-Next: bounded original IOPCD/wrapper execution, then production bridge changes
-only where supported by those results. Console persistence remains unverified.
+The self-contained `tools/trace_original_pops_io.py` now executes the original
+IOPCD and wrapper with controlled imported services: 21 cases pass, including
+TOC reads, aligned sector requests, descriptor zero, errors and close behavior.
+The metadata-only trace is committed under `docs/evidence/`. The wrapper forwards
+raw file-byte offsets; Sony IOPCD aligns the caller's supplied byte offset.
+Next: production diagnostics for the **core-embedded** IOPCD, trace the EE
+producer of the byte-offset field, and validate devices/saves on console.
 
 The older sections below are historical checkpoints, not current acceptance.
 

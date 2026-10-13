@@ -33,8 +33,8 @@ offset `0xaf680` (EE address `0x0091f680`), is the actual embedded wrapper:
 Callback addresses are **module-relative IOP text addresses**, not EE addresses.
 The read/write/lseek callbacks load the backing descriptor from the legacy file
 object at offset 12 and directly call the corresponding legacy IOMAN import.
-The seek callback does not add a VCD header or scale a sector number. This is
-static original-code evidence; bounded execution probes are the next step.
+The seek callback does not add a VCD header or scale a sector number. The
+bounded original-code execution below also confirms this forwarding behavior.
 The original open callback prepends the backing prefix and copies the requested
 path after dropping its first byte. It is not a safe implementation template for
 arbitrary untrusted paths or failed opens.
@@ -67,6 +67,53 @@ needed to investigate the actual embedded IOPCD.
 
 ## Reproduction and remaining gate
 
+`tools/trace_original_pops_io.py` now reproduces **21 passing execution cases**
+with the pinned external MAIN ELF and Sony POPS ELF. It independently decodes
+MAIN using liblzma and executes the original embedded wrapper and Sony IOPCD
+in separate MIPS32 Unicorn machines. Their allocated sections and GP retain
+their zero-based link addresses; imported kernel services are modeled. A
+logical IOMAN descriptor is deliberately different from the backing descriptor.
+No original instructions are embedded in the script, rewritten or exported.
+
+Observed file-mode behavior under the supplied synthetic requests:
+
+- `ServerFunc(0x435053, filename, length)` opens the supplied `pfs0:/IMAGE.VCD`
+  read-only, then reads 1,024 TOC bytes at file offset zero. The original wrapper
+  resolves that path to `mass:/POPS/IMAGE.VCD` in its default configuration.
+- `rdsector(fd, request, buffer)` uses the **byte offset already supplied at
+  request +12**. It records the low nine bits at request +16, seeks to the
+  remaining 512-byte-aligned offset, and requests
+  `(count * 2352 + skip + 512) & ~511` backing bytes. Even an exactly aligned
+  byte count includes an extra 512 bytes in this original expression.
+- The wrapper forwards seek/read arguments without adding 1 MiB or multiplying
+  an LBA. The synthetic bytes received by IOPCD match the backing-file positions.
+- The tested negative open/seek/read results propagate. A negative seek makes
+  no read. Descriptor zero survives. A short TOC read closes the descriptor.
+- The original close command clears its logical descriptor even when the
+  modeled backend close fails. This observation is not a durability guarantee.
+
+The selected IOPCD's exact IOMAN imports are open/close/read/lseek. Its callbacks
+and the original wrapper route exercised here do not call mount/umount. This
+does not answer whether other EE or IOP code mounts real HDD/PFS volumes.
+
+```text
+python -m pip install unicorn
+python tools/trace_original_pops_io.py --popstarter POPSLoader/bin/POPSLDR/PROFILES/MAIN/POPSTARTER.ELF --pops-elf EXTERNAL/POPS.ELF --json build/original-io-trace.json
+```
+
+The measured metadata-only result is committed in
+`docs/evidence/original_pops_io_trace.json`. Neither Sony nor POPStarter bytes
+are included. The script rejects any changed input hash before execution and
+bounds each callback by both an instruction count and an emulation timeout.
+An unknown import or callback that fails to return aborts the probe.
+
+**Limits:** the EE producer of `request +12` is not executed here. The example
+offsets are controlled stimuli, not observed console traffic. IOP services,
+filesystem descriptor routing, semaphore success, delay and printf are modeled.
+This establishes original callback behavior under those inputs, not Sony's
+complete runtime, CDDA, media retries, actual kernel import binding or saves.
+The next boundary is EE request production and same-console device/save tests.
+
 Use REPOP at the revision above in a separate reference checkout, preserving any
 ongoing REPOP development. With external binaries already available locally:
 
@@ -77,8 +124,9 @@ python REPOP/tools/inspect_popstarter_embedded_irx.py build/main-unpacked.bin --
 python REPOP/tools/inspect_popstarter_embedded_irx.py EXTERNAL/POPS.ELF --json build/sony-iop.json
 ```
 
-These are measured archive/decode/static-module results. They do not establish
+The REPOP inventory commands provide archive/decode/static-module results;
+the separate bounded probe adds original callback execution. They do not establish
 canonical unmodified r13 release provenance, Sony IOPCD execution on a console,
 backend streaming, saves across power cycles, or full POPStarter parity. Keep
-the PR draft. Trace the original IOPCD and embedded wrapper with bounded IOP
-execution and controlled file-service responses before changing POPFS semantics.
+the PR draft. Preserve transparent POPFS byte offsets; do not insert another
+VCD header/sector translation based on a synthetic request's LBA field.

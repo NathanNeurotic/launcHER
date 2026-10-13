@@ -1,0 +1,379 @@
+{
+  "main_sha256": "734c813e8e8ec2c6729ec5e15dd46ab696e90deeade8d0b2ca3ad03782781aa1",
+  "decoded_sha256": "185177c28aaef30ad1e00697ad7b6de22b55bd855253ab4ede8b1ab2dfb08aee",
+  "pops_elf_sha256": "59df3389c4df88a572daa720b05507c52c34eddfa0031a6fbeec55e0c2d0fcb1",
+  "wrapper_sha256": "c08a41c98301009bfd0d277dd974e244536fe0ec37df880501a919829ac21c0c",
+  "iopcd_sha256": "ccdd60e1408b7dbc4a65e9fdad53b671e7acdb69fc5acc72704a952feacd58ae",
+  "case_count": 21,
+  "cases": [
+    {
+      "case": "open-and-TOC",
+      "events": [
+        {
+          "op": "open",
+          "path": "mass:/POPS/IMAGE.VCD",
+          "flags": 1
+        },
+        {
+          "op": "read",
+          "fd": 7,
+          "offset": 0,
+          "size": 1024
+        }
+      ]
+    },
+    {
+      "case": "rdsector",
+      "requested_byte_offset": 0,
+      "requested_sector_count": 1,
+      "returned_bytes": 2560,
+      "reported_skip": 0,
+      "events": [
+        {
+          "op": "lseek",
+          "fd": 7,
+          "offset": 0,
+          "whence": 0
+        },
+        {
+          "op": "read",
+          "fd": 7,
+          "offset": 0,
+          "size": 2560
+        }
+      ]
+    },
+    {
+      "case": "rdsector",
+      "requested_byte_offset": 1024,
+      "requested_sector_count": 1,
+      "returned_bytes": 2560,
+      "reported_skip": 0,
+      "events": [
+        {
+          "op": "lseek",
+          "fd": 7,
+          "offset": 1024,
+          "whence": 0
+        },
+        {
+          "op": "read",
+          "fd": 7,
+          "offset": 1024,
+          "size": 2560
+        }
+      ]
+    },
+    {
+      "case": "rdsector",
+      "requested_byte_offset": 1048576,
+      "requested_sector_count": 1,
+      "returned_bytes": 2560,
+      "reported_skip": 0,
+      "events": [
+        {
+          "op": "lseek",
+          "fd": 7,
+          "offset": 1048576,
+          "whence": 0
+        },
+        {
+          "op": "read",
+          "fd": 7,
+          "offset": 1048576,
+          "size": 2560
+        }
+      ]
+    },
+    {
+      "case": "rdsector",
+      "requested_byte_offset": 1086232,
+      "requested_sector_count": 1,
+      "returned_bytes": 3072,
+      "reported_skip": 280,
+      "events": [
+        {
+          "op": "lseek",
+          "fd": 7,
+          "offset": 1085952,
+          "whence": 0
+        },
+        {
+          "op": "read",
+          "fd": 7,
+          "offset": 1085952,
+          "size": 3072
+        }
+      ]
+    },
+    {
+      "case": "rdsector",
+      "requested_byte_offset": 1193047,
+      "requested_sector_count": 16,
+      "returned_bytes": 37888,
+      "reported_skip": 87,
+      "events": [
+        {
+          "op": "lseek",
+          "fd": 7,
+          "offset": 1192960,
+          "whence": 0
+        },
+        {
+          "op": "read",
+          "fd": 7,
+          "offset": 1192960,
+          "size": 37888
+        }
+      ]
+    },
+    {
+      "case": "rdsector",
+      "requested_byte_offset": 1048576,
+      "requested_sector_count": 16,
+      "returned_bytes": 37888,
+      "reported_skip": 0,
+      "events": [
+        {
+          "op": "lseek",
+          "fd": 7,
+          "offset": 1048576,
+          "whence": 0
+        },
+        {
+          "op": "read",
+          "fd": 7,
+          "offset": 1048576,
+          "size": 37888
+        }
+      ]
+    },
+    {
+      "case": "rdsector",
+      "requested_byte_offset": 1048832,
+      "requested_sector_count": 16,
+      "returned_bytes": 38400,
+      "reported_skip": 256,
+      "events": [
+        {
+          "op": "lseek",
+          "fd": 7,
+          "offset": 1048576,
+          "whence": 0
+        },
+        {
+          "op": "read",
+          "fd": 7,
+          "offset": 1048576,
+          "size": 38400
+        }
+      ]
+    },
+    {
+      "case": "rdsector",
+      "requested_byte_offset": 1048576,
+      "requested_sector_count": 2,
+      "returned_bytes": 5120,
+      "reported_skip": 0,
+      "events": [
+        {
+          "op": "lseek",
+          "fd": 7,
+          "offset": 1048576,
+          "whence": 0
+        },
+        {
+          "op": "read",
+          "fd": 7,
+          "offset": 1048576,
+          "size": 5120
+        }
+      ]
+    },
+    {
+      "case": "seek-error",
+      "result": -5,
+      "events": [
+        {
+          "op": "lseek",
+          "fd": 7,
+          "offset": 1048576,
+          "whence": 0
+        }
+      ]
+    },
+    {
+      "case": "seek-error",
+      "result": -9,
+      "events": [
+        {
+          "op": "lseek",
+          "fd": 7,
+          "offset": 1048576,
+          "whence": 0
+        }
+      ]
+    },
+    {
+      "case": "read-result",
+      "result": -5,
+      "events": [
+        {
+          "op": "lseek",
+          "fd": 7,
+          "offset": 1048576,
+          "whence": 0
+        },
+        {
+          "op": "read",
+          "fd": 7,
+          "offset": 1048576,
+          "size": 2560
+        }
+      ]
+    },
+    {
+      "case": "read-result",
+      "result": 0,
+      "events": [
+        {
+          "op": "lseek",
+          "fd": 7,
+          "offset": 1048576,
+          "whence": 0
+        },
+        {
+          "op": "read",
+          "fd": 7,
+          "offset": 1048576,
+          "size": 2560
+        }
+      ]
+    },
+    {
+      "case": "read-result",
+      "result": 100,
+      "events": [
+        {
+          "op": "lseek",
+          "fd": 7,
+          "offset": 1048576,
+          "whence": 0
+        },
+        {
+          "op": "read",
+          "fd": 7,
+          "offset": 1048576,
+          "size": 2560
+        }
+      ]
+    },
+    {
+      "case": "read-result",
+      "result": 2352,
+      "events": [
+        {
+          "op": "lseek",
+          "fd": 7,
+          "offset": 1048576,
+          "whence": 0
+        },
+        {
+          "op": "read",
+          "fd": 7,
+          "offset": 1048576,
+          "size": 2560
+        }
+      ]
+    },
+    {
+      "case": "open-error",
+      "result": -2,
+      "events": [
+        {
+          "op": "open",
+          "path": "mass:/POPS/IMAGE.VCD",
+          "flags": 1
+        }
+      ]
+    },
+    {
+      "case": "open-error",
+      "result": -5,
+      "events": [
+        {
+          "op": "open",
+          "path": "mass:/POPS/IMAGE.VCD",
+          "flags": 1
+        }
+      ]
+    },
+    {
+      "case": "close",
+      "backend_result": 0,
+      "events": [
+        {
+          "op": "close",
+          "fd": 7
+        }
+      ]
+    },
+    {
+      "case": "close",
+      "backend_result": -5,
+      "events": [
+        {
+          "op": "close",
+          "fd": 7
+        }
+      ]
+    },
+    {
+      "case": "descriptor-zero",
+      "events": [
+        {
+          "op": "open",
+          "path": "mass:/POPS/IMAGE.VCD",
+          "flags": 1
+        },
+        {
+          "op": "read",
+          "fd": 0,
+          "offset": 0,
+          "size": 1024
+        }
+      ]
+    },
+    {
+      "case": "short-TOC",
+      "result": 512,
+      "events": [
+        {
+          "op": "open",
+          "path": "mass:/POPS/IMAGE.VCD",
+          "flags": 1
+        },
+        {
+          "op": "read",
+          "fd": 7,
+          "offset": 0,
+          "size": 1024
+        },
+        {
+          "op": "close",
+          "fd": 7
+        }
+      ]
+    }
+  ],
+  "execution": "original MIPS32 IOP code at link base zero; bounded callbacks",
+  "modeled_services": [
+    "legacy IOMAN descriptor routing",
+    "synthetic backend bytes/results",
+    "uncontended semaphores",
+    "DelayThread",
+    "printf",
+    "strcpy"
+  ],
+  "limits": "Synthetic file-mode requests; no EE caller, actual IOP kernel, physical medium, CDDA, save persistence, runtime mount sequence or console boot is exercised."
+}
