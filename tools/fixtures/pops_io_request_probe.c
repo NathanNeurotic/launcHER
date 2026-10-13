@@ -78,12 +78,14 @@ int main(void) {
       rpc_calls != 1 || errors != 1 || waits != 1 || signals != 1 || failed) goto fail;
   ++completed;
   printf("POPS_EE_IO_REQUEST_PASS cases=%u original_R5900=1 services=modeled\n", completed);
+  puts("[ps2rig] exit=0");
   fflush(stdout);
   SleepThread();
   return 0;
 fail:
   printf("POPS_EE_IO_REQUEST_FAIL completed=%u rpc=%u track=%u wait=%u signal=%u errors=%u failed=%d\n",
          completed, rpc_calls, track_calls, waits, signals, errors, failed);
+  puts("[ps2rig] exit=1");
   fflush(stdout);
   SleepThread();
   return 1;

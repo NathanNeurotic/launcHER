@@ -40,6 +40,14 @@ then one end-to-end device boot and VMC save/reload/power-cycle test. The native
 EE probe and modeled IOP route do not execute real SIF transport, a complete
 Sony IOP kernel or storage hardware. Do not introduce a second VCD offset remap.
 
+Physical-console continuation: the user enabled ps2link. The native original EE
+request probe passed all seven cases in ps2rig run `20261013T181122-0001`
+with `[ps2rig] exit=0`. This is actual R5900 hardware execution with modeled
+imported services, not a full POPS boot or save test. The source now prints rig
+exit markers and the metadata-only console result is committed. Continue with
+real IOP-kernel/RPC binding; a custom IOP reset removes ps2link services, so
+validate the foreign-image probe in isolated PCSX2 before console deployment.
+
 The older sections below are historical checkpoints, not current acceptance.
 
 Branch: `codex/popstarter-replacement`, based on `EMBER` and including merged

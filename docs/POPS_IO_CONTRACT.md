@@ -148,6 +148,15 @@ Every linked probe PT_LOAD extent, including BSS, is checked for overlap with
 the injected function, service entry redirects and fixed globals before a run.
 PCSX2 uses a fresh isolated profile with both memory cards disabled.
 
+The same seven cases subsequently **passed on the physical PS2** through
+ps2rig run `20261013T181122-0001`, with explicit `[ps2rig] exit=0`. The
+console ELF SHA256 is
+`651a5fcd61136aa6e701fb81692921bfeb3ec625a64de3c193149f529652fe4c`.
+Its stdout and outcome are preserved in
+`docs/evidence/original_pops_ee_console_probe.json`. This advances the bounded
+request-producer result to hardware execution; imported services remain doubles.
+It does not establish complete POPS boot, custom IOP reboot or save persistence.
+
 | LBA | Selected final sector | Observed count | Observed byte offset |
 | --- | --- | --- | --- |
 | 0 | 1000 | 16 | 1048576 |
