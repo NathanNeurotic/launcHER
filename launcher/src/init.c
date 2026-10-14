@@ -37,6 +37,7 @@ _Static_assert(POPS_PROXY_ARGS_MAX <= LF_ARG_MAX,
 
 // Embedded IOP modules
 IRX_DEFINE(iomanX);
+IRX_DEFINE(pops_iomanx);
 IRX_DEFINE(fileXio);
 IRX_DEFINE(sio2man);
 IRX_DEFINE(mcman);
@@ -275,7 +276,11 @@ static int loadModuleList(DeviceType device, int tolerant, int sonySio2) {
       }
     }
 
-    if (moduleList[i].path)
+    /* Only the identified Sony IOP reset path needs the private legacy-state
+     * migration. Normal launcher and Ember initialization retain SDK iomanX. */
+    if (sonySio2 && !strcmp(moduleList[i].name, "iomanX"))
+      ret = SifExecModuleBuffer(pops_iomanx_irx, size_pops_iomanx_irx, 0, NULL, &iopret);
+    else if (moduleList[i].path)
       ret = SifLoadModule(moduleList[i].path, moduleList[i].argLength, moduleList[i].argStr);
     else
       ret = SifExecModuleBuffer(moduleList[i].irx, *moduleList[i].size, moduleList[i].argLength, moduleList[i].argStr, &iopret);

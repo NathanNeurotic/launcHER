@@ -334,7 +334,8 @@ The host regression reproduces the descriptor-mode-3 case and validates both
 layouts and failure atomicity. Replacing only iomanX in the controlled probe
 passes PCSX2 with unchanged production POPFS and original IOPCD. Standard
 handles 0/1 survive correctly; emulator reservation then receives 2/3.
-This candidate is not yet selected by the launcher pending hardware comparison.
+The hardware comparison now passes in full (checkpoint below). The launcher
+selects this module only in the identified Sony post-reset path.
 The stock iomanX path for normal launcher/Ember initialization is untouched.
 
 Build it with the production SDK via `make` in `launcher/iop/pops_iomanx`.
@@ -354,3 +355,15 @@ The regression starts with poisoned private data and verifies descriptor-zero
 handling, active-handle exclusion and close lifetime. The rebuilt production
 driver and candidate pass the controlled emulator probe; the updated hardware
 comparison also reports file-service bind/open results explicitly.
+
+Final physical run `20261014T050940-0020` confirms the complete controlled
+bridge: visible `POPS_IOP_BINDING_PASS`, both aliases, five original Sony RPC
+sector reads, two direct and two POPFS card close/reopen readbacks, followed
+by `[ps2rig] exit=0`. The final screen is cleared before printing the result,
+so it remains visible after the progress log fills the display. This run uses
+the unchanged production POPFS, rather than the startup diagnostic copy.
+See `docs/evidence/pops_ioman_fixed_console_probe.json` for ELF identity and
+the network-versus-GS observation boundary. The compatibility IRX is now built
+and embedded by CMake and selected only for Sony initialization; stock iomanX
+remains the normal launcher/Ember module. Real-device streaming, a complete
+POPS game boot and durable VMC saves remain separate acceptance requirements.

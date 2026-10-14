@@ -49,6 +49,14 @@ static int probe_printf(const char *format, ...) {
 #define printf probe_printf
 #define puts(text) probe_printf("%s\n", text)
 
+/* Keep the terminal result visible after the progress log fills the GS screen. */
+static void result_screen(void) {
+#ifdef POPS_BINDING_CONSOLE_SCREEN
+  scr_clear();
+  scr_setXY(0, 0);
+#endif
+}
+
 #ifdef POPS_BINDING_STARTUP_TRACE
 static unsigned char worker_stack[16384] __attribute__((aligned(64)));
 static volatile int worker_done, worker_id, worker_result;
@@ -221,9 +229,14 @@ int main(void) {
 #ifndef POPS_BINDING_CONSOLE_SCREEN
   for (unsigned i = 0; i < 2; ++i) if ((result = fileXioClose(reserved[i])) < 0) goto fail;
 #endif
-  puts("POPS_IOP_BINDING_PASS real_Sony_IOP=1 real_SIF_RPC=1 media=controlled");
+  result_screen();
+  puts("POPS_IOP_BINDING_PASS");
+  puts("real_Sony_IOP=1 real_SIF_RPC=1 media=controlled");
+  puts("disc aliases: 2 PASS; Sony sector reads: 5 PASS");
+  puts("card close/reopen readback: direct 2 PASS; POPFS 2 PASS");
   puts("[ps2rig] exit=0"); fflush(stdout); SleepThread(); return 0;
 fail:
+  result_screen();
   printf("POPS_IOP_BINDING_FAIL stage=%d result=%d\n", stage, result);
   puts("[ps2rig] exit=1"); fflush(stdout); SleepThread(); return 1;
 }

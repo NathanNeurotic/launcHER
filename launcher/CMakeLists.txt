@@ -243,12 +243,30 @@ add_custom_command(
 add_custom_target(popfs DEPENDS ${POPFS_IRX})
 list(APPEND IRX_FILES popfs.irx)
 
+# Sony's external IOP images use legacy IOMAN layouts unsupported by the
+# stock SDK hook. Keep this module separate from normal/Ember initialization.
+set(POPS_IOMANX_IRX "${CMAKE_CURRENT_BINARY_DIR}/pops_iomanx.irx")
+file(GLOB POPS_IOMANX_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/iop/pops_iomanx/src/*")
+add_custom_command(
+    OUTPUT ${POPS_IOMANX_IRX}
+    COMMAND ${CMAKE_COMMAND} -E chdir "${CMAKE_CURRENT_SOURCE_DIR}/iop/pops_iomanx" ${CMAKE_MAKE_PROGRAM}
+    COMMAND ${CMAKE_COMMAND} -E copy
+        "${CMAKE_CURRENT_SOURCE_DIR}/iop/pops_iomanx/irx/pops_iomanx.irx" ${POPS_IOMANX_IRX}
+    DEPENDS ${POPS_IOMANX_SOURCES} "${CMAKE_CURRENT_SOURCE_DIR}/iop/pops_iomanx/Makefile"
+    COMMENT "Building Sony POPS IOMAN compatibility module"
+    VERBATIM
+)
+add_custom_target(pops_iomanx DEPENDS ${POPS_IOMANX_IRX})
+list(APPEND IRX_FILES pops_iomanx.irx)
+
 foreach(irx ${IRX_FILES})
   get_filename_component(irx_name ${irx} NAME_WE)
   string(REPLACE "-" "_" irx_name_clean ${irx_name})
 
   if(irx_name STREQUAL "popfs")
     irx_to_source("${POPFS_IRX}" irx_source "popfs_irx" "")
+  elseif(irx_name STREQUAL "pops_iomanx")
+    irx_to_source("${POPS_IOMANX_IRX}" irx_source "pops_iomanx_irx" "")
   elseif(irx_name STREQUAL "udpbd")
     # udpbd is not a part of PS2SDK
     irx_to_source("${CMAKE_CURRENT_SOURCE_DIR}/iop/udpfs/udpbd/irx/udpbd.irx" irx_source "udpbd_irx" "")
@@ -296,7 +314,7 @@ endforeach()
 
 # Create executable
 add_executable(launcher_unc ${EE_SOURCES} ${IRX_SOURCES} ${ELF_SOURCES} ${RES_SOURCES})
-add_dependencies(launcher_unc popfs)
+add_dependencies(launcher_unc popfs pops_iomanx)
 
 # Add dependencies on IOP modules built via Makefiles
 if(LAUNCHER_UDPBD)

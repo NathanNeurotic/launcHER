@@ -1,5 +1,30 @@
 # POPSTARTER replacement handoff — 2026-10-08
 
+## Verified hardware checkpoint — October 13, 2026
+
+Physical run `20261014T050940-0020` displayed `POPS_IOP_BINDING_PASS` and
+`[ps2rig] exit=0` in the OBS console capture. The actual selected Sony IOP
+image, original IOPCD and real SIF RPC passed both disc aliases, all five
+sector-read tuples and four distinct card write/close/reopen/readback checks
+(two direct, two through production POPFS). Storage was controlled IOP memory;
+this does not establish actual-device persistence or a complete game boot.
+Metadata: `docs/evidence/pops_ioman_fixed_console_probe.json`.
+
+Two causal repairs resolved the earlier hardware failures below: private
+`pops_iomanx` migrates Sony's identified linked/flat IOMAN layouts and all 32
+file slots; POPFS accepts newly allocated recycled slots with stale private
+data. The launcher now builds/embeds this compatibility module and selects it
+only in the identified Sony post-reset initialization. Normal/Ember loading
+continues to use stock SDK iomanX. The probe clears its final result screen so
+progress output cannot hide acceptance markers. Its network rig outcome can
+still be `hang`, because the foreign reset removes ps2link; the explicit GS
+result is recorded separately.
+
+Next: complete read-only installed-device inventory, choose an actual VCD,
+boot Sony POPS through launcHER and test separate VMC files across a power
+cycle. Do not overwrite existing saves. Earlier candidate/stall checkpoints
+below describe the investigation, not the current controlled-bridge result.
+
 ## Current local continuation — October 13, 2026
 
 Local development was fast-forwarded to PR #23 head
