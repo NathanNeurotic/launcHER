@@ -125,7 +125,13 @@ stops only after production service initialization, live disc/card checks and
 trampoline preparation. It displays `POPS_PREFLIGHT_PASS` and explicitly says
 Sony entry has not executed. This option defaults OFF; disable it for gameplay.
 The current local trace build enables this stop and disables soft recovery.
-Hardware confirmation of that boundary is next.
+Physical run `20261014T134640-0040` now displays
+`POPS_PREFLIGHT_PASS Sony_entry_not_executed=1`. Thus the complete production
+preflight passed with the actual Sony IOP reset and ATA disc/VMC route. The rig
+reports hang because the reset removes ps2link; acceptance is the persistent GS
+marker. See `docs/evidence/pops_production_preflight_console.json`.
+Sony EE entry was deliberately not executed. The next boundary is trampoline
+execution and the core's initial runtime; full game boot remains unverified.
 
 The earlier read-only configuration probe is
 `build/pops-device-config-v13/gcc/bin/inventory.elf` with ELF arguments
