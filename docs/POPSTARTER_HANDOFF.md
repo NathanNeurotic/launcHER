@@ -70,7 +70,15 @@ and post-open read failures; the 57 external tests and both normal/trace target
 builds pass. Hardware acceptance of this fix is pending: runs
 `20261014T061522-0031` and `20261014T062342-0032` returned no console stdout.
 Do not infer game boot or successful configuration parsing from them.
-The next read-only configuration probe is
+Physical run `20261014T075656-0033` subsequently confirmed that the global-card
+fix works. It reaches the absent ATA PATCHES.TXT and fails with errno 4: the
+stock BDM FatFs driver returns raw FRESULT values instead of errno. See
+`docs/evidence/pops_ata_configuration_errno_console.json`. The next correction
+belongs in the driver, preserving real I/O errors. A licensed source baseline
+and exact dependency identities are saved in `launcher/iop/pops_fatfs/`;
+this checkpoint is unintegrated. The new PSXCore reference is also unlinked.
+
+The read-only configuration probe is
 `build/pops-device-config-v13/gcc/bin/inventory.elf` with ELF arguments
 `--inspect-config ata0:/LAUNCHER-TEST-20261013-A/ TEST`.
 
