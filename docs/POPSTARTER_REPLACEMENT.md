@@ -1170,3 +1170,34 @@ This is additive filename compatibility, **not** proof that Sony IOPCD
 requests `IMAGE1.VCD` or that the selected POPS build will use the
 private disc-swap devctl interface. The actual multi-disc file-open
 sequence and card sharing still need hardware/runtime tracing.
+
+## PSXCore reference submodule — 2026-10-14
+
+`third_party/psxcore` is dnunezx's PSXCore (AFL-3.0), pinned at upstream
+`33ff5643`. It is an independent open-source launcher for the same Sony POPS
+build: it pins POPS.ELF by SHA-256 `59df3389…` (3,166,988 B), the loose-file
+input that `pops_profile.c` already accepts and that stages to the same
+measured core as both PAKs. REPOP vendors the same commit as Pillar 11; its
+`tools/psxcore_census.py` maps every PSXCore patch site onto REPOP's POPS
+ground truth.
+
+The submodule is reference material only. Nothing under it is built or linked
+by launcHER, and adding it changes no launch behavior.
+
+What it offers that launcHER's table does not have:
+
+- Five guarded POPS core corrections in `src/runtime_corrections.c`: texture
+  window repeat, linked GPU DMA from address 0, CDDA with SetMode bit 0 clear,
+  SPU enable without a state reset, and GTE register 23 writes. All five guards
+  match the reference POPS.ELF byte for byte. None of them appears in
+  `pops_core_patches.c`, which copies POPStarter's patch set.
+- Runtime fixes delivered as resident hooks (`runtime/*.S`): memory access,
+  code-cache validation, MDEC, RGB24, SPU capture/reverb, and PCM flow. They
+  depend on its resident loader layout, so they cannot be dropped into
+  launcHER's table directly.
+- A FatFs-based ATA FAT32/exFAT VCD backend (`iop/storage/fatfs`), worth
+  comparing with the untracked `launcher/iop/pops_fatfs` work.
+
+Upstream marks USB with multiple devices, the ATA/exFAT launch path, MX4SIO,
+MMCE, IGR and disc switching as unfinished. Its compatibility and
+hardware claims are **unverified** here.
