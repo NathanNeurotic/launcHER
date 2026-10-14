@@ -281,3 +281,24 @@ start results 0, then `load=production-popfs` without a return or final marker.
 The next diagnostic must pinpoint module-load versus driver-initialization
 progress. The network-only rig labeled the run hung, as expected after the
 reset removed ps2link; the incomplete screen progress is the stronger evidence.
+
+For that boundary, preparation also accepts `--startup-trace`. It compiles a
+**diagnostic copy** of current POPFS with volatile progress records, leaving
+production source/IRX unchanged. An EE worker performs module loading while a
+bounded watchdog reads IOP RAM directly with SDK `smem_read`; it does not need
+an IOP RPC response. The watchdog prints every matching progress record for
+12 one-second samples. A stage-0 record can be the uploaded IRX buffer; the
+executing module changes its own record. Stages: 1 entry/argc, 2 mode string,
+3 before GetDeviceList, 4 returned table, 100..131 device index and pointer,
+5 path validation, 6/7 before/after clearing paths, 8 collision checks,
+9/10 before/after first AddDrv, 11 alias AddDrv, 12 successful return. Reaching
+stage 12 and module result 0 was verified in PCSX2. A diagnostic build's pass
+does not establish the identical production module's hardware behavior.
+
+`tools/prepare_pops_device_inventory.py --launcher-build build/pops-ps2sdk
+--out build/device-inventory` prepares a separate read-only device probe.
+It adds the launcher's USB/MMCE drivers to an inherited ps2link environment
+without an IOP reboot, then lists bounded directories through iomanX. Never
+overwrite an existing driver or choose a game/save path from stale inventory.
+The first physical attempt observed two USB disks mounted by BDM/FatFs but
+did not finish directory enumeration. No game or existing save was modified.

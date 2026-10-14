@@ -11,6 +11,10 @@
 #include <stdarg.h>
 #include <string.h>
 #include <stdint.h>
+#ifdef POPS_BINDING_STARTUP_TRACE
+#include <smem.h>
+#include "diagnostic_popfs_irx.h"
+#endif
 #ifdef POPS_BINDING_CONSOLE_SCREEN
 #include <debug.h>
 #endif
@@ -44,6 +48,52 @@ static int probe_printf(const char *format, ...) {
 }
 #define printf probe_printf
 #define puts(text) probe_printf("%s\n", text)
+
+#ifdef POPS_BINDING_STARTUP_TRACE
+static unsigned char worker_stack[16384] __attribute__((aligned(64)));
+static volatile int worker_done, worker_id, worker_result;
+static const char *worker_args;
+static unsigned worker_length;
+extern void *_gp;
+static void load_worker(void *unused) {
+  (void)unused;
+  int start = -999;
+  int id = SifExecModuleBuffer(diagnostic_popfs_irx, size_diagnostic_popfs_irx,
+                              worker_length, worker_args, &start);
+  worker_id = id; worker_result = start; worker_done = 1;
+  ExitThread();
+}
+static void wake_main(s32 alarm, u16 ticks, void *common) {
+  (void)alarm; (void)ticks; iWakeupThread((int)(uintptr_t)common);
+}
+static int trace_start(unsigned length, const char *args) {
+  ee_thread_t thread = {0};
+  worker_args = args; worker_length = length; worker_done = 0;
+  thread.func = load_worker; thread.stack = worker_stack; thread.stack_size = sizeof(worker_stack);
+  thread.gp_reg = &_gp; thread.initial_priority = 32;
+  int id = CreateThread(&thread);
+  if (id < 0) return id;
+  StartThread(id, NULL);
+  unsigned words[1024] __attribute__((aligned(64)));
+  for (unsigned tick = 0; tick < 12; ++tick) {
+    SetAlarm(16000, wake_main, (void *)(uintptr_t)GetThreadId()); SleepThread();
+    unsigned found = 0;
+    for (unsigned base = 0x1000; base < 0x200000; base += sizeof(words)) {
+      smem_read((void *)(uintptr_t)base, words, sizeof(words));
+      for (unsigned i = 0; i + 7 < 1024; ++i) if (words[i] == 0x504f5046 && words[i+1] == 0x44494147) {
+        printf("POPS_IOP_BINDING trace tick=%u addr=%08x stage=%u value=%08x\n",
+               tick, base + i * 4, words[i+2], words[i+3]); ++found;
+      }
+    }
+    if (!found) printf("POPS_IOP_BINDING trace tick=%u no-loaded-marker\n", tick);
+    if (worker_done) {
+      printf("POPS_IOP_BINDING diagnostic-popfs id=%d start=%d\n", worker_id, worker_result);
+      return worker_id < 0 ? worker_id : worker_result ? -1000 - worker_result : 0;
+    }
+  }
+  return -4000; /* diagnostic timeout, no hardware acceptance */
+}
+#endif
 
 static int load(const char *name, void *data, unsigned size, unsigned length, const char *args) {
   int result = -999;
@@ -86,7 +136,11 @@ int main(void) {
   int length = pops_format_proxy_args_mode(args, sizeof(args), "trace0:/disc",
       "trace0:/card0", "trace0:/card1", NULL, NULL, NULL, 1);
   if (length < 0) { result = length; goto fail; }
+#ifdef POPS_BINDING_STARTUP_TRACE
+  if ((result = trace_start(length, args))) goto fail;
+#else
   if ((result = load("production-popfs", popfs_irx, size_popfs_irx, length, args))) goto fail;
+#endif
   stage = 6;
   if ((result = fileXioInit()) < 0) goto fail;
 #ifndef POPS_BINDING_CONSOLE_SCREEN

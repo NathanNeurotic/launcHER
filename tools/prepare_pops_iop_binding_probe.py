@@ -30,7 +30,35 @@ def array(name, data):
                         for i in range(0, len(data), 32)) + "\n};\n")
 
 
-def prepare(elf, image, launcher_build, out, console_screen=False):
+def startup_diagnostic(source):
+    """Instrument only the local diagnostic copy, leaving production untouched."""
+    source = source.replace('#define PATH_LIMIT 256',
+        'volatile unsigned pops_diag[8] = {0x504f5046, 0x44494147, 0, 0, 0, 0, 0, 0};\n'
+        '#define DIAG(s,v) do { pops_diag[3] = (unsigned)(v); pops_diag[2] = (s); } while (0)\n'
+        '#define PATH_LIMIT 256', 1)
+    edits = [
+        ('int i, result, alias;', 'int i, result, alias; DIAG(1, argc);'),
+        ('alias = !strcmp(argv[0], "popfs+pfs");', 'DIAG(2, argv[0]); alias = !strcmp(argv[0], "popfs+pfs");'),
+        ('iomanX_iop_device_t **list = iomanX_GetDeviceList();',
+         'DIAG(3, 0); iomanX_iop_device_t **list = iomanX_GetDeviceList(); DIAG(4, list);'),
+        ('if (list[i] && !strcmp(list[i]->name, name)) return 1;',
+         '{ DIAG(100 + i, list[i]); if (list[i] && !strcmp(list[i]->name, name)) return 1; }'),
+        ('for (i = 1; i < argc; ++i)\n    if (!argv[i]',
+         'DIAG(5, argc); for (i = 1; i < argc; ++i)\n    if (!argv[i]'),
+        ('memset(paths, 0, sizeof(paths));', 'DIAG(6, 0); memset(paths, 0, sizeof(paths)); DIAG(7, 0);'),
+        ('/* Reject exact slot/disc aliases,', 'DIAG(8, 0); /* Reject exact slot/disc aliases,'),
+        ('result = iomanX_AddDrv(&device);', 'DIAG(9, &device); result = iomanX_AddDrv(&device); DIAG(10, result);'),
+        ('if (alias && iomanX_AddDrv(&virtual_pfs) < 0)',
+         'DIAG(11, alias); if (alias && iomanX_AddDrv(&virtual_pfs) < 0)'),
+        ('return MODULE_RESIDENT_END;', 'DIAG(12, 0); return MODULE_RESIDENT_END;')]
+    for before, after in edits:
+        if source.count(before) != 1:
+            raise ValueError(f"diagnostic source guard changed: {before}")
+        source = source.replace(before, after, 1)
+    return source
+
+
+def prepare(elf, image, launcher_build, out, console_screen=False, startup_trace=False):
     pops, reboot = elf.read_bytes(), image.read_bytes()
     if sha(pops) != POPS_SHA or sha(reboot) != IOPRP_SHA:
         raise ValueError("unrecognized selected Sony ELF/IOPRP identity")
@@ -75,9 +103,22 @@ def prepare(elf, image, launcher_build, out, console_screen=False):
     if console_screen:
         config["targets"][1]["defines"] = ["POPS_BINDING_CONSOLE_SCREEN=1"]
         config["targets"][1]["libs"].append("debug")
+    if startup_trace:
+        source = (ROOT / "launcher/iop/popfs/src/popfs.c").read_text()
+        (out / "diagnostic_popfs.c").write_text(startup_diagnostic(source))
+        shutil.copyfile(ROOT / "launcher/iop/popfs/src/imports.lst", out / "popfs_imports.lst")
+        (out / "irx_imports.h").write_text(
+            '#include <irx.h>\n#include <iomanX.h>\n#include <sysclib.h>\n'
+            '#include <stdio.h>\n#include <intrman.h>\n#include <loadcore.h>\n')
+        config["targets"].insert(1, {"name": "diagnostic_popfs", "type": "iop",
+            "sources": ["diagnostic_popfs.c"], "imports_lst": "popfs_imports.lst",
+            "headers": ["iomanx"], "include_dirs": ["."], "opt": "-Os",
+            "defines": ["IOMANX_OLD_NAME_COMPATIBILITY=0", "IOMANX_OLD_NAME_ADDDELDRV=0"]})
+        config["targets"][-1]["embed_irx"].append("diagnostic_popfs")
+        config["targets"][-1].setdefault("defines", []).append("POPS_BINDING_STARTUP_TRACE=1")
     (out / "ps2.yaml").write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
     (out / "provenance.json").write_text(json.dumps({
-        "pops_elf_sha256": POPS_SHA, "console_screen": console_screen,
+        "pops_elf_sha256": POPS_SHA, "console_screen": console_screen, "startup_trace": startup_trace,
         "module_sha256": {k: sha(v) for k, v in modules.items()},
         "scope": "Actual Sony IOP kernel and IOPCD, actual SIF RPC and production bridge modules; storage medium is controlled IOP memory."
     }, indent=2) + "\n", encoding="utf-8")
@@ -91,5 +132,7 @@ if __name__ == "__main__":
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--console-screen", action="store_true",
                         help="Hardware capture: show EE progress on GS, do not reserve emulator stdout descriptors")
+    parser.add_argument("--startup-trace", action="store_true",
+                        help="Use a locally instrumented POPFS copy and an EE watchdog to locate startup stalls")
     args = parser.parse_args()
-    prepare(args.elf, args.iop_image, args.launcher_build, args.out, args.console_screen)
+    prepare(args.elf, args.iop_image, args.launcher_build, args.out, args.console_screen, args.startup_trace)
