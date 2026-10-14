@@ -23,8 +23,9 @@
 #define POPS_TRAMPOLINE_ADDR     UINT32_C(0x00084000)
 #define POPS_TRAMPOLINE_ARGS     UINT32_C(0x00084200)
 
-/* Proxy argument limit matching popfs. */
-#define POPS_PROXY_ARGS_MAX      (6 * 256)
+/* SifExecModuleBuffer's LOADFILE RPC copies at most LF_ARG_MAX=252 bytes.
+ * Reject larger packets before side effects instead of silent truncation. */
+#define POPS_PROXY_ARGS_MAX      252
 
 typedef struct {
   uint32_t entry;           /* Offset 0: Entrypoint (0x00200008) */

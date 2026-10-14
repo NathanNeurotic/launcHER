@@ -79,6 +79,14 @@ int iomanX_sync(const char *name, int flag) {
   return io_result;
 }
 
+/* Model the actual MODLOAD argv contract, including its synthesized filename. */
+static int start_payload(int argc, char **argv) {
+  char *loaded[9] = {"LBbyEE"};
+  assert(argc >= 0 && argc <= 7);
+  for (int i = 0; i < argc; ++i) loaded[i + 1] = argv[i];
+  return popfs_start(argc + 1, loaded);
+}
+
 int main(void) {
   char *arguments[] = {"popfs", "mass7:/POPS/Game.VCD", "udpfs:/saves/Card0.VMC",
                         "mmce1:/POPS/Game/Card1.VMC", "pfs0:/disc/Second.VCD"};
@@ -88,25 +96,26 @@ int main(void) {
   iox_stat_t stat;
   int saved;
 
-  assert(popfs_start(3, arguments) == MODULE_NO_RESIDENT_END);
+  assert(popfs_start(4, arguments) == MODULE_NO_RESIDENT_END); /* missing loader argv */
+  assert(start_payload(3, arguments) == MODULE_NO_RESIDENT_END);
   saved = 1; arguments[1] = "pops1:/recursive";
-  assert(popfs_start(4, arguments) == MODULE_NO_RESIDENT_END);
+  assert(start_payload(4, arguments) == MODULE_NO_RESIDENT_END);
   arguments[1] = "POPS0:/recursive";
-  assert(popfs_start(4, arguments) == MODULE_NO_RESIDENT_END);
+  assert(start_payload(4, arguments) == MODULE_NO_RESIDENT_END);
   arguments[1] = "PoPs:/recursive";
-  assert(popfs_start(4, arguments) == MODULE_NO_RESIDENT_END);
+  assert(start_payload(4, arguments) == MODULE_NO_RESIDENT_END);
   arguments[1] = "hdd0:PART:pops0:/recursive";
-  assert(popfs_start(4, arguments) == MODULE_NO_RESIDENT_END);
+  assert(start_payload(4, arguments) == MODULE_NO_RESIDENT_END);
   arguments[1] = "hdd0:PART:POPS:/recursive";
-  assert(popfs_start(4, arguments) == MODULE_NO_RESIDENT_END);
+  assert(start_payload(4, arguments) == MODULE_NO_RESIDENT_END);
   arguments[saved] = "mass7:/POPS/Game.VCD";
   arguments[2] = arguments[1];
-  assert(popfs_start(5, arguments) == MODULE_NO_RESIDENT_END);
+  assert(start_payload(5, arguments) == MODULE_NO_RESIDENT_END);
   arguments[2] = "udpfs:/saves/Card0.VMC";
   arguments[1] = "udpfs:/saves/Card0.VMC.bak";
-  assert(popfs_start(5, arguments) == MODULE_NO_RESIDENT_END);
+  assert(start_payload(5, arguments) == MODULE_NO_RESIDENT_END);
   arguments[1] = "mass7:/POPS/Game.VCD";
-  assert(popfs_start(5, arguments) == MODULE_RESIDENT_END);
+  assert(start_payload(5, arguments) == MODULE_RESIDENT_END);
   assert(registered && !strcmp(registered->name, "pops"));
   ops = registered->ops;
 
@@ -368,22 +377,22 @@ int main(void) {
   assert(!iomanX_DelDrv("pops"));
   iomanX_iop_device_t real_pfs = {"pfs", IOP_DT_FS, 1, "genuine PFS", &operations};
   registered_drivers[24] = &real_pfs;
-  assert(popfs_start(4, alias_args) == MODULE_NO_RESIDENT_END);
+  assert(start_payload(4, alias_args) == MODULE_NO_RESIDENT_END);
   assert(registered_drivers[24] == &real_pfs);
   registered_drivers[24] = NULL;
 
   /* Recursive PFS-backed paths are never accepted in virtual mode. */
   alias_args[1] = "hdd0:__common:pfs:/Game.VCD";
-  assert(popfs_start(4, alias_args) == MODULE_NO_RESIDENT_END);
+  assert(start_payload(4, alias_args) == MODULE_NO_RESIDENT_END);
   alias_args[1] = "PFS0:/Game.VCD";
-  assert(popfs_start(4, alias_args) == MODULE_NO_RESIDENT_END);
+  assert(start_payload(4, alias_args) == MODULE_NO_RESIDENT_END);
   alias_args[1] = "mass7:/POPS/Game.VCD";
 
   fail_alias_add = 1;
-  assert(popfs_start(4, alias_args) == MODULE_NO_RESIDENT_END);
+  assert(start_payload(4, alias_args) == MODULE_NO_RESIDENT_END);
   assert(!registered_drivers[0]); /* rolls back our pops registration */
   fail_alias_add = 0;
-  assert(popfs_start(4, alias_args) == MODULE_RESIDENT_END);
+  assert(start_payload(4, alias_args) == MODULE_RESIDENT_END);
   assert(registered_drivers[0] == &device);
   assert(registered_drivers[1] == &virtual_pfs);
   assert(!virtual_pfs.ops->open(&file, "IMAGE.VCD", FIO_O_RDONLY, 0));

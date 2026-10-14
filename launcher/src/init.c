@@ -3,6 +3,7 @@
 #include "common.h"
 #include "dprintf.h"
 #include "pops_external.h"
+#include "pops_bootstrap.h"
 #include "launch_args.h"
 #include "handler_pops.h"
 #include <ctype.h>
@@ -21,6 +22,9 @@
 #include <string.h>
 #define NEWLIB_PORT_AWARE
 #include "fileXio_rpc.h"
+
+_Static_assert(POPS_PROXY_ARGS_MAX <= LF_ARG_MAX,
+               "POPFS arguments must fit the SDK LOADFILE RPC packet");
 
 // Macros for loading embedded IOP modules
 #define IRX_DEFINE(mod)                                                                                                                              \
@@ -332,7 +336,7 @@ int initPopsServices(DeviceType devices, const void *core, size_t coreSize,
    * normal launch must not treat the device cache as initialized. This
    * remains set even after loadModuleList updates currentDevice. */
   forceIOPReset = 1;
-  if (!proxyArguments || !argumentSize || argumentSize > 6 * 256 ||
+  if (!proxyArguments || !argumentSize || argumentSize > POPS_PROXY_ARGS_MAX ||
       proxyArguments[argumentSize - 1] != '\0')
     return -EINVAL;
   /* Boot planning and core patching already verified the pristine core. Check

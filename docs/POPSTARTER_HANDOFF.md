@@ -35,10 +35,21 @@ isolated runner and metadata-only GCC/LLVM reports are all committed; no
 original-byte probe ELF/C array is distributed. Three synthetic input/layout
 guard tests are also in CI. See `docs/POPS_IO_CONTRACT.md` for exact reproduction.
 
-Next: establish actual post-reset Sony IOMAN/iomanX binding and module lifetimes,
-then one end-to-end device boot and VMC save/reload/power-cycle test. The native
-EE probe and modeled IOP route do not execute real SIF transport, a complete
-Sony IOP kernel or storage hardware. Do not introduce a second VCD offset remap.
+The actual Sony IOP image and SIF RPC binding probe now passes in isolated
+PCSX2 with the production iomanX/fileXio/POPFS modules and original IOPCD.
+It exposed a production startup error: MODLOAD supplies `LBbyEE` at argv[0],
+so POPFS must read its packed mode from argv[1]. The host fixture now models
+that real loader contract. Proxy argument packets are also limited to the
+SDK LOADFILE RPC's 252 bytes; larger configurations fail before side effects
+instead of being silently truncated. The 57 external-core tests and updated
+POPFS contracts pass. The real-kernel probe also checks both card aliases with
+different direct/bridged write patterns and close/reopen byte verification on
+controlled IOP memory. This does not establish physical-media persistence.
+
+Next: one end-to-end device boot and VMC save/reload/power-cycle test, plus
+full runtime patch/parity acceptance. Do not introduce a second VCD offset
+remap. See `docs/POPS_IO_CONTRACT.md` for the real-kernel probe and an important
+PCSX2 descriptor-1 console interception caveat.
 
 Physical-console continuation: the user enabled ps2link. The native original EE
 request probe passed all seven cases in ps2rig run `20261013T181122-0001`

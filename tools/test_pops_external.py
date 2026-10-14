@@ -817,6 +817,19 @@ class InspectorTests(unittest.TestCase):
             buf, 512, *paths, None), RANGE)
         self.assertEqual(buf.raw, before)
 
+    def test_proxy_packet_obeys_loadfile_rpc_limit_before_mutation(self):
+        buf = c.create_string_buffer(1024)
+        paths = [b"mass0:/" + b"d" * 75, b"mass0:/" + b"a" * 75,
+                 b"mass0:/" + b"b" * 72]
+        self.assertEqual(LIB.pops_format_proxy_args(
+            buf, len(buf), *paths, None, None, None), 252)
+        c.memset(buf, 0x5a, len(buf))
+        before = buf.raw
+        paths[2] += b"x"
+        self.assertEqual(LIB.pops_format_proxy_args(
+            buf, len(buf), *paths, None, None, None), RANGE)
+        self.assertEqual(buf.raw, before)
+
     def test_libcrypt_configuration_checks_iop_result(self):
         launcher = (ROOT / "launcher/src/handler_pops.c").read_text()
         start = launcher.index('res = fileXioDevctl("pops:", 0x05')

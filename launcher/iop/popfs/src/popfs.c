@@ -471,6 +471,12 @@ static int pfs_backing(const char *path) {
 
 int _start(int argc, char **argv) {
   int i, result, alias;
+  /* MODLOAD supplies the loader filename at argv[0] ("LBbyEE" for
+   * SifExecModuleBuffer). Our explicitly packed mode starts at argv[1]. */
+  if (argc < 5 || argc > 8 || !argv || !argv[0])
+    return MODULE_NO_RESIDENT_END;
+  --argc;
+  ++argv;
   if (argc < 4 || argc > 7 || !argv || !argv[0])
     return MODULE_NO_RESIDENT_END;
   alias = !strcmp(argv[0], "popfs+pfs");
