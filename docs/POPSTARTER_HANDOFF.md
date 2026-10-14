@@ -61,6 +61,16 @@ validate the foreign-image probe in isolated PCSX2 before console deployment.
 
 The older sections below are historical checkpoints, not current acceptance.
 
+Hardware binding attempt `20261014T004047-0013` subsequently rebooted into
+Sony's image and displayed successful iomanX/fileXio/backend module returns
+on the physical capture. It stopped at `load=production-popfs`, without a
+return status or PASS/FAIL marker. This hardware boundary remains unresolved;
+the emulator pass must not be substituted for it. The metadata-only attempt
+is committed under `docs/evidence/original_pops_iop_console_attempt.json`.
+The user authorized selecting any installed VCD and restarted ps2link.
+A read-only inventory loaded production USB/MMCE stacks and observed two USB
+disks mounted by BDM/FatFs, but no completed directory/game selection yet.
+
 Branch: `codex/popstarter-replacement`, based on `EMBER` and including merged
 OPL argument compatibility PR #19 (`c616e0cdccc2af24fd2e4e956fff167f822da4bf`).
 This branch is unfinished development. Do not merge or publish it as working

@@ -274,3 +274,10 @@ source-only input/layout guards run in CI without Sony binaries.
 **Remaining acceptance:** a complete POPS game boot, actual Sony card runtime,
 device streaming, audio and physical save/reload/power-cycle persistence.
 In-memory close/reopen proves the bridge and RPC route, not durable saves.
+
+The first hardware binding attempt, `20261014T004047-0013`, did **not** pass.
+The physical OBS capture showed Sony reset complete, iomanX/fileXio/backend
+start results 0, then `load=production-popfs` without a return or final marker.
+The next diagnostic must pinpoint module-load versus driver-initialization
+progress. The network-only rig labeled the run hung, as expected after the
+reset removed ps2link; the incomplete screen progress is the stronger evidence.
