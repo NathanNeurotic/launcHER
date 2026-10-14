@@ -138,7 +138,7 @@ int main(void) {
 #ifdef POPS_BINDING_CUSTOM_IOMANX
   if ((result = load("candidate-iomanX", iomanX_irx, size_iomanX_irx, 0, NULL))) goto fail;
 #else
-  if ((result = load("production-iomanX", iomanX_irx, size_iomanX_irx, 0, NULL))) goto fail;
+  if ((result = load("production-Sony-iomanX", iomanX_irx, size_iomanX_irx, 0, NULL))) goto fail;
 #endif
   stage = 3;
   if ((result = load("production-fileXio", fileXio_irx, size_fileXio_irx, 0, NULL))) goto fail;

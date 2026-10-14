@@ -367,3 +367,11 @@ the network-versus-GS observation boundary. The compatibility IRX is now built
 and embedded by CMake and selected only for Sony initialization; stock iomanX
 remains the normal launcher/Ember module. Real-device streaming, a complete
 POPS game boot and durable VMC saves remain separate acceptance requirements.
+
+Probe preparation now extracts `pops_iomanx.irx.c` by default to match the
+production Sony path. Its `iomanX` embed symbol is only the fixture's local
+name. Explicit `--iomanx-override` remains available for controlled comparisons.
+The read-only device inventory retains stock iomanX for the inherited ps2link
+environment, bounds directory walks and keeps its first discovered VCD visible
+on the final screen. Neither inventory nor the controlled bridge modifies an
+installed game's existing saves.

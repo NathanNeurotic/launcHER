@@ -10,6 +10,7 @@
 #include <debug.h>
 #include <sio.h>
 #include <stdarg.h>
+#include <string.h>
 #define NEWLIB_PORT_AWARE
 #include <fileXio_rpc.h>
 #include "production_names.h"
@@ -27,7 +28,17 @@ IRX(iomanX); IRX(sio2man); IRX(mcman); IRX(mcserv); IRX(bdm); IRX(bdmfs_fatfs);
 IRX(usbd_mini); IRX(usbmass_bd_mini); IRX(mmceman);
 IRX(fileXio);
 static iox_dirent_t entry __attribute__((aligned(64)));
+static char selected_vcd[512];
+static unsigned selected_size;
+static int vcd_name(const char *name) {
+  size_t n = strlen(name);
+  return n >= 4 && name[n-4] == '.' &&
+      (name[n-3] == 'v' || name[n-3] == 'V') &&
+      (name[n-2] == 'c' || name[n-2] == 'C') &&
+      (name[n-1] == 'd' || name[n-1] == 'D');
+}
 static void directory(const char *path) {
+  scr_clear(); scr_setXY(0, 0);
   printf("POPS_INVENTORY directory=%s\n", path);
   int fd = fileXioDopen(path);
   if (fd < 0) { printf("POPS_INVENTORY dopen=%d\n", fd); return; }
@@ -35,7 +46,15 @@ static void directory(const char *path) {
     int r = fileXioDread(fd, &entry);
     if (r <= 0) break;
     entry.name[sizeof(entry.name) - 1] = 0;
-    printf("POPS_INVENTORY entry=%s%s size=%u\n", path, entry.name, (unsigned)entry.stat.size);
+    if (vcd_name(entry.name)) {
+      printf("POPS_INVENTORY VCD=%s%s size=%u\n", path, entry.name, (unsigned)entry.stat.size);
+      size_t path_length = strlen(path), name_length = strlen(entry.name);
+      if (!selected_vcd[0] && path_length + name_length < sizeof(selected_vcd)) {
+        memcpy(selected_vcd, path, path_length);
+        memcpy(selected_vcd + path_length, entry.name, name_length + 1);
+        selected_size = entry.stat.size;
+      }
+    }
   }
   printf("POPS_INVENTORY dclose=%d\n", fileXioDclose(fd));
 }
@@ -81,7 +100,9 @@ int main(void) {
   const char *paths[] = {"mass0:/", "mass0:/POPS/", "mass1:/POPS/", "mass2:/POPS/",
       "mmce0:/POPS/", "mmce1:/POPS/", "mc0:/POPS/", "mc1:/POPS/", "pfs0:/POPS/"};
   for (unsigned i = 0; i < sizeof(paths) / sizeof(paths[0]); ++i) directory(paths[i]);
+  scr_clear(); scr_setXY(0, 0);
   puts("POPS_INVENTORY COMPLETE read-only");
+  printf("POPS_INVENTORY selected=%s size=%u\n", selected_vcd[0] ? selected_vcd : "none", selected_size);
   puts("[ps2rig] exit=0");
   fflush(stdout); SleepThread(); return 0;
 fail:

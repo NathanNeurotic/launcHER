@@ -69,7 +69,10 @@ def prepare(elf, image, launcher_build, out, console_screen=False, startup_trace
         raise ValueError("use a fresh directory under ignored build/")
     modules = {}
     for name in ("iomanX", "fileXio", "popfs"):
-        text = (launcher_build / "launcher" / f"{name}.irx.c").read_text()
+        # Match the launcher's Sony post-reset selection, not its normal SDK
+        # iomanX module. An explicit override remains available for comparisons.
+        source_name = "pops_iomanx" if name == "iomanX" else name
+        text = (launcher_build / "launcher" / f"{source_name}.irx.c").read_text()
         body = re.search(r"unsigned char\s+\w+\[\].*?=\s*\{(.*?)\};", text, re.S)
         declared = re.search(r"unsigned int\s+size_\w+\s*=\s*(\d+)", text)
         if not body or not declared:
