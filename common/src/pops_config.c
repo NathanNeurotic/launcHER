@@ -1,9 +1,18 @@
 #include "pops_config.h"
+#include "dprintf.h"
 #include <ctype.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+static FILE *open_config(const char *path) {
+  FILE *file = fopen(path, "r");
+  int error = errno;
+  DPRINTF("POPS config: %s open=%d errno=%d\n", path, file != NULL, file ? 0 : error);
+  errno = error;
+  return file;
+}
 
 void pops_config_init(PopsConfig *cfg) {
   if (!cfg)
@@ -279,7 +288,7 @@ int pops_config_load_file(PopsConfig *cfg, const char *filepath) {
   if (!cfg || !filepath)
     return -EINVAL;
 
-  FILE *f = fopen(filepath, "r");
+  FILE *f = open_config(filepath);
   if (!f)
     return errno ? -errno : -EIO;
 
@@ -329,7 +338,7 @@ int pops_config_load_discs(PopsConfig *cfg, const char *filepath) {
   FILE *f;
   if (!cfg || !filepath)
     return -EINVAL;
-  f = fopen(filepath, "r");
+  f = open_config(filepath);
   if (!f)
     return errno ? -errno : -EIO;
   cfg->disc_count = 0;
@@ -359,7 +368,7 @@ int pops_config_load_vmcdir(PopsConfig *cfg, const char *filepath) {
   FILE *f;
   if (!cfg || !filepath)
     return -EINVAL;
-  f = fopen(filepath, "r");
+  f = open_config(filepath);
   if (!f)
     return errno ? -errno : -EIO;
   if (fgets(line, sizeof(line), f)) {

@@ -43,6 +43,23 @@ See the three metadata-only device/inspection/staging reports in docs/evidence.
 default. Next: full production boot, then actual Sony card runtime and test-save
 persistence across power cycles. Earlier checkpoints below are historical.
 
+The first exact-CI-artifact game attempt (`20261014T060154-0027`) did not boot.
+Opt-in trace run `20261014T061203-0030` then confirmed that ATA initialization,
+the root and VCD opens, loose dependency discovery and VCD metadata all succeed;
+configuration discovery returns -6 before any Sony handoff. The earlier
+mount-failure interpretation was incorrect. See the metadata-only configuration
+failure report. Next: identify the exact optional config path and preserve real
+read/parse failures when fixing unavailable search locations.
+
+For physical diagnosis, configure `-DLAUNCHER_BOOT_TRACE=ON -DDEBUG=ON` in a
+separate build directory. It retains ten recent GS/EE-serial messages and stops
+on errors. The default build is unchanged. Optional
+`-DLAUNCHER_BOOT_TRACE_RECOVERY_ELF=mc0:/ps2link/PS2LINK.ELF` attempts relaunch
+after 15 seconds, but reliable soft recovery has not been established; use the
+user's automatic ps2link boot setup after a physical reboot if needed.
+The inventory fixture also accepts `--inspect-config VCD_DIRECTORY GAME_BASE`
+to exercise production configuration discovery without replacing ps2link's IOP.
+
 ## Current local continuation — October 13, 2026
 
 Local development was fast-forwarded to PR #23 head

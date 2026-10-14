@@ -20,6 +20,14 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 option(ENABLE_PRINTF "Enable printf debugging output" OFF)
 option(USE_EESIO "Use EE SIO for debugging" ON)
 option(DEBUG "Disable stripping ELFs (keeps debug symbols)" OFF)
+option(LAUNCHER_BOOT_TRACE "Show persistent boot-stage diagnostics and stop on errors" OFF)
+set(LAUNCHER_BOOT_TRACE_RECOVERY_ELF "" CACHE STRING "Optional installed ELF to relaunch after a diagnostic error")
+if(LAUNCHER_BOOT_TRACE)
+    add_compile_definitions(LAUNCHER_BOOT_TRACE)
+    if(LAUNCHER_BOOT_TRACE_RECOVERY_ELF)
+        add_compile_definitions(LAUNCHER_BOOT_TRACE_RECOVERY_ELF="${LAUNCHER_BOOT_TRACE_RECOVERY_ELF}")
+    endif()
+endif()
 
 # Standalone Ember launcher profile. Keep the storage transports Ember can use,
 # and drop the OSDMenu/HOSDMenu/MBR/CD/DVD/XFROM pieces from this fork's build.

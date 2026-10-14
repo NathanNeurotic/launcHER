@@ -41,7 +41,11 @@ void msg(const char *str, ...) {
 
   initScreen();
 
+#ifdef LAUNCHER_BOOT_TRACE
+  boot_trace_vprintf(str, args);
+#else
   scr_vprintf(str, args);
+#endif
 
   va_end(args);
 }
@@ -53,14 +57,30 @@ void fail(const char *str, ...) {
 
   initScreen();
 
+#ifdef LAUNCHER_BOOT_TRACE
+  boot_trace_vprintf(str, args);
+#else
   scr_vprintf(str, args);
+#endif
 
   va_end(args);
 
+#ifdef LAUNCHER_BOOT_TRACE
+  /* Diagnostic builds retain the error for physical capture after IOP reset. */
+#ifdef LAUNCHER_BOOT_TRACE_RECOVERY_ELF
+  scr_printf("\nDiagnostic recovery in 15 seconds: %s\n", LAUNCHER_BOOT_TRACE_RECOVERY_ELF);
+  sleep(15);
+  char *recoveryArgs[] = {(char *)LAUNCHER_BOOT_TRACE_RECOVERY_ELF};
+  LoadExecPS2(LAUNCHER_BOOT_TRACE_RECOVERY_ELF, 1, recoveryArgs);
+#endif
+  SleepThread();
+  return;
+#else
   sleep(10);
 
   char *argv[1] = {"BootIllegal"};
   ExecOSD(1, argv);
+#endif
 }
 
 // Tests if file exists by opening it

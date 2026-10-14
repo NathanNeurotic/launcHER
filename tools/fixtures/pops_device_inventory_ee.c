@@ -15,6 +15,7 @@
 #include <fileXio_rpc.h>
 #include "production_names.h"
 #include "pops_vcd.h"
+#include "pops_config.h"
 static int screen_printf(const char *format, ...) {
   char text[512]; va_list ap; va_start(ap, format);
   int n = vsnprintf(text, sizeof(text), format, ap); va_end(ap);
@@ -226,6 +227,16 @@ int main(int argc, char **argv) {
   sleep(3);
   puts("POPS_INVENTORY scanning connected storage"); fflush(stdout);
   if (fileXioInit() < 0) goto fail;
+  if (argc == 4 && !strcmp(argv[1], "--inspect-config")) {
+    static PopsConfig cfg;
+    scr_clear(); scr_setXY(0, 0);
+    pops_config_init(&cfg);
+    int result = pops_config_discover(&cfg, argv[2], argv[3]);
+    printf("POPS_CONFIG result=%d vmcdir=%s modes=%u cheats=%u discs=%u\n",
+        result, cfg.vmc_dir, cfg.compat_modes, cfg.cheat_count, cfg.disc_count);
+    printf("[ps2rig] exit=%d\n", result ? 1 : 0);
+    fflush(stdout); SleepThread(); return result ? 1 : 0;
+  }
   if (argc == 5 && !strcmp(argv[1], "--stage-test")) {
     scr_clear(); scr_setXY(0, 0);
     int result = stage_test(argv[2], argv[3], argv[4]);

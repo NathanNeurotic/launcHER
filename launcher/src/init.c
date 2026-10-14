@@ -276,6 +276,7 @@ static int loadModuleList(DeviceType device, int tolerant, int sonySio2) {
       }
     }
 
+    DPRINTF("IOP: loading %s (Sony=%d)\n", moduleList[i].name, sonySio2);
     /* Only the identified Sony IOP reset path needs the private legacy-state
      * migration. Normal launcher and Ember initialization retain SDK iomanX. */
     if (sonySio2 && !strcmp(moduleList[i].name, "iomanX"))
@@ -284,6 +285,7 @@ static int loadModuleList(DeviceType device, int tolerant, int sonySio2) {
       ret = SifLoadModule(moduleList[i].path, moduleList[i].argLength, moduleList[i].argStr);
     else
       ret = SifExecModuleBuffer(moduleList[i].irx, *moduleList[i].size, moduleList[i].argLength, moduleList[i].argStr, &iopret);
+    DPRINTF("IOP: loaded %s id=%d start=%d\n", moduleList[i].name, ret, iopret);
 
     // Delay to prevent ps2hdd module from hanging
     if ((device & Device_APA) && !strcmp(moduleList[i].name, "ata_bd"))
