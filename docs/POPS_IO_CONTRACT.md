@@ -302,3 +302,42 @@ without an IOP reboot, then lists bounded directories through iomanX. Never
 overwrite an existing driver or choose a game/save path from stale inventory.
 The first physical attempt observed two USB disks mounted by BDM/FatFs but
 did not finish directory enumeration. No game or existing save was modified.
+
+## Hardware-confirmed IOMAN layout mismatch
+
+Watchdog run `20261014T010845-0017` repeatedly displayed executing POPFS
+stage 100, value `0x00000003`: `driver_name_in_use()` index zero received
+descriptor flags as a device pointer. Its trace metadata is committed in
+`docs/evidence/pops_ioman_layout_console_trace.json`.
+
+The selected loose and packed-252 images contain identical IOMAN IRXs:
+12,545 bytes, SHA256
+`319a8e22e7efb42d224a21af98aa7e6b3dcaa2cd206eb8357e7b26e273827baf`.
+Their module version is 2.03, text/data/BSS sizes are `0x1e60/0x1f0/0x290`.
+Original entry/AddDrv/cleanup instructions establish BSS-relative used-device
+head `+0x0c`, 32 file slots at `+0x10` (512 bytes), and sixteen 8-byte linked
+device nodes at `+0x210`. The SDK hook assumes sixteen flat device pointers
+at `+0x10` and sixteen files at `+0x50`. Thus it copies the first file's mode
+3 as a device pointer and clears the wrong state. PCSX2's IOMAN HLE hides
+that invalid inherited state in the earlier emulator-only result.
+
+The packed-2305A image uses IOMAN 2.01: 11,177 bytes, SHA256
+`ec0097316c10bdefb1fc3cdd19843e90118a5f4e3ac579b0a6c9de1d3d597987`,
+text/data/BSS `0x1b90/0x180/0x250`. Its entry explicitly clears 64 bytes of
+device pointers at BSS `+0x10` and 512 file bytes at `+0x50`.
+
+A separate licensed SDK-derived `launcher/iop/pops_iomanx` candidate snapshots
+both exact layouts before export replacement, rejects unexpected metadata,
+cycles and file references to unknown devices, migrates all 32 file slots,
+and detaches old device ownership to avoid duplicate deinitialization.
+The host regression reproduces the descriptor-mode-3 case and validates both
+layouts and failure atomicity. Replacing only iomanX in the controlled probe
+passes PCSX2 with unchanged production POPFS and original IOPCD. Standard
+handles 0/1 survive correctly; emulator reservation then receives 2/3.
+This candidate is not yet selected by the launcher pending hardware comparison.
+The stock iomanX path for normal launcher/Ember initialization is untouched.
+
+Build it with the production SDK via `make` in `launcher/iop/pops_iomanx`.
+Probe preparation accepts `--iomanx-override` with the resulting IRX; metadata
+and console logs mark the candidate explicitly. Use `--console-screen` for
+hardware; do not use the instrumented POPFS copy for that final comparison.

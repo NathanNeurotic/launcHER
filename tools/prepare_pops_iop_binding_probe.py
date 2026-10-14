@@ -58,7 +58,7 @@ def startup_diagnostic(source):
     return source
 
 
-def prepare(elf, image, launcher_build, out, console_screen=False, startup_trace=False):
+def prepare(elf, image, launcher_build, out, console_screen=False, startup_trace=False, iomanx_override=None):
     pops, reboot = elf.read_bytes(), image.read_bytes()
     if sha(pops) != POPS_SHA or sha(reboot) != IOPRP_SHA:
         raise ValueError("unrecognized selected Sony ELF/IOPRP identity")
@@ -78,6 +78,11 @@ def prepare(elf, image, launcher_build, out, console_screen=False, startup_trace
         if len(data) != int(declared[1]) or not data.startswith(b"\x7fELF"):
             raise ValueError(f"truncated production module {name}")
         modules[name] = data
+    if iomanx_override:
+        data = iomanx_override.read_bytes()
+        if not data.startswith(b"\x7fELF"):
+            raise ValueError("IOManX candidate must be an IRX ELF")
+        modules["iomanX"] = data
     out.mkdir(parents=True)
     for filename in ("pops_iop_binding_probe.c", "pops_iop_binding_backend.c",
                      "pops_iop_binding_imports.lst"):
@@ -103,6 +108,8 @@ def prepare(elf, image, launcher_build, out, console_screen=False, startup_trace
     if console_screen:
         config["targets"][1]["defines"] = ["POPS_BINDING_CONSOLE_SCREEN=1"]
         config["targets"][1]["libs"].append("debug")
+    if iomanx_override:
+        config["targets"][1].setdefault("defines", []).append("POPS_BINDING_CUSTOM_IOMANX=1")
     if startup_trace:
         source = (ROOT / "launcher/iop/popfs/src/popfs.c").read_text()
         (out / "diagnostic_popfs.c").write_text(startup_diagnostic(source))
@@ -119,6 +126,7 @@ def prepare(elf, image, launcher_build, out, console_screen=False, startup_trace
     (out / "ps2.yaml").write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
     (out / "provenance.json").write_text(json.dumps({
         "pops_elf_sha256": POPS_SHA, "console_screen": console_screen, "startup_trace": startup_trace,
+        "custom_iomanx": bool(iomanx_override),
         "module_sha256": {k: sha(v) for k, v in modules.items()},
         "scope": "Actual Sony IOP kernel and IOPCD, actual SIF RPC and production bridge modules; storage medium is controlled IOP memory."
     }, indent=2) + "\n", encoding="utf-8")
@@ -134,5 +142,7 @@ if __name__ == "__main__":
                         help="Hardware capture: show EE progress on GS, do not reserve emulator stdout descriptors")
     parser.add_argument("--startup-trace", action="store_true",
                         help="Use a locally instrumented POPFS copy and an EE watchdog to locate startup stalls")
+    parser.add_argument("--iomanx-override", type=Path,
+                        help="Controlled candidate comparison: replace only the selected iomanX IRX")
     args = parser.parse_args()
-    prepare(args.elf, args.iop_image, args.launcher_build, args.out, args.console_screen, args.startup_trace)
+    prepare(args.elf, args.iop_image, args.launcher_build, args.out, args.console_screen, args.startup_trace, args.iomanx_override)

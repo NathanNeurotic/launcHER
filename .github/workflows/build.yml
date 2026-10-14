@@ -16,6 +16,8 @@ jobs:
         run: python tools/test_pops_external.py
       - name: Test POPS IOP filesystem proxy contracts
         run: python tools/test_popfs.py
+      - name: Test selected Sony IOMAN state layouts
+        run: python tools/test_sony_ioman_layout.py
       - name: Test POPS card creation and I/O failure handling
         run: python tools/test_pops_vmc.py
       - name: Test measured POPStarter compatibility dispatch

@@ -127,7 +127,11 @@ int main(void) {
   sbv_patch_enable_lmb();
   sbv_patch_disable_prefix_check();
   stage = 2;
+#ifdef POPS_BINDING_CUSTOM_IOMANX
+  if ((result = load("candidate-iomanX", iomanX_irx, size_iomanX_irx, 0, NULL))) goto fail;
+#else
   if ((result = load("production-iomanX", iomanX_irx, size_iomanX_irx, 0, NULL))) goto fail;
+#endif
   stage = 3;
   if ((result = load("production-fileXio", fileXio_irx, size_fileXio_irx, 0, NULL))) goto fail;
   stage = 4;

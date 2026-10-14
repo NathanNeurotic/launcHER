@@ -71,6 +71,19 @@ The user authorized selecting any installed VCD and restarted ps2link.
 A read-only inventory loaded production USB/MMCE stacks and observed two USB
 disks mounted by BDM/FatFs, but no completed directory/game selection yet.
 
+The startup watchdog now pinpointed the physical stall: run
+`20261014T010845-0017` repeatedly showed POPFS device-check index 0 with
+pointer `0x00000003`. Sony IOMAN 2.03 uses linked device nodes where the SDK
+legacy hook expects an array; the hook copies file flags as device pointers.
+Both 252 profiles share that module; the 2305A profile has the older flat
+2.01 layout. A separate SDK-derived `pops_iomanx` candidate now validates and
+migrates both layouts and all 32 descriptors. Host regressions and the
+controlled PCSX2 bridge pass with only iomanX replaced. It remains a candidate,
+not selected by production yet. Next: compare on hardware using unchanged
+production POPFS and original IOPCD, then integrate only in Sony post-reset
+initialization if that passes. The prepared local hardware comparison is
+`build/pops-iomanx-candidate-console/gcc/bin/pops_iop_binding_probe.elf`.
+
 Branch: `codex/popstarter-replacement`, based on `EMBER` and including merged
 OPL argument compatibility PR #19 (`c616e0cdccc2af24fd2e4e956fff167f822da4bf`).
 This branch is unfinished development. Do not merge or publish it as working
