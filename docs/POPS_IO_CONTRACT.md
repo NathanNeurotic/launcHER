@@ -341,3 +341,16 @@ Build it with the production SDK via `make` in `launcher/iop/pops_iomanx`.
 Probe preparation accepts `--iomanx-override` with the resulting IRX; metadata
 and console logs mark the candidate explicitly. Use `--console-screen` for
 hardware; do not use the instrumented POPFS copy for that final comparison.
+
+Hardware comparison `20261014T012340-0018` substituted only this iomanX
+candidate and the unchanged production POPFS returned start 0, resolving
+the earlier startup stall. It then displayed explicit FAIL at stage 6 with
+result -16; full bridge acceptance is still open. Source inspection confirms
+SDK IOMANX clears only a consumed file slot's device pointer, leaving stale
+`privdata` from the previous driver. POPFS incorrectly rejected such a newly
+allocated slot as busy. Its open callback now initializes its own private
+ownership; the manager already prevents allocating an active slot twice.
+The regression starts with poisoned private data and verifies descriptor-zero
+handling, active-handle exclusion and close lifetime. The rebuilt production
+driver and candidate pass the controlled emulator probe; the updated hardware
+comparison also reports file-service bind/open results explicitly.

@@ -141,10 +141,11 @@ static int bridge_open(iomanX_iop_file_t *file, const char *name, int flags, int
   int index, fd, state, error = 0;
   if (file->unit < 0 || file->unit > 1)
     return -ENODEV;
-  /* Reopening the same IOMANX file object would orphan the first backing
-   * descriptor and permanently pin the active-disc count. */
-  if (file->privdata)
-    return -EBUSY;
+  /* IOMANX reserves a free file-table slot before this callback, but clears
+   * only its device pointer on close; privdata may belong to the previous
+   * driver. The manager prevents double-open of an allocated slot. Initialize
+   * our ownership here instead of rejecting a valid recycled descriptor. */
+  file->privdata = NULL;
   /* Resolve the disc0 alias and reserve the handle in the same critical
    * section. Otherwise a concurrent SWAP_DISC could retarget the alias
    * between resolution and reservation, leaving the old image open while

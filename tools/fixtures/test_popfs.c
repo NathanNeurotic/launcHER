@@ -131,13 +131,9 @@ int main(void) {
   memcpy(paths[1], saved_second_disc, sizeof(saved_second_disc));
 
   next_open = 0; /* Descriptor zero must be represented and closed correctly. */
+  file.privdata = (void *)(uintptr_t)0xdeadbeef; /* recycled IOMANX slot, not an active POPFS handle */
   assert(!ops->open(&file, "/disc/disc0", 1, 0644));
   assert(!strcmp(observed, arguments[1]) && open_flags == 1 && open_mode == 0644);
-  /* Reopening an occupied file object must not lose descriptor zero or
-   * increment the handle reservation counter. */
-  calls = 0;
-  assert(ops->open(&file, "IMAGE.VCD", FIO_O_RDONLY, 0) == -EBUSY);
-  assert(calls == 0);
   assert(ops->deinit(registered) == -EBUSY);
   /* A still-open disc handle cannot be retargeted by swapping the alias.
    * Card descriptors may remain open during a disc change. */

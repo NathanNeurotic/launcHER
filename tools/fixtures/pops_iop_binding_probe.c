@@ -146,7 +146,9 @@ int main(void) {
   if ((result = load("production-popfs", popfs_irx, size_popfs_irx, length, args))) goto fail;
 #endif
   stage = 6;
-  if ((result = fileXioInit()) < 0) goto fail;
+  result = fileXioInit();
+  printf("POPS_IOP_BINDING fileXio-bind=%d\n", result);
+  if (result < 0) goto fail;
 #ifndef POPS_BINDING_CONSOLE_SCREEN
   /* PCSX2 IopBios.cpp write_HLE treats every imported write(fd=1) as
    * console output, even if Sony's file table allocated it to a real file.
@@ -160,6 +162,7 @@ int main(void) {
   const char *names[] = {"pops0:IMAGE.VCD", "pfs0:/IMAGE.VCD"};
   for (unsigned i = 0; i < 2; ++i) {
     fd = fileXioOpen(names[i], 1, 0);
+    printf("POPS_IOP_BINDING fileXio-open=%s fd=%d\n", names[i], fd);
     if (fd < 0) { result = fd; goto fail; }
     result = fileXioRead(fd, bytes, 1024);
     if (fileXioClose(fd) < 0 || result != 1024 || !fingerprint(bytes, 0, 1024)) goto fail;
