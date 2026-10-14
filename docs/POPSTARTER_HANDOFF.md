@@ -20,10 +20,28 @@ progress output cannot hide acceptance markers. Its network rig outcome can
 still be `hang`, because the foreign reset removes ps2link; the explicit GS
 result is recorded separately.
 
-Next: complete read-only installed-device inventory, choose an actual VCD,
-boot Sony POPS through launcHER and test separate VMC files across a power
-cycle. Do not overwrite existing saves. Earlier candidate/stall checkpoints
-below describe the investigation, not the current controlled-bridge result.
+Device inventory is now complete enough to select a real game. Run
+`20261014T055003-0024` loaded the production ATA/MX4SIO drivers and found many
+VCDs on the ATA exFAT partition. Earlier USB/MMCE-only inventories did not
+cover those devices. The stable `ata0:/POPS/Tekken.VCD` alias and VCD metadata
+were verified in `20261014T055350-0025`; never reuse the transient `mass2:`
+number across resets. The original title folder has an existing VMCDIR.
+
+Run `20261014T055930-0026` created fresh console directory
+`ata0:/LAUNCHER-TEST-20261013-A/`, copied Tekken as `TEST.VCD` (115654480 bytes),
+and copied the known loose `POPS.ELF` and `IOPRP252.IMG` from `usb0:/POPS/`.
+Every copied byte was compared after close/reopen. Original title/config/save
+files were preserved. The next production boot target is
+`ata0:/LAUNCHER-TEST-20261013-A/TEST.VCD`; cards should be created under its
+new `TEST/` folder. Sony input files remain console/local data, never distributed.
+See the three metadata-only device/inspection/staging reports in docs/evidence.
+
+`prepare_pops_device_inventory.py` defaults to read-only enumeration; explicit
+`--inspect` ELF arguments run bounded VCD/config inspection, while explicit
+`--stage-test VCD POPS_DIRECTORY NEW_DIRECTORY` creates only one fresh
+`ata0:/LAUNCHER-TEST-*` directory and refuses reuse. No write mode runs by
+default. Next: full production boot, then actual Sony card runtime and test-save
+persistence across power cycles. Earlier checkpoints below are historical.
 
 ## Current local continuation — October 13, 2026
 

@@ -38,7 +38,7 @@ def prepare(launcher_build, out):
         raise ValueError("use a fresh directory under ignored build/")
     modules = {}
     for name in ("iomanX", "fileXio", "sio2man", "mcman", "mcserv", "bdm", "bdmfs_fatfs",
-                 "usbd_mini", "usbmass_bd_mini", "mmceman"):
+                 "usbd_mini", "usbmass_bd_mini", "mmceman", "mx4sio_bd_mini", "ata_bd"):
         source = (launcher_build / "launcher" / f"{name}.irx.c").read_text()
         body = re.search(r"unsigned char\s+\w+\[\].*?=\s*\{(.*?)\};", source, re.S)
         declared = re.search(r"unsigned int\s+size_\w+\s*=\s*(\d+)", source)
@@ -51,13 +51,16 @@ def prepare(launcher_build, out):
     out.mkdir(parents=True)
     for name in ("pops_device_inventory_ee.c",):
         shutil.copyfile(ROOT / "tools/fixtures" / name, out / name)
+    shutil.copyfile(ROOT / "common/src/pops_vcd.c", out / "pops_vcd.c")
+    shutil.copyfile(ROOT / "common/include/pops_vcd.h", out / "pops_vcd.h")
     for name, data in modules.items():
         (out / f"{name}_irx.c").write_text(array(name, data))
     (out / "production_names.h").write_text("\n".join(
         f"#define MODULE_NAME_{name} {json.dumps(module_name(data))}" for name, data in modules.items()) + "\n")
     config = {"project": "pops-device-inventory", "targets": [
-        {"name": "inventory", "type": "ee", "sources": ["pops_device_inventory_ee.c"] +
-         [f"{name}_irx.c" for name in modules], "libs": ["patches", "filexio", "debug"], "debug": True}]}
+        {"name": "inventory", "type": "ee", "sources": ["pops_device_inventory_ee.c", "pops_vcd.c"] +
+         [f"{name}_irx.c" for name in modules], "include_dirs": ["."],
+         "libs": ["patches", "filexio", "debug"], "debug": True}]}
     (out / "ps2.yaml").write_text(json.dumps(config, indent=2) + "\n")
     (out / "provenance.json").write_text(json.dumps(
         {name: hashlib.sha256(data).hexdigest() for name, data in modules.items()}, indent=2) + "\n")
