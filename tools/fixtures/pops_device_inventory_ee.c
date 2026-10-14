@@ -11,6 +11,7 @@
 #include <sio.h>
 #include <stdarg.h>
 #include <string.h>
+#include <errno.h>
 #define NEWLIB_PORT_AWARE
 #include <fileXio_rpc.h>
 #include "production_names.h"
@@ -191,6 +192,38 @@ static int stage_test(const char *vcd, const char *pops_dir, const char *dest_di
   }
   return 0;
 }
+static int verify_fatfs(const char *path) {
+  const char prefix[] = "ata0:/LAUNCHER-TEST-";
+  const char *child;
+  if (strncmp(path, prefix, sizeof(prefix)-1) || strlen(path) >= 256 || strstr(path, ".."))
+    return -1;
+  child = strchr(path + sizeof(prefix)-1, '/');
+  if (!child || strncmp(child+1, "FATFS-", 6) || strchr(child+1, '/') || strchr(child+1, ':'))
+    return -1;
+  /* Create only an explicit fresh diagnostic file; never replace an old file. */
+  int fd = fileXioOpen(path, 2 | 0x200 | 0x800, 0666);
+  printf("POPS_FATFS create=%d path=%s\n", fd, path);
+  if (fd < 0) return -1;
+  for (unsigned i=0; i<8192; ++i) copy_bytes[i]=(unsigned char)(i*37u+11u);
+  int wrote = fileXioWrite(fd, copy_bytes, 8192);
+  int closed = fileXioClose(fd);
+  if (wrote != 8192 || closed < 0) return -1;
+  /* EXCL must win even over simultaneous TRUNC and APPEND. */
+  int collision = fileXioOpen(path, 2 | 0x200 | 0x800 | 0x400 | 0x100, 0666);
+  printf("POPS_FATFS collision=%d expected=%d\n", collision, -EEXIST);
+  if (collision >= 0) fileXioClose(collision);
+  if (collision != -EEXIST) return -1;
+  fd = fileXioOpen(path, 1, 0);
+  if (fd < 0) return -1;
+  int got = fileXioRead(fd, verify_bytes, 8192);
+  int eof = fileXioRead(fd, verify_bytes+8192, 1);
+  closed = fileXioClose(fd);
+  printf("POPS_FATFS readback=%d eof=%d close=%d\n", got, eof, closed);
+  if (got != 8192 || eof != 0 || closed < 0 || memcmp(copy_bytes,verify_bytes,8192))
+    return -1;
+  puts("POPS_FATFS PASS exclusive-create close-reopen byte-compare");
+  return 0;
+}
 int main(int argc, char **argv) {
   smod_mod_info_t module;
   char name[96];
@@ -227,6 +260,11 @@ int main(int argc, char **argv) {
   sleep(3);
   puts("POPS_INVENTORY scanning connected storage"); fflush(stdout);
   if (fileXioInit() < 0) goto fail;
+  if (argc == 3 && !strcmp(argv[1], "--verify-fatfs")) {
+    int result = verify_fatfs(argv[2]);
+    printf("[ps2rig] exit=%d\n", result ? 1 : 0);
+    fflush(stdout); SleepThread(); return result ? 1 : 0;
+  }
   if (argc == 4 && !strcmp(argv[1], "--inspect-config")) {
     static PopsConfig cfg;
     scr_clear(); scr_setXY(0, 0);

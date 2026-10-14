@@ -24,7 +24,10 @@ typedef int64_t s64;
 #define FIO_S_IXUSR 0x40
 #define IOP_DT_FS 0x10
 #define IOP_DT_FSEXT 0x10000000
-typedef struct { unsigned mode; unsigned size; } iox_stat_t;
+typedef struct {
+  unsigned mode, size, attr, hisize;
+  unsigned char ctime[8], atime[8], mtime[8];
+} iox_stat_t;
 typedef struct { iox_stat_t stat; char name[256]; } iox_dirent_t;
 typedef struct _file {
   int mode, unit;

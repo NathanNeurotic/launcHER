@@ -24,6 +24,7 @@
 #include <usbhdfsd-common.h>
 
 #include "fs_driver.h"
+#include "fatfs_errno.h"
 
 //#define DEBUG  //comment out this line when not debugging
 #include "module_debug.h"
@@ -367,18 +368,23 @@ static int fs_open(iop_file_t *fd, const char *name, int flags, int mode)
         f_mode |= FA_READ;
     if (flags & O_WRONLY)
         f_mode |= FA_WRITE;
-    if (flags & O_CREAT)
-        f_mode |= FA_OPEN_ALWAYS;
-    if (flags & O_TRUNC)
-        f_mode |= FA_CREATE_ALWAYS;
-    if (flags & O_APPEND)
-        f_mode |= FA_OPEN_APPEND;
+    /* Exclusive creation must win over truncate/append to preserve old saves. */
+    if ((flags & (O_CREAT | O_EXCL)) == (O_CREAT | O_EXCL)) {
+        f_mode |= FA_CREATE_NEW;
+    } else {
+        if (flags & O_CREAT)
+            f_mode |= FA_OPEN_ALWAYS;
+        if (flags & O_TRUNC)
+            f_mode |= FA_CREATE_ALWAYS;
+        if (flags & O_APPEND)
+            f_mode |= FA_OPEN_APPEND;
+    }
 
     ret = f_open(fd->privdata, modified_name, f_mode);
 
     if (ret != FR_OK) {
         fd->privdata = NULL;
-        ret          = -ret;
+        ret          = fatfs_result(ret);
     } else {
         ret = 1;
     }
@@ -402,7 +408,7 @@ static int fs_close(iop_file_t *fd)
     }
 
     _fs_unlock();
-    return -ret;
+    return fatfs_result(ret);
 }
 
 //---------------------------------------------------------------------------
@@ -434,7 +440,7 @@ s64 fs_lseek64(iop_file_t *fd, s64 offset, int whence)
     res = f_lseek(file, off);
 
     _fs_unlock();
-    return (res == FR_OK) ? (s64)(file->fptr) : -res;
+    return (res == FR_OK) ? (s64)(file->fptr) : fatfs_result(res);
 }
 
 static int fs_lseek(iop_file_t *fd, int offset, int whence)
@@ -458,7 +464,7 @@ static int fs_write(iop_file_t *fd, void *buffer, int size)
     ret = f_write(fd->privdata, buffer, size, &bw);
 
     _fs_unlock();
-    return (ret == FR_OK) ? bw : 0;
+    return (ret == FR_OK) ? (int)bw : fatfs_result(ret);
 }
 
 //---------------------------------------------------------------------------
@@ -477,7 +483,7 @@ static int fs_read(iop_file_t *fd, void *buffer, int size)
     ret = f_read(fd->privdata, buffer, size, &br);
 
     _fs_unlock();
-    return (ret == FR_OK) ? br : 0;
+    return (ret == FR_OK) ? (int)br : fatfs_result(ret);
 }
 
 //---------------------------------------------------------------------------
@@ -500,7 +506,7 @@ static int fs_remove(iop_file_t *fd, const char *name)
     ret = f_unlink(modified_name);
 
     _fs_unlock();
-    return -ret;
+    return fatfs_result(ret);
 }
 
 //---------------------------------------------------------------------------
@@ -525,7 +531,7 @@ static int fs_mkdir(iop_file_t *fd, const char *name, int mode)
     ret = f_mkdir(modified_name);
 
     _fs_unlock();
-    return -ret;
+    return fatfs_result(ret);
 }
 
 //---------------------------------------------------------------------------
@@ -556,7 +562,7 @@ static int fs_dopen(iop_file_t *fd, const char *name)
 
     if (ret != FR_OK) {
         fd->privdata = NULL;
-        ret          = -ret;
+        ret          = fatfs_result(ret);
     }
 
     _fs_unlock();
@@ -568,17 +574,18 @@ static int fs_dclose(iop_file_t *fd)
 {
     M_DEBUG("%s\n", __func__);
 
-    int ret = ENOENT;
+    int ret;
 
     _fs_lock();
-
-    if (fd->privdata) {
-        ret = f_closedir(fd->privdata);
-        fd->privdata = NULL;
+    if (fd->privdata == NULL) {
+        _fs_unlock();
+        return -EBADF;
     }
+    ret = f_closedir(fd->privdata);
+    fd->privdata = NULL;
 
     _fs_unlock();
-    return -ret;
+    return fatfs_result(ret);
 }
 
 //--------------------------------------------------------------------------
@@ -647,7 +654,7 @@ static int fs_dread(iop_file_t *fd, iox_dirent_t *buffer)
         fileInfoToStat(&fno, &(buffer->stat));
         ret = 1;
     } else {
-        ret = 0;
+        ret = fatfs_result(ret); /* FR_OK plus an empty name is genuine EOF. */
     }
 
     _fs_unlock();
@@ -694,7 +701,7 @@ static int fs_getstat(iop_file_t *fd, const char *name, iox_stat_t *stat)
     if (ret == FR_OK) {
         fileInfoToStat(&fno, stat);
     } else {
-        ret = -ret;
+        ret = fatfs_result(ret);
     }
 
     _fs_unlock();
@@ -848,7 +855,7 @@ int fs_rename(iop_file_t *fd, const char *path, const char *newpath)
     ret = f_rename(modified_path, modified_newpath);
 
     _fs_unlock();
-    return -ret;
+    return fatfs_result(ret);
 }
 
 static int fs_devctl(iop_file_t *fd, const char *name, int cmd, void *arg, unsigned int arglen, void *buf, unsigned int buflen)

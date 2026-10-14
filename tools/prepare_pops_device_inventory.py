@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare a read-only USB/MMCE inventory probe with production launcher IRXs."""
+"""Prepare a device probe; writes require explicit --stage-test/--verify-fatfs ELF arguments."""
 import argparse
 import hashlib
 import json

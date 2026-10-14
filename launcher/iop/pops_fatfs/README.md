@@ -3,8 +3,9 @@
 Baseline copied from ps2dev/ps2sdk commit
 `3304cd864748ce40b1ff9fb41cc5a700f5e573a0`, directory
 `iop/fs/bdmfs_fatfs/src`. The accompanying LICENSE is the SDK's AFL-2.0
-license. Copyright notices are retained. This checkpoint is unmodified source;
-it is not built or selected by launcHER yet.
+license. Copyright notices are retained; baseline whitespace was normalized.
+The launcher builds this wrapper with the pinned FatFs dependency below and
+embeds it as `bdmfs_fatfs_irx`, for initial preflight and Sony post-reset I/O.
 
 The corresponding FatFs dependency is fjtrujy/FatFs, branch `iop-r0.16`,
 pinned to commit `18cc3d9e07473a6aa3d783a66224b243a7b4974c`.
@@ -19,6 +20,13 @@ read/write/readdir failures as zero. Correct that boundary rather than treating
 errno 4 as a missing file in the EE configuration parser. Also preserve
 exclusive creation semantics before testing real VMC creation.
 
-Next: translate each FatFs API result to negative errno, propagate stream
-failures, test missing paths versus actual I/O faults, build a pinned module,
-and repeat the read-only configuration probe. No Sony data belongs here.
+Local repairs translate filesystem API results to negative errno, propagate
+read/write/directory errors instead of false EOF, and honor O_CREAT|O_EXCL
+before truncation/append flags. Host tests compile the actual filesystem
+callbacks with injected FatFs failures and verify that exclusive creation
+preserves existing contents. FatFs's internal mount callbacks retain FRESULT.
+
+Reproduce with `python tools/test_pops_fatfs.py` and the regular CMake build.
+The dependency archive is downloaded and hash-checked during the target build;
+no SDK source checkout or proprietary data is required. Hardware configuration,
+game boot and actual-save acceptance are recorded separately in the handoff.

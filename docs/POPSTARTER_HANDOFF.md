@@ -78,7 +78,30 @@ belongs in the driver, preserving real I/O errors. A licensed source baseline
 and exact dependency identities are saved in `launcher/iop/pops_fatfs/`;
 this checkpoint is unintegrated. The new PSXCore reference is also unlinked.
 
-The read-only configuration probe is
+The source-level FatFs correction now builds and is selected for both initial
+preflight and post-Sony-reset I/O. It translates FRESULT to negative errno,
+preserves read/write/readdir errors, and makes exclusive create win over
+truncate/append. FatFs is fetched from the exact hash-pinned archive documented
+in the module README; no SDK source checkout is required.
+
+Physical run `20261014T121822-0034` passes production configuration discovery
+with `POPS_CONFIG result=0` and exit 0. Missing ATA configs now report ENOENT.
+Physical run `20261014T122201-0037` creates a fresh 8192-byte diagnostic file,
+rejects an EXCL|TRUNC|APPEND collision with -EEXIST, and compares all bytes after
+close/reopen with true EOF. Original games/saves remain untouched. Metadata is
+in `pops_fatfs_configuration_console.json` and `pops_fatfs_exclusive_console.json`.
+This is filesystem acceptance, not Sony gameplay or power-cycle persistence.
+Runs 0035/0036 had no program result; a user reboot preceded passing run 0037.
+
+All nine host suites (including the new production FatFs callback fixture) and
+launcher argv regression pass; normal and persistent-trace GCC builds pass.
+On Windows set TEMP/TMP to the existing workspace build/test-tmp directory;
+the sandbox's default temp directory otherwise causes unrelated permission errors.
+The next game diagnostic is `build/pops-boot-trace/release/launcHER.elf`, with
+recovery disabled so the error screen remains visible. Its build predates this
+documentation commit; use exact-head CI artifacts for distributable provenance.
+
+The earlier read-only configuration probe is
 `build/pops-device-config-v13/gcc/bin/inventory.elf` with ELF arguments
 `--inspect-config ata0:/LAUNCHER-TEST-20261013-A/ TEST`.
 

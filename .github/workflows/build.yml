@@ -20,6 +20,8 @@ jobs:
         run: python tools/test_sony_ioman_layout.py
       - name: Test POPS card creation and I/O failure handling
         run: python tools/test_pops_vmc.py
+      - name: Test FatFs errno and exclusive creation contracts
+        run: python tools/test_pops_fatfs.py
       - name: Test measured POPStarter compatibility dispatch
         run: python tools/test_pops_modes.py
       - name: Test POPS configuration and feature helpers

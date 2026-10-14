@@ -219,6 +219,33 @@ endif()
 if(BDM)
   list(APPEND EE_SOURCES src/handler_bdm.c)
   list(APPEND IRX_FILES bdm.irx bdmfs_fatfs.irx)
+  # Pin the FatFs dependency; SDK wrapper sources and local repairs are licensed
+  # in-tree. The same module serves initial preflight and Sony post-reset I/O.
+  include(ExternalProject)
+  if(POLICY CMP0135)
+    cmake_policy(SET CMP0135 NEW)
+  endif()
+  ExternalProject_Add(launcher_fatfs_source
+      URL "https://codeload.github.com/fjtrujy/FatFs/tar.gz/18cc3d9e07473a6aa3d783a66224b243a7b4974c"
+      URL_HASH SHA256=ef0ce9710869f1932c328c5c4b07a707fdf08fa72e203f1fb1fa9ef67e288b81
+      SOURCE_DIR "${CMAKE_CURRENT_BINARY_DIR}/fatfs-source"
+      CONFIGURE_COMMAND "" BUILD_COMMAND "" INSTALL_COMMAND ""
+  )
+  set(POPS_FATFS_IRX "${CMAKE_CURRENT_BINARY_DIR}/bdmfs_fatfs.irx")
+  file(GLOB_RECURSE POPS_FATFS_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/iop/pops_fatfs/src/*")
+  add_custom_command(
+      OUTPUT ${POPS_FATFS_IRX}
+      COMMAND ${CMAKE_COMMAND} -E chdir "${CMAKE_CURRENT_SOURCE_DIR}/iop/pops_fatfs"
+          ${CMAKE_MAKE_PROGRAM}
+          "FATFS_ROOT=${CMAKE_CURRENT_BINARY_DIR}/fatfs-source"
+          "IOP_BIN_DIR=${CMAKE_CURRENT_BINARY_DIR}/"
+          "IOP_OBJS_DIR=${CMAKE_CURRENT_BINARY_DIR}/pops-fatfs-obj/"
+      DEPENDS launcher_fatfs_source ${POPS_FATFS_SOURCES}
+          "${CMAKE_CURRENT_SOURCE_DIR}/iop/pops_fatfs/Makefile"
+      COMMENT "Building BDM FatFs with errno and exclusive-create contracts"
+      VERBATIM
+  )
+  add_custom_target(pops_fatfs DEPENDS ${POPS_FATFS_IRX})
 endif()
 
 if(ENABLE_PRINTF)
@@ -267,6 +294,8 @@ foreach(irx ${IRX_FILES})
     irx_to_source("${POPFS_IRX}" irx_source "popfs_irx" "")
   elseif(irx_name STREQUAL "pops_iomanx")
     irx_to_source("${POPS_IOMANX_IRX}" irx_source "pops_iomanx_irx" "")
+  elseif(irx_name STREQUAL "bdmfs_fatfs")
+    irx_to_source("${POPS_FATFS_IRX}" irx_source "bdmfs_fatfs_irx" "")
   elseif(irx_name STREQUAL "udpbd")
     # udpbd is not a part of PS2SDK
     irx_to_source("${CMAKE_CURRENT_SOURCE_DIR}/iop/udpfs/udpbd/irx/udpbd.irx" irx_source "udpbd_irx" "")
@@ -315,6 +344,9 @@ endforeach()
 # Create executable
 add_executable(launcher_unc ${EE_SOURCES} ${IRX_SOURCES} ${ELF_SOURCES} ${RES_SOURCES})
 add_dependencies(launcher_unc popfs pops_iomanx)
+if(BDM)
+  add_dependencies(launcher_unc pops_fatfs)
+endif()
 
 # Add dependencies on IOP modules built via Makefiles
 if(LAUNCHER_UDPBD)
