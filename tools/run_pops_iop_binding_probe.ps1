@@ -4,7 +4,8 @@ param(
     [Parameter(Mandatory=$true)][string]$BiosDirectory,
     [Parameter(Mandatory=$true)][string]$BiosFilename,
     [Parameter(Mandatory=$true)][string]$OutputDirectory,
-    [ValidateRange(1,60)][int]$TimeoutSeconds = 45
+    [ValidateRange(1,60)][int]$TimeoutSeconds = 45,
+    [ValidateSet('POPS_IOP_BINDING','POPS_TRAMPOLINE')][string]$ResultPrefix = 'POPS_IOP_BINDING'
 )
 $ErrorActionPreference = 'Stop'
 $Elf = (Resolve-Path -LiteralPath $Elf).Path
@@ -12,6 +13,10 @@ $Pcsx2 = (Resolve-Path -LiteralPath $Pcsx2).Path
 $BiosDirectory = (Resolve-Path -LiteralPath $BiosDirectory).Path
 $biosPath = Join-Path $BiosDirectory $BiosFilename
 if (-not (Test-Path -LiteralPath $biosPath)) { throw 'Existing user-supplied BIOS missing' }
+if ($ResultPrefix -eq 'POPS_TRAMPOLINE') {
+    & python (Join-Path $PSScriptRoot 'prepare_pops_trampoline_probe.py') --verify-parent $Elf
+    if ($LASTEXITCODE -ne 0) { throw 'Trampoline parent overlaps its child destination or staging' }
+}
 $OutputDirectory = [IO.Path]::GetFullPath($OutputDirectory)
 if (Test-Path -LiteralPath $OutputDirectory) { throw 'Use a fresh output directory' }
 New-Item -ItemType Directory -Force "$OutputDirectory\PCSX2\inis" | Out-Null
@@ -53,9 +58,9 @@ try {
                 [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
             $reader = New-Object IO.StreamReader($stream)
             try { $content = $reader.ReadToEnd() } finally { $reader.Dispose() }
-            $lines = @($content -split "`r?`n" | Where-Object { $_.Contains('POPS_IOP_BINDING') })
-            if ($content.Contains('POPS_IOP_BINDING_FAIL')) { break }
-            if ($content.Contains('POPS_IOP_BINDING_PASS')) { $passed = $true; break }
+            $lines = @($content -split "`r?`n" | Where-Object { $_.Contains($ResultPrefix) })
+            if ($content.Contains($ResultPrefix + '_FAIL')) { break }
+            if ($content.Contains($ResultPrefix + '_PASS')) { $passed = $true; break }
         }
         if ($process.HasExited) { break }
         Start-Sleep -Milliseconds 250
@@ -72,6 +77,9 @@ $result = [ordered]@{
     observations = $lines
     scope = 'Real Sony IOP image/IOPCD, actual SIF RPC and production bridge IRXs; backing medium is controlled IOP memory; no game or physical persistence'
 }
+if ($ResultPrefix -eq 'POPS_TRAMPOLINE') {
+    $result.scope = 'Production trampoline and real EE kernel ExecPS2 with an owned child; no Sony core, foreign IOP, game or save inputs'
+}
 $result | ConvertTo-Json | Set-Content -Encoding UTF8 (Join-Path $OutputDirectory 'result.json')
 $lines | Write-Output
-if (-not $passed) { throw "No Sony IOP binding success marker: $log" }
+if (-not $passed) { throw "No $ResultPrefix success marker: $log" }

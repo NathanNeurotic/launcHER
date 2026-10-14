@@ -130,8 +130,20 @@ Physical run `20261014T134640-0040` now displays
 preflight passed with the actual Sony IOP reset and ATA disc/VMC route. The rig
 reports hang because the reset removes ps2link; acceptance is the persistent GS
 marker. See `docs/evidence/pops_production_preflight_console.json`.
-Sony EE entry was deliberately not executed. The next boundary is trampoline
-execution and the core's initial runtime; full game boot remains unverified.
+Sony EE entry was deliberately not executed. The unchanged production
+trampoline subsequently passed with an owned child in isolated PCSX2 and on
+physical PS2 (`20261014T135833-0041`, exit 0). The child receives argc=1 and
+`pops0:IMAGE.VCD` through the actual kernel ExecPS2 path. This does not execute
+Sony startup or reproduce every post-reset EE lifetime condition. No speculative
+interrupt change was made. See `docs/evidence/pops_owned_trampoline_probe.json`.
+
+Reproduce with `prepare_pops_trampoline_probe.py --out build/FRESH --linkfile
+SDK_STARTUP_EE_LINKFILE`, then ps2build GCC. Validate `--verify-parent` before
+running: its full load/BSS must fit 0x100000..0x200000, disjoint from destination
+and staging. The embedded child is stripped to avoid spilling the parent into
+the child destination. The isolated runner accepts `-ResultPrefix POPS_TRAMPOLINE`.
+The next boundary is Sony's early startup/runtime calls; full game boot remains
+unverified. Existing entry/argument code is not changed on the basis of a black screen.
 
 The earlier read-only configuration probe is
 `build/pops-device-config-v13/gcc/bin/inventory.elf` with ELF arguments

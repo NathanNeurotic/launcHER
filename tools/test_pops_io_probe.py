@@ -10,6 +10,7 @@ import unittest
 from prepare_pops_io_request_probe import RESERVED, prepare, segments, verify
 from trace_original_pops_io import decode_main
 from prepare_pops_iop_binding_probe import prepare as prepare_binding
+from prepare_pops_trampoline_probe import verify as verify_trampoline
 
 
 def elf(address=0x100000, file_size=4, memory_size=4):
@@ -21,6 +22,19 @@ def elf(address=0x100000, file_size=4, memory_size=4):
 
 
 class ProbeGuards(unittest.TestCase):
+    def test_trampoline_parent_rejects_child_staging_and_bss_overlap(self):
+        with tempfile.TemporaryDirectory() as work:
+            path = Path(work) / "parent.elf"
+            for address, memory in ((0xffffc, 4), (0x1ffffc, 8),
+                                    (0x200000, 4), (0x1000000, 4)):
+                path.write_bytes(elf(address, 4, memory))
+                with self.assertRaisesRegex(ValueError, "parent load/BSS"):
+                    verify_trampoline(path)
+            for address, memory in ((0x100000, 4), (0x1ffffc, 4),
+                                    (0x100000, 0x100000)):
+                path.write_bytes(elf(address, 4, memory))
+                verify_trampoline(path)
+
     def test_reject_unknown_binding_inputs_before_output(self):
         with tempfile.TemporaryDirectory() as work:
             root = Path(work)
