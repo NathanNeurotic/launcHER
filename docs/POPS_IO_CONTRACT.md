@@ -195,8 +195,8 @@ without original inputs, checking identity rejection and every injection region
 against file-backed and BSS overlaps. Actual original-code runs need the user's
 external files and remain a separate validation level.
 
-**Remaining limits:** no actual SIF transport, Sony IOP kernel, audio-track
-lookup or physical device is exercised. Compiler agreement is harness evidence,
+**Limits of this EE-only probe:** no actual SIF transport, Sony IOP kernel,
+audio-track lookup or physical device is exercised. Compiler agreement is harness evidence,
 not reconstructed-POPS parity or a hardware boot/save result. The measured
 offset ownership argues against adding another 1 MiB/2352-byte remap in POPFS.
 
@@ -216,3 +216,61 @@ canonical unmodified r13 release provenance, Sony IOPCD execution on a console,
 backend streaming, saves across power cycles, or full POPStarter parity. Keep
 the PR draft. Preserve transparent POPFS byte offsets; do not insert another
 VCD header/sector translation based on a synthetic request's LBA field.
+
+## Actual Sony IOP image, production bridge and SIF RPC
+
+`tools/prepare_pops_iop_binding_probe.py` prepares a separate local-only probe.
+It pins the complete external POPS.ELF and IOPRP252.IMG identities, extracts
+the unchanged embedded IOPCD, and copies the production iomanX/fileXio/POPFS
+IRXs from a launcher build's bin2c sources. The IOP kernel and RPC services
+execute in PCSX2; only the backing storage is a controlled in-memory IOP
+filesystem. The probe uses the production proxy argument formatter.
+
+Both GCC and LLVM harnesses passed with PCSX2 2.9.52.0. The observed sequence
+is: reboot into the selected Sony image, load the three production services,
+open both `pops0:IMAGE.VCD` and `pfs0:/IMAGE.VCD`, load original IOPCD, bind its
+`0x435052` server, read the 1,024-byte TOC, and verify all five EE-produced
+sector-request tuples above byte for byte. No additional offset translation
+or original-kernel/IOPCD patch was needed. Both save aliases also passed
+1,024-byte write/close/reopen/readback at offset 4,096. Direct backend controls
+and proxy writes use different patterns so earlier control writes cannot hide
+a failed proxy write. `docs/evidence/original_pops_iop_binding_probe.json`
+contains only input/module/ELF hashes and measured output.
+
+This uncovered a production defect before game testing: Sony MODLOAD supplies
+a loader filename at argv[0] (`LBbyEE` for `SifExecModuleBuffer`), moving our
+mode to argv[1]. The old driver rejected the real call with nonresident result
+1. POPFS now strips that filename and the host contract fixture includes it.
+The formatter also rejects packets larger than LOADFILE's `LF_ARG_MAX=252`
+before mutation; previously the SDK would silently truncate them. Production
+has a compile-time check against the SDK limit.
+
+PCSX2 initially produced a misleading save failure. Its
+[IopBios.cpp write_HLE](https://github.com/PCSX2/pcsx2/blob/master/pcsx2/IopBios.cpp)
+intercepts imported IOMAN and IOMANX writes to fd 1 as console output, returns
+the full requested count and bypasses the actual driver. The Sony image leaves
+that descriptor available, so a proxy's nested backing open can allocate it.
+The emulator fixture holds descriptors 0/1 open before testing; this workaround
+is **absent from production**. The `--console-screen` hardware variant omits
+the workaround and displays EE results through GS because the custom reset
+removes ps2link's network services. Do not interpret a missing network exit
+marker after that reset as the probe's own failure result.
+
+Reproduce after building launcHER, using fresh ignored directories:
+
+```text
+python tools/prepare_pops_iop_binding_probe.py --elf EXTERNAL/POPS.ELF --iop-image EXTERNAL/IOPRP252.IMG --launcher-build build/pops-ps2sdk --out build/iop-binding
+ps2build build -c build/iop-binding/ps2.yaml -o build/iop-binding/gcc --toolchain gcc
+ps2build build -c build/iop-binding/ps2.yaml -o build/iop-binding/llvm --toolchain llvm
+```
+
+Run `tools/run_pops_iop_binding_probe.ps1` with the same emulator/BIOS/output
+parameters as the EE runner, selecting `bin/pops_iop_binding_probe.elf`.
+The isolated runner disables memory cards, limits execution to 45 seconds and
+stops only its own PCSX2 process. Generated external arrays and probe ELFs
+remain local under ignored `build/` and must never be distributed. Four
+source-only input/layout guards run in CI without Sony binaries.
+
+**Remaining acceptance:** a complete POPS game boot, actual Sony card runtime,
+device streaming, audio and physical save/reload/power-cycle persistence.
+In-memory close/reopen proves the bridge and RPC route, not durable saves.

@@ -9,6 +9,7 @@ import unittest
 
 from prepare_pops_io_request_probe import RESERVED, prepare, segments, verify
 from trace_original_pops_io import decode_main
+from prepare_pops_iop_binding_probe import prepare as prepare_binding
 
 
 def elf(address=0x100000, file_size=4, memory_size=4):
@@ -20,6 +21,16 @@ def elf(address=0x100000, file_size=4, memory_size=4):
 
 
 class ProbeGuards(unittest.TestCase):
+    def test_reject_unknown_binding_inputs_before_output(self):
+        with tempfile.TemporaryDirectory() as work:
+            root = Path(work)
+            original, image, output = root / "unknown.elf", root / "unknown.img", root / "output"
+            original.write_bytes(elf())
+            image.write_bytes(bytes(64))
+            with self.assertRaisesRegex(ValueError, "unrecognized selected Sony"):
+                prepare_binding(original, image, root, output)
+            self.assertFalse(output.exists())
+
     def test_reject_unknown_original_before_output(self):
         with tempfile.TemporaryDirectory() as work:
             root = Path(work)
