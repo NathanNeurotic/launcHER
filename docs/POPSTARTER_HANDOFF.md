@@ -101,6 +101,32 @@ The next game diagnostic is `build/pops-boot-trace/release/launcHER.elf`, with
 recovery disabled so the error screen remains visible. Its build predates this
 documentation commit; use exact-head CI artifacts for distributable provenance.
 
+The traced full launch with repaired FatFs reached the Sony IOP reset and then
+failed loading stock SDK mcman with -200 (`20261014T122341-0038`). Static ABI
+inspection identifies Sony SIO2 2.3 versus stock mcman's SIO2 1.2 imports;
+multitap changed from ordinal 55 to 57. The SDK's mcman-2000 explicitly targets
+SIO2 2.3 and exports mcman 2.3 for the existing mcserv. The candidate selects
+mcman-2000 and loads its secrman 1.4 dependency only in the Sony path.
+Normal launcher/Ember module selection is unchanged.
+
+Reproduce the metadata-only ABI inspection with
+`python tools/inspect_pops_card_abi.py --elf EXTERNAL/POPS.ELF --launcher-build BUILD`.
+See `docs/evidence/pops_card_service_abi.json`. Do not fix this by simply
+rewriting an import version: the multitap ordinal also changes.
+Candidate run `20261014T123524-0039` was uploaded/launched but the final console
+capture was black, with no explicit acceptance marker. It proves neither full
+service initialization nor game boot. The error and candidate reports preserve
+that distinction. Normal and diagnostic target builds pass, as do 57 external
+host tests. The FatFs commit c48e087 has all four GitHub CI runs passing.
+
+An additional opt-in diagnostic
+`-DLAUNCHER_BOOT_TRACE=ON -DLAUNCHER_BOOT_TRACE_STOP_BEFORE_HANDOFF=ON`
+stops only after production service initialization, live disc/card checks and
+trampoline preparation. It displays `POPS_PREFLIGHT_PASS` and explicitly says
+Sony entry has not executed. This option defaults OFF; disable it for gameplay.
+The current local trace build enables this stop and disables soft recovery.
+Hardware confirmation of that boundary is next.
+
 The earlier read-only configuration probe is
 `build/pops-device-config-v13/gcc/bin/inventory.elf` with ELF arguments
 `--inspect-config ata0:/LAUNCHER-TEST-20261013-A/ TEST`.

@@ -83,6 +83,10 @@ foreach(irx ${IRX_FILES})
   list(APPEND IRX_SOURCES ${irx_source})
 endforeach()
 
+# Card services compatible with Sony's embedded SIO2 2.3. These are selected
+# only after the identified Sony IOP reset, alongside the normal SDK variants.
+list(APPEND IRX_FILES mcman-2000.irx secrman.irx)
+
 # OSDM support
 if(LAUNCHER_OSDM)
   list(APPEND EE_SOURCES src/handler_osdm.c)

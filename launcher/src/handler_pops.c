@@ -1372,6 +1372,14 @@ int launchPOPS(int argc, char *argv[]) {
 
   DPRINTF("POPS: Transferring control to trampoline at 0x%08X\n", (uint32_t)POPS_TRAMPOLINE_ADDR);
 
+#ifdef LAUNCHER_BOOT_TRACE_STOP_BEFORE_HANDOFF
+  /* Opt-in acceptance boundary: all production initialization, disc/card
+   * probes and trampoline setup passed. Sony code has not executed yet. */
+  DPRINTF("POPS_PREFLIGHT_PASS Sony_entry_not_executed=1\n");
+  SleepThread();
+  return 0;
+#endif
+
   /* Execute trampoline below 1 MiB, which stages core, clears RAM, and enters POPS */
   ((void (*)(void *))POPS_TRAMPOLINE_ADDR)((void *)POPS_TRAMPOLINE_ARGS);
 

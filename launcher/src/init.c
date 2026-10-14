@@ -41,7 +41,9 @@ IRX_DEFINE(pops_iomanx);
 IRX_DEFINE(fileXio);
 IRX_DEFINE(sio2man);
 IRX_DEFINE(mcman);
+IRX_DEFINE(mcman_2000);
 IRX_DEFINE(mcserv);
+IRX_DEFINE(secrman);
 IRX_DEFINE(popfs);
 
 #ifdef MMCE
@@ -276,11 +278,24 @@ static int loadModuleList(DeviceType device, int tolerant, int sonySio2) {
       }
     }
 
+    if (sonySio2 && !strcmp(moduleList[i].name, "mcman")) {
+      /* The selected Sony SIO2 exports 2.3, requiring the SDK's remote
+       * compatible card manager (including multitap ordinal 57, not 55).
+       * The foreign image also needs the authentication dependency explicitly. */
+      int secrResult = 0;
+      DPRINTF("IOP: loading secrman (Sony=1)\n");
+      ret = SifExecModuleBuffer(secrman_irx, size_secrman_irx, 0, NULL, &secrResult);
+      DPRINTF("IOP: loaded secrman id=%d start=%d\n", ret, secrResult);
+      if (ret < 0 || secrResult != 0)
+        return ret < 0 ? ret : -EIO;
+    }
     DPRINTF("IOP: loading %s (Sony=%d)\n", moduleList[i].name, sonySio2);
     /* Only the identified Sony IOP reset path needs the private legacy-state
      * migration. Normal launcher and Ember initialization retain SDK iomanX. */
     if (sonySio2 && !strcmp(moduleList[i].name, "iomanX"))
       ret = SifExecModuleBuffer(pops_iomanx_irx, size_pops_iomanx_irx, 0, NULL, &iopret);
+    else if (sonySio2 && !strcmp(moduleList[i].name, "mcman"))
+      ret = SifExecModuleBuffer(mcman_2000_irx, size_mcman_2000_irx, 0, NULL, &iopret);
     else if (moduleList[i].path)
       ret = SifLoadModule(moduleList[i].path, moduleList[i].argLength, moduleList[i].argStr);
     else
