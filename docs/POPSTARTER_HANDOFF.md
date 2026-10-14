@@ -60,6 +60,20 @@ user's automatic ps2link boot setup after a physical reboot if needed.
 The inventory fixture also accepts `--inspect-config VCD_DIRECTORY GAME_BASE`
 to exercise production configuration discovery without replacing ps2link's IOP.
 
+Host regression subsequently confirmed that an unavailable optional global
+memory-card root (`ENODEV`/`ENXIO` at open) aborts configuration discovery.
+The fix treats those failed global opens like an absent optional file, while
+preserving permission failures, selected-title device failures, malformed
+configuration and every read failure after a successful open (including a
+device removed during reading). Nine feature tests pass with injected open
+and post-open read failures; the 57 external tests and both normal/trace target
+builds pass. Hardware acceptance of this fix is pending: runs
+`20261014T061522-0031` and `20261014T062342-0032` returned no console stdout.
+Do not infer game boot or successful configuration parsing from them.
+The next read-only configuration probe is
+`build/pops-device-config-v13/gcc/bin/inventory.elf` with ELF arguments
+`--inspect-config ata0:/LAUNCHER-TEST-20261013-A/ TEST`.
+
 ## Current local continuation — October 13, 2026
 
 Local development was fast-forwarded to PR #23 head

@@ -284,13 +284,19 @@ loop_remaining:
   return 0;
 }
 
-int pops_config_load_file(PopsConfig *cfg, const char *filepath) {
+static int load_config_file(PopsConfig *cfg, const char *filepath, int optional_global) {
   if (!cfg || !filepath)
     return -EINVAL;
 
   FILE *f = open_config(filepath);
-  if (!f)
-    return errno ? -errno : -EIO;
+  if (!f) {
+    int result = errno ? -errno : -EIO;
+    /* Only an optional global location that could not be opened is absent.
+     * A device removed during reading must still fail after a successful open. */
+    if (optional_global && (result == -ENOENT || result == -ENODEV || result == -ENXIO))
+      return 0;
+    return result;
+  }
 
   char line[256];
   int result = 0;
@@ -311,6 +317,10 @@ int pops_config_load_file(PopsConfig *cfg, const char *filepath) {
   if (fclose(f) && !result)
     result = errno ? -errno : -EIO;
   return result;
+}
+
+int pops_config_load_file(PopsConfig *cfg, const char *filepath) {
+  return load_config_file(cfg, filepath, 0);
 }
 
 /* Trim without forming a pointer before an empty line's buffer. */
@@ -407,18 +417,18 @@ int pops_config_discover(PopsConfig *cfg, const char *vcd_dir, const char *game_
   };
   for (int g = 0; g < 4; ++g) {
     snprintf(path, sizeof(path), "%sPATCHES.TXT", globalDirs[g]);
-    result = pops_config_load_file(cfg, path);
-    if (result && result != -ENOENT)
+    result = load_config_file(cfg, path, 1);
+    if (result)
       return result;
 
     snprintf(path, sizeof(path), "%sMODES.TXT", globalDirs[g]);
-    result = pops_config_load_file(cfg, path);
-    if (result && result != -ENOENT)
+    result = load_config_file(cfg, path, 1);
+    if (result)
       return result;
 
     snprintf(path, sizeof(path), "%sCHEATS.TXT", globalDirs[g]);
-    result = pops_config_load_cheats(cfg, path);
-    if (result && result != -ENOENT)
+    result = load_config_file(cfg, path, 1);
+    if (result)
       return result;
   }
 

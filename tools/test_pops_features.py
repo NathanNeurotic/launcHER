@@ -74,7 +74,9 @@ def compile_shared_library():
         str(ROOT / "common/src/pops_modes_patches.c"),
         str(ROOT / "common/src/pops_vcd.c"),
     ]
-    cmd = ["gcc", "-shared", "-fPIC", "-O2", "-Dfopen=pops_test_fopen", "-I", str(ROOT / "common/include")] + sources + ["-o", str(so_path)]
+    cmd = ["gcc", "-shared", "-fPIC", "-O2", "-Dfopen=pops_test_fopen",
+           "-Dfgets=pops_test_fgets", "-Dferror=pops_test_ferror", "-Dfclose=pops_test_fclose",
+           "-I", str(ROOT / "common/include")] + sources + ["-o", str(so_path)]
     subprocess.check_call(cmd)
     return c.CDLL(str(so_path))
 
@@ -471,6 +473,43 @@ class FeatureTests(unittest.TestCase):
             oversized = root / 'long.txt'
             oversized.write_text('$80001234 5678' + ' ' * 300)
             self.assertLess(LIB.pops_config_load_file(c.byref(cfg), str(oversized).encode()), 0)
+
+    def test_unavailable_optional_global_cards_preserve_title_configuration(self):
+        LIB.pops_test_set_card_error.argtypes = [c.c_int]
+        LIB.pops_test_set_card_read_error.argtypes = [c.c_int]
+        LIB.pops_config_discover.argtypes = [c.POINTER(PopsConfig), c.c_char_p, c.c_char_p]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / 'Game').mkdir()
+            (root / 'Game' / 'MODES.TXT').write_text('MODE 2\n')
+            try:
+                for missing in (errno.ENOENT, errno.ENODEV, errno.ENXIO):
+                    LIB.pops_test_set_card_error(missing)
+                    cfg = PopsConfig()
+                    LIB.pops_config_init(c.byref(cfg))
+                    self.assertEqual(LIB.pops_config_discover(c.byref(cfg),
+                                     (str(root) + '/').encode(), b'Game'), 0)
+                    self.assertEqual(cfg.compat_modes, 2)
+                for failure in (errno.EIO, errno.EACCES):
+                    LIB.pops_test_set_card_error(failure)
+                    cfg = PopsConfig()
+                    LIB.pops_config_init(c.byref(cfg))
+                    self.assertEqual(LIB.pops_config_discover(c.byref(cfg),
+                                     (str(root) + '/').encode(), b'Game'), -failure)
+                LIB.pops_test_set_card_error(errno.ENOENT)
+                cfg = PopsConfig()
+                LIB.pops_config_init(c.byref(cfg))
+                self.assertEqual(LIB.pops_config_discover(c.byref(cfg),
+                                 b'unavailable:/', b'Game'), -errno.ENODEV)
+                for read_failure in (errno.ENODEV, errno.ENXIO, errno.EIO):
+                    LIB.pops_test_set_card_read_error(read_failure)
+                    cfg = PopsConfig()
+                    LIB.pops_config_init(c.byref(cfg))
+                    self.assertEqual(LIB.pops_config_discover(c.byref(cfg),
+                                     (str(root) + '/').encode(), b'Game'), -read_failure)
+            finally:
+                LIB.pops_test_set_card_error(errno.ENOENT)
+                LIB.pops_test_set_card_read_error(0)
 
     def test_auxiliary_config_bounds(self):
         cfg = PopsConfig()
