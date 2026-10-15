@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """No proprietary inputs: validate startup control-transfer census bounds."""
+import json
 import struct
 import unittest
-from inspect_pops_startup_calls import START, scan_words, inspect
+from inspect_pops_startup_calls import (START, END, FUNCTION_END, scan_words,
+                                         inspect, parse_function_metadata,
+                                         annotate_ground_truth)
 
 
 def j(target, op=3):
@@ -29,6 +32,44 @@ class StartupTransferCensusTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unknown external"):
             inspect(bytes(512))
         self.assertEqual(scan_words(b"\x00\x00\x00\x00"), [])
+
+    def test_extended_original_function_extent_is_distinct(self):
+        self.assertEqual(END - START, 524)
+        self.assertEqual(FUNCTION_END - START, 1076)
+        self.assertEqual((END - START) % 4, 0)
+        self.assertEqual((FUNCTION_END - END) % 4, 0)
+
+    def test_ground_truth_candidates_keep_overlaps_visible(self):
+        rows = [
+            {"name": "FUN_002004f0", "address": "002004f0", "size": 1076},
+            {"name": "nested_overlap", "address": "00200500", "size": 16},
+            {"name": "other", "address": "0022faf0", "size": 64},
+        ]
+        functions = parse_function_metadata(json.dumps(rows).encode())
+        results = annotate_ground_truth([
+            {"pc": "0x002004f0", "kind": "call", "target": "0x00200504"},
+            {"pc": "0x002004f4", "kind": "call", "target": "0x0022faf0"},
+            {"pc": "0x002004f8", "kind": "indirect-call"},
+        ], functions)
+        self.assertEqual(len(results[0]["ground_truth_candidates"]), 2)
+        self.assertEqual(results[0]["ground_truth_candidates"][0]["name"], "FUN_002004f0")
+        self.assertFalse(results[0]["ground_truth_candidates"][0]["at_entry"])
+        self.assertEqual(results[1]["ground_truth_candidates"],
+                         [{"name": "other", "offset": 0, "at_entry": True}])
+        self.assertNotIn("ground_truth_candidates", results[2])
+
+    def test_reject_broken_ground_truth_inventory(self):
+        invalid = [
+            {"name": "x", "address": "002004f0", "size": True},
+            {"name": "x", "address": "002004f0", "size": 0},
+            {"name": "x", "address": "002004fx", "size": 4},
+            {"name": "x", "address": "ffffffff", "size": 8},
+        ]
+        for row in invalid:
+            with self.subTest(row=row), self.assertRaises(ValueError):
+                parse_function_metadata(json.dumps([row]).encode())
+        with self.assertRaises(ValueError):
+            parse_function_metadata(b"{}")
 
     def test_sign_extended_conditional_call(self):
         blob = struct.pack("<I", 0x0431ffff)

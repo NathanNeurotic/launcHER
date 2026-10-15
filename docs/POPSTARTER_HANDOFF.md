@@ -178,6 +178,23 @@ python tools/inspect_pops_startup_calls.py --elf EXTERNAL/POPS.ELF \
 python tools/test_pops_startup_calls.py
 ```
 
+The original function inventory in REPOP places
+`FUN_002004f0` at `0x002004f0..0x00200924` (1,076 bytes). The
+hardware-executed parser probe covered only the first 524 bytes through
+`0x002006fc`. The inspector defaults to that observed prefix. To statically
+census the whole function and annotate direct targets with candidate
+original Ghidra function ranges, run:
+
+```sh
+python tools/inspect_pops_startup_calls.py --elf EXTERNAL/POPS.ELF --whole-function --functions ../REPOP/pops/ghidra/output/functions.json --json build/pops-startup-calls-full.json
+```
+
+Ghidra intervals may overlap, and all candidates remain visible rather
+than guessing a unique callee. The second half has not been demonstrated
+on hardware. REPOP previously misidentified this address as a SIF RPC
+dispatcher; that unsupported attribution is corrected in its source
+provenance notes.
+
 The tool emits only direct MIPS J/JAL and conditional-link targets and marks
 JALR as unresolved, across the bounded original `0x002004f0..0x002006fc`
 prefix. It requires the complete known external ELF digest and a unique
