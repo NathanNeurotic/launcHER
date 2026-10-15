@@ -28,6 +28,8 @@ jobs:
         run: python tools/test_pops_features.py
       - name: Test original-code probe input and memory boundaries
         run: python tools/test_pops_io_probe.py
+      - name: Test bounded original POPS startup callsite census
+        run: python tools/test_pops_startup_calls.py
       - name: Test network SMAP IP configuration parser
         run: python tools/test_smap_ipconfig.py
 

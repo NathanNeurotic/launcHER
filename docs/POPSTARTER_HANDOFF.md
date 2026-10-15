@@ -166,6 +166,29 @@ The earlier read-only configuration probe is
 `build/pops-device-config-v13/gcc/bin/inventory.elf` with ELF arguments
 `--inspect-config ata0:/LAUNCHER-TEST-20261013-A/ TEST`.
 
+### Next original startup boundary: read-only callsite census
+
+The original parser has passed hardware acceptance, but the next runtime
+initialization stage is not yet isolated. Run this **offline** against the
+same user-supplied hash-pinned Sony ELF:
+
+```sh
+python tools/inspect_pops_startup_calls.py --elf EXTERNAL/POPS.ELF \
+  --json build/pops-startup-calls.json
+python tools/test_pops_startup_calls.py
+```
+
+The tool emits only direct MIPS J/JAL and conditional-link targets and marks
+JALR as unresolved, across the bounded original `0x002004f0..0x002006fc`
+prefix. It requires the complete known external ELF digest and a unique
+executable segment covering that region. The report records a digest of the
+inspected range but no original Sony instruction bytes or generated ELF.
+The caller must cross-reference candidate targets with REPOP function
+boundaries before deciding what to model or trace. **This is not a dynamic
+call graph**: embedded data, unreachable instructions, delay slots and
+indirect targets remain limitations. It does not justify mutating POPS
+startup, disabling interrupts or changing the verified launcher arguments.
+
 ## Current local continuation — October 13, 2026
 
 Local development was fast-forwarded to PR #23 head
