@@ -11,6 +11,7 @@ from prepare_pops_io_request_probe import RESERVED, prepare, segments, verify
 from trace_original_pops_io import decode_main
 from prepare_pops_iop_binding_probe import prepare as prepare_binding
 from prepare_pops_trampoline_probe import verify as verify_trampoline
+from prepare_pops_startup_args_probe import RESERVED as STARTUP_REGIONS, verify as verify_startup, prepare as prepare_startup
 
 
 def elf(address=0x100000, file_size=4, memory_size=4):
@@ -22,6 +23,22 @@ def elf(address=0x100000, file_size=4, memory_size=4):
 
 
 class ProbeGuards(unittest.TestCase):
+    def test_startup_probe_identity_and_full_memory_overlap(self):
+        with tempfile.TemporaryDirectory() as work:
+            root=Path(work)
+            path=root/"probe.elf"
+            path.write_bytes(elf())
+            with self.assertRaisesRegex(ValueError,"unknown external POPS"):
+                prepare_startup(path,root/"output")
+            self.assertFalse((root/"output").exists())
+            for low,high in STARTUP_REGIONS:
+                for start,files,memory in ((low,4,4),(high-1,1,1),(low-8,4,12)):
+                    path.write_bytes(elf(start,files,memory))
+                    with self.assertRaisesRegex(ValueError,"overlaps original"):
+                        verify_startup(path)
+            path.write_bytes(elf())
+            verify_startup(path)
+
     def test_trampoline_parent_rejects_child_staging_and_bss_overlap(self):
         with tempfile.TemporaryDirectory() as work:
             path = Path(work) / "parent.elf"

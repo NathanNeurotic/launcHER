@@ -145,6 +145,23 @@ the child destination. The isolated runner accepts `-ResultPrefix POPS_TRAMPOLIN
 The next boundary is Sony's early startup/runtime calls; full game boot remains
 unverified. Existing entry/argument code is not changed on the basis of a black screen.
 
+The original startup parser prefix now also executes in isolated PCSX2 and on
+physical PS2 (`20261014T205627-0043`, exit 0), using the original R5900 string
+routine and character table. The current `pops0:IMAGE.VCD` produces name `VCD`
+and route `pops0:IMAGE.VCD`; `hdd0:PART:pfs0:/POPS/Tekken.VCD` produces name
+`VCD` and route `hdd0:PART`. Missing colon/extension produces empty fields.
+The fixture asserts all five measured outputs plus argc=0. Initial helper is
+modeled and the probe stops before runtime initialization, so this does not
+prove later mount/file-service acceptance. Metadata:
+`docs/evidence/pops_original_startup_args.json`.
+
+Reproduce with `prepare_pops_startup_args_probe.py --elf EXTERNAL/POPS.ELF
+--out build/FRESH`, native ps2build GCC, then `--verify-probe` before execution.
+The isolated runner accepts `-ResultPrefix POPS_STARTUP_ARGS`. Generated original
+arrays and ELFs remain local. Six host guard tests pass, including identity,
+file bounds and full load/BSS overlap checks. Run 0042 had no program result;
+only run 0043 is hardware parser acceptance.
+
 The earlier read-only configuration probe is
 `build/pops-device-config-v13/gcc/bin/inventory.elf` with ELF arguments
 `--inspect-config ata0:/LAUNCHER-TEST-20261013-A/ TEST`.
