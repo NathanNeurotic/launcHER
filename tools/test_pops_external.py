@@ -155,6 +155,21 @@ def check_boot_staging(plan, source, iop=None, original_writes=None):
         raise RuntimeError('Storage bridge changed bytes outside verified sites')
     print('Guarded storage bridge PASS: storage skip, preserved delay slot, eight aliases, entire RAM compared')
     ram.raw = before
+    # Verify optional PSXCore runtime corrections against the canonical core.
+    expected_corrections = bytearray(before)
+    for addr, repl in ((0x0021d6a4, 0x240f0000), (0x0020ac5c, 0x10000006),
+                       (0x0020ead4, 0x00000000), (0x00213c20, 0x00000000),
+                       (0x0024a94c, 0x00000000)):
+        expected_corrections[addr - 0x100000:addr - 0x100000 + 4] = struct.pack('<I', repl)
+    ram[0x0021d6a4 - 0x100000] = b'\0'
+    corrupted_fix = ram.raw
+    if LIB.pops_core_runtime_corrections_stage(0x100000, ram, ram_size, 31) != -4 or ram.raw != corrupted_fix:
+        raise RuntimeError("Runtime corrections guard failure changed memory")
+    ram.raw = before
+    if LIB.pops_core_runtime_corrections_stage(0x100000, ram, ram_size, 31) or ram.raw != bytes(expected_corrections):
+        raise RuntimeError("Runtime corrections output differs from verified replacements")
+    print("Guarded runtime corrections PASS: 5 verified sites, entire RAM compared")
+    ram.raw = before
     # Corrupt the last original module-error guard and prove there are no earlier
     # patch writes on rejection. The full core identity guard also must fail.
     ram[0x2004be - 0x100000] = b'\0'
@@ -273,6 +288,16 @@ class InspectorTests(unittest.TestCase):
         self.assertEqual(LIB.pops_core_patches_stage(0x200000, memory, 1, 1), RANGE)
         self.assertEqual(LIB.pops_core_patches_stage(0x200004, memory, len(memory), 1), RANGE)
         self.assertEqual(LIB.pops_core_patches_stage(0x200000, memory, len(memory), 1), -4)
+        self.assertEqual(memory.raw, before)
+
+    def test_core_runtime_corrections_bounds_flags_and_unknown_identity(self):
+        memory = c.create_string_buffer(0x302e60)
+        before = memory.raw
+        self.assertEqual(LIB.pops_core_runtime_corrections_stage(0x200000, memory, len(memory), 0), INVALID)
+        self.assertEqual(LIB.pops_core_runtime_corrections_stage(0x200000, memory, len(memory), 32), INVALID)
+        self.assertEqual(LIB.pops_core_runtime_corrections_stage(0x200000, memory, 1, 1), RANGE)
+        self.assertEqual(LIB.pops_core_runtime_corrections_stage(0x200004, memory, len(memory), 1), RANGE)
+        self.assertEqual(LIB.pops_core_runtime_corrections_stage(0x200000, memory, len(memory), 1), -4)
         self.assertEqual(memory.raw, before)
 
     def test_sha256_matches_hashlib_across_padding_and_block_boundaries(self):
@@ -1186,6 +1211,7 @@ def main():
     LIB.pops_boot_stage_elf.argtypes = [c.c_void_p, c.c_size_t, c.c_void_p,
                                       c.c_size_t, c.POINTER(BootBuffers)]
     LIB.pops_core_patches_stage.argtypes = [c.c_uint32, c.c_void_p, c.c_size_t, c.c_uint32]
+    LIB.pops_core_runtime_corrections_stage.argtypes = [c.c_uint32, c.c_void_p, c.c_size_t, c.c_uint32]
     LIB.pops_core_image_identify.argtypes = [c.c_void_p, c.c_size_t]
     LIB.pops_core_sio2_identify.argtypes = [c.c_void_p, c.c_size_t]
     for name in ("pops_core_iopcd_probe_io_ordinals", "pops_iop_module_probe_io_ordinals"):
@@ -1212,7 +1238,8 @@ def main():
                  "pops_container_stage", "pops_patch_options", "pops_pak_inspect",
                  "pops_pak_decode", "pops_iop_image_inspect", "pops_image_sha256",
                  "pops_boot_plan_pak", "pops_boot_plan_elf", "pops_boot_stage_pak",
-                 "pops_boot_stage_elf", "pops_core_patches_stage", "pops_core_image_identify",
+                 "pops_boot_stage_elf", "pops_core_patches_stage",
+                 "pops_core_runtime_corrections_stage", "pops_core_image_identify",
                  "pops_format_proxy_args", "pops_trampoline_args_init",
                  "pops_bootstrap_verify_layout"):
         getattr(LIB, name).restype = c.c_int

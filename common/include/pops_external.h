@@ -142,6 +142,21 @@ enum {
  * operations, runtime callbacks, path/IOP/storage/VMC setup or boot readiness. */
 int pops_core_patches_stage(uint32_t base, void *memory, size_t span, uint32_t groups);
 
+enum {
+  POPS_FIX_TEXTURE_WINDOW   = 1u << 0,
+  POPS_FIX_GPU_DMA_ZERO     = 1u << 1,
+  POPS_FIX_CDDA_SETMODE     = 1u << 2,
+  POPS_FIX_SPU_ENABLE_RESET = 1u << 3,
+  POPS_FIX_GTE_RES1         = 1u << 4,
+  POPS_FIX_ALL              = (1u << 5) - 1
+};
+
+/* Stage optional, transactionally-guarded core runtime corrections
+ * (assessed from PSXCore / community research). Validates complete reference
+ * core identity and all expected instruction guards before applying any write.
+ * Does not conflict with or alter the baseline POPStarter patch groups. */
+int pops_core_runtime_corrections_stage(uint32_t base, void *memory, size_t span, uint32_t mask);
+
 /* Identify the measured reference core and dependency sets by exact SHA256.
  * Unknown/mutated images fail closed. No writes, reboot, runtime patches or
  * module compatibility claim. Output remains unchanged on failure. */
