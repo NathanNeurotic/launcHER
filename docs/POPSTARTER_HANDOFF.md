@@ -425,3 +425,30 @@ state/caller ordering and Mode 6 OSD globals next; do not reuse speculative
 `POPS/popstarter/src/runtime_hooks.c` mode switches (they were the source of the
 incorrect single-write implementations). Optional reference reproduction is in
 `POPSTARTER_REPLACEMENT.md`. No new hardware result has been obtained.
+
+## POPS early startup sequence and storage bridge census (2026-10-16)
+
+Static whole-function callsite census on original `FUN_002004f0`
+(`0x002004f0..0x00200924`) against `POPS.ELF` and REPOP Ghidra functions
+(`build/pops-startup-calls-full.json`) establishes the core sequence:
+
+1. `FUN_002004f0`: Validates arguments, extracts title identity and partition route.
+2. `FUN_002149e0()`: Performs pre-mount hardware initialization.
+3. `FUN_002002a0(1)`: Embedded IRX loader. `FUN_002003d8` branches around Sony's
+   DEV9/ATAD/HDD/PFS loading when non-HDD paths are active.
+4. `FUN_00214938()`: Mounts partitions. `0x00214968` mounts `hdd0:__common` as
+   `pfs1:`, and `0x002149a0` mounts the title partition as `pfs0:`.
+   `POPS_CORE_STORAGE_BRIDGE` NOPs both partition mounts and redirects literal
+   `pfs0:` and `pfs1:` path references to `pops:`.
+5. `FUN_00210540()`: Binds IOPCD RPC `0x435052` and retrieves the disc TOC.
+6. `FUN_0020cf00(1)`: Sets up memory card handling.
+
+POPStarter decompilation confirms that its main routine (`0x00874400..0x00874ce8`)
+directly executes these patch groups before jumping to the core entrypoint:
+- `FUN_008dc2c4`: Patch dispatcher.
+- `FUN_008db778`: HDD check bypass.
+- `FUN_008db7e4`: PFS and file path redirection.
+- `FUN_008dbafc`: Exception breakpoints.
+- `FUN_008dbd6c`: Disc string rewrite.
+- `FUN_008dbfd4`: SifLoadModule error bypass.
+

@@ -79,3 +79,36 @@ run `--smb-files smb0:/LAUNCHER-NET-.../`, then independently run
 `verify_network_fixture.py REPORT`. The console probe refuses ordinary
 game/save paths. Keep these diagnostic files for evidence; do not reuse the
 same folder for another creation run.
+
+## Fresh-IOP network transport probe (2026-10-16)
+
+A clean network transport test requires `SifIopReset("", 0)` to clear ps2link's
+inherited network stack and reinitialize `dev9`, `smap`, `ps2ip`/`ministack`,
+`smbman`/`udpfs`/`udpbd` from scratch.
+
+Probe tooling:
+- `tools/fixtures/network_transport_ee.c`: standalone test harness executing
+  `SifIopReset("", 0)`, loading the network stack, connecting, and running
+  `network_fixture_test()`.
+- `tools/prepare_network_transport_probe.py`: extracts production IRX arrays
+  from the launcher build, packages sources into an isolated build directory,
+  and generates `ps2.yaml`.
+
+Diagnosis after initial run `20261016T022121-0062`:
+- `SifIopReset("", 0)` tears down ps2link and its legacy FILEIO RPC.
+- Standard newlib `open()` in `handler_smb.c` (`read_config`) and `init.c`
+  (`initSMAPArguments`) targeted legacy FILEIO, failing to open `IPCONFIG.DAT`
+  and `SMBCONFIG.DAT` on memory cards.
+- `initTCPIPArguments` returned `NULL`, aborting before network driver loading.
+
+Resolution:
+- Switched `read_config` and `initSMAPArguments` to `fileXioOpen`, `fileXioRead`,
+  and `fileXioClose`.
+- Added early `fileXioInit()` binding immediately after `fileXio.irx` loads in
+  `loadModuleList`, ensuring memory card access is operational before network
+  argument callbacks execute.
+- Added structured `NETWORK_STAGE step=...` reporting across GS screen, EE SIO
+  hardware serial, and `udptty`.
+- Rebuilt probe ELF (`build/network-fresh-v3/build/bin/network.elf`, SHA256
+  `6B251EA15A2B8BB66814D2ADD18E78F752582A4C23D79073679799BDA560894F`).
+
