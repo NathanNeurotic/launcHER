@@ -404,17 +404,15 @@ int pops_has_smb_stack(void) {
 
   static const char *smb_files[] = {
     "SMBCONFIG.DAT",
-    "smbconfig.dat",
-    "SMBMAN.IRX",
-    "smbman.irx",
-    "PS2NETFS.IRX",
-    "ps2netfs.irx"
+    "smbconfig.dat"
   };
   static const char *dirs[] = {
     "mc0:/POPSTARTER/",
     "mc1:/POPSTARTER/",
     "mc0:/POPS/",
-    "mc1:/POPS/"
+    "mc1:/POPS/",
+    "mc0:/SYS-CONF/",
+    "mc1:/SYS-CONF/"
   };
 
   if (s_bdma_test_root[0]) {

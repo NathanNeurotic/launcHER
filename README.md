@@ -385,6 +385,62 @@ Network configuration for UDPBD/UDPFS follows the inherited OSDMenu Launcher imp
 mc?:/SYS-CONF/IPCONFIG.DAT
 ```
 
+### SMBv1
+
+```ini
+path=smb0:/EMBER/ember.elf
+arg=<GAME_FOLDER>
+arg=-dev9=NIC
+```
+
+The SMB share root contains `EMBER/ember.elf`, `EMBER/bios.bin` and
+`EMBER/games/<GAME_FOLDER>/`. The share name belongs in `SMBCONFIG.DAT`,
+not in the `smb0:` path. `smb:/` also addresses the same share.
+
+launcHER embeds DEV9, NetMan, the SDK SMAP/TCP-IP stack and an SDK-derived
+SMBv1 client. It establishes the session and opens the share itself. It does
+not depend on a connection inherited from OPL or loose network IRX files.
+Ember receives the mounted filesystem with DEV9 kept powered.
+
+Put `IPCONFIG.DAT` and `SMBCONFIG.DAT` in `mc0:/POPSTARTER/` or
+`mc1:/POPSTARTER/`. The fallback directories, in order, are `mc0:/POPS/`,
+`mc1:/POPS/`, `mc0:/SYS-CONF/`, and `mc1:/SYS-CONF/`. Each file is searched
+independently. Existing RiptOPL POPStarter network settings use this format.
+
+`IPCONFIG.DAT` contains the console's static IP, netmask and gateway:
+
+```text
+192.168.1.10 255.255.255.0 192.168.1.1
+```
+
+`SMBCONFIG.DAT` contains the server IP and share on its first line, then the
+username and password on separate lines. The server port defaults to 445;
+an explicit port uses `192.168.1.100:1445`. For a guest share, leave both
+credential lines empty. The following values are examples:
+
+```text
+192.168.1.100 PS2SMB
+example-user
+example-password
+```
+
+This implementation requires static addressing and a server offering SMBv1.
+SMBv2/v3-only servers cannot negotiate with it. Select one network profile
+per launch; SMB's TCP/IP stack cannot run alongside the UDP ministack on
+the same adapter. UDPFS exposes server files directly; UDPBD exposes a
+server block image through the launcher's FatFs driver. They are different
+server modes, with different roots.
+
+The transport code has host regression coverage and builds for PS2. Full
+Ember playback, network interruption recovery during a game, and save
+persistence on physical hardware still need acceptance testing for each
+transport. Sony POPS over these backends also depends on the ongoing POPS
+runtime work; SMB POPS currently retains the `POPS_IOX.PAK` requirement.
+
+The SMB client includes software developed by Eric Young
+(`eay@mincom.oz.au`). Its source, changes and original license notices are
+in `launcher/iop/smbman/`; distributed binaries include `SMB-NOTICES.txt`.
+
 ---
 
 ## OPL APPS layout

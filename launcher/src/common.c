@@ -105,6 +105,9 @@ int handleGenericPath(DeviceType device, int argc, char *argv[]) {
   if (res)
     return res;
 
+  if (device == Device_SMB)
+    settings.dev9ShutdownType = ShutdownType_None;
+
   if (tryFile(argv[0]))
     return -ENOENT;
 

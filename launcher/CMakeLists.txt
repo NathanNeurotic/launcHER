@@ -11,6 +11,7 @@ option(LAUNCHER_CDROM "Support for loading PS1 and PS2 CDs/DVDs" ON)
 option(LAUNCHER_ILINK "Support for loading ELFs from iLink" OFF)
 option(LAUNCHER_UDPBD "Support for loading ELFs from UDPBD" OFF)
 option(LAUNCHER_UDPFS "Support for loading ELFs from UDPFS" OFF)
+option(LAUNCHER_SMB "Support for loading ELFs from SMBv1" ON)
 option(LAUNCHER_XFROM "Support for loading ELFs from XFROM" ON)
 
 # Base sources
@@ -187,6 +188,23 @@ if(LAUNCHER_UDPFS)
 endif()
 
 # CDROM support
+if(LAUNCHER_SMB)
+  list(APPEND EE_SOURCES src/handler_smb.c ../common/src/network_config.c)
+  list(APPEND IRX_FILES netman.irx smap_tcpip.irx ps2ip-nm.irx launcher_smbman.irx)
+  add_compile_definitions(SMB)
+  set(DEV9 ON)
+  set(SMBMAN_IRX "${CMAKE_CURRENT_BINARY_DIR}/launcher_smbman.irx")
+  file(GLOB SMBMAN_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/iop/smbman/src/*")
+  add_custom_command(OUTPUT ${SMBMAN_IRX}
+      COMMAND ${CMAKE_COMMAND} -E chdir "${CMAKE_CURRENT_SOURCE_DIR}/iop/smbman"
+          ${CMAKE_MAKE_PROGRAM} "IOP_BIN_DIR=${CMAKE_CURRENT_BINARY_DIR}/"
+          "IOP_OBJS_DIR=${CMAKE_CURRENT_BINARY_DIR}/smbman-obj/"
+      DEPENDS ${SMBMAN_SOURCES} "${CMAKE_CURRENT_SOURCE_DIR}/iop/smbman/Makefile"
+      VERBATIM)
+  add_custom_target(launcher_smbman DEPENDS ${SMBMAN_IRX})
+endif()
+
+# CDROM support
 if(LAUNCHER_CDROM)
   list(APPEND EE_SOURCES src/handler_cdrom.c)
   list(APPEND IRX_FILES xparam.irx)
@@ -294,7 +312,14 @@ foreach(irx ${IRX_FILES})
   get_filename_component(irx_name ${irx} NAME_WE)
   string(REPLACE "-" "_" irx_name_clean ${irx_name})
 
-  if(irx_name STREQUAL "popfs")
+  if(irx_name STREQUAL "launcher_smbman")
+    irx_to_source("${SMBMAN_IRX}" irx_source "launcher_smbman_irx" "")
+  elseif(irx_name STREQUAL "smap_tcpip")
+    # The conversion output is named after its input, so give SDK SMAP a
+    # distinct file name from the ministack driver's smap.irx.
+    configure_file("$ENV{PS2SDK}/iop/irx/smap.irx" "${CMAKE_CURRENT_BINARY_DIR}/smap_tcpip.irx" COPYONLY)
+    irx_to_source("${CMAKE_CURRENT_BINARY_DIR}/smap_tcpip.irx" irx_source "smap_tcpip_irx" "")
+  elseif(irx_name STREQUAL "popfs")
     irx_to_source("${POPFS_IRX}" irx_source "popfs_irx" "")
   elseif(irx_name STREQUAL "pops_iomanx")
     irx_to_source("${POPS_IOMANX_IRX}" irx_source "pops_iomanx_irx" "")
@@ -348,6 +373,9 @@ endforeach()
 # Create executable
 add_executable(launcher_unc ${EE_SOURCES} ${IRX_SOURCES} ${ELF_SOURCES} ${RES_SOURCES})
 add_dependencies(launcher_unc popfs pops_iomanx)
+if(LAUNCHER_SMB)
+  add_dependencies(launcher_unc launcher_smbman)
+endif()
 if(BDM)
   add_dependencies(launcher_unc pops_fatfs)
 endif()
@@ -372,6 +400,7 @@ if("ps1vn.elf" IN_LIST ELF_FILES)
 endif()
 
 target_include_directories(launcher_unc PRIVATE
+    iop/smbman/include
     ../common/include
     ../third_party/lzma
     include

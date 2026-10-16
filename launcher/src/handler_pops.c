@@ -3,6 +3,7 @@
 #include "common.h"
 #include "dprintf.h"
 #include "init.h"
+#include "handler_smb.h"
 #include "pops_external.h"
 #include "pops_bootstrap.h"
 #include "pops_vcd.h"
@@ -290,199 +291,15 @@ static int pops_load_bdma_drivers(const char *vcdDir, const char *vmcDir, PopsBd
 
 #undef POPS_BDMA_NAMES
 
-/* Helper to read IPCONFIG.DAT text from candidate folders */
-static int pops_read_ipconfig(const char *searchDirs[], int dirCount, char *outIp, size_t outSize) {
-  char path[PATH_MAX];
-  if (!outIp || outSize == 0) return -EINVAL;
-  outIp[0] = '\0';
-
-  for (int d = 0; d < dirCount; ++d) {
-    snprintf(path, sizeof(path), "%sIPCONFIG.DAT", searchDirs[d]);
-    int fd = open(path, O_RDONLY);
-    if (fd < 0) {
-      snprintf(path, sizeof(path), "%sipconfig.dat", searchDirs[d]);
-      fd = open(path, O_RDONLY);
-    }
-    if (fd >= 0) {
-      char buf[128];
-      ssize_t n = read(fd, buf, sizeof(buf) - 1);
-      close(fd);
-      if (n > 0) {
-        buf[n] = '\0';
-        char *start = buf;
-        while (*start && isspace((unsigned char)*start)) start++;
-        char *end = start + strlen(start);
-        while (end > start && isspace((unsigned char)*(end - 1))) {
-          *(--end) = '\0';
-        }
-        if (start[0]) {
-          strncpy(outIp, start, outSize - 1);
-          outIp[outSize - 1] = '\0';
-          return 0;
-        }
-      }
-    }
-  }
-
-  static const char *sysConf[] = { "mc0:/SYS-CONF/IPCONFIG.DAT", "mc1:/SYS-CONF/IPCONFIG.DAT" };
-  for (int s = 0; s < 2; ++s) {
-    int fd = open(sysConf[s], O_RDONLY);
-    if (fd >= 0) {
-      char buf[128];
-      ssize_t n = read(fd, buf, sizeof(buf) - 1);
-      close(fd);
-      if (n > 0) {
-        buf[n] = '\0';
-        char *start = buf;
-        while (*start && isspace((unsigned char)*start)) start++;
-        char *end = start + strlen(start);
-        while (end > start && isspace((unsigned char)*(end - 1))) {
-          *(--end) = '\0';
-        }
-        if (start[0]) {
-          strncpy(outIp, start, outSize - 1);
-          outIp[outSize - 1] = '\0';
-          return 0;
-        }
-      }
-    }
-  }
-
-  return -ENOENT;
-}
-
+/* The embedded stack is owned by init.c and reconnected after every reset.
+ * These arguments remain for callers; bootstrap files must be on a card. */
 int pops_load_smb_stack(const char *vcdDir, const char *vmcDir) {
-  char modPath[PATH_MAX];
-  const char *searchDirs[8];
-  int dirCount = 0;
-
-  if (vmcDir && vmcDir[0])
-    searchDirs[dirCount++] = vmcDir;
-
-  if (vcdDir && vcdDir[0] && (!vmcDir || strcmp(vcdDir, vmcDir) != 0))
-    searchDirs[dirCount++] = vcdDir;
-
-  char vcdIrxDir[PATH_MAX] = {0};
-  if (vcdDir && vcdDir[0]) {
-    snprintf(vcdIrxDir, sizeof(vcdIrxDir), "%sIRX/", vcdDir);
-    searchDirs[dirCount++] = vcdIrxDir;
-  }
-
-  searchDirs[dirCount++] = "mc0:/POPSTARTER/";
-  searchDirs[dirCount++] = "mc1:/POPSTARTER/";
-  searchDirs[dirCount++] = "mc0:/POPS/";
-  searchDirs[dirCount++] = "mc1:/POPS/";
-
-  /* 1. DEV9 network device driver */
-  static const char *dev9Drivers[] = { "PS2DEV9.IRX", "ps2dev9.irx", "DEV9.IRX", "dev9.irx" };
-  int loadedDev9 = 0;
-  for (int i = 0; i < 4; ++i) {
-    for (int d = 0; d < dirCount; ++d) {
-      snprintf(modPath, sizeof(modPath), "%s%s", searchDirs[d], dev9Drivers[i]);
-      if (!tryFile(modPath)) {
-        DPRINTF("POPS: Loading DEV9 module %s\n", modPath);
-        int module = SifLoadModule(modPath, 0, NULL);
-        if (module < 0) {
-          DPRINTF("POPS: DEV9 load rejected %s (%d)\n", modPath, module);
-          continue;
-        }
-        loadedDev9 = 1;
-        break;
-      }
-    }
-    if (loadedDev9) break;
-  }
-
-  /* 2. SMAP network adapter driver */
-  static const char *smapDrivers[] = { "SMAP.IRX", "smap.irx", "PS2SMAP.IRX", "ps2smap.irx" };
-  int loadedSmap = 0;
-  for (int i = 0; i < 4; ++i) {
-    for (int d = 0; d < dirCount; ++d) {
-      snprintf(modPath, sizeof(modPath), "%s%s", searchDirs[d], smapDrivers[i]);
-      if (!tryFile(modPath)) {
-        DPRINTF("POPS: Loading SMAP module %s\n", modPath);
-        int module = SifLoadModule(modPath, 0, NULL);
-        if (module < 0) {
-          DPRINTF("POPS: SMAP load rejected %s (%d)\n", modPath, module);
-          continue;
-        }
-        loadedSmap = 1;
-        break;
-      }
-    }
-    if (loadedSmap) break;
-  }
-
-  /* Read IPCONFIG.DAT for static IP arguments */
-  char ipConfig[128] = {0};
-  pops_read_ipconfig(searchDirs, dirCount, ipConfig, sizeof(ipConfig));
-  uint32_t ipArgLen = ipConfig[0] ? (uint32_t)(strlen(ipConfig) + 1) : 0;
-  char *ipArgPtr = ipConfig[0] ? ipConfig : NULL;
-
-  /* 3. PS2IP TCP/IP stack driver */
-  static const char *ps2ipDrivers[] = { "PS2IP.IRX", "ps2ip.irx" };
-  int loadedPs2ip = 0;
-  for (int i = 0; i < 2; ++i) {
-    for (int d = 0; d < dirCount; ++d) {
-      snprintf(modPath, sizeof(modPath), "%s%s", searchDirs[d], ps2ipDrivers[i]);
-      if (!tryFile(modPath)) {
-        DPRINTF("POPS: Loading PS2IP module %s (args: %s)\n", modPath, ipArgPtr ? ipArgPtr : "none");
-        int module = SifLoadModule(modPath, ipArgLen, ipArgPtr);
-        if (module < 0) {
-          DPRINTF("POPS: PS2IP load rejected %s (%d)\n", modPath, module);
-          continue;
-        }
-        loadedPs2ip = 1;
-        break;
-      }
-    }
-    if (loadedPs2ip) break;
-  }
-
-  /* 4. SMBMAN SMB protocol client driver */
-  static const char *smbmanDrivers[] = { "SMBMAN.IRX", "smbman.irx" };
-  int loadedSmbman = 0;
-  for (int i = 0; i < 2; ++i) {
-    for (int d = 0; d < dirCount; ++d) {
-      snprintf(modPath, sizeof(modPath), "%s%s", searchDirs[d], smbmanDrivers[i]);
-      if (!tryFile(modPath)) {
-        DPRINTF("POPS: Loading SMBMAN module %s\n", modPath);
-        int module = SifLoadModule(modPath, 0, NULL);
-        if (module < 0) {
-          DPRINTF("POPS: SMBMAN load rejected %s (%d)\n", modPath, module);
-          continue;
-        }
-        loadedSmbman = 1;
-        break;
-      }
-    }
-    if (loadedSmbman) break;
-  }
-
-  /* 5. PS2NETFS network filesystem driver */
-  static const char *ps2netfsDrivers[] = { "PS2NETFS.IRX", "ps2netfs.irx" };
-  int loadedNetfs = 0;
-  for (int i = 0; i < 2; ++i) {
-    for (int d = 0; d < dirCount; ++d) {
-      snprintf(modPath, sizeof(modPath), "%s%s", searchDirs[d], ps2netfsDrivers[i]);
-      if (!tryFile(modPath)) {
-        DPRINTF("POPS: Loading PS2NETFS module %s\n", modPath);
-        int module = SifLoadModule(modPath, 0, NULL);
-        if (module < 0) {
-          DPRINTF("POPS: PS2NETFS load rejected %s (%d)\n", modPath, module);
-          continue;
-        }
-        loadedNetfs = 1;
-        break;
-      }
-    }
-    if (loadedNetfs) break;
-  }
-
-  /* Allow SMB session handshake and share mount to stabilize */
-  sleep(1);
-
-  return (loadedNetfs || loadedSmbman) ? 0 : -ENOENT;
+  (void)vcdDir; (void)vmcDir;
+#ifdef SMB
+  return launcher_smb_connect();
+#else
+  return -ENODEV;
+#endif
 }
 
 /* Explicit manifest lines must not be silently shortened into another
@@ -745,7 +562,8 @@ int launchPOPS(int argc, char *argv[]) {
   int isSbLaunch = pops_get_active_sb_launch() || (device == Device_SMB);
   if (isSbLaunch) {
     DPRINTF("POPS: Active SB. launch detected\n");
-    pops_load_smb_stack(NULL, NULL);
+    res = pops_load_smb_stack(NULL, NULL);
+    if (res) return res;
   }
 
   vcdPath = resolvedVcd;

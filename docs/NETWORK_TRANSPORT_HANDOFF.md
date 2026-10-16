@@ -1,0 +1,62 @@
+# UDPFS, UDPBD and SMBv1 checkpoint - 2026-10-15
+
+User priority: complete transport support before resuming Sony early startup.
+Continue on PR #23, branch `codex/popstarter-replacement`. Do not merge.
+Parser checkpoint `a30c223` was pushed before the network work.
+
+Reference inspected: RiptOPL `origin/rebuild/main`
+`634f2dd2cee69fcd31c5a0b426ca2b57bbe19a2f`.
+Use the remote tree, not the older local checkout. RiptOPL's shared UDPFS
+transport resets sequence state on rediscovery and waits past stale ACKs
+without spending a retry. Its SMB code performs LOGON then OPENSHARE and
+interlocks the single NIC against the UDP ministack. Its POPStarter network
+editor writes `IPv4[:port] share\nuser\npassword\n`.
+
+Confirmed original gaps and local repairs:
+
+- SMB loaded optional loose IRXs but never logged in or opened a share;
+  PS2NETFS incorrectly counted as SMB availability. Replaced by embedded
+  DEV9 -> NetMan -> SDK SMAP -> ps2ip-nm -> source-built smbman, then checked
+  LOGON/OPENSHARE. A failed share open logs off. State resets after each IOP
+  reboot. Both initial loading and Sony post-reset loading use this path.
+- TCP/IP's three module arguments are separate NUL-terminated strings,
+  parsed from static IPCONFIG.DAT. Credentials are never printed.
+- SMB O_EXCL previously ignored: use atomic create dispositions in both NT
+  and legacy commands. Preserve missing/exists/access errno. SDK source and
+  ABI header pinned to 3304cd864748ce40b1ff9fb41cc5a700f5e573a0.
+- UDPFS ACK comparison previously accepted stale ACKs. Real 12-bit serial
+  arithmetic, same-alarm stale-ACK waiting, and clean rediscovery state now
+  have executable production-code host tests. The existing one-NACK-per-gap
+  guard and learned INFORM server port are retained.
+- UDPFS CLOSE now validates reply length/type and propagates server errors
+  through the iomanX wrapper. Startup propagates AddDrv failure.
+- Ministack announces the configured IP with gratuitous ARP before server
+  discovery. New private export ordinal 7 releases UDP socket callbacks
+  before a failed UDPFS module is unloaded. Existing ordinals are unchanged.
+- UDPBD receive bounds cover the remaining destination, zero-length data,
+  invalid block shifts and arithmetic overflow. Server write failure is
+  retained; module initialization reports failed event/socket allocation.
+- Generic SMB handoff keeps DEV9 powered. Device cache reuse requires all
+  requested device bits; a partial initialization is never cached. SMB plus
+  a UDP network backend is rejected before loading either stack.
+
+Validation to date: the PS2 release target compiled successfully in the
+existing ps2homebrew container. All five new host test groups passed:
+configuration/creation, actual UDPFS transport, actual UDPBD handlers, actual
+EE SMB session controller, and UDPFS close reply/error propagation. All 57
+existing POPS checks passed after the source-shape assertions were updated
+for the new loading behavior. These
+results do not establish hardware streaming or full game/save acceptance.
+
+Before calling transport parity complete, run each mode independently on
+physical PS2 with controlled server fixtures: open/seek/read, exclusive
+create collision, write/close/reopen/readback, then Ember argv/handoff and
+game/save/power-cycle acceptance. Exercise server restart and packet loss.
+Do not replay an uncertain save write across a new server session. UDPFS's
+rediscovery primitive is fixed; transparent in-game descriptor recovery is
+not implemented or claimed. UDPBD flush remains the protocol's existing
+no-op: server storage durability still needs validation.
+
+SMB uses memory-card bootstrap files and static addressing. No credentials,
+Sony bytes, games, or user saves belong in commits. The existing POPS IOX
+dependency and full Sony boot acceptance boundary remain unchanged.

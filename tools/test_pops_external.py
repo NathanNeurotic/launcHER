@@ -916,7 +916,7 @@ class InspectorTests(unittest.TestCase):
     def test_pops_does_not_ignore_negative_iop_module_start_result(self):
         init = (ROOT / "launcher/src/init.c").read_text()
         start = init.index("static int loadModuleList(")
-        check = init.index("if (iopret == 1 || (sonySio2 && iopret < 0))", start)
+        check = init.index("if (iopret == 1 || ((sonySio2 || (device & Device_SMB)) && iopret < 0))", start)
         end = init.index("if (moduleList[i].type & Device_Optional)", check)
         self.assertIn("ret = iopret;", init[check:end])
         self.assertLess(check, end)
@@ -928,7 +928,7 @@ class InspectorTests(unittest.TestCase):
         loader = init.index("ret = loadModuleList(devices, 0, 1);", check)
         self.assertLess(cache, loader)
         # The normal loader checks this flag before reusing currentDevice.
-        self.assertIn("if (!forceIOPReset && ((currentDevice)&device))", init)
+        self.assertIn("if (!forceIOPReset && currentDevice && (currentDevice & device) == device)", init)
         self.assertIn("forceIOPReset = 0;", init)
 
     def test_network_dependency_requires_iox_without_legacy_fallback(self):
@@ -995,19 +995,17 @@ class InspectorTests(unittest.TestCase):
     def test_pops_smb_driver_loads_only_once_after_reboot(self):
         init = (ROOT / "launcher/src/init.c").read_text()
         launcher = (ROOT / "launcher/src/handler_pops.c").read_text()
-        # Generic launcher behavior is unaffected; only Sony POPS skips
-        # the early stack setup, and then checks the final load status.
-        self.assertIn("if ((device & Device_SMB) && !sonySio2)", init)
+        # Both initial and Sony post-reset stacks establish the share once.
+        self.assertIn("ret = launcher_smb_connect();", init)
+        self.assertIn("launcher_smb_reset();", init)
         post = launcher.index("res = initPopsServices(")
         smb = launcher.index("res = pops_load_smb_stack(vcdDir, vmcDir);", post)
         self.assertLess(post, smb)
         self.assertIn("return res;", launcher[smb:launcher.index(
             "res = pops_load_custom_modules(vcdDir, vmcDir);", smb)])
-        # File existence alone must never count as a loaded IRX.
-        for field in ("loadedDev9", "loadedSmap", "loadedPs2ip",
-                      "loadedSmbman", "loadedNetfs"):
-            point = launcher.index(field + " = 1;")
-            self.assertIn("if (module < 0)", launcher[point-210:point])
+        self.assertNotIn("loadedNetfs", launcher)
+        for module in ("netman", "smap_tcpip", "ps2ip_nm", "launcher_smbman"):
+            self.assertIn("INT_MODULE(" + module, init)
 
     def test_virtual_pfs_disc_reads_match_pops_before_handoff(self):
         source = (ROOT / "launcher/src/handler_pops.c").read_text()

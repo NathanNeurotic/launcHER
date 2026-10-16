@@ -45,6 +45,7 @@ set(LAUNCHER_CDROM OFF CACHE BOOL "CD/DVD support" FORCE)
 set(LAUNCHER_ILINK ON CACHE BOOL "i.Link support" FORCE)
 set(LAUNCHER_UDPBD ON CACHE BOOL "UDPBD support" FORCE)
 set(LAUNCHER_UDPFS ON CACHE BOOL "UDPFS support" FORCE)
+set(LAUNCHER_SMB ON CACHE BOOL "SMBv1 filesystem support" FORCE)
 set(LAUNCHER_XFROM OFF CACHE BOOL "XFROM support" FORCE)
 
 # Only the embedded ELF loader and standalone launcher are required.
@@ -56,6 +57,7 @@ add_custom_target(launcHER ALL
     COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/release"
     COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_BINARY_DIR}/launcher/launcher.elf" "${CMAKE_BINARY_DIR}/release/launcHER.elf"
     COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/examples/launcHER.CNF" "${CMAKE_BINARY_DIR}/release/launcHER.CNF"
+    COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/launcher/iop/smbman/SMB-NOTICES.txt" "${CMAKE_BINARY_DIR}/release/SMB-NOTICES.txt"
     COMMAND ${CMAKE_COMMAND}
         "-DLAUNCHER_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
         "-DLAUNCHER_VERSION_FILE=${CMAKE_BINARY_DIR}/release/version.txt"

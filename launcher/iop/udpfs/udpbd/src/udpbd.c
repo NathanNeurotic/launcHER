@@ -320,6 +320,11 @@ static inline void _cmd_read_rdma(struct SUDPBDv2_Header *hdr)
     uint32_t size;
 
     smap_fifo_read(0x2C, &bt.bt, 4);
+    if (bt.block_shift > 7 || bt.block_count > (RDMA_MAX_PAYLOAD >> (bt.block_shift + 2))) {
+        g_errno = 3;
+        SetEventFlag(g_ev_done, 2);
+        return;
+    }
     size = bt.block_count << (bt.block_shift + 2);
 
     if (g_buffer == NULL) {
@@ -340,7 +345,7 @@ static inline void _cmd_read_rdma(struct SUDPBDv2_Header *hdr)
     g_read_cmdpkt++;
 
     // Validate packet data size
-    if (size > RDMA_MAX_PAYLOAD)
+    if (size == 0 || size > RDMA_MAX_PAYLOAD || size > g_read_size)
     {
         // Error, wakeup caller
         g_read_size = 0;
@@ -368,6 +373,7 @@ static inline void _cmd_write_done(struct SUDPBDv2_Header *hdr)
 {
     int32_t result;
     smap_fifo_read(0x2C, &result, 4);
+    g_errno = result < 0 ? result : 0;
 
     // Done, wakeup caller
     SetEventFlag(g_ev_done, (result >= 0) ? 1 : 2);
@@ -416,6 +422,7 @@ int udpbd_init(void)
     EventFlagData.bits   = 0;
     if (g_ev_done <= 0)
         g_ev_done = CreateEventFlag(&EventFlagData);
+    if (g_ev_done <= 0) return -EIO;
 
     g_udpbd.name         = "udp";
     g_udpbd.path         = "udpbd";
@@ -430,6 +437,11 @@ int udpbd_init(void)
 
     // Bind to UDP socket
     udpbd_socket = udp_bind(UDPBD_CLIENT_PORT, udpbd_isr, NULL);
+    if (udpbd_socket == NULL) {
+        DeleteEventFlag(g_ev_done);
+        g_ev_done = 0;
+        return -EIO;
+    }
 
     // Broadcast request for block device information
     udp_packet_init((udp_packet_t *)&pkt, IP_ADDR(255,255,255,255), UDPBD_SERVER_PORT);

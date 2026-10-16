@@ -111,3 +111,18 @@
 # path=udpfs:/EMBER/ember.elf
 # arg=<GAME_FOLDER>
 # arg=-dev9=NIC
+
+# ---------------------------------------------------------------------
+# PROFILE 6 - SMBv1 (static IP; server must offer SMBv1)
+# Share root contains EMBER/ember.elf, bios.bin and games/<GAME_FOLDER>/.
+# Network modules are embedded; launcHER logs in and opens the share.
+# Set IPCONFIG.DAT and SMBCONFIG.DAT in mc0:/POPSTARTER/ or mc1:/POPSTARTER/.
+# IPCONFIG.DAT: console-IP netmask gateway (one line).
+# SMBCONFIG.DAT: server-IP[:port] share (line 1), user (line 2), password
+# (line 3). Leave user/password lines empty for guest. Default port: 445.
+# The share name is not part of smb0:/; choose one network profile per boot.
+# See README.md for fallback configuration locations and acceptance status.
+# ---------------------------------------------------------------------
+# path=smb0:/EMBER/ember.elf
+# arg=<GAME_FOLDER>
+# arg=-dev9=NIC

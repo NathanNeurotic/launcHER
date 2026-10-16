@@ -6,6 +6,7 @@
 #include "pops_bootstrap.h"
 #include "launch_args.h"
 #include "handler_pops.h"
+#include "handler_smb.h"
 #include <ctype.h>
 #include <fcntl.h>
 #include <iopcontrol.h>
@@ -96,6 +97,14 @@ IRX_DEFINE(smap);
 IRX_DEFINE(ministack);
 #endif
 
+#ifdef SMB
+#define DEV9
+IRX_DEFINE(netman);
+IRX_DEFINE(smap_tcpip);
+IRX_DEFINE(ps2ip_nm);
+IRX_DEFINE(launcher_smbman);
+#endif
+
 #ifdef APA
 #define DEV9
 IRX_DEFINE(ps2hdd_osd);
@@ -159,7 +168,7 @@ static ModuleListEntry moduleList[] = {
     INT_MODULE(mmceman, NULL, Device_MMCE),
 #endif
 #ifdef DEV9
-    INT_MODULE(ps2dev9, NULL, Device_ATA | Device_UDPBD | Device_APA | Device_UDPFS | Device_XFROM),
+    INT_MODULE(ps2dev9, NULL, Device_ATA | Device_UDPBD | Device_APA | Device_UDPFS | Device_XFROM | Device_SMB),
 #endif
 #ifdef XFROM
     INT_MODULE(extflash, NULL, Device_XFROM),
@@ -171,6 +180,12 @@ static ModuleListEntry moduleList[] = {
 #endif
 #ifdef UDPFS
     INT_MODULE(udpfs_ioman, NULL, Device_UDPFS),
+#endif
+#ifdef SMB
+    INT_MODULE(netman, NULL, Device_SMB),
+    INT_MODULE(smap_tcpip, NULL, Device_SMB),
+    INT_MODULE(ps2ip_nm, &initTCPIPArguments, Device_SMB),
+    INT_MODULE(launcher_smbman, NULL, Device_SMB),
 #endif
 #ifdef BDM
     INT_MODULE(bdm, NULL, Device_BDM | Device_APA),
@@ -218,7 +233,9 @@ int initModulesAny(DeviceType devices) {
 }
 
 static int loadModules(DeviceType device, int tolerant) {
-  if (!forceIOPReset && ((currentDevice)&device))
+  if ((device & Device_SMB) && (device & (Device_UDPFS | Device_UDPBD)))
+    return -EINVAL; /* TCP/IP and ministack cannot own the same NIC. */
+  if (!forceIOPReset && currentDevice && (currentDevice & device) == device)
     // Do nothing if the drivers are already loaded
     return 0;
   forceIOPReset = 0;
@@ -250,6 +267,12 @@ static int loadModules(DeviceType device, int tolerant) {
  * FILEIO; iomanX bridges legacy imports to the modern filesystem drivers. */
 static int loadModuleList(DeviceType device, int tolerant, int sonySio2) {
   int ret = 0, iopret = 0;
+  if ((device & Device_SMB) && (device & (Device_UDPFS | Device_UDPBD)))
+    return -EINVAL;
+#ifdef SMB
+  launcher_smb_reset();
+#endif
+  currentDevice = Device_None; /* A partial initialization is never cached. */
   // Load modules
   for (int i = 0; i < MODULE_COUNT; i++) {
     ret = 0;
@@ -308,10 +331,10 @@ static int loadModuleList(DeviceType device, int tolerant, int sonySio2) {
 
     if (ret >= 0)
       ret = 0;
-    /* For POPS, a failed IOP module's _start result can be negative even
+    /* For POPS/SMB, a failed IOP module's _start result can be negative even
      * when SifExecModuleBuffer itself returns a successful module ID.
-     * Generic launch behavior remains unchanged for compatibility. */
-    if (iopret == 1 || (sonySio2 && iopret < 0))
+     * Other generic launch behavior remains unchanged for compatibility. */
+    if (iopret == 1 || ((sonySio2 || (device & Device_SMB)) && iopret < 0))
       ret = iopret;
     if (moduleList[i].type & Device_Optional)
       ret = 0;
@@ -340,12 +363,12 @@ static int loadModuleList(DeviceType device, int tolerant, int sonySio2) {
     msg("POPS: Cannot bind fileXio after IOP reset: %d\n", ret);
     return ret;
   }
-  /* The POPS path (sonySio2) initializes SMB once, after the external
-   * IOP reboot, using the VCD/VMC search directories. Loading here as well
-   * causes duplicate IRX loads before their paths are available. Preserve
-   * the original generic launcher's SMB behavior unchanged. */
-  if ((device & Device_SMB) && !sonySio2)
-    pops_load_smb_stack(NULL, NULL);
+#ifdef SMB
+  if (device & Device_SMB) {
+    ret = launcher_smb_connect();
+    if (ret) return ret;
+  }
+#endif
   currentDevice = device;
   return 0;
 }
