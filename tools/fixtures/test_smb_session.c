@@ -12,21 +12,17 @@ static const char *config = "192.168.1.100:1445 PS2SMB\nuser\npassword\n";
 static size_t offset;
 static unsigned commands[8], failure;
 static int calls;
-int fake_open(const char *path, int flags, ...) {
+int fileXioOpen(const char *path, int flags, ...) {
     (void)flags;
-    if (!strstr(path,"SMBCONFIG.DAT")) { errno=ENOENT;return -1; }
+    if (!strstr(path,"SMBCONFIG.DAT")) return -ENOENT;
     offset=0;return 7;
 }
-#ifdef _WIN32
-int fake_read(int fd,void *buffer,unsigned size) {
-#else
-ssize_t fake_read(int fd,void *buffer,size_t size) {
-#endif
+int fileXioRead(int fd, void *buffer, int size) {
     assert(fd==7);
-    size_t n=strlen(config)-offset;if(n>size)n=size;
-    memcpy(buffer,config+offset,n);offset+=n;return (ssize_t)n;
+    size_t n=strlen(config)-offset;if(n>(size_t)size)n=(size_t)size;
+    memcpy(buffer,config+offset,n);offset+=n;return (int)n;
 }
-int fake_close(int fd) { assert(fd==7);return 0; }
+int fileXioClose(int fd) { assert(fd==7);return 0; }
 void msg(const char *fmt,...) { (void)fmt; }
 int fileXioDevctl(const char *name,int cmd,void *arg,unsigned arglen,void *out,unsigned outlen) {
     (void)out;(void)outlen;

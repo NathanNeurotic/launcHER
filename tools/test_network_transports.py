@@ -16,7 +16,12 @@ with tempfile.TemporaryDirectory(prefix="launcher-net-") as work:
     (work/"iomanX.h").write_text('''#include <stdint.h>
 typedef struct { uint32_t mode,attr,size,hisize; char ctime[8],atime[8],mtime[8]; } iox_stat_t;
 ''')
-    (work/"fileXio_rpc.h").write_text("int fileXioDevctl(const char *,int,void *,unsigned,void *,unsigned);\n")
+    (work/"io_common.h").write_text("#define FIO_O_RDONLY 1\n")
+    (work/"fileXio_rpc.h").write_text('''int fileXioDevctl(const char *,int,void *,unsigned,void *,unsigned);
+int fileXioOpen(const char *,int,...);
+int fileXioRead(int,void *,int);
+int fileXioClose(int);
+''')
     (work/"msg.h").write_text("void msg(const char *,...);\n")
     (work/"bdm.h").write_text('''#include <stdint.h>
 struct block_device {
@@ -62,8 +67,7 @@ int DelayThread(int);
         output = work/(name+(".exe" if os.name=="nt" else ""))
         args = [cc,"-std=c11","-Wall","-Wextra","-Wno-unused-parameter", "-I",str(work)]
         if name=="smb_session":
-            args += ["-D_COMMON_H_", "-include",str(work/"msg.h"),
-                     "-Dopen=fake_open", "-Dread=fake_read", "-Dclose=fake_close"]
+            args += ["-D_COMMON_H_", "-include",str(work/"msg.h")]
         for path in includes: args += ["-I",str(ROOT/path)]
         args += [str(ROOT/s) for s in sources]+["-o",str(output)]
         subprocess.run(args,check=True)

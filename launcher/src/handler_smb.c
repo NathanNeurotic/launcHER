@@ -4,12 +4,11 @@
 #include <ps2smb.h>
 #define NEWLIB_PORT_AWARE
 #include <fileXio_rpc.h>
+#include <io_common.h>
 #include <errno.h>
-#include <fcntl.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-#include <unistd.h>
 
 static int connected;
 void launcher_smb_reset(void) { connected = 0; }
@@ -24,25 +23,23 @@ static int read_config(const char *name, char *out, size_t capacity) {
   char path[80];
   for (unsigned i = 0; i < sizeof(dirs)/sizeof(dirs[0]); ++i) {
     snprintf(path, sizeof(path), "%s%s", dirs[i], name);
-    int fd = open(path, O_RDONLY);
-    if (fd < 0 && errno == ENOENT) {
+    int fd = fileXioOpen(path, FIO_O_RDONLY, 0);
+    if (fd < 0) {
       for (size_t j = strlen(dirs[i]); path[j]; ++j)
         if (path[j] >= 'A' && path[j] <= 'Z') path[j] += 'a' - 'A';
-      fd = open(path, O_RDONLY);
+      fd = fileXioOpen(path, FIO_O_RDONLY, 0);
     }
-    if (fd < 0) {
-      if (errno != ENOENT && errno != ENODEV && errno != ENXIO) return -errno;
-      continue;
-    }
+    if (fd < 0) continue;
     size_t used = 0;
     int result = 0;
     while (used < capacity) {
-      ssize_t n = read(fd, out+used, capacity-used);
-      if (n < 0) { result = -errno; break; }
+      int n = fileXioRead(fd, out + used, (int)(capacity - used));
+      if (n < 0) { result = n; break; }
       if (!n) break;
       used += (size_t)n;
     }
-    if (close(fd) < 0 && !result) result = -errno;
+    int close_ret = fileXioClose(fd);
+    if (close_ret < 0 && !result) result = close_ret;
     if (result) return result;
     return used == capacity ? -EFBIG : (int)used;
   }

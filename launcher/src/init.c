@@ -23,6 +23,7 @@
 #include <string.h>
 #define NEWLIB_PORT_AWARE
 #include "fileXio_rpc.h"
+#include <io_common.h>
 
 _Static_assert(POPS_PROXY_ARGS_MAX <= LF_ARG_MAX,
                "POPFS arguments must fit the SDK LOADFILE RPC packet");
@@ -325,6 +326,14 @@ static int loadModuleList(DeviceType device, int tolerant, int sonySio2) {
       ret = SifExecModuleBuffer(moduleList[i].irx, *moduleList[i].size, moduleList[i].argLength, moduleList[i].argStr, &iopret);
     DPRINTF("IOP: loaded %s id=%d start=%d\n", moduleList[i].name, ret, iopret);
 
+    if (!strcmp(moduleList[i].name, "fileXio")) {
+      int fxio_ret = fileXioInit();
+      if (fxio_ret < 0) {
+        msg("ERROR: Failed to initialize fileXio RPC: %d\n", fxio_ret);
+        return fxio_ret;
+      }
+    }
+
     // Delay to prevent ps2hdd module from hanging
     if ((device & Device_APA) && !strcmp(moduleList[i].name, "ata_bd"))
       sleep(1);
@@ -461,15 +470,22 @@ void applyXPARAM(char *gameID) { SifExecModuleBuffer(xparam_irx, size_xparam_irx
  * IPCONFIG.DAT also contains netmask/gateway, while a 7-15 byte IP alone
  * remains valid. Preserve the original 19-byte SMAP argument allocation. */
 char *initSMAPArguments(uint32_t *argLength) {
-  static char ipconfigPath[] = "mcX:/SYS-CONF/IPCONFIG.DAT";
-  char ipAddr[16], contents[64];
+  static const char *const dirs[] = {
+    "mc0:/POPSTARTER/", "mc1:/POPSTARTER/", "mc0:/POPS/", "mc1:/POPS/",
+    "mc0:/SYS-CONF/", "mc1:/SYS-CONF/"
+  };
+  char path[80], ipAddr[16], contents[64];
   if (!argLength) return NULL;
-  for (char slot = '0'; slot <= '1'; ++slot) {
-    ipconfigPath[2] = slot;
-    int fd = open(ipconfigPath, O_RDONLY);
+  for (unsigned i = 0; i < sizeof(dirs)/sizeof(dirs[0]); ++i) {
+    snprintf(path, sizeof(path), "%sIPCONFIG.DAT", dirs[i]);
+    int fd = fileXioOpen(path, FIO_O_RDONLY, 0);
+    if (fd < 0) {
+      snprintf(path, sizeof(path), "%sipconfig.dat", dirs[i]);
+      fd = fileXioOpen(path, FIO_O_RDONLY, 0);
+    }
     if (fd < 0) continue;
-    ssize_t n = read(fd, contents, sizeof(contents));
-    close(fd);
+    int n = fileXioRead(fd, contents, sizeof(contents));
+    fileXioClose(fd);
     if (n <= 0 || !smap_parse_ipconfig(contents, (size_t)n, ipAddr))
       continue;
     char *argStr = calloc(19, sizeof(char));
