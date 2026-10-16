@@ -60,3 +60,22 @@ no-op: server storage durability still needs validation.
 SMB uses memory-card bootstrap files and static addressing. No credentials,
 Sony bytes, games, or user saves belong in commits. The existing POPS IOX
 dependency and full Sony boot acceptance boundary remain unchanged.
+
+Physical SMB progress (client-local date Oct 15, run IDs are UTC Oct 16):
+configuration inventory `20261016T020636-0058` passed. With no listening
+server, `20261016T020903-0059` correctly failed at connection (-4097).
+After the user started PS2 Servers v0.8.1, `20261016T021127-0060` logged in,
+opened the configured share, and enumerated its root read-only. Controlled
+file test `20261016T021534-0061` then passed read/seek, atomic EEXIST even
+with TRUNC requested, and 8 KiB write/close/reopen/byte comparison. Direct
+host hashes confirm both initial files unchanged and NEW.BIN correct.
+These tests inherit ps2link's TCP/IP stack; fresh stack/game/save acceptance
+is still outstanding. Metadata: `docs/evidence/network_*_hardware.json`.
+
+Reproduce the read-only probe with `prepare_pops_device_inventory.py` and
+`--network-config` or `--smb-read-only`. For writes, create a fresh owned
+folder with `prepare_network_fixture.py --root SERVER_ROOT --report REPORT`,
+run `--smb-files smb0:/LAUNCHER-NET-.../`, then independently run
+`verify_network_fixture.py REPORT`. The console probe refuses ordinary
+game/save paths. Keep these diagnostic files for evidence; do not reuse the
+same folder for another creation run.

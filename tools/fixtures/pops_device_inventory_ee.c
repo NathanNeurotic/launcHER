@@ -14,9 +14,12 @@
 #include <errno.h>
 #define NEWLIB_PORT_AWARE
 #include <fileXio_rpc.h>
+#include <io_common.h>
 #include "production_names.h"
 #include "pops_vcd.h"
 #include "pops_config.h"
+#include "network_config.h"
+#include "handler_smb.h"
 static int screen_printf(const char *format, ...) {
   char text[512]; va_list ap; va_start(ap, format);
   int n = vsnprintf(text, sizeof(text), format, ap); va_end(ap);
@@ -28,11 +31,17 @@ static int screen_printf(const char *format, ...) {
 }
 #define printf screen_printf
 #define puts(text) screen_printf("%s\n", text)
+void msg(const char *format, ...) {
+  char text[256]; va_list ap; va_start(ap,format);
+  vsnprintf(text,sizeof(text),format,ap); va_end(ap);
+  screen_printf("%s",text);
+}
 #define IRX(name) extern unsigned char name##_irx[]; extern unsigned int size_##name##_irx
 IRX(iomanX); IRX(sio2man); IRX(mcman); IRX(mcserv); IRX(bdm); IRX(bdmfs_fatfs);
 IRX(usbd_mini); IRX(usbmass_bd_mini); IRX(mmceman);
 IRX(mx4sio_bd_mini); IRX(ata_bd);
 IRX(fileXio);
+IRX(launcher_smbman);
 static iox_dirent_t entry __attribute__((aligned(64)));
 static char selected_vcd[512];
 static unsigned selected_size;
@@ -224,6 +233,99 @@ static int verify_fatfs(const char *path) {
   puts("POPS_FATFS PASS exclusive-create close-reopen byte-compare");
   return 0;
 }
+/* Only report presence/validity and endpoint metadata, never credentials or
+ * raw file contents. No server connection, config write or IOP reset. */
+static void network_config_report(void) {
+  const char *dirs[] = {"mc0:/POPSTARTER/", "mc1:/POPSTARTER/", "mc0:/POPS/",
+    "mc1:/POPS/", "mc0:/SYS-CONF/", "mc1:/SYS-CONF/"};
+  const char *names[] = {"IPCONFIG.DAT", "ipconfig.dat", "SMBCONFIG.DAT", "smbconfig.dat"};
+  char path[96], text[1024];
+  unsigned ip_found = 0, smb_found = 0;
+  for (unsigned d = 0; d < sizeof(dirs)/sizeof(dirs[0]); ++d) {
+    for (unsigned f = 0; f < sizeof(names)/sizeof(names[0]); ++f) {
+      snprintf(path,sizeof(path),"%s%s",dirs[d],names[f]);
+      int fd = fileXioOpen(path,1,0);
+      if (fd < 0) continue;
+      int n = fileXioRead(fd,text,sizeof(text));
+      int closed = fileXioClose(fd), valid = 0;
+      if (n > 0 && n < sizeof(text) && closed >= 0) {
+        if (f < 2) {
+          char packed[48]; size_t length;
+          valid = launcher_parse_tcpip_config(text,(size_t)n,packed,&length);
+          if (valid) { ++ip_found;printf("POPS_NETWORK_CONFIG console_ip=%s\n",packed); }
+        } else {
+          LauncherSmbConfig config;
+          valid = launcher_parse_smb_config(text,(size_t)n,&config);
+          if (valid) {
+            ++smb_found;
+            printf("POPS_NETWORK_CONFIG server=%s port=%d share=%s\n",config.server,config.port,config.share);
+          }
+          memset(&config,0,sizeof(config));
+        }
+      }
+      memset(text,0,sizeof(text));
+      printf("POPS_NETWORK_CONFIG path=%s bytes=%d valid=%d\n",path,n,valid);
+    }
+  }
+  printf("POPS_NETWORK_CONFIG_COMPLETE ip_files=%u smb_files=%u read_only=1\n",ip_found,smb_found);
+}
+
+/* Restricted to a newly host-created LAUNCHER-NET-* folder. Existing collision
+ * and data files are owned fixtures; never accept a game/save directory here. */
+static int network_fixture_test(const char *root) {
+  const char *folder = strstr(root,":/LAUNCHER-NET-");
+  if (!folder || strlen(root) > 400) return -EINVAL;
+  folder += 2;
+  for (const char *p = folder; *p; ++p) {
+    if (*p == '/' && !p[1]) continue;
+    if ((*p >= 'A' && *p <= 'Z') || (*p >= '0' && *p <= '9') || *p == '-' || *p == '_') continue;
+    return -EINVAL;
+  }
+  char path[512];
+  for (int sample = 0; sample < 2; ++sample) {
+    unsigned seed = sample ? 0x73 : 0x31;
+    snprintf(path,sizeof(path),"%s%s",root,sample ? "EXISTING.BIN" : "FIXTURE.BIN");
+    int fd = fileXioOpen(path,FIO_O_RDONLY,0);
+    if (fd < 0) return fd;
+    int got = fileXioRead(fd,verify_bytes,8192);
+    int size = fileXioLseek(fd,0,SEEK_END);
+    int closed = fileXioClose(fd);
+    if (got != 8192 || size != 8192 || closed < 0) return -EIO;
+    for (unsigned i = 0; i < 8192; ++i)
+      if (verify_bytes[i] != (unsigned char)(i*17+seed)) return -EIO;
+    if (sample) {
+      fd = fileXioOpen(path,FIO_O_WRONLY|FIO_O_CREAT|FIO_O_EXCL|FIO_O_TRUNC,0666);
+      printf("POPS_NETWORK_FILES exclusive_collision=%d\n",fd);
+      if (fd >= 0) { fileXioClose(fd);return -EIO; }
+      if (fd != -EEXIST) return fd;
+      fd = fileXioOpen(path,FIO_O_RDONLY,0);
+      if (fd < 0) return fd;
+      got = fileXioRead(fd,verify_bytes,8192); closed = fileXioClose(fd);
+      if (got != 8192 || closed < 0) return -EIO;
+      for (unsigned i = 0; i < 8192; ++i)
+        if (verify_bytes[i] != (unsigned char)(i*17+seed)) return -EIO;
+    }
+  }
+  snprintf(path,sizeof(path),"%sNEW.BIN",root);
+  int fd = fileXioOpen(path,FIO_O_WRONLY|FIO_O_CREAT|FIO_O_EXCL,0666);
+  if (fd < 0) return fd;
+  for (unsigned i = 0; i < 8192; ++i) copy_bytes[i] = (unsigned char)(i*17+0xa9);
+  int written = fileXioWrite(fd,copy_bytes,8192);
+  int closed = fileXioClose(fd);
+  printf("POPS_NETWORK_FILES written=%d close=%d\n",written,closed);
+  if (written != 8192 || closed < 0) return -EIO;
+  fd = fileXioOpen(path,FIO_O_RDONLY,0);
+  if (fd < 0) return fd;
+  int got = fileXioRead(fd,verify_bytes,8192);
+  int seek = fileXioLseek(fd,4096,SEEK_SET);
+  int partial = fileXioRead(fd,verify_bytes+8192,32);
+  closed = fileXioClose(fd);
+  if (got != 8192 || seek != 4096 || partial != 32 || closed < 0 ||
+      memcmp(copy_bytes,verify_bytes,8192) || memcmp(copy_bytes+4096,verify_bytes+8192,32)) return -EIO;
+  printf("POPS_NETWORK_FILES_PASS bytes=8192 exclusive_create=1 close_reopen=1 seek=1\n");
+  return 0;
+}
+
 int main(int argc, char **argv) {
   smod_mod_info_t module;
   char name[96];
@@ -246,6 +348,38 @@ int main(int argc, char **argv) {
   LOAD_MISSING(sio2man);
   LOAD_MISSING(mcman);
   LOAD_MISSING(mcserv);
+  if ((argc == 2 && !strcmp(argv[1], "--smb-read-only")) ||
+      (argc == 3 && !strcmp(argv[1], "--smb-files"))) {
+    if (fileXioInit() < 0) goto fail;
+    LOAD_MISSING(launcher_smbman);
+    int result = launcher_smb_connect();
+    printf("POPS_SMB_READ_ONLY session=%d inherited_tcpip=1\n",result);
+    if (!result && argc == 3) result = network_fixture_test(argv[2]);
+    if (!result && argc == 2) {
+      int fd = fileXioDopen("smb0:/");
+      printf("POPS_SMB_READ_ONLY root=%d\n",fd);
+      if (fd < 0) result = fd;
+      else {
+        for (unsigned n = 0; n < 16; ++n) {
+          memset(&entry,0,sizeof(entry));
+          int r = fileXioDread(fd,&entry);
+          if (r < 0) result = r;
+          if (r <= 0) break;
+          printf("POPS_SMB_READ_ONLY entry=%s size=%u\n",entry.name,entry.stat.size);
+        }
+        int closed = fileXioDclose(fd);
+        if (!result && closed < 0) result = closed;
+      }
+    }
+    printf("POPS_SMB_RESULT result=%d read_only=%d inherited_tcpip=1\n",result,argc==2);
+    printf("[ps2rig] exit=%d\n",result ? 1 : 0);
+    fflush(stdout); SleepThread(); return result ? 1 : 0;
+  }
+  if (argc == 2 && !strcmp(argv[1], "--network-config")) {
+    if (fileXioInit() < 0) goto fail;
+    network_config_report();
+    puts("[ps2rig] exit=0"); fflush(stdout); SleepThread(); return 0;
+  }
   LOAD_MISSING(bdm);
   LOAD_MISSING(bdmfs_fatfs);
   LOAD_MISSING(usbd_mini);

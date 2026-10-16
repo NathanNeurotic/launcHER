@@ -38,7 +38,7 @@ def prepare(launcher_build, out):
         raise ValueError("use a fresh directory under ignored build/")
     modules = {}
     for name in ("iomanX", "fileXio", "sio2man", "mcman", "mcserv", "bdm", "bdmfs_fatfs",
-                 "usbd_mini", "usbmass_bd_mini", "mmceman", "mx4sio_bd_mini", "ata_bd"):
+                 "usbd_mini", "usbmass_bd_mini", "mmceman", "mx4sio_bd_mini", "ata_bd", "launcher_smbman"):
         source = (launcher_build / "launcher" / f"{name}.irx.c").read_text()
         body = re.search(r"unsigned char\s+\w+\[\].*?=\s*\{(.*?)\};", source, re.S)
         declared = re.search(r"unsigned int\s+size_\w+\s*=\s*(\d+)", source)
@@ -56,12 +56,18 @@ def prepare(launcher_build, out):
     for name in ("pops_config.h", "dprintf.h"):
         shutil.copyfile(ROOT / "common/include" / name, out / name)
     shutil.copyfile(ROOT / "common/src/pops_config.c", out / "pops_config.c")
+    shutil.copyfile(ROOT / "common/src/network_config.c", out / "network_config.c")
+    for name in ("network_config.h", "ipconfig_smap.h", "handler_smb.h", "common.h"):
+        shutil.copyfile(ROOT / "launcher/include" / name, out / name)
+    shutil.copyfile(ROOT / "launcher/src/handler_smb.c", out / "handler_smb.c")
+    shutil.copyfile(ROOT / "common/include/loader.h", out / "loader.h")
+    shutil.copyfile(ROOT / "launcher/iop/smbman/include/ps2smb.h", out / "ps2smb.h")
     for name, data in modules.items():
         (out / f"{name}_irx.c").write_text(array(name, data))
     (out / "production_names.h").write_text("\n".join(
         f"#define MODULE_NAME_{name} {json.dumps(module_name(data))}" for name, data in modules.items()) + "\n")
     config = {"project": "pops-device-inventory", "targets": [
-        {"name": "inventory", "type": "ee", "sources": ["pops_device_inventory_ee.c", "pops_vcd.c", "pops_config.c"] +
+        {"name": "inventory", "type": "ee", "sources": ["pops_device_inventory_ee.c", "pops_vcd.c", "pops_config.c", "network_config.c", "handler_smb.c"] +
          [f"{name}_irx.c" for name in modules], "include_dirs": ["."],
          "libs": ["patches", "filexio", "debug"], "defines": ["ENABLE_PRINTF=1"], "debug": True}]}
     (out / "ps2.yaml").write_text(json.dumps(config, indent=2) + "\n")
