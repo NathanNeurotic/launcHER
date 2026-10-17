@@ -34,6 +34,7 @@ class PopsConfig(c.Structure):
         ("safe_mode", c.c_uint8),
         ("usb_delay", c.c_uint8),
         ("compat_modes", c.c_uint8),
+        ("runtime_corrections", c.c_uint8),
         ("disc_count", c.c_uint8),
         ("discs", (c.c_char * 128) * 4),
         ("vmc_dir", c.c_char * 128),
@@ -631,8 +632,26 @@ class FeatureTests(unittest.TestCase):
         self.assertEqual(cfg.usb_delay, 5)
 
         self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$IGR2"), 0)
-        self.assertEqual(cfg.no_igr, 0)
-        self.assertEqual(cfg.igr_type, 2)
+        # Runtime core corrections directives
+        self.assertEqual(cfg.runtime_corrections, 0)
+        self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$FIX_TEXTURE_WINDOW"), 0)
+        self.assertEqual(cfg.runtime_corrections, 1)
+
+        self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$FIX_GPU_DMA"), 0)
+        self.assertEqual(cfg.runtime_corrections, 3)
+
+        self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$FIX_CDDA"), 0)
+        self.assertEqual(cfg.runtime_corrections, 7)
+
+        self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$FIX_SPU_RESET"), 0)
+        self.assertEqual(cfg.runtime_corrections, 15)
+
+        self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$FIX_GTE_RES1"), 0)
+        self.assertEqual(cfg.runtime_corrections, 31)
+
+        cfg.runtime_corrections = 0
+        self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$PSXCORE_FIXES"), 0)
+        self.assertEqual(cfg.runtime_corrections, 31)
 
         # 32-byte table export and reload
         tbl = (c.c_uint8 * 32)()

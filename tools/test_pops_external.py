@@ -200,6 +200,12 @@ def check_boot_staging(plan, source, iop=None, original_writes=None):
     print("Embedded IOPCD identity/imports PASS: open/close/read/lseek, patched EE, full-IRX guards")
     if LIB.pops_core_image_identify(patched_core, len(patched_core)) != -4:
         raise RuntimeError("Patched core incorrectly accepted as pristine")
+    if LIB.pops_core_image_identify_baseline_patched(patched_core, len(patched_core)):
+        raise RuntimeError("Baseline patched core rejected by baseline patched identify")
+    if LIB.pops_core_image_identify_baseline_patched(before[core_start:bss_start], len(patched_core)) != -4:
+        raise RuntimeError("Pristine core incorrectly accepted as baseline patched")
+    if LIB.pops_core_runtime_corrections_stage(0x100000, ram, ram_size, 31):
+        raise RuntimeError("Sequential runtime corrections staging failed after baseline patches")
     if LIB.pops_core_sio2_identify(patched_core, len(patched_core)):
         raise RuntimeError("EE core patches incorrectly invalidate untouched SIO2")
     corrupted_sio2 = bytearray(patched_core)
@@ -1213,6 +1219,7 @@ def main():
     LIB.pops_core_patches_stage.argtypes = [c.c_uint32, c.c_void_p, c.c_size_t, c.c_uint32]
     LIB.pops_core_runtime_corrections_stage.argtypes = [c.c_uint32, c.c_void_p, c.c_size_t, c.c_uint32]
     LIB.pops_core_image_identify.argtypes = [c.c_void_p, c.c_size_t]
+    LIB.pops_core_image_identify_baseline_patched.argtypes = [c.c_void_p, c.c_size_t]
     LIB.pops_core_sio2_identify.argtypes = [c.c_void_p, c.c_size_t]
     for name in ("pops_core_iopcd_probe_io_ordinals", "pops_iop_module_probe_io_ordinals"):
         getattr(LIB, name).argtypes = [c.c_void_p, c.c_size_t,

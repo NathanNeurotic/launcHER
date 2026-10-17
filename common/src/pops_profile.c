@@ -94,6 +94,8 @@ static int matches(const void *file, size_t size, const char *expected) {
 #define CORE_SIZE UINT32_C(0x00302e60)
 static const char core_hash[] =
   "38ecd425324a1244e90ae68b927496b9af511fd0ed89761199fb6eb699e71ab0";
+static const char core_patched_hash[] =
+  "59e9154f403831c5f9989b53300261e59920e3c28e46b4b9c4d28a3f2d6260b2";
 static const char elf_hash[] =
   "59df3389c4df88a572daa720b05507c52c34eddfa0031a6fbeec55e0c2d0fcb1";
 
@@ -103,6 +105,14 @@ int pops_core_image_identify(const void *core, size_t size) {
   if (size != CORE_SIZE)
     return POPS_FILE_UNSUPPORTED;
   return matches(core, size, core_hash) ? POPS_FILE_OK : POPS_FILE_GUARD;
+}
+
+int pops_core_image_identify_baseline_patched(const void *core, size_t size) {
+  if (!core)
+    return POPS_FILE_INVALID;
+  if (size != CORE_SIZE)
+    return POPS_FILE_UNSUPPORTED;
+  return matches(core, size, core_patched_hash) ? POPS_FILE_OK : POPS_FILE_GUARD;
 }
 
 int pops_core_sio2_identify(const void *core, size_t size) {

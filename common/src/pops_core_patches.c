@@ -139,8 +139,8 @@ int pops_core_runtime_corrections_stage(uint32_t base, void *memory, size_t span
       span < 0x502e60 - base)
     return POPS_FILE_RANGE;
   status = pops_core_image_identify(bytes + 0x200000 - base, 0x302e60);
-  if (status)
-    return status;
+  if (status && pops_core_image_identify_baseline_patched(bytes + 0x200000 - base, 0x302e60))
+    return POPS_FILE_GUARD;
   /* Verify every selected site before modifying any of them. */
   for (i = 0; i < sizeof(runtime_corrections) / sizeof(runtime_corrections[0]); ++i) {
     const CorePatch *patch = runtime_corrections + i;

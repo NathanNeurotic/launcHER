@@ -955,6 +955,17 @@ int launchPOPS(int argc, char *argv[]) {
     return res;
   }
 
+  /* Stage opt-in runtime core corrections when configured */
+  if (cfg.runtime_corrections) {
+    res = pops_core_runtime_corrections_stage(POPS_CORE_ADDR, (void *)stagedCore,
+                                              plan.core_size, cfg.runtime_corrections);
+    if (res) {
+      msg("POPS: Runtime corrections staging failed: %d\n", res);
+      return res;
+    }
+    DPRINTF("POPS: Applied runtime corrections mask=0x%02X\n", (unsigned)cfg.runtime_corrections);
+  }
+
   /* Apply compatibility modes and user directive patches */
   res = pops_apply_all_config_patches((void *)stagedCore, plan.core_size, &cfg);
   if (res) {

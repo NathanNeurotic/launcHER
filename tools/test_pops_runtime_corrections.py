@@ -97,6 +97,8 @@ def build_libraries():
     mock.pops_core_runtime_corrections_stage.restype = c.c_int
     mock.test_set_mock_identify_status.argtypes = [c.c_int]
     mock.test_set_mock_identify_status.restype = None
+    mock.pops_core_image_identify_baseline_patched.argtypes = [c.c_void_p, c.c_size_t]
+    mock.pops_core_image_identify_baseline_patched.restype = c.c_int
 
     prod = c.CDLL(str(prod_path))
     prod.pops_core_runtime_corrections_stage.argtypes = [
@@ -105,6 +107,10 @@ def build_libraries():
     prod.pops_core_runtime_corrections_stage.restype = c.c_int
     prod.pops_core_image_identify.argtypes = [c.c_void_p, c.c_size_t]
     prod.pops_core_image_identify.restype = c.c_int
+    prod.pops_core_image_identify_baseline_patched.argtypes = [c.c_void_p, c.c_size_t]
+    prod.pops_core_image_identify_baseline_patched.restype = c.c_int
+    prod.pops_core_patches_stage.argtypes = [c.c_uint32, c.c_void_p, c.c_size_t, c.c_uint32]
+    prod.pops_core_patches_stage.restype = c.c_int
     prod.pops_elf_inspect.argtypes = [c.c_void_p, c.c_size_t, c.POINTER(ElfInfo)]
     prod.pops_elf_inspect.restype = c.c_int
     prod.pops_boot_plan_elf.argtypes = [
@@ -356,6 +362,23 @@ def exercise_canonical_pops_elf(elf_path):
     if res != POPS_FILE_GUARD or test_ram.raw != bytes(expected_buf):
         raise RuntimeError("Reapplication on patched canonical core did not fail closed")
     print("Reapplication on patched canonical core fails closed PASS")
+
+    # 6. Baseline core patches followed by runtime corrections (production launcher order)
+    test_ram_seq = c.create_string_buffer(before, len(before))
+    res_base = PROD_LIB.pops_core_patches_stage(ram_base, test_ram_seq, ram_size, 0x7F)
+    if res_base != POPS_FILE_OK:
+        raise RuntimeError(f"Baseline core patches failed on canonical core: {res_base}")
+    patched_core_bytes = test_ram_seq.raw[core_start:core_start + core_size]
+    if PROD_LIB.pops_core_image_identify_baseline_patched(patched_core_bytes, len(patched_core_bytes)) != POPS_FILE_OK:
+        raise RuntimeError("pops_core_image_identify_baseline_patched rejected baseline-patched canonical core")
+    res_corr = PROD_LIB.pops_core_runtime_corrections_stage(ram_base, test_ram_seq, ram_size, POPS_FIX_ALL)
+    if res_corr != POPS_FILE_OK:
+        raise RuntimeError(f"pops_core_runtime_corrections_stage failed after baseline patches: {res_corr}")
+    for _, _, addr, _, repl in CORRECTIONS:
+        val = struct.unpack_from("<I", test_ram_seq, addr - ram_base)[0]
+        if val != repl:
+            raise RuntimeError(f"Sequential staging correction site mismatch at 0x{addr:08x}: actual 0x{val:08x} != repl 0x{repl:08x}")
+    print("Sequential staging (baseline patches + runtime corrections) PASS on canonical POPS core")
 
 
 def find_default_pops_elf():

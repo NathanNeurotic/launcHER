@@ -53,6 +53,9 @@ typedef struct {
   /* Compatibility modes bitmask: (1 << (mode - 1)) for Modes 1..8 */
   uint8_t compat_modes;
 
+  /* Runtime core corrections bitmask: POPS_FIX_* (0x01..0x1F) */
+  uint8_t runtime_corrections;
+
   /* Multi-disc support from DISCS.TXT */
   uint8_t disc_count;
   char discs[POPS_MAX_DISCS][128];

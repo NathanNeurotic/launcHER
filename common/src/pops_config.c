@@ -1,4 +1,5 @@
 #include "pops_config.h"
+#include "pops_external.h"
 #include "dprintf.h"
 #include <ctype.h>
 #include <errno.h>
@@ -192,6 +193,31 @@ static int parse_single_directive(PopsConfig *cfg, const char *token) {
       cfg->compat_modes |= (uint8_t)(1 << (mode - 1));
       return 1;
     }
+  }
+  if (!strcasecmp(token, "$FIX_TEXTURE_WINDOW")) {
+    cfg->runtime_corrections |= POPS_FIX_TEXTURE_WINDOW;
+    return 1;
+  }
+  if (!strcasecmp(token, "$FIX_GPU_DMA") || !strcasecmp(token, "$FIX_GPU_DMA_ZERO")) {
+    cfg->runtime_corrections |= POPS_FIX_GPU_DMA_ZERO;
+    return 1;
+  }
+  if (!strcasecmp(token, "$FIX_CDDA") || !strcasecmp(token, "$FIX_CDDA_SETMODE")) {
+    cfg->runtime_corrections |= POPS_FIX_CDDA_SETMODE;
+    return 1;
+  }
+  if (!strcasecmp(token, "$FIX_SPU_RESET") || !strcasecmp(token, "$FIX_SPU_ENABLE_RESET")) {
+    cfg->runtime_corrections |= POPS_FIX_SPU_ENABLE_RESET;
+    return 1;
+  }
+  if (!strcasecmp(token, "$FIX_GTE_RES1")) {
+    cfg->runtime_corrections |= POPS_FIX_GTE_RES1;
+    return 1;
+  }
+  if (!strcasecmp(token, "$FIX_ALL") || !strcasecmp(token, "$CORE_FIXES") ||
+      !strcasecmp(token, "$PSXCORE_FIXES")) {
+    cfg->runtime_corrections |= POPS_FIX_ALL;
+    return 1;
   }
   return 0;
 }
