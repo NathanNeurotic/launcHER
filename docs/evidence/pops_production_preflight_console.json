@@ -1,0 +1,35 @@
+{
+  "run": {
+    "run_id": "20261014T134640-0040",
+    "outcome": "hang",
+    "elf_sha256": "1d43e448b7a095bc4a914761cd54b7238a44009d19f3997c777011fdfc0dcff2",
+    "args": [
+      "ata0:/LAUNCHER-TEST-20261013-A/TEST.VCD"
+    ],
+    "stdout": "loadelf: fname host:program.elf secname all\r\nInput ELF format filename = host:program.elf\r\n0 01cca540 0003b2c4 ....\r\nLoaded, host:program.elf\r\nstart address 0x1d0001c\r\ngp address 00000000\r\nread/write allocate memory 4000\r\npath: ata0:/LAUNCHER-TEST-20261013-A/TEST.VCD\n",
+    "artifacts": [
+      "program.elf",
+      "stdout.txt"
+    ],
+    "timings": {
+      "queue_ms": 0,
+      "upload_ms": 3,
+      "run_ms": 30000
+    },
+    "started": "2026-10-14T13:46:40.4536868Z"
+  },
+  "screen_observations": [
+    "IOP: loaded ps2dev9 id=31 start=0",
+    "IOP: loaded bdm id=32 start=0",
+    "IOP: loaded bdmfs_fatfs id=33 start=0",
+    "IOP: loaded ata_bd id=34 start=0",
+    "POPS: Transferring control to trampoline at 0x00084000",
+    "POPS_PREFLIGHT_PASS Sony_entry_not_executed=1"
+  ],
+  "acceptance": "Physical production preflight passed after the selected Sony IOP reset, including compatible card services, live ATA disc/VMC checks and trampoline preparation.",
+  "limits": [
+    "The diagnostic deliberately stopped before executing the trampoline/Sony EE entry.",
+    "Rig hang is expected because Sony IOP reset removes ps2link; the explicit persistent GS marker is the acceptance evidence.",
+    "No full game boot, in-game save or power-cycle persistence acceptance."
+  ]
+}

@@ -32,6 +32,7 @@
 
     <h4>Start</h4>
     <a href="getting-started.html"><span class="icon icon-start"></span>Getting Started</a>
+    <a href="pops-setup.html"><span class="icon icon-ps1"></span>POPS &amp; PS1 Setup</a>
     <a href="releases.html"><span class="icon icon-releases"></span>Downloads &amp; Releases</a>
 
     <h4>Storage &amp; Devices</h4>
@@ -134,6 +135,41 @@
   <br>
   Ensure your <code>launcHER.CNF</code> includes:
   <pre><code>arg=-dev9=NICHDD</code></pre>
+</div>
+
+<h2 id="pops-errors">POPS Error Diagnostic Reference</h2>
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>On-Screen Error</th>
+        <th>Root Cause</th>
+        <th>Solution</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>POPS: Missing POPS dependencies</code></td>
+        <td>launcHER could not find <code>POPS_IOX.PAK</code>, <code>POPS.PAK</code>, or <code>POPS.ELF</code> + <code>IOPRP252.IMG</code> in any search location.</td>
+        <td>Copy <code>POPS_IOX.PAK</code> (or <code>POPS.PAK</code>) to your game folder, to <code>&lt;device&gt;:/POPS/</code>, or to <code>mc0:/POPS/</code>.</td>
+      </tr>
+      <tr>
+        <td><code>POPS: Cannot open target VCD: &lt;path&gt;</code></td>
+        <td>The <code>.VCD</code> disc image does not exist at the requested path, or the storage device disconnected.</td>
+        <td>Verify file spelling and case sensitivity. For multi-disc games, verify that all discs listed in <code>DISCS.TXT</code> exist.</td>
+      </tr>
+      <tr>
+        <td><code>POPS: Failed decoding / Invalid PAK package</code></td>
+        <td>The PAK container is corrupted or truncated.</td>
+        <td>Provide a clean, uncorrupted copy of <code>POPS_IOX.PAK</code> or <code>POPS.PAK</code>.</td>
+      </tr>
+      <tr>
+        <td><code>POPS: IOP reboot failed</code></td>
+        <td>The embedded or loose <code>IOPRP</code> reboot image failed to initialize the I/O Processor.</td>
+        <td>Use <code>POPS_IOX.PAK</code> containing <code>ioprp2305a</code>, or verify your standalone <code>IOPRP252.IMG</code> matches Sony's original 265,233-byte image.</td>
+      </tr>
+    </tbody>
+  </table>
 </div>
 
 <h2 id="reporting-bugs">Submitting a Bug Report</h2>

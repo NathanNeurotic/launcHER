@@ -1,0 +1,29 @@
+{
+  "run": {
+    "run_id": "20261014T050940-0020",
+    "outcome": "hang",
+    "elf_sha256": "25999b33b6b341ba2110c2c075b94d92f9da15a2636b1a63cae4bb4c57c55d2f",
+    "stdout": "loadelf: fname host:program.elf secname all\r\nInput ELF format filename = host:program.elf\r\n1 00100000 00079384 ........\r\nLoaded, host:program.elf\r\nstart address 0x11ca98\r\ngp address 00000000\r\n",
+    "artifacts": [
+      "program.elf",
+      "stdout.txt"
+    ],
+    "timings": {
+      "queue_ms": 0,
+      "upload_ms": 37,
+      "run_ms": 20000
+    },
+    "started": "2026-10-14T05:09:40.1251349Z"
+  },
+  "screen_observations": [
+    "POPS_IOP_BINDING_PASS",
+    "real_Sony_IOP=1 real_SIF_RPC=1 media=controlled",
+    "disc aliases: 2 PASS; Sony sector reads: 5 PASS",
+    "card close/reopen readback: direct 2 PASS; POPFS 2 PASS",
+    "[ps2rig] exit=0"
+  ],
+  "interpretation": "Physical GS capture confirms the complete controlled bridge passed with the private Sony-layout iomanX, production fileXio/POPFS and original Sony IOPCD. The rig's network-only hang classification results from replacing ps2link's IOP image and is superseded by the observed final screen marker.",
+  "controlled_bridge_acceptance": true,
+  "physical_media_persistence": false,
+  "full_game_boot": false
+}

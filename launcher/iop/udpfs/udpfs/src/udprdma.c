@@ -329,6 +329,31 @@ static void _send_data_ll(struct udprdma_socket *s,
 }
 
 
+/* Only a covering ACK completes this send. Stale ACKs keep the existing
+ * alarm armed and do not spend a retransmit. Preserve pending receive FIN. */
+static int _wait_ack(struct udprdma_socket *s, uint16_t sent) {
+    uint32_t bits;
+    for (;;) {
+        WaitEventFlag(s->event_flag, EF_RX_ACK | EF_TIMEOUT, WEF_OR, &bits);
+        if (bits & EF_RX_ACK) {
+            ClearEventFlag(s->event_flag, ~EF_RX_ACK);
+            if (((s->tx_seq_nr_acked - sent) & 0xfff) < 0x800) return 1;
+        }
+        if (bits & EF_TIMEOUT) return 0;
+    }
+}
+
+static void _reset_session(struct udprdma_socket *s) {
+    s->tx_seq_nr = 0;
+    s->tx_seq_nr_acked = 0xfff;
+    s->rx_seq_nr_expected = 0;
+    s->rx_window_count = 0;
+    s->rx_nack_sent = 0;
+    s->rx_buffer = NULL;
+    s->rx_hdr_buffer = NULL;
+    s->rx_received = s->rx_hdr_received = 0;
+}
+
 /*
  * Public API
  */
@@ -357,6 +382,7 @@ udprdma_socket_t *udprdma_create(uint16_t port, uint16_t service_id)
     s->port = port ? port : UDPFS_PORT;
     s->service_id = service_id;
     s->state = STATE_INIT;
+    _reset_session(s);
 
     /* Bind UDP socket */
     s->udp_socket = udp_bind(s->port, _ist, s);
@@ -372,6 +398,7 @@ udprdma_socket_t *udprdma_create(uint16_t port, uint16_t service_id)
     s->event_flag = CreateEventFlag(&evf_data);
     if (s->event_flag <= 0) {
         M_DEBUG("udprdma_create: CreateEventFlag failed\n");
+        udp_unbind(s->udp_socket);
         s->udp_socket = NULL;
         return NULL;
     }
@@ -390,11 +417,13 @@ void udprdma_destroy(udprdma_socket_t *socket)
 {
     if (socket == NULL) return;
 
+    if (socket->udp_socket != NULL)
+        udp_unbind(socket->udp_socket);
     if (socket->event_flag > 0) {
         DeleteEventFlag(socket->event_flag);
     }
 
-    /* Note: UDP socket cleanup not implemented in ministack */
+    /* The ministack callback no longer references this socket/module. */
     socket->udp_socket = NULL;
     socket->event_flag = 0;
     socket->state = STATE_INIT;
@@ -428,7 +457,8 @@ int udprdma_discover(udprdma_socket_t *socket, uint32_t timeout_ms)
         M_DEBUG("udprdma_discover: evf_bits=0x%X\n", evf_bits);
 
         if (evf_bits & EF_RX_INFO) {
-            /* Got INFORM response */
+            /* Server starts a fresh session on rediscovery. */
+            _reset_session(socket);
             socket->state = STATE_CONNECTED;
             M_DEBUG("udprdma_discover: connected to %d.%d.%d.%d:%d\n",
                 (socket->peer_ip >> 24) & 0xFF,
@@ -459,7 +489,7 @@ void udprdma_inform(udprdma_socket_t *socket)
 int udprdma_send(udprdma_socket_t *socket, const void *data, uint32_t size)
 {
     iop_sys_clock_t clock;
-    uint32_t evf_bits;
+    int covered;
     uint16_t sent_seq_nr;
     int retries;
 
@@ -483,25 +513,10 @@ int udprdma_send(udprdma_socket_t *socket, const void *data, uint32_t size)
         USec2SysClock(UDPRDMA_RETX_TIMEOUT_US, &clock);
         SetAlarm(&clock, _timeout_cb, socket);
 
-        /* Wait for ACK or timeout - no WEF_CLEAR to preserve EF_RX_FIN */
-        WaitEventFlag(socket->event_flag, EF_RX_ACK | EF_TIMEOUT,
-            WEF_OR, &evf_bits);
-
+        covered = _wait_ack(socket, sent_seq_nr);
         CancelAlarm(_timeout_cb, socket);
         ClearEventFlag(socket->event_flag, ~(EF_RX_ACK | EF_TIMEOUT));
-
-        if (evf_bits & EF_RX_ACK) {
-            int16_t diff = (int16_t)((socket->tx_seq_nr_acked - sent_seq_nr) & 0xFFF);
-            if (diff >= 0 || diff < -2048) {
-                return UDPRDMA_OK;
-            }
-            M_PRINTF("send: stale ACK acked=%d sent=%d, retry %d\n",
-                socket->tx_seq_nr_acked, sent_seq_nr, retries + 1);
-        }
-
-        if (evf_bits & EF_TIMEOUT) {
-            M_PRINTF("send: timeout seq=%d, retry %d\n", sent_seq_nr, retries + 1);
-        }
+        if (covered) return UDPRDMA_OK;
 
         /* Restore sequence number for retransmit */
         socket->tx_seq_nr = sent_seq_nr;
@@ -517,7 +532,7 @@ int udprdma_send_ll(udprdma_socket_t *socket,
                     const void *data, uint32_t data_size)
 {
     iop_sys_clock_t clock;
-    uint32_t evf_bits;
+    int covered;
     uint16_t sent_seq_nr;
     int retries;
 
@@ -539,25 +554,10 @@ int udprdma_send_ll(udprdma_socket_t *socket,
         USec2SysClock(UDPRDMA_RETX_TIMEOUT_US, &clock);
         SetAlarm(&clock, _timeout_cb, socket);
 
-        /* Wait for ACK or timeout - no WEF_CLEAR to preserve EF_RX_FIN */
-        WaitEventFlag(socket->event_flag, EF_RX_ACK | EF_TIMEOUT,
-            WEF_OR, &evf_bits);
-
+        covered = _wait_ack(socket, sent_seq_nr);
         CancelAlarm(_timeout_cb, socket);
         ClearEventFlag(socket->event_flag, ~(EF_RX_ACK | EF_TIMEOUT));
-
-        if (evf_bits & EF_RX_ACK) {
-            int16_t diff = (int16_t)((socket->tx_seq_nr_acked - sent_seq_nr) & 0xFFF);
-            if (diff >= 0 || diff < -2048) {
-                return UDPRDMA_OK;
-            }
-            M_PRINTF("send_ll: stale ACK acked=%d sent=%d, retry %d\n",
-                socket->tx_seq_nr_acked, sent_seq_nr, retries + 1);
-        }
-
-        if (evf_bits & EF_TIMEOUT) {
-            M_PRINTF("send_ll: timeout seq=%d, retry %d\n", sent_seq_nr, retries + 1);
-        }
+        if (covered) return UDPRDMA_OK;
 
         socket->tx_seq_nr = sent_seq_nr;
     }

@@ -20,6 +20,18 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 option(ENABLE_PRINTF "Enable printf debugging output" OFF)
 option(USE_EESIO "Use EE SIO for debugging" ON)
 option(DEBUG "Disable stripping ELFs (keeps debug symbols)" OFF)
+option(LAUNCHER_BOOT_TRACE "Show persistent boot-stage diagnostics and stop on errors" OFF)
+option(LAUNCHER_BOOT_TRACE_STOP_BEFORE_HANDOFF "Stop after verified POPS preflight instead of entering Sony code" OFF)
+set(LAUNCHER_BOOT_TRACE_RECOVERY_ELF "" CACHE STRING "Optional installed ELF to relaunch after a diagnostic error")
+if(LAUNCHER_BOOT_TRACE)
+    add_compile_definitions(LAUNCHER_BOOT_TRACE)
+    if(LAUNCHER_BOOT_TRACE_STOP_BEFORE_HANDOFF)
+        add_compile_definitions(LAUNCHER_BOOT_TRACE_STOP_BEFORE_HANDOFF)
+    endif()
+    if(LAUNCHER_BOOT_TRACE_RECOVERY_ELF)
+        add_compile_definitions(LAUNCHER_BOOT_TRACE_RECOVERY_ELF="${LAUNCHER_BOOT_TRACE_RECOVERY_ELF}")
+    endif()
+endif()
 
 # Standalone Ember launcher profile. Keep the storage transports Ember can use,
 # and drop the OSDMenu/HOSDMenu/MBR/CD/DVD/XFROM pieces from this fork's build.
@@ -33,6 +45,7 @@ set(LAUNCHER_CDROM OFF CACHE BOOL "CD/DVD support" FORCE)
 set(LAUNCHER_ILINK ON CACHE BOOL "i.Link support" FORCE)
 set(LAUNCHER_UDPBD ON CACHE BOOL "UDPBD support" FORCE)
 set(LAUNCHER_UDPFS ON CACHE BOOL "UDPFS support" FORCE)
+set(LAUNCHER_SMB ON CACHE BOOL "SMBv1 filesystem support" FORCE)
 set(LAUNCHER_XFROM OFF CACHE BOOL "XFROM support" FORCE)
 
 # Only the embedded ELF loader and standalone launcher are required.
@@ -44,6 +57,7 @@ add_custom_target(launcHER ALL
     COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/release"
     COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_BINARY_DIR}/launcher/launcher.elf" "${CMAKE_BINARY_DIR}/release/launcHER.elf"
     COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/examples/launcHER.CNF" "${CMAKE_BINARY_DIR}/release/launcHER.CNF"
+    COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_SOURCE_DIR}/launcher/iop/smbman/SMB-NOTICES.txt" "${CMAKE_BINARY_DIR}/release/SMB-NOTICES.txt"
     COMMAND ${CMAKE_COMMAND}
         "-DLAUNCHER_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
         "-DLAUNCHER_VERSION_FILE=${CMAKE_BINARY_DIR}/release/version.txt"

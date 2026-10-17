@@ -32,6 +32,7 @@
 
     <h4>Start</h4>
     <a href="getting-started.html"><span class="icon icon-start"></span>Getting Started</a>
+    <a href="pops-setup.html"><span class="icon icon-ps1"></span>POPS &amp; PS1 Setup</a>
     <a href="releases.html"><span class="icon icon-releases"></span>Downloads &amp; Releases</a>
 
     <h4>Storage &amp; Devices</h4>
@@ -57,7 +58,7 @@
 
 <h1>launcHER.CNF <span class="g">Reference</span></h1>
 <p class="lead">
-  <code>launcHER.CNF</code> is an INI-style configuration file that instructs launcHER where Ember is installed, what arguments to supply, and how to maintain the PlayStation 2 hardware environment across handoff.
+  <code>launcHER.CNF</code> is an INI-style configuration file that instructs launcHER where Ember or a POPS <code>.VCD</code> game is installed, what arguments to supply, and how to maintain the PlayStation 2 hardware environment across handoff.
 </p>
 
 <h2 id="syntax-rules">Syntax Rules</h2>
@@ -83,8 +84,8 @@
     <tbody>
       <tr>
         <td><code>path=&lt;path&gt;</code></td>
-        <td>Specifies the path to <code>ember.elf</code>. Can be repeated to define fallback locations.</td>
-        <td><code>path=mass?:/EMBER/ember.elf</code></td>
+        <td>Specifies the path to <code>ember.elf</code> or a PlayStation 1 <code>.VCD</code> disc image. Can be repeated to define fallback locations.</td>
+        <td><code>path=mass?:/EMBER/ember.elf</code><br><code>path=mass0:/POPS/Crash.VCD</code></td>
       </tr>
       <tr>
         <td><code>arg=&lt;value&gt;</code></td>
@@ -160,10 +161,18 @@
 <h3>USB Direct Invocation Example:</h3>
 <pre><code>launcHER.elf mass0:/EMBER/ember.elf "Soul Blade"</code></pre>
 
+<h3>POPS .VCD Direct Invocation Example:</h3>
+<pre><code>launcHER.elf mass0:/POPS/Crash Bandicoot.VCD</code></pre>
+
 <div class="callout info">
   <div class="h">Flag Placement Rule</div>
   Always place global launcher flags (such as <code>-skip_argv0</code> and <code>-dev9=...</code>) at the <b>very end</b> of the command line so all preceding strings are cleanly passed to the child ELF.
 </div>
+
+<h2 id="pops-directives">POPS Per-Game Directives</h2>
+<p>
+  When launching PlayStation 1 <code>.VCD</code> images, POPS reads per-game configuration files (<code>PATCHES.TXT</code>, <code>MODES.TXT</code>, <code>CHEATS.TXT</code>, <code>DISCS.TXT</code>, <code>VMCDIR.TXT</code>) placed alongside the game disc or inside its VMC folder. See the dedicated <a href="pops-setup.html#step-4-game-directives"><b>POPS Per-Game Configuration Directives Reference</b></a> for the complete list of video modes, screen centering offsets, compatibility modes 1..8, and cheat formatting.
+</p>
 
 </main>
   <aside class="toc"><div class="toc-h">On this page</div><nav id="toc-nav"></nav></aside>

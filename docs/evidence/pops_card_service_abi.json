@@ -1,0 +1,380 @@
+{
+  "sony_sio2_sha256": "1964b83bcc8c0cab9dfcf9b9637e0e313e69c23fd5c73408fe889ace91f13708",
+  "sony_sio2_export": {
+    "version": 515,
+    "ordinals": []
+  },
+  "modules": {
+    "mcman": {
+      "sha256": "5bb7d332523add2a834374998e5dd6268c9b8a05dbff3346bff334e7d2023dd7",
+      "imports": {
+        "sio2man": {
+          "version": 258,
+          "ordinals": [
+            24,
+            25,
+            26,
+            55
+          ]
+        },
+        "loadcore": {
+          "version": 257,
+          "ordinals": [
+            6,
+            7,
+            3
+          ]
+        },
+        "intrman": {
+          "version": 258,
+          "ordinals": [
+            9,
+            17,
+            18
+          ]
+        },
+        "sysclib": {
+          "version": 257,
+          "ordinals": [
+            12,
+            14,
+            20,
+            22,
+            23,
+            27,
+            29,
+            30
+          ]
+        },
+        "thbase": {
+          "version": 257,
+          "ordinals": [
+            33
+          ]
+        },
+        "thsemap": {
+          "version": 258,
+          "ordinals": [
+            4,
+            5,
+            6,
+            8
+          ]
+        },
+        "timrman": {
+          "version": 257,
+          "ordinals": [
+            4,
+            5,
+            7,
+            10
+          ]
+        },
+        "modload": {
+          "version": 257,
+          "ordinals": [
+            13
+          ]
+        },
+        "ioman": {
+          "version": 257,
+          "ordinals": [
+            20,
+            21
+          ]
+        },
+        "secrman": {
+          "version": 260,
+          "ordinals": [
+            4,
+            5,
+            6
+          ]
+        },
+        "cdvdman": {
+          "version": 257,
+          "ordinals": [
+            51
+          ]
+        },
+        "stdio": {
+          "version": 258,
+          "ordinals": [
+            4
+          ]
+        }
+      },
+      "exports": {
+        "mcman": {
+          "version": 515,
+          "ordinals": []
+        }
+      }
+    },
+    "mcman-2000": {
+      "sha256": "caf1aa5c83a2652096d248c71d25fb6106bd72f46d7b4a31411873c37f370709",
+      "imports": {
+        "sio2man": {
+          "version": 515,
+          "ordinals": [
+            24,
+            25,
+            26,
+            57
+          ]
+        },
+        "loadcore": {
+          "version": 257,
+          "ordinals": [
+            6,
+            7,
+            3
+          ]
+        },
+        "intrman": {
+          "version": 258,
+          "ordinals": [
+            9,
+            17,
+            18
+          ]
+        },
+        "sysclib": {
+          "version": 257,
+          "ordinals": [
+            12,
+            14,
+            20,
+            22,
+            23,
+            27,
+            29,
+            30
+          ]
+        },
+        "thbase": {
+          "version": 257,
+          "ordinals": [
+            33
+          ]
+        },
+        "thsemap": {
+          "version": 258,
+          "ordinals": [
+            4,
+            5,
+            6,
+            8
+          ]
+        },
+        "timrman": {
+          "version": 257,
+          "ordinals": [
+            4,
+            5,
+            7,
+            10
+          ]
+        },
+        "modload": {
+          "version": 257,
+          "ordinals": [
+            13
+          ]
+        },
+        "ioman": {
+          "version": 257,
+          "ordinals": [
+            20,
+            21
+          ]
+        },
+        "secrman": {
+          "version": 260,
+          "ordinals": [
+            4,
+            5,
+            6
+          ]
+        },
+        "cdvdman": {
+          "version": 257,
+          "ordinals": [
+            51
+          ]
+        },
+        "stdio": {
+          "version": 258,
+          "ordinals": [
+            4
+          ]
+        }
+      },
+      "exports": {
+        "mcman": {
+          "version": 515,
+          "ordinals": []
+        }
+      }
+    },
+    "mcserv": {
+      "sha256": "9f1b2ee6eb5f7c1f56ce225100824d85bc615eda3dac4f6be00b5f9f6d3c8924",
+      "imports": {
+        "loadcore": {
+          "version": 257,
+          "ordinals": [
+            6,
+            7,
+            3
+          ]
+        },
+        "intrman": {
+          "version": 258,
+          "ordinals": [
+            9,
+            17,
+            18
+          ]
+        },
+        "mcman": {
+          "version": 515,
+          "ordinals": [
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            24,
+            29,
+            30,
+            36,
+            37,
+            38,
+            39,
+            40,
+            21,
+            22,
+            23,
+            42,
+            45
+          ]
+        },
+        "sysclib": {
+          "version": 257,
+          "ordinals": [
+            12,
+            14
+          ]
+        },
+        "sifman": {
+          "version": 257,
+          "ordinals": [
+            5,
+            7,
+            8,
+            29
+          ]
+        },
+        "sifcmd": {
+          "version": 257,
+          "ordinals": [
+            14,
+            17,
+            19,
+            22,
+            23,
+            24,
+            25
+          ]
+        },
+        "thbase": {
+          "version": 257,
+          "ordinals": [
+            4,
+            6,
+            20,
+            33,
+            10,
+            5
+          ]
+        },
+        "stdio": {
+          "version": 258,
+          "ordinals": [
+            4
+          ]
+        }
+      },
+      "exports": {
+        "mcserv": {
+          "version": 257,
+          "ordinals": []
+        }
+      }
+    },
+    "secrman": {
+      "sha256": "a81c42450207f71fdc7fea508d4bc1eafdeb1fa13d99d3a928f834b425e8461b",
+      "imports": {
+        "cdvdman": {
+          "version": 257,
+          "ordinals": [
+            29
+          ]
+        },
+        "ioman": {
+          "version": 257,
+          "ordinals": [
+            4,
+            5,
+            6,
+            8
+          ]
+        },
+        "loadcore": {
+          "version": 257,
+          "ordinals": [
+            6
+          ]
+        },
+        "modload": {
+          "version": 257,
+          "ordinals": [
+            12
+          ]
+        },
+        "stdio": {
+          "version": 258,
+          "ordinals": [
+            4
+          ]
+        },
+        "sysclib": {
+          "version": 257,
+          "ordinals": [
+            14,
+            12
+          ]
+        }
+      },
+      "exports": {
+        "secrman": {
+          "version": 260,
+          "ordinals": []
+        }
+      }
+    }
+  },
+  "selected_abi_matches": true,
+  "limits": "Static library/ordinal inspection only; not full IOP dependency or runtime acceptance."
+}
