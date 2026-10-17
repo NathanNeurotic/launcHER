@@ -1200,4 +1200,110 @@ What it offers that launcHER's table does not have:
 
 Upstream marks USB with multiple devices, the ATA/exFAT launch path, MX4SIO,
 MMCE, IGR and disc switching as unfinished. Its compatibility and
-hardware claims are **unverified** here.
+hardware claims are unverified here.
+
+### PSXCore runtime corrections adaptation: October 16, 2026
+
+launcHER adapts the five bounded core corrections from PSXCore into
+`common/src/pops_core_patches.c` via `pops_core_runtime_corrections_stage()`,
+declared in `common/include/pops_external.h`.
+
+Each correction fixes an identified flaw in the external POPS core:
+
+1. Texture window repeat (`POPS_FIX_TEXTURE_WINDOW`, `1u << 0`):
+   Address `0x0021d6a4`. Replaces `addiu t7, zero, 1` (`0x240f0001`) with
+   `addiu t7, zero, 0` (`0x240f0000`) in `FUN_0021d690`. Selects GS repeat
+   for unmasked texture coordinates rather than region clamp, resolving
+   scrolling texture gaps.
+2. GPU DMA linked list start at address 0 (`POPS_FIX_GPU_DMA_ZERO`, `1u << 1`):
+   Address `0x0020ac5c`. Replaces `beqzl v0, 0x0020ac78` (`0x54800006`) with
+   `b 0x0020ac78` (`0x10000006`) in `FUN_0020ac30`. PS1 RAM address 0 is a
+   valid linked transfer start; POPS otherwise discards the transfer as empty.
+3. CDDA playback SetMode bit 0 check (`POPS_FIX_CDDA_SETMODE`, `1u << 2`):
+   Address `0x0020ead4`. NOPs the conditional branch (`0x10400009` -> `0x00000000`)
+   in `FUN_0020ea68`. POPS previously advanced CD audio without submitting
+   samples when SetMode bit 0 was clear.
+4. SPU enable reset avoidance (`POPS_FIX_SPU_ENABLE_RESET`, `1u << 3`):
+   Address `0x00213c20`. NOPs the cold-reset function call (`0x0c084f80` -> `0x00000000`)
+   in `FUN_002138e0`. Enabling the SPU is not a power-on event; POPS otherwise
+   cleared envelope and voice rates programmed while the SPU was disabled.
+5. GTE RES1 register classification (`POPS_FIX_GTE_RES1`, `1u << 4`):
+   Address `0x0024a94c`. Replaces write class 3 (discarded store) with class 0
+   (standard word store, `0x00000003` -> `0x00000000`) in the GTE dispatch table
+   at `0x0024a938`. GTE data register 23 is ordinary 32-bit storage.
+
+Transaction and verification rules:
+- `pops_core_runtime_corrections_stage()` validates the pristine reference core
+  SHA256 (`38ecd425...`) and verifies all selected instruction sites before
+  writing any byte. A single mismatch rejects the operation with `POPS_FILE_GUARD`
+  without mutating memory.
+- The correction addresses do not collide with baseline POPStarter patches
+  in `pops_core_patches_stage()`.
+- Test suite `tools/test_pops_runtime_corrections.py` exercises mask bounds,
+  span checks, single-byte guard rejections, transactional atomicity, individual
+  flags, combined `POPS_FIX_ALL`, and verification against canonical `POPS.ELF`.
+
+### Code-cache and self-modifying code (SMC) comparison
+
+POPS native dynamic recompiler (`FUN_00208568`, documented in REPOP `pops/src/smc_guard.c`):
+- Emits an 11-instruction preamble at the head of every translated EE block.
+- Re-reads guest words 0 and 1, computes their sum (`addu $v0, $v0, $v1`), and
+  compares that sum against compile time. On mismatch, jumps to dispatch slow path
+  `0x002081f0` with code 6 (`POPS_DISPATCH_SMC_HIT`).
+- Limitation: Checks only a 2-word additive checksum. Any modification to guest
+  instruction 2 or later goes undetected. Complementary edits that preserve the
+  sum of words 0 and 1 also go undetected, leading to execution of stale translated
+  code in games that load code overlays into reused RAM buffers.
+- POPStarter history: Community game fixes addressed this through title-specific
+  patches (`CodeCache Scan_X`, `No_Break_CodeGSF`) or mode flags.
+
+PSXCore approach (`runtime/codeguard.c`, `runtime/codeguard.S`):
+- Installs resident code in low EE RAM at `0x000ff000` (`._psxcore_code_guard`).
+- Hooks the block compiler at `0x0020273c`, block reservation at `0x00202288`,
+  and decoder instruction capture at `0x002041a4`.
+- Captures every decoded guest instruction in `np_code_guard_originals[258]`.
+- Emits inline paired 64-bit loads (`ld`) or 32-bit loads (`lw`) against PS1 RAM
+  (`0x40000000 | (guest_pc & 0x1fffff)`) comparing every instruction in the block
+  against its compile-time snapshot.
+- On mismatch, branches to native slow-path `0x002081f0` with `$v0 = 6`.
+- Tradeoff: Adds approximately 12 KiB of inline checks per maximum block and
+  requires an active resident monitor in low EE memory throughout execution.
+  Because launcHER operates as a headless forwarder that transfers control to
+  POPS via a low-RAM trampoline, resident code-guard hooks are not suitable as
+  static patches; game-specific overlay issues remain handled via existing
+  container/patch mechanisms.
+
+### Storage and IOP worker comparison
+
+IOP stack budget:
+- Sony IOPCD executes file callbacks on a 2 KiB stack. Modern multi-layer
+  filesystems (FatFs, exFAT, BDM, USB, SMB, UDPFS) require 4 to 8 KiB of stack
+  during deep directory scans, cluster allocation, and packet assembly.
+- Calling those stacks directly from IOPCD context can cause stack overflow.
+
+PSXCore approach:
+- Implements `iop/filebridge/worker.c`: an independent IOP worker thread with
+  `0x6000` (24 KiB) stack and `0x400` (1 KiB) canary guard (`0xa5a5a5a5`).
+- Native IOPCD requests queue to the worker thread via `np_file_worker_call()`
+  and execute synchronously on the worker stack.
+- Keeps SDK `iomanX` private (`iop/storage/iomanx/manager.c`) with unhooked
+  `hook_ioman()`, avoiding corruption of Sony's linked 32-descriptor table.
+- Dynamically locates native Sony IOMAN 1.4 via `GetLoadcoreInternalData()` in
+  `iop/nativegate/gate.c` and registers a single native `pfs` device.
+- Implements two-stage save replacement: writes to `card0.bak`, renames target
+  to `.prev`, flushes BDM cache, and renames `.bak` to target, falling back to
+  `.prev` on error.
+
+launcHER approach:
+- Implements private `launcher/iop/pops_iomanx/`: migrates Sony's linked/flat
+  device registry and all 32 file slots, verified on hardware in run `20261014T050940-0020`.
+- Implements `launcher/iop/popfs/`: unified IOMANX driver providing `pops0:` and
+  optional non-APA `pfs0:` disc/card aliases directly to underlying storage
+  (`ata0:`, `mass0:`, `smb0:`, `udpfs:`).
+- Implements `launcher/iop/pops_fatfs/`: BDM FatFs with strict negative errno
+  translation and exclusive creation semantics.
+- Evaluation: POPFS currently executes callbacks synchronously. For local ATA
+  and USB storage, stack depth remains within acceptable limits. If complex
+  network transports (SMB/UDPFS) exhibit stack pressure under heavy game loads,
+  adopting a dedicated worker thread modeled after PSXCore's worker will provide
+  an isolated stack budget.
