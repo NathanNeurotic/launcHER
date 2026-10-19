@@ -11,6 +11,75 @@ support without requiring BDMAssault. The first implementation is the external
 file/container core, not a working POPS launch mode. Existing Ember arguments,
 quickboot behavior and IOP handoff are unchanged.
 
+## Ordered external fix-file continuation — 2026-10-19
+
+The launcher now discovers `TROJAN_0.BIN` through `TROJAN_9.BIN` and
+`PATCH_0.BIN` through `PATCH_9.BIN` in the selected VCD directory and its
+unredirected title folder. It processes root TROJANs, root PATCHes, title
+TROJANs, then title PATCHes; slots ascend within each pass. Memory-card
+configuration discovery remains separate. The old extra memory-card Trojan
+passes have been removed: they could override title fixes and are not present
+in the measured original file loaders. VMCDIR continues to redirect saves only.
+
+Original-reference evidence: the SHA256-pinned POPSLoader MAIN profile decodes
+locally to `185177c28aaef30ad1e00697ad7b6de22b55bd855253ab4ede8b1ab2dfb08aee`.
+Its direct calls at `0x00876d6c`, `0x00876e00`, `0x00877078`, and `0x00877118`
+target `0x00880a24`, `0x00881de8`, `0x00880a24`, and `0x00881de8`, respectively;
+the scope arguments are 0, 0, 1, and 1. Both original loaders increment the
+filename slot from `/` to `0` before their first iteration and perform ten
+iterations. The original PATCH loader copies the payload before dispatching
+nonzero mode bytes at header offsets `0x38..0x3b`, in that exact byte order.
+The decompiler reference is REPOP `cffde861312f3559904f3c286b9cfbd0a9027db3`,
+`popstarter/ghidra/output/decompiled.c`. These static callsites establish the
+recorded ordering, not execution of every conditional pass in a console run.
+No original loader code or payload bytes are distributed here.
+
+Format-1 PATCH records with control 0 or 1 can now stage bounded data and
+header-only settings. The session preserves ordered/repeated mode dispatch
+(1..5 and 7), including overlapping mode 2/1 and mode 2/5 writes. It checks
+independently derived initial mode-site values, then tracks changes made by
+explicit fix payloads/hooks and prior mode dispatch. Unexpected site changes
+fail. Filename/header slot mismatches, unsupported flags/video actions/mode 6,
+malformed records, bounds and buffer aliases fail before that file writes.
+Missing files are optional; read/seek/close errors are fatal. All fix staging
+still precedes VMC creation and IOP reset; a failed sequence is discarded.
+
+This is a supported subset of the file-loader contract. PATCH video actions
+2/4/6, original startup-state gates, independent pristine TROJAN hook profiles,
+and executable-fix acceptance remain open. In particular, do not convert the
+four ordered PATCH mode bytes into a mask, silently ignore an unsupported
+PATCH, or claim full runtime parity from host staging tests.
+
+`python tools/test_pops_fix_files.py` compiles the production discovery, file
+reader and stager with synthetic fixtures. Optional
+`POPS_TEST_ELF=/external/POPS.ELF python tools/test_pops_fix_files.py` also checks
+the exact identified external core and compares the complete staged buffer.
+The existing optional original-dispatch comparison accepts the REPOP Ghidra
+comment delimiters. The optional external-core suite now tests sequential
+runtime-correction identity with the same complete baseline (`POPS_CORE_ALL`)
+used by the launcher, after its separate original-only write comparison.
+
+A rebuildable R5900 probe uses synthetic core data, no IOP reset and no game
+or save file access:
+
+```sh
+python tools/prepare_pops_fix_files_probe.py --out build/fix-files-FRESH
+ps2build build -c build/fix-files-FRESH/ps2.yaml -o build/fix-files-FRESH/gcc --toolchain gcc
+```
+
+Its 36 ordered mode pairs and one rejection/atomicity case report
+`POPS_FIX_FILES_PASS cases=37` only after whole-buffer comparison checksums
+match. This tests the production C stager on the EE; it does not execute Sony
+POPS or prove a game boot, runtime hooks, media streaming or save persistence.
+
+The corrected probe passed on physical PS2 on October 19, with explicit
+`POPS_FIX_FILES_PASS cases=37 result=0 Sony_entry_executed=0` and
+`[ps2rig] exit=0`. Metadata and exact ELF/source hashes are in
+`docs/evidence/pops_fix_files_console.json`. Earlier variants printed only a
+start marker and are not acceptance evidence. The accepted harness initializes
+SIF RPC, uses screen progress and buffers its final stdout; this is a harness
+correction, not a demonstrated defect in production fix staging.
+
 ## Current implementation
 
 ### External dependency sets and boot environment

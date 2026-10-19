@@ -12,6 +12,24 @@ extern "C" {
 /* Apply Compatibility Modes 1..8 to the staged POPS core */
 int pops_apply_compat_modes(void *staged_core, size_t core_size, uint8_t modes_mask);
 
+/* Fix-file session after the identified core and initial config patches.
+ * Retains expected bytes across ordered/repeated mode dispatch and explicit
+ * external payload writes. No executable is entered and no live RAM is used.
+ * Discard the staged core on any failure in a sequence of fix files. */
+#define POPS_COMPAT_SITE_COUNT 38
+typedef struct {
+  uint32_t expected[POPS_COMPAT_SITE_COUNT];
+} PopsFixContext;
+int pops_fix_context_init(PopsFixContext *context, const void *staged_core,
+                           size_t core_size, uint8_t initial_modes);
+/* expected_trojan selects TROJAN versus PATCH; slot must match the filename.
+ * PATCH data precedes its four mode bytes, in recorded order. Video actions
+ * and runtime-dependent mode 6 remain unsupported and fail before writes.
+ * Context, input container and staged core must be disjoint. */
+int pops_fix_stage(PopsFixContext *context, void *staged_core, size_t core_size,
+                    const void *file, size_t file_size, unsigned slot,
+                    int expected_trojan);
+
 /* Apply Video Mode overrides (PAL/NTSC, 480p, 576p, HDTV fix, X/Y centering) */
 int pops_apply_video_overrides(void *staged_core, size_t core_size,
                                uint8_t video_mode, uint8_t hdtv_fix,

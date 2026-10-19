@@ -22,7 +22,7 @@ reference = json.loads((ROOT / 'tools/fixtures/pops_compat_reference.json').read
 if args.decompile:
     text = args.decompile.read_text()
     text = text[text.index('void FUN_008dc2c4('):]
-    text = text[:text.index('/* ---------------------------------------------------------------- */')]
+    text = re.split(r'/\* -+ \*/', text, maxsplit=1)[0]
     for mode, expected in reference.items():
         branch = re.search(r'(?:if|else if) \(\(?param_1 == ' + mode +
                            r'\).*?\{(.*?)(?=\n    \}\n)', text, re.S).group(1)
@@ -55,7 +55,8 @@ build = ROOT / 'build/pops-host/modes'
 build.mkdir(parents=True, exist_ok=True)
 library = build / ('modes.dll' if os.name == 'nt' else 'modes.so')
 subprocess.run(['gcc', '-shared', '-fPIC', '-O2', '-I', str(ROOT / 'common/include'),
-                str(ROOT / 'common/src/pops_modes_patches.c'), '-o', str(library)], check=True)
+                str(ROOT / 'common/src/pops_modes_patches.c'),
+                str(ROOT / 'common/src/pops_external.c'), '-o', str(library)], check=True)
 lib = c.CDLL(str(library))
 lib.pops_apply_compat_modes.argtypes = [c.c_void_p, c.c_size_t, c.c_uint8]
 for mask in range(256):

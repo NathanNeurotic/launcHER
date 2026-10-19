@@ -195,6 +195,12 @@ def check_boot_staging(plan, source, iop=None, original_writes=None):
     patched = ram.raw
     if LIB.pops_core_patches_stage(0x100000, ram, ram_size, 0x3f) != -4 or ram.raw != patched:
         raise RuntimeError("Core patch reapplication did not fail closed")
+    # The sequential-runtime identity includes launcHER's storage bridge as
+    # well as the six original groups. Keep the original-only comparison above
+    # separate, then reproduce the actual launcher's POPS_CORE_ALL input.
+    ram.raw = before
+    if LIB.pops_core_patches_stage(0x100000, ram, ram_size, 0x7f):
+        raise RuntimeError("Complete launcher baseline patches rejected")
     patched_core = ram.raw[core_start:bss_start]
     check_iopcd(patched_core)
     print("Embedded IOPCD identity/imports PASS: open/close/read/lseek, patched EE, full-IRX guards")
@@ -1250,8 +1256,12 @@ def main():
                  "pops_format_proxy_args", "pops_trampoline_args_init",
                  "pops_bootstrap_verify_layout"):
         getattr(LIB, name).restype = c.c_int
-    result = unittest.TextTestRunner(verbosity=2).run(
-        unittest.defaultTestLoader.loadTestsFromTestCase(InspectorTests))
+    from test_pops_fix_files import FixFiles
+    suite = unittest.TestSuite([
+        unittest.defaultTestLoader.loadTestsFromTestCase(InspectorTests),
+        unittest.defaultTestLoader.loadTestsFromTestCase(FixFiles),
+    ])
+    result = unittest.TextTestRunner(verbosity=2).run(suite)
     if not result.wasSuccessful():
         return 1
     original_writes = read_original_writes(args.loader_source) if args.loader_source else None

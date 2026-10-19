@@ -13,6 +13,13 @@ supersede this checkpoint: inspect current CI rather than reusing that result.
 
 ## Start here
 
+- October 19 continuation: `docs/POPSTARTER_REPLACEMENT.md` now records ordered
+  TROJAN/PATCH discovery, the measured root/title pass order, supported PATCH
+  data/settings records and remaining unsupported actions. Run
+  `tools/test_pops_fix_files.py`; its optional `POPS_TEST_ELF` input verifies
+  the identified external core. `tools/prepare_pops_fix_files_probe.py` builds
+  a separate synthetic EE-only staging probe. Console staging acceptance is
+  separate from Sony runtime/game/save acceptance.
 - `docs/NETWORK_TRANSPORT_HANDOFF.md`: UDPFS, UDPBD and SMBv1 implementation,
   fixtures, test procedure and physical acceptance boundaries.
 - `docs/POPSTARTER_HANDOFF.md` and `docs/POPSTARTER_REPLACEMENT.md`: external

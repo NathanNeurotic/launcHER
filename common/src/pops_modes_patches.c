@@ -1,4 +1,5 @@
 #include "pops_modes_patches.h"
+#include "pops_external.h"
 #include <errno.h>
 #include <string.h>
 
@@ -82,6 +83,125 @@ static const CompatPatch compat_patches[] = {
   {5, 0x0020bcac, 0x00000000, 0x1000d2e8, 4},
   {7, 0x0021e45c, 0x00000000, 0x00000040, 1},
 };
+
+typedef char compat_site_count_must_match[
+    sizeof(compat_patches) / sizeof(compat_patches[0]) == POPS_COMPAT_SITE_COUNT ? 1 : -1];
+
+static uint32_t compat_read(const uint8_t *bytes, const CompatPatch *patch) {
+  uint32_t value = 0;
+  for (unsigned j = 0; j < patch->width; ++j)
+    value |= (uint32_t)bytes[patch->address - POPS_CORE_BASE_ADDR + j] << (8 * j);
+  return value;
+}
+
+static int compat_context_check(const PopsFixContext *context,
+                                 const uint8_t *bytes, size_t size) {
+  for (unsigned i = 0; i < POPS_COMPAT_SITE_COUNT; ++i) {
+    const CompatPatch *patch = &compat_patches[i];
+    size_t offset = patch->address - POPS_CORE_BASE_ADDR;
+    if (offset > size || patch->width > size - offset)
+      return -ERANGE;
+    if (compat_read(bytes, patch) != context->expected[i])
+      return -EINVAL;
+  }
+  return 0;
+}
+
+static int fix_alias(const void *a, size_t asize, const void *b, size_t bsize) {
+  uintptr_t x = (uintptr_t)a, y = (uintptr_t)b;
+  return x <= y ? y - x < asize : x - y < bsize;
+}
+
+int pops_fix_context_init(PopsFixContext *context, const void *staged_core,
+                           size_t core_size, uint8_t initial_modes) {
+  PopsFixContext candidate;
+  if (!context || !staged_core ||
+      fix_alias(context, sizeof(*context), staged_core, core_size))
+    return -EINVAL;
+  if (initial_modes & 0xa0)
+    return -ENOTSUP;
+  for (unsigned i = 0; i < POPS_COMPAT_SITE_COUNT; ++i)
+    candidate.expected[i] = compat_patches[i].expected;
+  /* The initial text/database mask uses the existing ascending dispatcher.
+   * Calculate its result independently; do not bless arbitrary current bytes. */
+  for (unsigned i = 0; i < POPS_COMPAT_SITE_COUNT; ++i) {
+    const CompatPatch *patch = &compat_patches[i];
+    if (initial_modes & (1 << (patch->mode - 1))) {
+      for (unsigned j = 0; j < POPS_COMPAT_SITE_COUNT; ++j)
+        if (compat_patches[j].address == patch->address)
+          candidate.expected[j] = patch->replacement;
+    }
+  }
+  int result = compat_context_check(&candidate, staged_core, core_size);
+  if (result)
+    return result;
+  *context = candidate;
+  return 0;
+}
+
+int pops_fix_stage(PopsFixContext *context, void *staged_core, size_t core_size,
+                    const void *file, size_t file_size, unsigned slot,
+                    int expected_trojan) {
+  PopsContainerPlan plan;
+  PopsPatchOptions options = {{0}, POPS_PATCH_VIDEO_NONE};
+  uint8_t *bytes = staged_core;
+  uint32_t hook[3];
+  if (!context || !bytes || !file || slot > 9 ||
+      fix_alias(context, sizeof(*context), bytes, core_size) ||
+      fix_alias(context, sizeof(*context), file, file_size) ||
+      fix_alias(file, file_size, bytes, core_size))
+    return -EINVAL;
+  int result = pops_container_plan(file, file_size, POPS_CORE_BASE_ADDR,
+                                    core_size, &plan);
+  if (result)
+    return result;
+  if (plan.container.slot != slot ||
+      (plan.container.kind == POPS_CONTAINER_TROJAN) != !!expected_trojan)
+    return -EINVAL;
+  if (!expected_trojan) {
+    /* Only the original PATCH format-1 record is grounded by this loader. */
+    if (plan.container.flags != 0x00010001)
+      return -ENOTSUP;
+    result = pops_patch_options(&plan.container, &options);
+    if (result)
+      return result;
+    if (options.video != POPS_PATCH_VIDEO_NONE)
+      return -ENOTSUP;
+    for (unsigned i = 0; i < 4; ++i)
+      if (options.modes[i] == 6 || options.modes[i] > 7)
+        return -ENOTSUP;
+  }
+  result = compat_context_check(context, bytes, core_size);
+  if (result)
+    return result;
+  /* All bounds/options/guards precede the first payload write. Trojan hooks
+   * retain the existing snapshot guards; they are not independent pristine
+   * profiles. Explicit payload changes become the next session's expectation. */
+  if (plan.container.kind != POPS_CONTAINER_CONFIG) {
+    size_t count = plan.hook_size > 8 ? 3 : 2;
+    if (expected_trojan)
+      memcpy(hook, bytes + plan.hook_offset, count * sizeof(hook[0]));
+    result = pops_container_stage(file, file_size, POPS_CORE_BASE_ADDR, bytes,
+                                    core_size, expected_trojan ? hook : NULL,
+                                    expected_trojan ? count : 0);
+    if (result)
+      return result;
+  }
+  for (unsigned mode = 0; mode < 4; ++mode) {
+    if (!options.modes[mode])
+      continue;
+    for (unsigned i = 0; i < POPS_COMPAT_SITE_COUNT; ++i) {
+      const CompatPatch *patch = &compat_patches[i];
+      if (patch->mode == options.modes[mode])
+        for (unsigned j = 0; j < patch->width; ++j)
+          bytes[patch->address - POPS_CORE_BASE_ADDR + j] =
+              (uint8_t)(patch->replacement >> (8 * j));
+    }
+  }
+  for (unsigned i = 0; i < POPS_COMPAT_SITE_COUNT; ++i)
+    context->expected[i] = compat_read(bytes, &compat_patches[i]);
+  return 0;
+}
 
 int pops_apply_compat_modes(void *staged_core, size_t core_size, uint8_t modes_mask) {
   uint8_t *bytes = staged_core;

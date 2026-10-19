@@ -86,7 +86,7 @@ int pops_container_inspect(const void *file, size_t size, PopsContainer *out) {
   trojan = !memcmp(data, "TROJAN_", 7) && data[7] >= '0' && data[7] <= '9';
   if (trojan) {
     result.slot = data[7] - '0';
-  } else if (!memcmp(data, "PATCH_", 6) && data[6] >= '1' &&
+  } else if (!memcmp(data, "PATCH_", 6) && data[6] >= '0' &&
              data[6] <= '9' && data[7] == 0) {
     result.slot = data[6] - '0';
   } else {

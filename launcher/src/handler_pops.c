@@ -179,14 +179,20 @@ int findPopsDependencies(const char *vcdPath, char *popsPath, size_t popsPathSiz
 static int readFullFile(const char *path, void *buffer, size_t max_size, size_t *out_size) {
   int fd = open(path, O_RDONLY);
   if (fd < 0)
-    return fd;
+    return errno ? -errno : -EIO;
 
   off_t sz = lseek(fd, 0, SEEK_END);
   if (sz <= 0 || (size_t)sz > max_size) {
+    int result = sz < 0 ? (errno ? -errno : -EIO) : -EINVAL;
     close(fd);
-    return -EINVAL;
+    return result;
   }
-  lseek(fd, 0, SEEK_SET);
+  off_t position = lseek(fd, 0, SEEK_SET);
+  if (position != 0) {
+    int result = position < 0 && errno ? -errno : -EIO;
+    close(fd);
+    return result;
+  }
 
   size_t total = 0;
   while (total < (size_t)sz) {
@@ -194,16 +200,57 @@ static int readFullFile(const char *path, void *buffer, size_t max_size, size_t 
     if (chunk > 65536)
       chunk = 65536;
     ssize_t n = read(fd, (char *)buffer + total, chunk);
-    if (n <= 0) {
+    if (n <= 0 || (size_t)n > chunk) {
+      int result = n < 0 && errno ? -errno : -EIO;
       close(fd);
-      return -EIO;
+      return result;
     }
     total += (size_t)n;
   }
-  close(fd);
+  if (close(fd))
+    return errno ? -errno : -EIO;
 
   if (out_size)
     *out_size = total;
+  return 0;
+}
+
+/* The archived MAIN calls root TROJAN, root PATCH, title TROJAN, title PATCH
+ * (0x876d6c/0x876e00/0x877078/0x877118). Slot order is 0..9 in both loaders.
+ * These are explicit external fix files, never files from VMCDIR redirection.
+ * The staged executable is discarded by the caller on any failure. */
+static int pops_stage_fix_files(void *stagedCore, size_t coreSize,
+                                 const char *vcdDir, const char *titleDir,
+                                 uint8_t initialModes) {
+  PopsFixContext context;
+  int result = pops_fix_context_init(&context, stagedCore, coreSize, initialModes);
+  if (result)
+    return result;
+  const char *dirs[] = {vcdDir, titleDir};
+  for (unsigned scope = 0; scope < 2; ++scope) {
+    for (unsigned kind = 0; kind < 2; ++kind) {
+      for (unsigned slot = 0; slot < 10; ++slot) {
+        char path[PATH_MAX];
+        size_t size = 0;
+        void *buffer = (void *)0x01f00000;
+        int length = snprintf(path, sizeof(path), "%s%s_%u.BIN", dirs[scope],
+                                kind ? "PATCH" : "TROJAN", slot);
+        if (length < 0 || (size_t)length >= sizeof(path))
+          return -ENAMETOOLONG;
+        result = readFullFile(path, buffer, 0x100000, &size);
+        if (result == -ENOENT)
+          continue;
+        if (!result)
+          result = pops_fix_stage(&context, stagedCore, coreSize, buffer, size,
+                                   slot, !kind);
+        if (result) {
+          msg("POPS: Fix file rejected %s (%d)\n", path, result);
+          return result;
+        }
+        DPRINTF("POPS: Applied %s\n", path);
+      }
+    }
+  }
   return 0;
 }
 
@@ -988,58 +1035,11 @@ int launchPOPS(int argc, char *argv[]) {
             compat->patch_offset, compat->patch_val);
   }
 
-  /* Save redirection must not redirect title fixes. */
-  char trojanPath[PATH_MAX];
-  const char *trojanDirs[6];
-  int trojanDirCount = 0;
-  if (vcdDir && vcdDir[0])
-    trojanDirs[trojanDirCount++] = vcdDir;
-  trojanDirs[trojanDirCount++] = gameConfigDir;
-  trojanDirs[trojanDirCount++] = "mc0:/POPSTARTER/";
-  trojanDirs[trojanDirCount++] = "mc1:/POPSTARTER/";
-  trojanDirs[trojanDirCount++] = "mc0:/POPS/";
-  trojanDirs[trojanDirCount++] = "mc1:/POPS/";
-
-  for (int td = 0; td < trojanDirCount; ++td) {
-    for (int slot = 0; slot <= 9; ++slot) {
-      snprintf(trojanPath, sizeof(trojanPath), "%sTROJAN_%d.BIN", trojanDirs[td], slot);
-      if (!tryFile(trojanPath)) {
-        size_t trojanSize = 0;
-        void *trojanBuf = (void *)0x01f00000;
-        PopsContainerPlan trojanPlan;
-        uint32_t expected[3] = {0};
-        size_t guardWords;
-
-        res = readFullFile(trojanPath, trojanBuf, 0x100000, &trojanSize);
-        if (res) {
-          msg("POPS: Cannot read TROJAN %s: %d\n", trojanPath, res);
-          return res;
-        }
-        res = pops_container_plan(trojanBuf, trojanSize, POPS_CORE_ADDR,
-                                  plan.core_size, &trojanPlan);
-        if (res || trojanPlan.container.kind != POPS_CONTAINER_TROJAN ||
-            trojanPlan.container.slot != slot) {
-          msg("POPS: Invalid TROJAN slot/contents in %s\n", trojanPath);
-          return res ? res : -EINVAL;
-        }
-
-        /* The stager requires two guard words for ordinary 4/8-byte hooks,
-         * three only for 12-byte hooks. Passing three to every TROJAN caused
-         * ordinary patches to be silently rejected and falsely logged. */
-        guardWords = trojanPlan.hook_size > 8 ? 3 : 2;
-        memcpy(expected, (const uint8_t *)stagedCore + trojanPlan.hook_offset,
-               guardWords * sizeof(expected[0]));
-        res = pops_container_stage(trojanBuf, trojanSize, POPS_CORE_ADDR,
-                                   (void *)stagedCore, plan.core_size,
-                                   expected, guardWords);
-        if (res) {
-          msg("POPS: TROJAN stage rejected %s: %d\n", trojanPath, res);
-          return res;
-        }
-        DPRINTF("POPS: Applied %s\n", trojanPath);
-      }
-    }
-  }
+  /* Preserve original root/title and TROJAN/PATCH ordering. */
+  res = pops_stage_fix_files((void *)stagedCore, plan.core_size, vcdDir,
+                              gameConfigDir, cfg.compat_modes);
+  if (res)
+    return res;
 
   /* Check the unreturnable trampoline before touching save images or
    * rebooting the IOP. Keep the actual low-RAM argument write immediately
