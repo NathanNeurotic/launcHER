@@ -92,7 +92,9 @@ int main(int argc,char **argv) {
     result=module("ministack",ministack_irx,size_ministack_irx,strlen(mini_args)+1,mini_args);
     if(result)goto done;
     report("NETWORK_STAGE step=ministack_ready\n");
-    LOAD(udptty);logger_ready=1;
+    /* SDK udptty belongs to the ps2ip stack. Keep UDP transport probes
+     * independent of TCP/IP; report() still writes to GS and EE SIO. */
+    report("NETWORK_STAGE step=logger_disabled stack=ministack output=GS,SIO\n");
     if(udpfs) { LOAD(udpfs_ioman); }
     else { LOAD(bdm);LOAD(bdmfs_fatfs);LOAD(udpbd); }
   }

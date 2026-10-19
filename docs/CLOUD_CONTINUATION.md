@@ -42,10 +42,12 @@ fresh-stack hardware rerun. Verify subsequent rig evidence before claiming it.
 Treat the configuration explanation in the network handoff as a source-level
 diagnosis unless a captured stopped stage or controlled rerun confirms it.
 
-Review the diagnostic's UDP logging dependencies before hardware use: the UDP
-branch currently attempts to load SDK `udptty` after ministack. Confirm its
-imports against the selected stack; SDK TCP/IP logging must not accidentally
-become a dependency of a ministack-only test.
+The diagnostic's UDP branch no longer loads SDK `udptty` after ministack.
+Ministack exports its private `mstack` UDP API, without the SDK TCP/IP socket
+exports. UDPFS/UDPBD probes now retain GS and EE SIO reporting and explicitly
+report `logger_disabled`; only the SMB/ps2ip branch loads `udptty`. This removes
+the logger load as a prerequisite to UDP fixture execution. A target rebuild
+and captured fresh-stack hardware rerun are still required.
 
 UDPFS and UDPBD physical streaming, restart/loss behavior, full game launch,
 save readback and power-cycle acceptance remain separate gates. Host tests and
