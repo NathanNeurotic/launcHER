@@ -42,3 +42,23 @@ REPOP `parity/baseline.json` currently records **477 eligible EE functions / 139
 7. **Release gate**: no automatic promotion of unverified status or merge of PR #23. Build/test success is not synonymous with complete parity. Keep original files, ROMs, unpacked binaries and memory-card images outside the repository.
 
 Reproducibility: `python tools/test_pops_external.py`, `python tools/test_pops_read_trace.py`, `python tools/test_pops_fix_files.py`, `python tools/test_pops_modes.py`, `python tools/test_popfs.py`; use PR CI for complete PS2SDK build and opt-in `-DLAUNCHER_BOOT_TRACE=ON -DDEBUG=ON` artifact. Correlate every hardware claim with a pinned branch SHA, output ELF SHA-256, device, original version, log/probe hash and the exact success boundary. Historical run records under `docs/evidence/` are not substitutes for the next boot result.
+
+
+## Reverse-engineering function anchors (selected pinned profiles)
+
+These are exact **entry/callsite addresses in the identified original images**, not addresses to write into arbitrary POPS versions. Validate profile SHA-256 and original bytes before translating any fix. A known callsite does not establish every conditional path.
+
+| Image | Original symbol / address | What is actually established | Next observation |
+| --- | --- | --- | --- |
+| POPStarter MAIN | `0x00876d6c`, `0x00876e00`, `0x00877078`, `0x00877118` | Direct EE calls in this order to two loaders, root scope first and title scope second (static original-code inspection). | Branch predicates, path construction, config failure policy and late-module effects. |
+| POPStarter MAIN | `FUN_00880a24` | TROJAN file loader; slots `0..9` and original scope arguments observed. | Full container error/overlap cases, call side effects and actual installed resident code. |
+| POPStarter MAIN | `FUN_00881de8` | PATCH file loader; copies payload then processes mode bytes `0x38..0x3b` sequentially. | Video controls 2/4/6, mode 6 state, unsupported payload/flags and runtime injection. |
+| POPStarter MAIN | `FUN_008dc2c4` | Measured original mode dispatcher for 1–5 and 7, with write widths/order; no observed mode-8 branch in that dispatcher. | Trace callers and conditionals before assigning meanings to modes 6/8. |
+| Sony POPS ELF | `FUN_002004f0` | Actual startup/argument function, not REPOP's local scaffold `pops_sif_rpc_handler`; partition-dependent module path. | Exact argv state and external virtual `pfs` timing on console. |
+| Sony POPS ELF | `FUN_002002a0` → `FUN_002001d8` | Loads selected embedded IRX modules into IOP (allocation/DMA/load/result), with conditionally selected HDD-related group. | Exact post-reset module table and full error propagation. |
+| Sony POPS ELF | `FUN_00210540` | Binds disc RPC `0x435052`, initializes/opens image and obtains 1 KiB TOC. | Original vs replacement SIF RPC request/response bytes and descriptor lifetime. |
+| Sony POPS ELF | `FUN_0020cf00` | Initializes two `0x20000`-byte card images when selected parameter is nonzero. | In-game save write/flush semantics and power-cycle persistence. |
+| POPStarter r13 embedded IOP | PFS Wrapper r6a callback offsets `0xd4`, `0x154`, `0x178`, `0x19c`, `0x1c0` | Legacy open/close/read/write/seek; forwarding offset and descriptor behavior in controlled original-code execution. Addresses are **IOP module-relative**, not EE. | Real IOP IOMAN/iomanX binding and negative/short-I/O transitions. |
+| Sony embedded IOPCD | `rdsector` `0x554`, `ServerFunc` `0x804` | Read request offset/alignment and `0x435053` image request in the selected external core; IOMAN ordinals open 4, close 5, read 6, lseek 8. Addresses are **IOP module-relative**. | Boot-to-game trace with real kernel services, CDDA, disc change and SubQ paths. |
+
+Source chain: [POPSTARTER_REPLACEMENT.md](POPSTARTER_REPLACEMENT.md) (§ ordered fix-file continuation, § next IOP integration), [POPS_IO_CONTRACT.md](POPS_IO_CONTRACT.md), REPOP `docs/POPSTARTER_PFS_WRAP_EVIDENCE.md`, `docs/POPS_STARTUP_FUNCTION_EVIDENCE.md` and current `parity/popstarter*/ground_truth.json`. Existing REPOP `popstarter/src` code is not ground truth merely because it compiles. Each future source-parity claim needs an original CLEAN symbol, a justified reconstructed function, a real MIPS build and explained size/semantic differences.
