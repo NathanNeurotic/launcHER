@@ -7,6 +7,15 @@ Include `Co-authored-by: ChatGPT <chatgpt@openai.com>` in new commits.
 
 ## October 20 source and CI continuation
 
+Follow-up source review found that the fileXio comparison rejected positive
+driver close results. It now treats only negative results as errors, matching
+the existing SMB fixture's nonnegative-close contract (hardware returned 3).
+Reader regressions cover positive close success and preservation of the original
+POSIX failure even when that comparison completes. The Windows reader harness
+opens binary fixtures in binary mode, avoiding text-mode EOF at byte 0x1a.
+All seven reader tests passed locally with Windows GCC; target/CI and physical
+console results must still be reported separately.
+
 At resumption, local HEAD, the freshly fetched remote branch and PR #23 all
 matched `5bf2afcc548029f4794497882c96b15c365904e3` (zero ahead/behind).
 The uncommitted dependency-reader tracing edit was preserved. The temporary

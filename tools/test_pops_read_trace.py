@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 class ReadTraceTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.temp = tempfile.TemporaryDirectory()
+        cls.temp = tempfile.TemporaryDirectory(ignore_cleanup_errors=os.name == 'nt')
         directory = Path(cls.temp.name)
         (directory / 'fileXio_rpc.h').write_text('''
 #include <stdint.h>
@@ -40,6 +40,9 @@ int fileXioClose(int);
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+#ifndef O_BINARY
+#define O_BINARY 0
+#endif
 static int mode, posix_failure, real_fd, closes, reads;
 static char trace[16384];
 void test_reset(int next_mode, int next_posix_failure) {
@@ -58,7 +61,7 @@ int boot_trace_printf(const char *format, ...) {
 int fileXioOpen(const char *path, int flags) {
   assert(flags==0);
   if(mode==1) return -EACCES;
-  real_fd=open(path,O_RDONLY);
+  real_fd=open(path,O_RDONLY|O_BINARY);
   return real_fd<0?-errno:0; /* Descriptor zero is a valid open. */
 }
 int64_t fileXioLseek64(int fd, int64_t offset, int whence) {
@@ -80,12 +83,16 @@ int fileXioRead(int fd, void *buffer, int size) {
 int fileXioClose(int fd) {
   assert(fd==0);++closes;
   int result=close(real_fd);
-  return mode==7?-EIO:(result<0?-errno:result);
+  return mode==7?-EIO:(result<0?-errno:(mode==8?3:result));
 }
 static ssize_t test_posix_read(int fd, void *buffer, size_t size) {
   if(posix_failure) { errno=EIO;return -1; }
   return read(fd,buffer,size);
 }
+static int test_posix_open(const char *path, int flags) {
+  return open(path,flags|O_BINARY);
+}
+#define open test_posix_open
 #define read test_posix_read
 ''' + source[start:end] + '''
 int test_dependency(const char *path, void *buffer, size_t capacity, size_t *out) {
@@ -140,6 +147,23 @@ int test_dependency(const char *path, void *buffer, size_t capacity, size_t *out
             self.assertEqual(self.buffer.raw, before)
             self.assertEqual(self.lib.test_reads(), 0)
             self.assertEqual(self.lib.test_closes(), 1)
+
+    def test_positive_driver_close_is_success(self):
+        self.lib.test_reset(8, 0)
+        self.assertEqual(self.compare(), 0)
+        self.assertEqual(self.lib.test_closes(), 1)
+        self.assertIn(('sha256='+hashlib.sha256(self.data).hexdigest()).encode(),
+                      self.lib.test_log())
+        self.assertNotIn(b'POPS_XIO_FAIL', self.lib.test_log())
+
+    def test_positive_close_comparison_retains_original_error(self):
+        self.lib.test_reset(8, 1)
+        size = c.c_size_t(0x1234)
+        self.assertEqual(self.lib.test_dependency(os.fsencode(self.path), self.buffer,
+                         len(self.data), c.byref(size)), -errno.EIO)
+        self.assertEqual(size.value, 0x1234)
+        self.assertIn(b'POPS_XIO complete', self.lib.test_log())
+        self.assertIn(b'original_result=-5 retained', self.lib.test_log())
 
     def test_io_failures_close_once_and_report_stage(self):
         for mode, error, stage in ((1, errno.EACCES, 'open'), (2, errno.EIO, 'size'),

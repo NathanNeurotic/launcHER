@@ -52,8 +52,9 @@ int pops_read_filexio_trace(const char *path, void *buffer, size_t capacity) {
     total += (size_t)received;
   }
   int closed = fileXioClose(fd);
-  if (!result && closed) {
-    result = closed < 0 ? closed : -EIO;
+  /* IOP drivers may return a positive success value (for example SMB). */
+  if (!result && closed < 0) {
+    result = closed;
     DPRINTF("POPS_XIO_FAIL stage=close result=%d bytes=%u\n", result, (unsigned)total);
   }
   if (!result) {
