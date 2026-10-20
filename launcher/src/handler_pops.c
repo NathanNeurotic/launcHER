@@ -220,11 +220,15 @@ static int readFullFile(const char *path, void *buffer, size_t max_size, size_t 
     }
     total += (size_t)n;
   }
-  if (close(fd)) {
+  /* PS2SDK libcglue preserves nonnegative driver close return values. */
+  int closed = close(fd);
+  if (closed < 0) {
     int result = errno ? -errno : -EIO;
-    DPRINTF("POPS_READ_FAIL stage=close result=%d bytes=%u\n", result, (unsigned)total);
+    DPRINTF("POPS_READ_FAIL stage=close result=%d returned=%d errno=%d bytes=%u\n",
+            result, closed, errno, (unsigned)total);
     return result;
   }
+  DPRINTF("POPS_READ close_result=%d bytes=%u\n", closed, (unsigned)total);
   DPRINTF("POPS_READ complete bytes=%u\n", (unsigned)total);
 
   if (out_size)

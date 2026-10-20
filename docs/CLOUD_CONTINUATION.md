@@ -7,6 +7,22 @@ Include `Co-authored-by: ChatGPT <chatgpt@openai.com>` in new commits.
 
 ## October 20 source and CI continuation
 
+Latest hardware observation: run `20261020T134413-0102`, artifact from commit
+`52253e5`, reached `POPS_READ_FAIL stage=close result=-5 bytes=3166988`.
+The independent fileXio comparison completed all 3,166,988 bytes and produced
+the expected `59df3389...` core SHA256. See
+`docs/evidence/pops_dependency_close_console.json`. The earlier unknown read
+stage is now isolated to the POSIX close check, before Sony entry.
+
+Source correction: `readFullFile` now rejects only negative `close()` results.
+PS2SDK libcglue's `_close` passes its driver's nonnegative return through
+`__transform_errno`; a positive success must not be interpreted through stale
+`errno`. The original trace did not log the raw return, so the next controlled
+run must confirm the explanation. New trace fields report `close_result` or
+the raw negative return and errno. All nine reader host regressions pass,
+including positive success with stale errno and retained negative-close errors.
+Reference: https://github.com/ps2dev/ps2sdk/blob/master/ee/libcglue/src/glue.c
+
 Follow-up source review found that the fileXio comparison rejected positive
 driver close results. It now treats only negative results as errors, matching
 the existing SMB fixture's nonnegative-close contract (hardware returned 3).

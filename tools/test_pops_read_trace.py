@@ -92,7 +92,16 @@ static ssize_t test_posix_read(int fd, void *buffer, size_t size) {
 static int test_posix_open(const char *path, int flags) {
   return open(path,flags|O_BINARY);
 }
+static int test_posix_close(int fd) {
+  int result=close(fd);
+  if(result<0) return result;
+  if(mode==9) { errno=EIO; return 3; }
+  if(mode==10) { errno=EACCES; return -1; }
+  if(mode==11) { errno=0; return -1; }
+  return result;
+}
 #define open test_posix_open
+#define close test_posix_close
 #define read test_posix_read
 ''' + source[start:end] + '''
 int test_dependency(const char *path, void *buffer, size_t capacity, size_t *out) {
@@ -197,6 +206,29 @@ int test_dependency(const char *path, void *buffer, size_t capacity, size_t *out
         self.assertEqual(self.lib.test_closes(), 0)
         self.assertIn(f'POPS_READ size_low={len(self.data)} size_high=0 capacity={len(self.data)}'.encode(),
                       self.lib.test_log())
+
+    def test_positive_posix_close_ignores_stale_errno(self):
+        self.lib.test_reset(9, 0)
+        size = c.c_size_t(0)
+        self.assertEqual(self.lib.test_dependency(os.fsencode(self.path), self.buffer,
+                         len(self.data), c.byref(size)), 0)
+        self.assertEqual(size.value, len(self.data))
+        self.assertEqual(self.buffer.raw[:len(self.data)], self.data)
+        self.assertEqual(self.lib.test_closes(), 0)
+        self.assertIn(b'POPS_READ close_result=3', self.lib.test_log())
+        self.assertNotIn(b'POPS_READ_COMPARE', self.lib.test_log())
+
+    def test_negative_posix_close_retains_error_after_comparison(self):
+        for mode, error in ((10, errno.EACCES), (11, errno.EIO)):
+            with self.subTest(mode=mode):
+                self.lib.test_reset(mode, 0)
+                size = c.c_size_t(0x1234)
+                self.assertEqual(self.lib.test_dependency(os.fsencode(self.path), self.buffer,
+                                 len(self.data), c.byref(size)), -error)
+                self.assertEqual(size.value, 0x1234)
+                self.assertIn(b'POPS_READ_FAIL stage=close', self.lib.test_log())
+                self.assertIn(b'POPS_XIO complete', self.lib.test_log())
+                self.assertIn(f'original_result={-error} retained'.encode(), self.lib.test_log())
 
 
 if __name__ == '__main__':
