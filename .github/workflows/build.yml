@@ -77,6 +77,24 @@ jobs:
             build/release/launcHER.zip
             build/release/SMB-NOTICES.txt
 
+      # Compile opt-in diagnostics too; keep the normal release artifact above.
+      - name: Build boot-trace diagnostic
+        if: github.event_name == 'pull_request'
+        run: |
+          cmake -B build-trace -DLAUNCHER_BOOT_TRACE=ON -DDEBUG=ON
+          cmake --build build-trace --target launcHER
+
+      - name: Upload boot-trace diagnostic
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: launcHER-boot-trace
+          if-no-files-found: error
+          path: |
+            build-trace/release/launcHER.elf
+            build-trace/release/version.txt
+            build-trace/release/SMB-NOTICES.txt
+
   release:
     needs: [build, host-tests]
     runs-on: ubuntu-latest

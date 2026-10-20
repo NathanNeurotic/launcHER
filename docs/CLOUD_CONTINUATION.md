@@ -15,6 +15,12 @@ POSIX failure even when that comparison completes. The Windows reader harness
 opens binary fixtures in binary mode, avoiding text-mode EOF at byte 0x1a.
 All seven reader tests passed locally with Windows GCC; target/CI and physical
 console results must still be reported separately.
+PR CI additionally builds `LAUNCHER_BOOT_TRACE=ON` with `DEBUG=ON` in a separate
+`build-trace` directory and uploads `launcHER-boot-trace`. The ordinary
+`launcHER` artifact remains the default production build. No recovery ELF is
+configured in the diagnostic. Use the artifact from the exact inspected commit
+for a future authorized console comparison; a successful build is not runtime
+acceptance.
 
 At resumption, local HEAD, the freshly fetched remote branch and PR #23 all
 matched `5bf2afcc548029f4794497882c96b15c365904e3` (zero ahead/behind).
