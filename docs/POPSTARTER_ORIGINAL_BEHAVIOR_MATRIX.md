@@ -46,6 +46,9 @@ Reproducibility: `python tools/test_pops_external.py`, `python tools/test_pops_r
 
 ## Reverse-engineering function anchors (selected pinned profiles)
 
+**Decompiler provenance warning:** REPOP's archived `popstarter/ghidra/output/decompiled.c` identifies its processor as `MIPS:LE:64:64-32addr`, whereas the current eligible EE ground-truth export identifies `r5900:LE:32:default`. The archived C is a useful lead for finding callsites, but it is **not** itself an R5900-validated function-parity claim. Corroborate each high-priority path against a current CLEAN R5900 export, instruction bytes and bounded original execution before changing production runtime behavior.
+
+
 These are exact **entry/callsite addresses in the identified original images**, not addresses to write into arbitrary POPS versions. Validate profile SHA-256 and original bytes before translating any fix. A known callsite does not establish every conditional path.
 
 | Image | Original symbol / address | What is actually established | Next observation |
