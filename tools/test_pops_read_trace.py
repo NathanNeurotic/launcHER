@@ -24,7 +24,7 @@ int64_t fileXioLseek64(int, int64_t, int);
 int fileXioRead(int, void *, int);
 int fileXioClose(int);
 ''')
-        (directory / 'io_common.h').write_text('#define FIO_O_RDONLY 0\n')
+        (directory / 'io_common.h').write_text('#define FIO_O_RDONLY 0x0001\n')
         source = (ROOT / 'launcher/src/handler_pops.c').read_text()
         start = source.index('static int readFullFile(')
         end = source.index('/* The archived MAIN calls root TROJAN', start)
@@ -59,7 +59,7 @@ int boot_trace_printf(const char *format, ...) {
   va_end(args);return result;
 }
 int fileXioOpen(const char *path, int flags) {
-  assert(flags==0);
+  assert(flags==0x0001);
   if(mode==1) return -EACCES;
   real_fd=open(path,O_RDONLY|O_BINARY);
   return real_fd<0?-errno:0; /* Descriptor zero is a valid open. */
