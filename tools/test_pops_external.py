@@ -1257,9 +1257,11 @@ def main():
                  "pops_bootstrap_verify_layout"):
         getattr(LIB, name).restype = c.c_int
     from test_pops_fix_files import FixFiles
+    from test_pops_read_trace import ReadTraceTests
     suite = unittest.TestSuite([
         unittest.defaultTestLoader.loadTestsFromTestCase(InspectorTests),
         unittest.defaultTestLoader.loadTestsFromTestCase(FixFiles),
+        unittest.defaultTestLoader.loadTestsFromTestCase(ReadTraceTests),
     ])
     result = unittest.TextTestRunner(verbosity=2).run(suite)
     if not result.wasSuccessful():

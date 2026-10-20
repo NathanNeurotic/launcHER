@@ -22,6 +22,7 @@ set(EE_SOURCES
     src/handler_mc.c
     src/handler_quickboot.c
     src/handler_pops.c
+    src/pops_read_trace.c
     src/pops_trampoline.S
 )
 
