@@ -95,6 +95,9 @@ static int test_close(int fd) {
 int test_directory(void *core, size_t size, const char *root, const char *title) {
   return pops_stage_fix_files(core, size, root, title, 0);
 }
+int test_dependency(const char *path, void *buffer, size_t size, size_t *read_size) {
+  return readPopsDependency(path, buffer, size, read_size);
+}
 void test_io_failures(int reads, int closes) { fail_reads=reads; fail_closes=closes; }
 ''')
         library = directory / ('fixes.dll' if os.name == 'nt' else 'fixes.so')

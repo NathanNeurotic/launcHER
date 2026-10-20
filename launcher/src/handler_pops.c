@@ -11,6 +11,7 @@
 #include "pops_config.h"
 #include "pops_compat_db.h"
 #include "pops_modes_patches.h"
+#include "pops_read_trace.h"
 #include <ctype.h>
 #include <fcntl.h>
 #include <kernel.h>
@@ -178,18 +179,28 @@ int findPopsDependencies(const char *vcdPath, char *popsPath, size_t popsPathSiz
 
 static int readFullFile(const char *path, void *buffer, size_t max_size, size_t *out_size) {
   int fd = open(path, O_RDONLY);
-  if (fd < 0)
-    return errno ? -errno : -EIO;
+  if (fd < 0) {
+    int result = errno ? -errno : -EIO;
+    DPRINTF("POPS_READ_FAIL stage=open result=%d path=%s\n", result, path);
+    return result;
+  }
 
   off_t sz = lseek(fd, 0, SEEK_END);
+  DPRINTF("POPS_READ size_low=%u size_high=%u capacity=%u path=%s\n",
+          (unsigned)(uint64_t)sz, (unsigned)((uint64_t)sz >> 32),
+          (unsigned)max_size, path);
   if (sz <= 0 || (size_t)sz > max_size) {
     int result = sz < 0 ? (errno ? -errno : -EIO) : -EINVAL;
+    DPRINTF("POPS_READ_FAIL stage=size result=%d\n", result);
     close(fd);
     return result;
   }
   off_t position = lseek(fd, 0, SEEK_SET);
   if (position != 0) {
     int result = position < 0 && errno ? -errno : -EIO;
+    DPRINTF("POPS_READ_FAIL stage=rewind result=%d position_low=%u position_high=%u\n",
+            result, (unsigned)(uint64_t)position,
+            (unsigned)((uint64_t)position >> 32));
     close(fd);
     return result;
   }
@@ -202,17 +213,38 @@ static int readFullFile(const char *path, void *buffer, size_t max_size, size_t 
     ssize_t n = read(fd, (char *)buffer + total, chunk);
     if (n <= 0 || (size_t)n > chunk) {
       int result = n < 0 && errno ? -errno : -EIO;
+      DPRINTF("POPS_READ_FAIL stage=read result=%d offset=%u requested=%u returned=%d\n",
+              result, (unsigned)total, (unsigned)chunk, (int)n);
       close(fd);
       return result;
     }
     total += (size_t)n;
   }
-  if (close(fd))
-    return errno ? -errno : -EIO;
+  if (close(fd)) {
+    int result = errno ? -errno : -EIO;
+    DPRINTF("POPS_READ_FAIL stage=close result=%d bytes=%u\n", result, (unsigned)total);
+    return result;
+  }
+  DPRINTF("POPS_READ complete bytes=%u\n", (unsigned)total);
 
   if (out_size)
     *out_size = total;
   return 0;
+}
+
+/* A failed dependency remains fatal. A trace-only second read compares the
+ * independent fileXio RPC route; its bytes must never authorize a handoff. */
+static int readPopsDependency(const char *path, void *buffer, size_t max_size,
+                               size_t *out_size) {
+  int result = readFullFile(path, buffer, max_size, out_size);
+#ifdef LAUNCHER_BOOT_TRACE
+  if (result) {
+    DPRINTF("POPS_READ_COMPARE original_result=%d\n", result);
+    pops_read_filexio_trace(path, buffer, max_size);
+    DPRINTF("POPS_READ_COMPARE original_result=%d retained; Sony_entry_not_executed=1\n", result);
+  }
+#endif
+  return result;
 }
 
 /* The archived MAIN calls root TROJAN, root PATCH, title TROJAN, title PATCH
@@ -867,7 +899,7 @@ int launchPOPS(int argc, char *argv[]) {
   int isPak = dot && !strcasecmp(dot, ".pak");
 
   if (isPak) {
-    res = readFullFile(popsPath, POPS_LOAD_RAW_BUF, POPS_LOAD_MAX_SIZE, &rawSize);
+    res = readPopsDependency(popsPath, POPS_LOAD_RAW_BUF, POPS_LOAD_MAX_SIZE, &rawSize);
     if (res) {
       msg("POPS: Failed reading %s: %d\n", popsPath, res);
       return res;
@@ -891,12 +923,12 @@ int launchPOPS(int argc, char *argv[]) {
   } else {
     /* Loose POPS.ELF + IOPRP252.IMG */
     size_t elfSize = 0, iopSize = 0;
-    res = readFullFile(popsPath, POPS_LOAD_RAW_BUF, POPS_LOAD_MAX_SIZE, &elfSize);
+    res = readPopsDependency(popsPath, POPS_LOAD_RAW_BUF, POPS_LOAD_MAX_SIZE, &elfSize);
     if (res) {
       msg("POPS: Failed reading %s: %d\n", popsPath, res);
       return res;
     }
-    res = readFullFile(ioprpPath, POPS_LOAD_IOP_BUF, POPS_IOP_MAX_SIZE, &iopSize);
+    res = readPopsDependency(ioprpPath, POPS_LOAD_IOP_BUF, POPS_IOP_MAX_SIZE, &iopSize);
     if (res) {
       msg("POPS: Failed reading %s: %d\n", ioprpPath, res);
       return res;

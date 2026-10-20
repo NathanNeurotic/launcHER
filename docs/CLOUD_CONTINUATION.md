@@ -1,11 +1,48 @@
-# Cloud continuation checkpoint - 2026-10-18
+# Continuation checkpoint - 2026-10-20
 
 Continue draft PR [#23](https://github.com/NathanNeurotic/launcHER/pull/23)
 on `codex/popstarter-replacement`. Do not merge. Fetch before editing and
 preserve newer work. Publish validated incremental commits on this branch.
 Include `Co-authored-by: ChatGPT <chatgpt@openai.com>` in new commits.
 
-The code checkpoint inspected for this handoff is
+## October 20 source and CI continuation
+
+At resumption, local HEAD, the freshly fetched remote branch and PR #23 all
+matched `5bf2afcc548029f4794497882c96b15c365904e3` (zero ahead/behind).
+The uncommitted dependency-reader tracing edit was preserved. The temporary
+`codex/pops-trace-20261019` branch contains diagnostic defaults; it is not
+newer production parity work and must not be merged wholesale into the PR.
+
+The next physical boot gate is **reading the external POPS.ELF**, before
+core staging or Sony IOP reset. A user screenshot showed dependency EIO (-5)
+at `ata0:/LAUNCHER-TEST-20261013-A/POPS.ELF`. Optional configuration ENOENTs
+above it were not the launch failure. The later `size=ld capacity=3166988`
+trace exposed unsupported `%lld` formatting in nano printf, not an oversized
+file. The exact failing operation still needs a captured result. See
+`docs/evidence/pops_dependency_read_failure_console.json`.
+
+The current reader trace uses 32-bit low/high fields, reports open/size/rewind/
+read/close stages, and compares a failed POSIX dependency read through fileXio
+only in `LAUNCHER_BOOT_TRACE` builds. The comparison opens read-only, uses a
+64-byte-aligned bounce buffer for all positive short reads, and reports a
+complete-file SHA256 only after successful close. The original error remains
+fatal even if the comparison succeeds; comparison bytes are discarded and
+never authorize staging or handoff. No module reset/load is added by it.
+
+`tools/test_pops_read_trace.py` executes the production comparison and caller
+with injected I/O failures and short reads. It is included by the existing
+external-POPS CI test entry point. A console retry is still required to
+distinguish a legacy RPC problem from a driver/media failure. Do not bypass
+the error, substitute a different dependency, or overwrite installed files
+based on the formatting failure. The user selected source and CI work for
+this continuation; no further console execution was requested for this pass.
+
+For the next diagnostic build use `-DLAUNCHER_BOOT_TRACE=ON -DDEBUG=ON` with
+no recovery ELF. Look for `POPS_READ_FAIL stage=...`, `POPS_XIO...`, and the
+retained original result. All existing game/save/runtime acceptance gates
+below remain open.
+
+The earlier October 18 code checkpoint inspected for this handoff was
 `43c6ef10de2a285c247a1d563e190a5ab6da9294`. Local HEAD, the origin tracking
 branch and PR head matched. Its GitHub host tests, PS2 build and launcher
 argument checks passed; release jobs were skipped. Subsequent commits may
