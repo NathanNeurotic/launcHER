@@ -23,6 +23,15 @@ the raw negative return and errno. All nine reader host regressions pass,
 including positive success with stale errno and retained negative-close errors.
 Reference: https://github.com/ps2dev/ps2sdk/blob/master/ee/libcglue/src/glue.c
 
+The PR's `launcHER-boot-trace` artifact now also enables
+`LAUNCHER_BOOT_TRACE_STOP_AFTER_DEPENDENCIES`. After successful PAK input or both
+loose dependency reads it prints `POPS_DEPENDENCIES_PASS` and sleeps before core
+staging, VMC creation, external IOP reset or Sony entry. This verifies only the
+dependency read boundary. Production defaults remain unchanged. Disable this
+option explicitly for later startup diagnostics; do not mistake this intentional
+stop for full preflight/game acceptance. Earlier artifact descriptions without
+this stop refer to older commits.
+
 Follow-up source review found that the fileXio comparison rejected positive
 driver close results. It now treats only negative results as errors, matching
 the existing SMB fixture's nonnegative-close contract (hardware returned 3).

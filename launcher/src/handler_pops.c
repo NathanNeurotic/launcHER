@@ -909,6 +909,12 @@ int launchPOPS(int argc, char *argv[]) {
       return res;
     }
 
+#ifdef LAUNCHER_BOOT_TRACE_STOP_AFTER_DEPENDENCIES
+    msg("POPS_DEPENDENCIES_PASS package_bytes=%u staging=0 VMC_creation=0 Sony_entry=0\n",
+        (unsigned)rawSize);
+    SleepThread();
+    return 0;
+#endif
     size_t decodedSize = 0;
     res = pops_pak_decode(POPS_LOAD_RAW_BUF, rawSize, POPS_STAGE_BUF,
                           POPS_STAGING_CAPACITY, &decodedSize);
@@ -938,6 +944,12 @@ int launchPOPS(int argc, char *argv[]) {
       return res;
     }
 
+#ifdef LAUNCHER_BOOT_TRACE_STOP_AFTER_DEPENDENCIES
+    msg("POPS_DEPENDENCIES_PASS elf_bytes=%u iop_bytes=%u staging=0 VMC_creation=0 Sony_entry=0\n",
+        (unsigned)elfSize, (unsigned)iopSize);
+    SleepThread();
+    return 0;
+#endif
     res = pops_boot_plan_elf(POPS_LOAD_RAW_BUF, elfSize, POPS_LOAD_IOP_BUF, iopSize, &plan);
     if (res) {
       msg("POPS: Invalid POPS.ELF or IOPRP: %d\n", res);
