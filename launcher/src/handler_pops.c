@@ -178,18 +178,26 @@ int findPopsDependencies(const char *vcdPath, char *popsPath, size_t popsPathSiz
 
 static int readFullFile(const char *path, void *buffer, size_t max_size, size_t *out_size) {
   int fd = open(path, O_RDONLY);
-  if (fd < 0)
-    return errno ? -errno : -EIO;
+  if (fd < 0) {
+    int result = errno ? -errno : -EIO;
+    DPRINTF("POPS_READ_FAIL stage=open result=%d path=%s\n", result, path);
+    return result;
+  }
 
   off_t sz = lseek(fd, 0, SEEK_END);
+  DPRINTF("POPS_READ size=%lld capacity=%u path=%s\n",
+          (long long)sz, (unsigned)max_size, path);
   if (sz <= 0 || (size_t)sz > max_size) {
     int result = sz < 0 ? (errno ? -errno : -EIO) : -EINVAL;
+    DPRINTF("POPS_READ_FAIL stage=size result=%d\n", result);
     close(fd);
     return result;
   }
   off_t position = lseek(fd, 0, SEEK_SET);
   if (position != 0) {
     int result = position < 0 && errno ? -errno : -EIO;
+    DPRINTF("POPS_READ_FAIL stage=rewind result=%d position=%lld\n",
+            result, (long long)position);
     close(fd);
     return result;
   }
@@ -202,13 +210,19 @@ static int readFullFile(const char *path, void *buffer, size_t max_size, size_t 
     ssize_t n = read(fd, (char *)buffer + total, chunk);
     if (n <= 0 || (size_t)n > chunk) {
       int result = n < 0 && errno ? -errno : -EIO;
+      DPRINTF("POPS_READ_FAIL stage=read result=%d offset=%u requested=%u returned=%d\n",
+              result, (unsigned)total, (unsigned)chunk, (int)n);
       close(fd);
       return result;
     }
     total += (size_t)n;
   }
-  if (close(fd))
-    return errno ? -errno : -EIO;
+  if (close(fd)) {
+    int result = errno ? -errno : -EIO;
+    DPRINTF("POPS_READ_FAIL stage=close result=%d bytes=%u\n", result, (unsigned)total);
+    return result;
+  }
+  DPRINTF("POPS_READ complete bytes=%u\n", (unsigned)total);
 
   if (out_size)
     *out_size = total;
