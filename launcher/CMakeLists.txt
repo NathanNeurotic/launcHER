@@ -11,6 +11,7 @@ option(LAUNCHER_CDROM "Support for loading PS1 and PS2 CDs/DVDs" ON)
 option(LAUNCHER_ILINK "Support for loading ELFs from iLink" OFF)
 option(LAUNCHER_UDPBD "Support for loading ELFs from UDPBD" OFF)
 option(LAUNCHER_UDPFS "Support for loading ELFs from UDPFS" OFF)
+option(LAUNCHER_SMB "Support for loading ELFs from SMBv1" ON)
 option(LAUNCHER_XFROM "Support for loading ELFs from XFROM" ON)
 
 # Base sources
@@ -20,6 +21,9 @@ set(EE_SOURCES
     src/init.c
     src/handler_mc.c
     src/handler_quickboot.c
+    src/handler_pops.c
+    src/pops_read_trace.c
+    src/pops_trampoline.S
 )
 
 # Common files
@@ -29,6 +33,19 @@ list(APPEND EE_SOURCES
     ../common/src/cnf.c
     ../common/src/loader.c
     ../common/src/launch_args.c
+    ../common/src/pops_external.c
+    ../common/src/pops_pak.c
+    ../common/src/pops_iop_image.c
+    ../common/src/pops_profile.c
+    ../common/src/pops_boot_stage.c
+    ../common/src/pops_core_patches.c
+    ../common/src/pops_bootstrap.c
+    ../common/src/pops_vcd.c
+    ../common/src/pops_vmc.c
+    ../common/src/pops_config.c
+    ../common/src/pops_compat_db.c
+    ../common/src/pops_modes_patches.c
+    ../third_party/lzma/LzmaDec.c
     ../common/src/dprintf.c
 )
 
@@ -67,6 +84,10 @@ foreach(irx ${IRX_FILES})
   irx_to_source("$ENV{PS2SDK}/iop/irx/${irx}" irx_source "${irx_name}_irx" "")
   list(APPEND IRX_SOURCES ${irx_source})
 endforeach()
+
+# Card services compatible with Sony's embedded SIO2 2.3. These are selected
+# only after the identified Sony IOP reset, alongside the normal SDK variants.
+list(APPEND IRX_FILES mcman-2000.irx secrman.irx)
 
 # OSDM support
 if(LAUNCHER_OSDM)
@@ -168,6 +189,23 @@ if(LAUNCHER_UDPFS)
 endif()
 
 # CDROM support
+if(LAUNCHER_SMB)
+  list(APPEND EE_SOURCES src/handler_smb.c ../common/src/network_config.c)
+  list(APPEND IRX_FILES netman.irx smap_tcpip.irx ps2ip-nm.irx launcher_smbman.irx)
+  add_compile_definitions(SMB)
+  set(DEV9 ON)
+  set(SMBMAN_IRX "${CMAKE_CURRENT_BINARY_DIR}/launcher_smbman.irx")
+  file(GLOB SMBMAN_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/iop/smbman/src/*")
+  add_custom_command(OUTPUT ${SMBMAN_IRX}
+      COMMAND ${CMAKE_COMMAND} -E chdir "${CMAKE_CURRENT_SOURCE_DIR}/iop/smbman"
+          ${CMAKE_MAKE_PROGRAM} "IOP_BIN_DIR=${CMAKE_CURRENT_BINARY_DIR}/"
+          "IOP_OBJS_DIR=${CMAKE_CURRENT_BINARY_DIR}/smbman-obj/"
+      DEPENDS ${SMBMAN_SOURCES} "${CMAKE_CURRENT_SOURCE_DIR}/iop/smbman/Makefile"
+      VERBATIM)
+  add_custom_target(launcher_smbman DEPENDS ${SMBMAN_IRX})
+endif()
+
+# CDROM support
 if(LAUNCHER_CDROM)
   list(APPEND EE_SOURCES src/handler_cdrom.c)
   list(APPEND IRX_FILES xparam.irx)
@@ -204,6 +242,33 @@ endif()
 if(BDM)
   list(APPEND EE_SOURCES src/handler_bdm.c)
   list(APPEND IRX_FILES bdm.irx bdmfs_fatfs.irx)
+  # Pin the FatFs dependency; SDK wrapper sources and local repairs are licensed
+  # in-tree. The same module serves initial preflight and Sony post-reset I/O.
+  include(ExternalProject)
+  if(POLICY CMP0135)
+    cmake_policy(SET CMP0135 NEW)
+  endif()
+  ExternalProject_Add(launcher_fatfs_source
+      URL "https://codeload.github.com/fjtrujy/FatFs/tar.gz/18cc3d9e07473a6aa3d783a66224b243a7b4974c"
+      URL_HASH SHA256=ef0ce9710869f1932c328c5c4b07a707fdf08fa72e203f1fb1fa9ef67e288b81
+      SOURCE_DIR "${CMAKE_CURRENT_BINARY_DIR}/fatfs-source"
+      CONFIGURE_COMMAND "" BUILD_COMMAND "" INSTALL_COMMAND ""
+  )
+  set(POPS_FATFS_IRX "${CMAKE_CURRENT_BINARY_DIR}/bdmfs_fatfs.irx")
+  file(GLOB_RECURSE POPS_FATFS_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/iop/pops_fatfs/src/*")
+  add_custom_command(
+      OUTPUT ${POPS_FATFS_IRX}
+      COMMAND ${CMAKE_COMMAND} -E chdir "${CMAKE_CURRENT_SOURCE_DIR}/iop/pops_fatfs"
+          ${CMAKE_MAKE_PROGRAM}
+          "FATFS_ROOT=${CMAKE_CURRENT_BINARY_DIR}/fatfs-source"
+          "IOP_BIN_DIR=${CMAKE_CURRENT_BINARY_DIR}/"
+          "IOP_OBJS_DIR=${CMAKE_CURRENT_BINARY_DIR}/pops-fatfs-obj/"
+      DEPENDS launcher_fatfs_source ${POPS_FATFS_SOURCES}
+          "${CMAKE_CURRENT_SOURCE_DIR}/iop/pops_fatfs/Makefile"
+      COMMENT "Building BDM FatFs with errno and exclusive-create contracts"
+      VERBATIM
+  )
+  add_custom_target(pops_fatfs DEPENDS ${POPS_FATFS_IRX})
 endif()
 
 if(ENABLE_PRINTF)
@@ -214,11 +279,54 @@ if(ENABLE_PRINTF)
 endif()
 
 # Process all IRX files
+set(POPFS_IRX "${CMAKE_CURRENT_BINARY_DIR}/popfs.irx")
+file(GLOB POPFS_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/iop/popfs/src/*")
+add_custom_command(
+    OUTPUT ${POPFS_IRX}
+    COMMAND ${CMAKE_COMMAND} -E chdir "${CMAKE_CURRENT_SOURCE_DIR}/iop/popfs" ${CMAKE_MAKE_PROGRAM}
+    COMMAND ${CMAKE_COMMAND} -E copy
+        "${CMAKE_CURRENT_SOURCE_DIR}/iop/popfs/irx/popfs.irx" ${POPFS_IRX}
+    DEPENDS ${POPFS_SOURCES} "${CMAKE_CURRENT_SOURCE_DIR}/iop/popfs/Makefile"
+    COMMENT "Building POPS filesystem bridge"
+    VERBATIM
+)
+add_custom_target(popfs DEPENDS ${POPFS_IRX})
+list(APPEND IRX_FILES popfs.irx)
+
+# Sony's external IOP images use legacy IOMAN layouts unsupported by the
+# stock SDK hook. Keep this module separate from normal/Ember initialization.
+set(POPS_IOMANX_IRX "${CMAKE_CURRENT_BINARY_DIR}/pops_iomanx.irx")
+file(GLOB POPS_IOMANX_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/iop/pops_iomanx/src/*")
+add_custom_command(
+    OUTPUT ${POPS_IOMANX_IRX}
+    COMMAND ${CMAKE_COMMAND} -E chdir "${CMAKE_CURRENT_SOURCE_DIR}/iop/pops_iomanx" ${CMAKE_MAKE_PROGRAM}
+    COMMAND ${CMAKE_COMMAND} -E copy
+        "${CMAKE_CURRENT_SOURCE_DIR}/iop/pops_iomanx/irx/pops_iomanx.irx" ${POPS_IOMANX_IRX}
+    DEPENDS ${POPS_IOMANX_SOURCES} "${CMAKE_CURRENT_SOURCE_DIR}/iop/pops_iomanx/Makefile"
+    COMMENT "Building Sony POPS IOMAN compatibility module"
+    VERBATIM
+)
+add_custom_target(pops_iomanx DEPENDS ${POPS_IOMANX_IRX})
+list(APPEND IRX_FILES pops_iomanx.irx)
+
 foreach(irx ${IRX_FILES})
   get_filename_component(irx_name ${irx} NAME_WE)
   string(REPLACE "-" "_" irx_name_clean ${irx_name})
 
-  if(irx_name STREQUAL "udpbd")
+  if(irx_name STREQUAL "launcher_smbman")
+    irx_to_source("${SMBMAN_IRX}" irx_source "launcher_smbman_irx" "")
+  elseif(irx_name STREQUAL "smap_tcpip")
+    # The conversion output is named after its input, so give SDK SMAP a
+    # distinct file name from the ministack driver's smap.irx.
+    configure_file("$ENV{PS2SDK}/iop/irx/smap.irx" "${CMAKE_CURRENT_BINARY_DIR}/smap_tcpip.irx" COPYONLY)
+    irx_to_source("${CMAKE_CURRENT_BINARY_DIR}/smap_tcpip.irx" irx_source "smap_tcpip_irx" "")
+  elseif(irx_name STREQUAL "popfs")
+    irx_to_source("${POPFS_IRX}" irx_source "popfs_irx" "")
+  elseif(irx_name STREQUAL "pops_iomanx")
+    irx_to_source("${POPS_IOMANX_IRX}" irx_source "pops_iomanx_irx" "")
+  elseif(irx_name STREQUAL "bdmfs_fatfs")
+    irx_to_source("${POPS_FATFS_IRX}" irx_source "bdmfs_fatfs_irx" "")
+  elseif(irx_name STREQUAL "udpbd")
     # udpbd is not a part of PS2SDK
     irx_to_source("${CMAKE_CURRENT_SOURCE_DIR}/iop/udpfs/udpbd/irx/udpbd.irx" irx_source "udpbd_irx" "")
   elseif(irx_name STREQUAL "smap")
@@ -265,6 +373,13 @@ endforeach()
 
 # Create executable
 add_executable(launcher_unc ${EE_SOURCES} ${IRX_SOURCES} ${ELF_SOURCES} ${RES_SOURCES})
+add_dependencies(launcher_unc popfs pops_iomanx)
+if(LAUNCHER_SMB)
+  add_dependencies(launcher_unc launcher_smbman)
+endif()
+if(BDM)
+  add_dependencies(launcher_unc pops_fatfs)
+endif()
 
 # Add dependencies on IOP modules built via Makefiles
 if(LAUNCHER_UDPBD)
@@ -286,7 +401,9 @@ if("ps1vn.elf" IN_LIST ELF_FILES)
 endif()
 
 target_include_directories(launcher_unc PRIVATE
+    iop/smbman/include
     ../common/include
+    ../third_party/lzma
     include
 )
 
@@ -305,6 +422,7 @@ link_newlib_nano(launcher_unc
     cdvd
     patches
     kernel
+    iopreboot
     libdebug.a
     fileXio
     gskit

@@ -1,0 +1,29 @@
+{
+  "run": {
+    "run_id": "20261014T004047-0013",
+    "outcome": "hang",
+    "elf_sha256": "427e9480e76cb583cdeb203302712bb58666389a1c9f5d2067eac326d2e70914",
+    "stdout": "unmounting\r\nunmounted\r\nloadelf: fname host:program.elf secname all\r\nInput ELF format filename = host:program.elf\r\n1 00100000 00078e04 ........\r\nLoaded, host:program.elf\r\nstart address 0x11ca20\r\ngp address 00000000\r\n",
+    "artifacts": [
+      "program.elf",
+      "stdout.txt"
+    ],
+    "timings": {
+      "queue_ms": 0,
+      "upload_ms": 4,
+      "run_ms": 20000
+    },
+    "started": "2026-10-14T00:40:47.9987891Z"
+  },
+  "provenance_path": "build/pops-real-iop-console/provenance.json",
+  "observation_method": "OBS physical capture preview read via Computer Use",
+  "screen_observations": [
+    "POPS_IOP_BINDING foreign-reset-complete",
+    "POPS_IOP_BINDING module=production-iomanX id=25 start=0",
+    "POPS_IOP_BINDING module=production-fileXio id=26 start=0",
+    "POPS_IOP_BINDING module=controlled-backend id=27 start=0",
+    "POPS_IOP_BINDING load=production-popfs"
+  ],
+  "interpretation": "No POPFS module return or PASS/FAIL screen marker observed. Hardware stalled at load/initialization boundary; reset intentionally removed ps2link, so network hang classification alone is not proof of probe failure.",
+  "acceptance": false
+}

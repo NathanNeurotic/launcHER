@@ -1,7 +1,12 @@
-
 #include "init.h"
+#include "ipconfig_smap.h"
 #include "common.h"
 #include "dprintf.h"
+#include "pops_external.h"
+#include "pops_bootstrap.h"
+#include "launch_args.h"
+#include "handler_pops.h"
+#include "handler_smb.h"
 #include <ctype.h>
 #include <fcntl.h>
 #include <iopcontrol.h>
@@ -18,6 +23,10 @@
 #include <string.h>
 #define NEWLIB_PORT_AWARE
 #include "fileXio_rpc.h"
+#include <io_common.h>
+
+_Static_assert(POPS_PROXY_ARGS_MAX <= LF_ARG_MAX,
+               "POPFS arguments must fit the SDK LOADFILE RPC packet");
 
 // Macros for loading embedded IOP modules
 #define IRX_DEFINE(mod)                                                                                                                              \
@@ -30,10 +39,14 @@
 
 // Embedded IOP modules
 IRX_DEFINE(iomanX);
+IRX_DEFINE(pops_iomanx);
 IRX_DEFINE(fileXio);
 IRX_DEFINE(sio2man);
 IRX_DEFINE(mcman);
+IRX_DEFINE(mcman_2000);
 IRX_DEFINE(mcserv);
+IRX_DEFINE(secrman);
+IRX_DEFINE(popfs);
 
 #ifdef MMCE
 IRX_DEFINE(mmceman);
@@ -83,6 +96,14 @@ IRX_DEFINE(xfromman);
 #define DEV9
 IRX_DEFINE(smap);
 IRX_DEFINE(ministack);
+#endif
+
+#ifdef SMB
+#define DEV9
+IRX_DEFINE(netman);
+IRX_DEFINE(smap_tcpip);
+IRX_DEFINE(ps2ip_nm);
+IRX_DEFINE(launcher_smbman);
 #endif
 
 #ifdef APA
@@ -148,7 +169,7 @@ static ModuleListEntry moduleList[] = {
     INT_MODULE(mmceman, NULL, Device_MMCE),
 #endif
 #ifdef DEV9
-    INT_MODULE(ps2dev9, NULL, Device_ATA | Device_UDPBD | Device_APA | Device_UDPFS | Device_XFROM),
+    INT_MODULE(ps2dev9, NULL, Device_ATA | Device_UDPBD | Device_APA | Device_UDPFS | Device_XFROM | Device_SMB),
 #endif
 #ifdef XFROM
     INT_MODULE(extflash, NULL, Device_XFROM),
@@ -160,6 +181,12 @@ static ModuleListEntry moduleList[] = {
 #endif
 #ifdef UDPFS
     INT_MODULE(udpfs_ioman, NULL, Device_UDPFS),
+#endif
+#ifdef SMB
+    INT_MODULE(netman, NULL, Device_SMB),
+    INT_MODULE(smap_tcpip, NULL, Device_SMB),
+    INT_MODULE(ps2ip_nm, &initTCPIPArguments, Device_SMB),
+    INT_MODULE(launcher_smbman, NULL, Device_SMB),
 #endif
 #ifdef BDM
     INT_MODULE(bdm, NULL, Device_BDM | Device_APA),
@@ -195,6 +222,7 @@ static DeviceType currentDevice = Device_None;
 static int forceIOPReset = 0;
 
 static int loadModules(DeviceType device, int tolerant);
+static int loadModuleList(DeviceType device, int tolerant, int sonySio2);
 
 // Initializes IOP modules for given device type
 int initModules(DeviceType device) { return loadModules(device, 0); }
@@ -206,16 +234,15 @@ int initModulesAny(DeviceType devices) {
 }
 
 static int loadModules(DeviceType device, int tolerant) {
-  if (!forceIOPReset && ((currentDevice)&device))
+  if ((device & Device_SMB) && (device & (Device_UDPFS | Device_UDPBD)))
+    return -EINVAL; /* TCP/IP and ministack cannot own the same NIC. */
+  if (!forceIOPReset && currentDevice && (currentDevice & device) == device)
     // Do nothing if the drivers are already loaded
     return 0;
   forceIOPReset = 0;
 
   if (currentDevice && !(currentDevice & (Device_APA | Device_ATA)) && !(currentDevice & (Device_APA | Device_ATA)))
     shutdownDEV9();
-
-  int ret = 0;
-  int iopret = 0;
 
   // Initialize the RPC manager and reboot the IOP
   sceSifInitRpc(0);
@@ -233,12 +260,38 @@ static int loadModules(DeviceType device, int tolerant) {
   if (currentDevice == Device_None)
     sbv_patch_fileio(); // Patch fileio only once
 
+  return loadModuleList(device, tolerant, 0);
+}
+
+/* This helper never resets the IOP. The POPS bootstrap must first reboot with
+ * its identified external IOP image. fileXio has a separate RPC ID from Sony's
+ * FILEIO; iomanX bridges legacy imports to the modern filesystem drivers. */
+static int loadModuleList(DeviceType device, int tolerant, int sonySio2) {
+  int ret = 0, iopret = 0;
+  if ((device & Device_SMB) && (device & (Device_UDPFS | Device_UDPBD)))
+    return -EINVAL;
+#ifdef SMB
+  launcher_smb_reset();
+#endif
+  currentDevice = Device_None; /* A partial initialization is never cached. */
   // Load modules
   for (int i = 0; i < MODULE_COUNT; i++) {
     ret = 0;
     iopret = 0;
     if (!(device & moduleList[i].type) && !(moduleList[i].type & Device_Basic))
       continue;
+    if (sonySio2 && !strcmp(moduleList[i].name, "sio2man"))
+      continue;
+    /* A loose external IRX on a memory card does not mean that driver was
+     * installed on the newly rebooted IOP. Preserve the normal USB stack
+     * unless this is an explicit XX./BDMA opt-in; otherwise POPFS can start
+     * with no live mass: device at all. Experimental XX behavior is retained. */
+    if (sonySio2 && (device & Device_USB) && pops_get_active_xx_launch() &&
+        pops_has_external_usb_modules() &&
+        (!strcmp(moduleList[i].name, "usbd_mini") || !strcmp(moduleList[i].name, "usbmass_bd_mini"))) {
+      DPRINTF("POPS: XX. USB opt-in: external driver override for %s\n", moduleList[i].name);
+      continue;
+    }
 
     // If module has an arugment function, execute it
     if (moduleList[i].argumentFunction != NULL) {
@@ -249,10 +302,37 @@ static int loadModules(DeviceType device, int tolerant) {
       }
     }
 
-    if (moduleList[i].path)
+    if (sonySio2 && !strcmp(moduleList[i].name, "mcman")) {
+      /* The selected Sony SIO2 exports 2.3, requiring the SDK's remote
+       * compatible card manager (including multitap ordinal 57, not 55).
+       * The foreign image also needs the authentication dependency explicitly. */
+      int secrResult = 0;
+      DPRINTF("IOP: loading secrman (Sony=1)\n");
+      ret = SifExecModuleBuffer(secrman_irx, size_secrman_irx, 0, NULL, &secrResult);
+      DPRINTF("IOP: loaded secrman id=%d start=%d\n", ret, secrResult);
+      if (ret < 0 || secrResult != 0)
+        return ret < 0 ? ret : -EIO;
+    }
+    DPRINTF("IOP: loading %s (Sony=%d)\n", moduleList[i].name, sonySio2);
+    /* Only the identified Sony IOP reset path needs the private legacy-state
+     * migration. Normal launcher and Ember initialization retain SDK iomanX. */
+    if (sonySio2 && !strcmp(moduleList[i].name, "iomanX"))
+      ret = SifExecModuleBuffer(pops_iomanx_irx, size_pops_iomanx_irx, 0, NULL, &iopret);
+    else if (sonySio2 && !strcmp(moduleList[i].name, "mcman"))
+      ret = SifExecModuleBuffer(mcman_2000_irx, size_mcman_2000_irx, 0, NULL, &iopret);
+    else if (moduleList[i].path)
       ret = SifLoadModule(moduleList[i].path, moduleList[i].argLength, moduleList[i].argStr);
     else
       ret = SifExecModuleBuffer(moduleList[i].irx, *moduleList[i].size, moduleList[i].argLength, moduleList[i].argStr, &iopret);
+    DPRINTF("IOP: loaded %s id=%d start=%d\n", moduleList[i].name, ret, iopret);
+
+    if (!strcmp(moduleList[i].name, "fileXio")) {
+      int fxio_ret = fileXioInit();
+      if (fxio_ret < 0) {
+        msg("ERROR: Failed to initialize fileXio RPC: %d\n", fxio_ret);
+        return fxio_ret;
+      }
+    }
 
     // Delay to prevent ps2hdd module from hanging
     if ((device & Device_APA) && !strcmp(moduleList[i].name, "ata_bd"))
@@ -260,7 +340,10 @@ static int loadModules(DeviceType device, int tolerant) {
 
     if (ret >= 0)
       ret = 0;
-    if (iopret == 1)
+    /* For POPS/SMB, a failed IOP module's _start result can be negative even
+     * when SifExecModuleBuffer itself returns a successful module ID.
+     * Other generic launch behavior remains unchanged for compatibility. */
+    if (iopret == 1 || ((sonySio2 || (device & Device_SMB)) && iopret < 0))
       ret = iopret;
     if (moduleList[i].type & Device_Optional)
       ret = 0;
@@ -272,8 +355,11 @@ static int loadModules(DeviceType device, int tolerant) {
     }
 
     // Clean up arguments
-    if (moduleList[i].argStr != NULL)
+    if (moduleList[i].argStr != NULL) {
       free(moduleList[i].argStr);
+      moduleList[i].argStr = NULL;
+      moduleList[i].argLength = 0;
+    }
 
     if (ret) {
       msg("ERROR: Failed to initialize module %s: %d\n", moduleList[i].name, ret);
@@ -281,8 +367,54 @@ static int loadModules(DeviceType device, int tolerant) {
     }
   }
 
-  fileXioInit();
+  ret = fileXioInit();
+  if (ret < 0) {
+    msg("POPS: Cannot bind fileXio after IOP reset: %d\n", ret);
+    return ret;
+  }
+#ifdef SMB
+  if (device & Device_SMB) {
+    ret = launcher_smb_connect();
+    if (ret) return ret;
+  }
+#endif
   currentDevice = device;
+  return 0;
+}
+
+int initPopsServices(DeviceType devices, const void *core, size_t coreSize,
+                     const char *proxyArguments, uint32_t argumentSize) {
+  int ret, moduleResult = 0;
+  /* A foreign IOPRP has replaced the regular launcher environment. If
+   * any subsequent POPS stage fails and control returns to launcHER, a
+   * normal launch must not treat the device cache as initialized. This
+   * remains set even after loadModuleList updates currentDevice. */
+  forceIOPReset = 1;
+  if (!proxyArguments || !argumentSize || argumentSize > POPS_PROXY_ARGS_MAX ||
+      proxyArguments[argumentSize - 1] != '\0')
+    return -EINVAL;
+  /* Boot planning and core patching already verified the pristine core. Check
+   * the module we execute independently: EE patching changes the core hash. */
+  ret = pops_core_sio2_identify(core, coreSize);
+  if (ret)
+    return -EINVAL;
+  sceSifInitRpc(0);
+  sbv_patch_enable_lmb();
+  sbv_patch_disable_prefix_check();
+  /* Load Sony's SIO2 once, before MMCE/memory-card services. POPS must skip
+   * its first embedded-module call under POPS_CORE_STORAGE_BRIDGE. */
+  ret = SifExecModuleBuffer((void *)((const unsigned char *)core + 0xcbbc0),
+                           0x1999, 0, NULL, &moduleResult);
+  if (ret < 0 || moduleResult != 0)
+    return ret < 0 ? ret : -EIO;
+  ret = loadModuleList(devices, 0, 1);
+  if (ret)
+    return ret;
+  moduleResult = 0;
+  ret = SifExecModuleBuffer(popfs_irx, size_popfs_irx, argumentSize,
+                           proxyArguments, &moduleResult);
+  if (ret < 0 || moduleResult != 0)
+    return ret < 0 ? ret : -EIO;
   return 0;
 }
 
@@ -334,42 +466,36 @@ void applyXPARAM(char *gameID) { SifExecModuleBuffer(xparam_irx, size_xparam_irx
 #if defined(UDPBD) || defined(UDPFS)
 // Builds IP address argument for SMAP module
 // using mc?:SYS-CONF/IPCONFIG.DAT from memory card
+/* Read the first IPv4 token, not a fixed number of characters. The normal
+ * IPCONFIG.DAT also contains netmask/gateway, while a 7-15 byte IP alone
+ * remains valid. Preserve the original 19-byte SMAP argument allocation. */
 char *initSMAPArguments(uint32_t *argLength) {
-  // Try to get IP from IPCONFIG.DAT
-  // The 'X' in "mcX" will be replaced with memory card number
-  static char ipconfigPath[] = "mcX:/SYS-CONF/IPCONFIG.DAT";
-
-  int ipconfigFd, count;
-  char ipAddr[16]; // IP address will not be longer than 15 characters
-  for (char i = '0'; i < '2'; i++) {
-    ipconfigPath[2] = i;
-    // Attempt to open IPCONFIG.DAT
-    ipconfigFd = open(ipconfigPath, O_RDONLY);
-    if (ipconfigFd >= 0) {
-      count = read(ipconfigFd, ipAddr, sizeof(ipAddr) - 1);
-      close(ipconfigFd);
-      break;
+  static const char *const dirs[] = {
+    "mc0:/POPSTARTER/", "mc1:/POPSTARTER/", "mc0:/POPS/", "mc1:/POPS/",
+    "mc0:/SYS-CONF/", "mc1:/SYS-CONF/"
+  };
+  char path[80], ipAddr[16], contents[64];
+  if (!argLength) return NULL;
+  for (unsigned i = 0; i < sizeof(dirs)/sizeof(dirs[0]); ++i) {
+    snprintf(path, sizeof(path), "%sIPCONFIG.DAT", dirs[i]);
+    int fd = fileXioOpen(path, FIO_O_RDONLY, 0);
+    if (fd < 0) {
+      snprintf(path, sizeof(path), "%sipconfig.dat", dirs[i]);
+      fd = fileXioOpen(path, FIO_O_RDONLY, 0);
     }
+    if (fd < 0) continue;
+    int n = fileXioRead(fd, contents, sizeof(contents));
+    fileXioClose(fd);
+    if (n <= 0 || !smap_parse_ipconfig(contents, (size_t)n, ipAddr))
+      continue;
+    char *argStr = calloc(19, sizeof(char));
+    if (!argStr) return NULL;
+    snprintf(argStr, 19, "ip=%s", ipAddr);
+    *argLength = 19;
+    return argStr;
   }
-
-  if ((ipconfigFd < 0) || (count < sizeof(ipAddr) - 1)) {
-    msg("ERROR: Failed to read IP address from IPCONFIG.DAT\n");
-    return NULL;
-  }
-
-  count = 0; // Reuse count as line index
-  // In case IP address is shorter than 15 chars
-  while (!isspace((unsigned char)ipAddr[count])) {
-    // Advance index until we read a whitespace character
-    count++;
-  }
-  ipAddr[count] = '\0';
-
-  char ipArg[19]; // 15 bytes for IP string + 3 bytes for 'ip='
-  *argLength = 19;
-  char *argStr = calloc(sizeof(char), 19);
-  snprintf(argStr, sizeof(ipArg), "ip=%s", ipAddr);
-  return argStr;
+  msg("ERROR: No valid console IPv4 in IPCONFIG.DAT on mc0:/mc1:\n");
+  return NULL;
 }
 #endif
 

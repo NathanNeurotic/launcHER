@@ -1,0 +1,36 @@
+{
+  "run": {
+    "run_id": "20261014T061203-0030",
+    "outcome": "hang",
+    "elf_sha256": "c1def3acc268c1c70fe2f66d2de6325a14da74ce6e12ef7710ef83105c3ceb2b",
+    "args": [
+      "ata0:/LAUNCHER-TEST-20261013-A/TEST.VCD"
+    ],
+    "stdout": "unmounting\r\nunmounted\r\nloadelf: fname host:program.elf secname all\r\nInput ELF format filename = host:program.elf\r\n0 01ccb300 0003a504 ....\r\nLoaded, host:program.elf\r\nstart address 0x1d0001c\r\ngp address 00000000\r\nread/write allocate memory 4000\r\npath: ata0:/LAUNCHER-TEST-20261013-A/TEST.VCD\n",
+    "artifacts": [
+      "program.elf",
+      "stdout.txt"
+    ],
+    "timings": {
+      "queue_ms": 0,
+      "upload_ms": 4,
+      "run_ms": 20000
+    },
+    "started": "2026-10-14T06:12:03.0779211Z"
+  },
+  "screen_observations": [
+    "IOP: loaded ata_bd id=33 start=0",
+    "BDM: initialized device=8 path=ata0:/LAUNCHER-TEST-20261013-A/TEST.VCD result=0",
+    "BDM: fileXio stat result=-6",
+    "BDM: root=ata0: open=3 errno=0",
+    "BDM: staged file probe=0 errno=0",
+    "POPS: Target disc ... (device 8)",
+    "POPS: Using emulator ata0:/LAUNCHER-TEST-20261013-A/POPS.ELF",
+    "POPS: Detected serial MENU.EXE (raw cdrom:\\MENU.EXE;1)",
+    "POPS: Cannot load game configuration: -6",
+    "Failed to launch ...: -6"
+  ],
+  "interpretation": "The initial production/diagnostic failure was not an ATA mount failure. The complete trace confirms successful root/VCD opens and VCD metadata inspection, then fatal configuration discovery. The exact optional configuration path is the next diagnostic boundary. Direct fileXio stat returned -6 and is recorded separately; do not substitute it for the successful POSIX opens.",
+  "full_game_boot": false,
+  "recovery": "Soft relaunch was attempted, but the subsequent run 20261014T061522-0031 received no console stdout; reliable automatic recovery is not established."
+}

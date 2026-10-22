@@ -32,6 +32,7 @@ typedef enum {
   //
   Device_XFROM = (1 << 12),
   Device_Optional = (1 << 13), // Marks that the module is not required for the launcher to work properly
+  Device_SMB = (1 << 14),
 } DeviceType;
 
 typedef enum {
@@ -62,10 +63,10 @@ void msg(const char *str, ...);
 void fail(const char *str, ...);
 
 // Tests if file exists by opening it
-int tryFile(char *filepath);
+int tryFile(const char *filepath);
 
 // Attempts to guess device type from path
-DeviceType guessDeviceType(char *path);
+DeviceType guessDeviceType(const char *path);
 
 // Attempts to convert launcher-specific path into path supported by PS2 modules
 char *normalizePath(char *path, DeviceType type);
@@ -81,6 +82,11 @@ int initPFS(char *path, DeviceType additionalDevices);
 
 // Mounts the partition specified in path
 int mountPFS(char *path);
+/* POPS-only APA remount after external IOP reboot, allowing saved VMC writes. */
+int mountPFSWritable(char *path);
+/* POPS-only transition from its initial read-only inspection mount to
+ * writable card initialization before the external IOP reboot. */
+int remountPFSWritable(char *path);
 
 // Unmounts the partition
 void deinitPFS();

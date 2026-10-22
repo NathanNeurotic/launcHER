@@ -110,6 +110,14 @@ int arp_resolve(uint32_t ip, uint8_t mac[6])
     return -1;
 }
 
+/* Publish the configured address before discovery replies need a unicast
+ * return path. The existing request builder uses our IP/MAC as the sender. */
+void arp_announce(void)
+{
+    uint32_t ip = ms_ip_get_ip();
+    if (ip != 0) arp_send_request(ip);
+}
+
 int handle_rx_arp(const uint8_t *hdr)
 {
     const arp_packet_t *req = (const arp_packet_t *)hdr;

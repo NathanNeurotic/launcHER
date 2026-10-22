@@ -1,12 +1,12 @@
 [
   {
-    "title": "launcHER Documentation — Home Overview",
+    "title": "launcHER Documentation \u2014 Home Overview",
     "cat": "overview",
     "text": "launcHER is a standalone PlayStation 2 forwarder built specifically to launch Ember from supported storage devices while preserving the environment Ember needs after handoff. Standalone forwarder, Ember handoff, PFS mount persistence, exFAT, ATA BDM, USB, MX4SIO, MMCE, DEV9 power preservation, OPL DB, uLaunchELF.",
     "url": "index.html"
   },
   {
-    "title": "HDD Users — Read This First",
+    "title": "HDD Users \u2014 Read This First",
     "cat": "storage",
     "text": "launcHER does not require a dedicated HDD partition. The __.EMBER APA partition is only an example. Choose the path that matches where Ember actually lives: USB mass?:/EMBER/ember.elf, internal exFAT ata:/EMBER/ember.elf, or APA/PFS hdd0:<PARTITION>:pfs:/EMBER/ember.elf.",
     "url": "index.html#hdd-myth"
@@ -18,7 +18,7 @@
     "url": "index.html#why-launcher"
   },
   {
-    "title": "Getting Started — Ember Directory Layout",
+    "title": "Getting Started \u2014 Ember Directory Layout",
     "cat": "start",
     "text": "Ember folder structure: EMBER/ember.elf, EMBER/bios.bin, EMBER/games/<GAME_FOLDER>/ containing cue and bin files. Constant across USB, exFAT, and APA PFS.",
     "url": "getting-started.html#step-1-ember-layout"
@@ -42,7 +42,7 @@
     "url": "getting-started.html#renaming-elf"
   },
   {
-    "title": "Which HDD Do I Have? — Decision Tree",
+    "title": "Which HDD Do I Have? \u2014 Decision Tree",
     "cat": "storage",
     "text": "Identify your PS2 HDD setup: USB external drive (mass?:), internal exFAT ATA BDM (ata:), mixed APA-Jail, or traditional APA/PFS partitions (hdd0:).",
     "url": "hdd-modes.html#decision-tree"
@@ -78,37 +78,37 @@
     "url": "hdd-modes.html#separation-of-concerns"
   },
   {
-    "title": "Storage Profiles — USB Mass Storage",
+    "title": "Storage Profiles \u2014 USB Mass Storage",
     "cat": "storage",
     "text": "USB configuration: path=mass?:/EMBER/ember.elf with arg=<GAME_FOLDER>. Supports mass?:, usb?:, and specific units like mass0:.",
     "url": "storage-profiles.html#profile-usb"
   },
   {
-    "title": "Storage Profiles — Internal exFAT (ATA BDM)",
+    "title": "Storage Profiles \u2014 Internal exFAT (ATA BDM)",
     "cat": "storage",
     "text": "Internal exFAT HDD: path=ata:/EMBER/ember.elf, arg=<GAME_FOLDER>, arg=-dev9=NICHDD. Keeps the expansion bay IDE interface powered for Ember.",
     "url": "storage-profiles.html#profile-exfat"
   },
   {
-    "title": "Storage Profiles — APA / PFS HDD",
+    "title": "Storage Profiles \u2014 APA / PFS HDD",
     "cat": "storage",
     "text": "APA/PFS profile: path=hdd0:<PARTITION>:pfs:/EMBER/ember.elf, arg=pfs0:/EMBER/ember.elf, arg=<GAME_FOLDER>, arg=-skip_argv0, arg=-dev9=NICHDD.",
     "url": "storage-profiles.html#profile-apa-pfs"
   },
   {
-    "title": "Storage Profiles — MMCE & Memory Card",
+    "title": "Storage Profiles \u2014 MMCE & Memory Card",
     "cat": "storage",
     "text": "MMCE SPI SD card adapter (mmce?:/EMBER/ember.elf) and standard PlayStation 2 Memory Cards (mc?:/EMBER/ember.elf).",
     "url": "storage-profiles.html#profile-mmce"
   },
   {
-    "title": "Storage Profiles — MX4SIO & i.Link",
+    "title": "Storage Profiles \u2014 MX4SIO & i.Link",
     "cat": "storage",
     "text": "MX4SIO SIO2 SD adapter (mx4sio:/EMBER/ember.elf) and early fat PS2 i.Link FireWire (ilink:/EMBER/ember.elf).",
     "url": "storage-profiles.html#profile-mx4sio"
   },
   {
-    "title": "Storage Profiles — UDPBD & UDPFS Network Boot",
+    "title": "Storage Profiles \u2014 UDPBD & UDPFS Network Boot",
     "cat": "storage",
     "text": "UDPBD network block device and UDPFS network filesystem with arg=-dev9=NIC. IP configuration read from mc?:/SYS-CONF/IPCONFIG.DAT.",
     "url": "storage-profiles.html#profile-udpbd"
@@ -226,5 +226,77 @@
     "cat": "credits",
     "text": "Lineage and credits: nuno6573 (concept & architecture), pcm720 (OSDMenu launcher foundation), Gageformer (Ember), eliminator1403 (hardware testing), NathanNeurotic (fork, PFS persistence, packaging).",
     "url": "credits.html"
+  },
+  {
+    "title": "Sony POPS & PS1 Setup Guide",
+    "cat": "pops",
+    "text": "Run PlayStation 1 VCD games using Sony POPS with launcHER: replaces POPStarter, launches .VCD images directly, and mounts storage without BDMAssault.",
+    "url": "pops-setup.html"
+  },
+  {
+    "title": "POPS External Dependencies (POPS_IOX.PAK, POPS.PAK, POPS.ELF)",
+    "cat": "pops",
+    "text": "POPS dependency requirements: POPS_IOX.PAK, POPS.PAK, or loose POPS.ELF with IOPRP252.IMG. Search priority order: game folder, device /POPS/, mc0:/POPS/, mc1:/POPS/, hdd0:__.POPS:pfs:/.",
+    "url": "pops-setup.html#step-1-dependencies"
+  },
+  {
+    "title": "Preparing .VCD Disc Images (CUE2POPS)",
+    "cat": "pops",
+    "text": "PlayStation 1 Virtual CD images (.VCD) use Mode 2 Form 1 raw sectors (2352 bytes). Converted from BIN/CUE dumps using CUE2POPS.",
+    "url": "pops-setup.html#step-2-vcd-images"
+  },
+  {
+    "title": "POPS Quickboot and launcHER.CNF Configuration",
+    "cat": "pops",
+    "text": "Configure path= pointing directly to .VCD files across USB (mass?:), ATA exFAT (ata:), APA PFS (hdd0:__.POPS), MMCE, MX4SIO, i.Link, UDPBD, and UDPFS. Supports direct invocation and quickboot without CNF, defaulting unprefixed titles to POPS APA, loading and utilizing BDMA drivers for XX. prefixes when present (ATA, MX4SIO, MMCE, USB), and SB. prefixes for SMB.",
+    "url": "pops-setup.html#step-3-launch-methods"
+  },
+  {
+    "title": "POPS Per-Game Directives (PATCHES.TXT, MODES.TXT)",
+    "cat": "pops",
+    "text": "Video mode overrides ($480p, $480i, $576p, $576i, $PAL2NTSC, $NTSC2PAL, $NOPAL), centering ($HDTVFIX, $XPOS, $YPOS), smoothing ($SMOOTH), CPU timing ($FASTMIPS, $SLOWMIPS), and shell boot ($NOBOOT, $BIOS).",
+    "url": "pops-setup.html#step-4-game-directives"
+  },
+  {
+    "title": "POPS Compatibility Modes 1 through 8",
+    "cat": "pops",
+    "text": "Compatibility modes 1..8: Mode 1 SPU2 DMA sync, Mode 2 fast sector cache override, Mode 3 audio mixer, Mode 4 GPU FIFO sync, Mode 5 progressive timing, Mode 6 LibCrypt subchannel, Mode 7 R3000A CPU throttle, Mode 8 CD-DA buffer.",
+    "url": "pops-setup.html#step-5-compatibility-modes"
+  },
+  {
+    "title": "Built-In Game Compatibility & LibCrypt Engine",
+    "cat": "pops",
+    "text": "568 verified game profiles and 229 validated 16-bit LibCrypt keys. Automatically reads SYSTEM.CNF serial from ISO9660 PVD and applies hardware subchannel Q emulation.",
+    "url": "pops-setup.html#step-6-compatibility-database"
+  },
+  {
+    "title": "Virtual Memory Cards (VMC) in POPS",
+    "cat": "pops",
+    "text": "Automatic creation of formatted 128 KiB PS1 memory card images (<SERIAL>.VMC0 and <SERIAL>.VMC1). Redirection to custom folders via VMCDIR.TXT.",
+    "url": "pops-setup.html#step-7-vmc-saves"
+  },
+  {
+    "title": "Multi-Disc Disc Swapping (DISCS.TXT)",
+    "cat": "pops",
+    "text": "Define up to 4 discs in DISCS.TXT. In-game disc swap combo SELECT + L1 + R1 cycles to the next disc image dynamically.",
+    "url": "pops-setup.html#step-8-multi-disc"
+  },
+  {
+    "title": "GameShark & Action Replay Cheats (CHEATS.TXT)",
+    "cat": "pops",
+    "text": "Cheat engine supporting 16-bit writes (types 80, 10), 8-bit writes (types 30, 20), conditionals (types D0..D3, E0..E1), $ prefixes, and safe mode.",
+    "url": "pops-setup.html#step-9-cheats"
+  },
+  {
+    "title": "In-Game Reset (IGR) and Controller Hotkeys",
+    "cat": "pops",
+    "text": "Controller hotkeys: In-Game Reset with L1 + L2 + R1 + R2 + SELECT + START, disc swap with SELECT + L1 + R1. Custom textures IGR_BG.TM2 and TROJAN_*.BIN fixes.",
+    "url": "pops-setup.html#step-10-igr-hotkeys"
+  },
+  {
+    "title": "Custom IRX Driver Modules & Peripherals",
+    "cat": "pops",
+    "text": "Load custom IOP driver modules MODULE_0..9.IRX, peripheral drivers USBMOUSE, USBKBD, GUNCON, DS3, DS4, and driver manifests MODULES.TXT and IRX.TXT.",
+    "url": "pops-setup.html#step-11-custom-irx"
   }
 ]

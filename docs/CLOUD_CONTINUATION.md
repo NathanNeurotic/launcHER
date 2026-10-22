@@ -1,0 +1,159 @@
+# Continuation checkpoint - 2026-10-20
+
+Continue draft PR [#23](https://github.com/NathanNeurotic/launcHER/pull/23)
+on `codex/popstarter-replacement`. Do not merge. Fetch before editing and
+preserve newer work. Publish validated incremental commits on this branch.
+Include `Co-authored-by: ChatGPT <chatgpt@openai.com>` in new commits.
+
+## October 20 source and CI continuation
+
+Latest hardware observation: run `20261020T134413-0102`, artifact from commit
+`52253e5`, reached `POPS_READ_FAIL stage=close result=-5 bytes=3166988`.
+The independent fileXio comparison completed all 3,166,988 bytes and produced
+the expected `59df3389...` core SHA256. See
+`docs/evidence/pops_dependency_close_console.json`. The earlier unknown read
+stage is now isolated to the POSIX close check, before Sony entry.
+
+Source correction: `readFullFile` now rejects only negative `close()` results.
+PS2SDK libcglue's `_close` passes its driver's nonnegative return through
+`__transform_errno`; a positive success must not be interpreted through stale
+`errno`. The original trace did not log the raw return, so the next controlled
+run must confirm the explanation. New trace fields report `close_result` or
+the raw negative return and errno. All nine reader host regressions pass,
+including positive success with stale errno and retained negative-close errors.
+Reference: https://github.com/ps2dev/ps2sdk/blob/master/ee/libcglue/src/glue.c
+
+The PR's `launcHER-boot-trace` artifact now also enables
+`LAUNCHER_BOOT_TRACE_STOP_AFTER_DEPENDENCIES`. After successful PAK input or both
+loose dependency reads it prints `POPS_DEPENDENCIES_PASS` and sleeps before core
+staging, VMC creation, external IOP reset or Sony entry. This verifies only the
+dependency read boundary. Production defaults remain unchanged. Disable this
+option explicitly for later startup diagnostics; do not mistake this intentional
+stop for full preflight/game acceptance. Earlier artifact descriptions without
+this stop refer to older commits.
+
+Follow-up source review found that the fileXio comparison rejected positive
+driver close results. It now treats only negative results as errors, matching
+the existing SMB fixture's nonnegative-close contract (hardware returned 3).
+Reader regressions cover positive close success and preservation of the original
+POSIX failure even when that comparison completes. The Windows reader harness
+opens binary fixtures in binary mode, avoiding text-mode EOF at byte 0x1a.
+All seven reader tests passed locally with Windows GCC; target/CI and physical
+console results must still be reported separately.
+PR CI additionally builds `LAUNCHER_BOOT_TRACE=ON` with `DEBUG=ON` in a separate
+`build-trace` directory and uploads `launcHER-boot-trace`. The ordinary
+`launcHER` artifact remains the default production build. No recovery ELF is
+configured in the diagnostic. Use the artifact from the exact inspected commit
+for a future authorized console comparison; a successful build is not runtime
+acceptance.
+
+At resumption, local HEAD, the freshly fetched remote branch and PR #23 all
+matched `5bf2afcc548029f4794497882c96b15c365904e3` (zero ahead/behind).
+The uncommitted dependency-reader tracing edit was preserved. The temporary
+`codex/pops-trace-20261019` branch contains diagnostic defaults; it is not
+newer production parity work and must not be merged wholesale into the PR.
+
+The next physical boot gate is **reading the external POPS.ELF**, before
+core staging or Sony IOP reset. A user screenshot showed dependency EIO (-5)
+at `ata0:/LAUNCHER-TEST-20261013-A/POPS.ELF`. Optional configuration ENOENTs
+above it were not the launch failure. The later `size=ld capacity=3166988`
+trace exposed unsupported `%lld` formatting in nano printf, not an oversized
+file. The exact failing operation still needs a captured result. See
+`docs/evidence/pops_dependency_read_failure_console.json`.
+
+The current reader trace uses 32-bit low/high fields, reports open/size/rewind/
+read/close stages, and compares a failed POSIX dependency read through fileXio
+only in `LAUNCHER_BOOT_TRACE` builds. The comparison opens read-only, uses a
+64-byte-aligned bounce buffer for all positive short reads, and reports a
+complete-file SHA256 only after successful close. The original error remains
+fatal even if the comparison succeeds; comparison bytes are discarded and
+never authorize staging or handoff. No module reset/load is added by it.
+
+`tools/test_pops_read_trace.py` executes the production comparison and caller
+with injected I/O failures and short reads. It is included by the existing
+external-POPS CI test entry point. A console retry is still required to
+distinguish a legacy RPC problem from a driver/media failure. Do not bypass
+the error, substitute a different dependency, or overwrite installed files
+based on the formatting failure. The user selected source and CI work for
+this continuation; no further console execution was requested for this pass.
+
+For the next diagnostic build use `-DLAUNCHER_BOOT_TRACE=ON -DDEBUG=ON` with
+no recovery ELF. Look for `POPS_READ_FAIL stage=...`, `POPS_XIO...`, and the
+retained original result. All existing game/save/runtime acceptance gates
+below remain open.
+
+The earlier October 18 code checkpoint inspected for this handoff was
+`43c6ef10de2a285c247a1d563e190a5ab6da9294`. Local HEAD, the origin tracking
+branch and PR head matched. Its GitHub host tests, PS2 build and launcher
+argument checks passed; release jobs were skipped. Subsequent commits may
+supersede this checkpoint: inspect current CI rather than reusing that result.
+
+## Start here
+
+- October 19 continuation: `docs/POPSTARTER_REPLACEMENT.md` now records ordered
+  TROJAN/PATCH discovery, the measured root/title pass order, supported PATCH
+  data/settings records and remaining unsupported actions. Run
+  `tools/test_pops_fix_files.py`; its optional `POPS_TEST_ELF` input verifies
+  the identified external core. `tools/prepare_pops_fix_files_probe.py` builds
+  a separate synthetic EE-only staging probe. Console staging acceptance is
+  separate from Sony runtime/game/save acceptance.
+- `docs/NETWORK_TRANSPORT_HANDOFF.md`: UDPFS, UDPBD and SMBv1 implementation,
+  fixtures, test procedure and physical acceptance boundaries.
+- `docs/POPSTARTER_HANDOFF.md` and `docs/POPSTARTER_REPLACEMENT.md`: external
+  POPS replacement scope, measured startup sequence and remaining parity gaps.
+- Inspect commits `5656873`, `3d5446c` and `43c6ef1` for newer PSXCore runtime
+  correction work. These arrived after the original network checkpoint and
+  must be preserved. Runtime changes are opt-in; consult their guards and
+  verification paths before enabling anything.
+- `tools/test_network_transports.py`: focused production-code host regressions.
+- `tools/prepare_network_transport_probe.py` and
+  `tools/fixtures/network_transport_ee.c`: rebuildable fresh-IOP diagnostic.
+
+## Hardware evidence and unresolved work
+
+SMB configuration, login/share enumeration and controlled 8 KiB file I/O
+passed on physical PS2, using ps2link's inherited TCP/IP stack. The committed
+`docs/evidence/network_*_hardware.json` files record those results. The deliberate
+exclusive-create collision corresponds to server status `0xc0000035`; this is
+expected test behavior. Direct host readback preserved both initial files and
+verified the new file.
+
+Fresh-IOP run `20261016T022121-0062` produced no final acceptance marker after
+IOP reset disconnected ps2link. Its new fixture file was absent on the host.
+The later fileXio configuration-access repair and staged logging are committed,
+but the existence of that repair or a rebuilt probe does not prove a successful
+fresh-stack hardware rerun. Verify subsequent rig evidence before claiming it.
+Treat the configuration explanation in the network handoff as a source-level
+diagnosis unless a captured stopped stage or controlled rerun confirms it.
+
+The diagnostic's UDP branch no longer loads SDK `udptty` after ministack.
+Ministack exports its private `mstack` UDP API, without the SDK TCP/IP socket
+exports. UDPFS/UDPBD probes now retain GS and EE SIO reporting and explicitly
+report `logger_disabled`; only the SMB/ps2ip branch loads `udptty`. This removes
+the logger load as a prerequisite to UDP fixture execution. A target rebuild
+and captured fresh-stack hardware rerun are still required.
+
+UDPFS and UDPBD physical streaming, restart/loss behavior, full game launch,
+save readback and power-cycle acceptance remain separate gates. Host tests and
+target builds do not establish those results. UDPBD flush remains a protocol
+no-op; transparent UDPFS descriptor recovery is not implemented.
+
+## Reproduction and local-only material
+
+Build diagnostic IRX arrays from current launcher sources, then run the tracked
+preparation tool to generate an isolated `ps2.yaml` project. Follow its `--help`
+for paths; previous `build/` artifacts and absolute Windows paths are local
+evidence, not prerequisites available to a cloud checkout. Use the PS2 SDK
+toolchain and repository CI for reproducible host/target checks.
+
+The last observed console address was `192.168.1.10`. PS2 Servers used host
+`192.168.1.100`, SMBv1 port `1111`, share `games`, and UDPFS port `62966`.
+These are historical local settings, not guaranteed current connectivity.
+Use fresh owned `LAUNCHER-NET-*` fixture directories and the tracked prepare/
+verify tools; never target ordinary game/save paths or reuse an exclusive-create
+fixture. Keep existing diagnostic folders as evidence.
+
+No proprietary Sony binaries, games, saves, credentials, ignored build trees
+or machine-specific caches are part of this handoff. A cloud agent can continue
+source work and CI independently; physical-console acceptance requires the
+local rig or explicit reports with captured results.

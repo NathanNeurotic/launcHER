@@ -1,0 +1,33 @@
+{
+  "run_id": "20261014T075656-0033",
+  "outcome": "fail",
+  "exit_code": 1,
+  "elf_sha256": "dfccfb4ce6e93504a821b9cf75bd8d2699d7b2858314ed20b1f7c91863bd210b",
+  "args": [
+    "--inspect-config",
+    "ata0:/LAUNCHER-TEST-20261013-A/",
+    "TEST"
+  ],
+  "stdout": [
+    "POPS config: mc0:/POPSTARTER/PATCHES.TXT open=0 errno=2",
+    "POPS config: mc0:/POPSTARTER/MODES.TXT open=0 errno=2",
+    "POPS config: mc0:/POPSTARTER/CHEATS.TXT open=0 errno=2",
+    "POPS config: mc1:/POPSTARTER/PATCHES.TXT open=0 errno=6",
+    "POPS config: mc1:/POPSTARTER/MODES.TXT open=0 errno=6",
+    "POPS config: mc1:/POPSTARTER/CHEATS.TXT open=0 errno=6",
+    "POPS config: mc0:/POPS/PATCHES.TXT open=0 errno=2",
+    "POPS config: mc0:/POPS/MODES.TXT open=0 errno=2",
+    "POPS config: mc0:/POPS/CHEATS.TXT open=0 errno=2",
+    "POPS config: mc1:/POPS/PATCHES.TXT open=0 errno=6",
+    "POPS config: mc1:/POPS/MODES.TXT open=0 errno=6",
+    "POPS config: mc1:/POPS/CHEATS.TXT open=0 errno=6",
+    "POPS config: ata0:/LAUNCHER-TEST-20261013-A/PATCHES.TXT open=0 errno=4",
+    "POPS_CONFIG result=-4 vmcdir= modes=0 cheats=0 discs=0",
+    "[ps2rig] exit=1"
+  ],
+  "interpretation": [
+    "Optional global card fix passed; absent mc1 no longer aborts discovery.",
+    "Missing ATA PATCHES.TXT returns errno 4 from stock FatFs; configuration fails before Sony POPS.",
+    "Full game boot and persistent saves remain unverified."
+  ]
+}

@@ -5,6 +5,38 @@ on:
   pull_request:
 
 jobs:
+  host-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Test external POPS and POPStarter container handling
+        run: python tools/test_pops_external.py
+      - name: Test PSXCore runtime corrections staging, bounds, atomicity and guards
+        run: python tools/test_pops_runtime_corrections.py
+      - name: Test POPS IOP filesystem proxy contracts
+        run: python tools/test_popfs.py
+      - name: Test selected Sony IOMAN state layouts
+        run: python tools/test_sony_ioman_layout.py
+      - name: Test POPS card creation and I/O failure handling
+        run: python tools/test_pops_vmc.py
+      - name: Test FatFs errno and exclusive creation contracts
+        run: python tools/test_pops_fatfs.py
+      - name: Test measured POPStarter compatibility dispatch
+        run: python tools/test_pops_modes.py
+      - name: Test POPS configuration and feature helpers
+        run: python tools/test_pops_features.py
+      - name: Test original-code probe input and memory boundaries
+        run: python tools/test_pops_io_probe.py
+      - name: Test bounded original POPS startup callsite census
+        run: python tools/test_pops_startup_calls.py
+      - name: Test network SMAP IP configuration parser
+        run: python tools/test_smap_ipconfig.py
+      - name: Test network configuration, SMB creation and UDPFS reliability
+        run: python tools/test_network_transports.py
+
   build:
     runs-on: ubuntu-latest
     container: ghcr.io/ps2homebrew/ps2homebrew:main
@@ -31,7 +63,7 @@ jobs:
           cd build/release
           grep -Eq '^version=([[:xdigit:]]{12}|v[0-9][0-9A-Za-z._-]*)$' version.txt
           test "$(wc -l < version.txt)" -eq 1
-          zip -9 launcHER.zip launcHER.elf launcHER.CNF version.txt
+          zip -9 launcHER.zip launcHER.elf launcHER.CNF version.txt SMB-NOTICES.txt
 
       - name: Upload launcHER
         uses: actions/upload-artifact@v4
@@ -43,9 +75,28 @@ jobs:
             build/release/launcHER.CNF
             build/release/version.txt
             build/release/launcHER.zip
+            build/release/SMB-NOTICES.txt
+
+      # Compile opt-in diagnostics too; keep the normal release artifact above.
+      - name: Build boot-trace diagnostic
+        if: github.event_name == 'pull_request'
+        run: |
+          cmake -B build-trace -DLAUNCHER_BOOT_TRACE=ON -DDEBUG=ON -DLAUNCHER_BOOT_TRACE_STOP_AFTER_DEPENDENCIES=ON
+          cmake --build build-trace --target launcHER
+
+      - name: Upload boot-trace diagnostic
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: launcHER-boot-trace
+          if-no-files-found: error
+          path: |
+            build-trace/release/launcHER.elf
+            build-trace/release/version.txt
+            build-trace/release/SMB-NOTICES.txt
 
   release:
-    needs: [build]
+    needs: [build, host-tests]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -71,6 +122,7 @@ jobs:
             release/launcHER.CNF
             release/version.txt
             release/launcHER.zip
+            release/SMB-NOTICES.txt
 
       - uses: "marvinpinto/action-automatic-releases@latest"
         if: startsWith(github.ref, 'refs/tags/v')
@@ -82,3 +134,4 @@ jobs:
             release/launcHER.CNF
             release/version.txt
             release/launcHER.zip
+            release/SMB-NOTICES.txt

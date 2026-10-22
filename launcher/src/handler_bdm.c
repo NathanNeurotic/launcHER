@@ -2,10 +2,15 @@
 #include "errno.h"
 #include "init.h"
 #include "loader.h"
+#include "dprintf.h"
 #include <fcntl.h>
 #include <ps2sdkapi.h>
 #include <stdio.h>
 #include <string.h>
+#ifdef LAUNCHER_BOOT_TRACE
+#define NEWLIB_PORT_AWARE
+#include <fileXio_rpc.h>
+#endif
 
 #define BDM_MAX_DEVICES 2
 
@@ -24,8 +29,15 @@ int handleBDM(DeviceType device, int argc, char *argv[]) {
 
   // Initialize device modules
   int res = initModules(device);
+  DPRINTF("BDM: initialized device=%d path=%s result=%d\n", device, elfPath, res);
   if (res)
     return res;
+#ifdef LAUNCHER_BOOT_TRACE
+  iox_stat_t traceStat;
+  int traceResult = fileXioGetStat(elfPath, &traceStat);
+  DPRINTF("BDM: fileXio stat path=%s result=%d size=%u\n", elfPath, traceResult,
+          traceResult < 0 ? 0 : (unsigned)traceStat.size);
+#endif
 
   // Extract mountpoint for probing
   char *mountpoint = strchr(elfPath, ':');
@@ -51,12 +63,15 @@ int handleBDM(DeviceType device, int argc, char *argv[]) {
     while (delayAttempts != 0) {
       // Try to open the file to make sure it exists
       res = open(probeMountpoint, O_DIRECTORY | O_RDONLY);
+      DPRINTF("BDM: root=%s open=%d errno=%d attempts=%d\n", probeMountpoint, res, errno, delayAttempts);
       if (res >= 0) {
         // If mountpoint is available
         close(res);
 
         // Jump to launch if file exists
-        if (!(res = tryFile(elfPath)))
+        res = tryFile(elfPath);
+        DPRINTF("BDM: file=%s probe=%d errno=%d\n", elfPath, res, errno);
+        if (!res)
           goto found;
         // Else, try next device
         break;
