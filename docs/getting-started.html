@@ -82,17 +82,21 @@
 
 <h2 id="step-2-game-argument">Step 2: The Game Argument Rule</h2>
 <div class="callout warning">
-  <div class="h">Critical: Pass the Bare Folder Name Only</div>
+  <div class="h">Pass the Game Folder or an Exact CUE Within It</div>
   Ember resolves games relative to its own <code>games/</code> subfolder.
   <br><br>
   If your game is at:
   <pre><code>EMBER/games/Soul Blade/</code></pre>
-  Your <code>arg=</code> line in <code>launcHER.CNF</code> MUST be:
+  For the normal folder launch, set:
   <pre><code>arg=Soul Blade</code></pre>
+  With an Ember build supporting explicit file selection, choose a CUE by replacing that value:
+  <pre><code>arg=Soul Blade/Soul Blade.cue</code></pre>
+  Keep the folder and filename together on one <code>arg=</code> line, without quotes.
+  See <a href="configuration.html#exact-cue">exact CUE selection</a> for a multidisc example.
   <b>DO NOT pass:</b>
   <ul style="margin: 6px 0 0; padding-left: 20px;">
     <li><code>games/Soul Blade</code> (Ember will look for <code>games/games/Soul Blade</code>)</li>
-    <li><code>Soul Blade/Soul Blade.cue</code> (Ember expects a directory, not a cue filename)</li>
+    <li><code>Soul Blade.cue</code> (the containing game folder is required)</li>
     <li><code>mass0:/EMBER/games/Soul Blade/</code> (Absolute paths will fail)</li>
   </ul>
 </div>

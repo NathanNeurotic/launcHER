@@ -114,9 +114,10 @@
 
 <div class="callout warning">
   <div class="h">1. Check the Game Argument</div>
-  Did you pass <code>arg=Soul Blade</code> or did you pass <code>arg=Soul Blade/Soul Blade.cue</code>?
-  <br>
-  Ember requires the <b>bare folder name</b>. Passing a file path or <code>.cue</code> file will cause Ember to fail to load disc tracks.
+  A normal folder launch uses <code>arg=Soul Blade</code>. A compatible Ember build can select
+  a file with <code>arg=Soul Blade/Soul Blade.cue</code>. Verify the actual folder and CUE filename,
+  keep them together in one argument, and omit <code>games/</code> and absolute device paths.
+  Do not add a separate CUE argument after the folder. See <a href="configuration.html#exact-cue">exact CUE selection</a>.
 </div>
 
 <div class="callout warning">

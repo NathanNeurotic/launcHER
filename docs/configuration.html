@@ -95,6 +95,30 @@
   </table>
 </div>
 
+<h2 id="exact-cue">Selecting an Exact CUE</h2>
+<p>
+  A normal folder launch uses <code>arg=Final Fantasy VII</code>. With an Ember build supporting
+  explicit file selection, replace that game argument to start a particular CUE:
+</p>
+<pre><code>arg=Final Fantasy VII/Final Fantasy VII (Disc 2).cue</code></pre>
+<p>
+  This selects <code>EMBER/games/Final Fantasy VII/Final Fantasy VII (Disc 2).cue</code>.
+  Use one <code>arg=</code> line for the combined folder and filename, preserving spaces without
+  quotes. launcHER forwards it unchanged; it does not interpret disc numbers or read a disc list.
+  The folder-only argument remains valid. Settings and saves remain in the game folder.
+  See <a href="https://github.com/Gageformer/Ember#launching-ember-from-homebrew">Ember's argument interface</a>.
+</p>
+<p>For APA/PFS, keep the ELF-path argument and launcher flags:</p>
+<pre><code>path=hdd0:__.EMBER:pfs:/EMBER/ember.elf
+arg=pfs0:/EMBER/ember.elf
+arg=Final Fantasy VII/Final Fantasy VII (Disc 2).cue
+arg=-skip_argv0
+arg=-dev9=NICHDD</code></pre>
+<p>
+  Replace <code>__.EMBER</code> with your actual partition. Only the game argument changes.
+  Do not prepend <code>games/</code>, use an absolute CUE path, or append a second game argument.
+</p>
+
 <h2 id="flags-reference">Global Launcher Flags</h2>
 <p>
   Special arguments beginning with a hyphen (<code>-</code>) are intercepted by launcHER to control kernel behavior:

@@ -10,14 +10,20 @@
 #   +OPL/APPS/Soul Blade/launcHER.CNF
 #
 # IMPORTANT:
-#   - Replace <GAME_FOLDER> with the bare folder name under EMBER/games.
-#   - Do NOT add games/ or a .cue filename.
+#   - Replace <GAME_FOLDER> with the folder name under EMBER/games.
+#   - To choose a CUE, use <GAME_FOLDER>/<CUE_FILENAME> in that same arg= value.
+#   - Do NOT add games/ or an absolute device path. Do not quote CNF values.
+#   - Replace the folder-only game arg; do not add a separate CUE arg= line.
 #   - arg= lines are global to every active path= line in this file.
 #   - Leave only ONE profile below uncommented unless you intentionally want
 #     fallback paths that share the exact same arguments.
 #
 # Example game argument:
 #   arg=Final Fantasy VII
+# Or choose an exact CUE with an Ember build supporting explicit file selection:
+#   arg=Final Fantasy VII/Final Fantasy VII (Disc 2).cue
+# launcHER forwards the value as-is; it does not interpret disc numbers.
+# Keep each profile's ELF-path argument and -skip_argv0/-dev9 flags as shown.
 #
 # ---------------------------------------------------------------------
 # WHICH HDD DO I HAVE?

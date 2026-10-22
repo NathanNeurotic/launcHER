@@ -38,6 +38,18 @@ check([self, bare, 'mc0:/config.cnf'], [self, 'mc0:/config.cnf'])
 check([self, bare, '-dev9=NICHDD'], [self, '-dev9=NICHDD'])
 check([self, bare.replace('/', '\\')], [self])
 check([self.replace('pfs0:', 'pfs:'), bare], [self.replace('pfs0:', 'pfs:')])
+
+# A selected CUE is one opaque game argument; preserve its folder, slash and spaces.
+# The folder name need not describe the chosen disc (it may still say Disc 1).
+game = 'Driver 2 - Back on the Streets (Disc 1) [SLES_029.94]'
+cue = game + '/Driver 2 - Back on the Streets (Disc 2).cue'
+for argument in (game, cue):
+    forwarded = ['hdd0:__.EMBER:pfs:/EMBER/ember.elf', 'pfs0:/EMBER/ember.elf',
+                 argument, '-skip_argv0', '-dev9=NICHDD']
+    check([self, bare] + forwarded, [self] + forwarded)
+    check(['mass0:/APPS/renamed.elf', 'mass0:/APPS/renamed.elf',
+           'mass0:/EMBER/ember.elf', argument],
+          ['mass0:/APPS/renamed.elf', 'mass0:/EMBER/ember.elf', argument])
 for target in ('pfs1:/OPL/APPS/Looney Tunes Racing [SLES_031.27]/launcHER.elf',
                'hdd0:OTHER:pfs0:/OPL/APPS/Looney Tunes Racing [SLES_031.27]/launcHER.elf',
                'pfs0:/OTHER/launcHER.elf', 'pfs0:/EMBER/ember.elf', 'Game'):
