@@ -816,16 +816,8 @@ int pops_apply_all_config_patches(void *staged_core, size_t core_size, const Pop
     result = pops_apply_vmc1_disable(staged_core, core_size);
     if (result) return result;
   }
-  if (!cfg->no_igr && core_size >= (size_t)(0x0020c0a4 - POPS_CORE_BASE_ADDR + 4)) {
-    size_t off = 0x0020c0a4 - POPS_CORE_BASE_ADDR;
-    uint8_t *b = (uint8_t *)staged_core;
-    uint32_t cur = (uint32_t)b[off] | ((uint32_t)b[off + 1] << 8) |
-                   ((uint32_t)b[off + 2] << 16) | ((uint32_t)b[off + 3] << 24);
-    if (cur == 0x0c08b44c) {
-      result = pops_apply_igr_exit(staged_core, core_size);
-      if (result) return result;
-    }
-  }
+  /* Do not overwrite 0x0020c0a4 by default; pristine 0x0c08b44c preserves
+   * active controller polling in the native POPS IGR prompt overlay. */
   if (core_size >= (size_t)(0x002fb599 - POPS_CORE_BASE_ADDR + 1)) {
     uint8_t *b = (uint8_t *)staged_core;
     if (b[0x002fb599 - POPS_CORE_BASE_ADDR] == 0x08) {
