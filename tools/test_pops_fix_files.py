@@ -114,6 +114,9 @@ void test_io_failures(int reads, int closes) { fail_reads=reads; fail_closes=clo
 
     @classmethod
     def tearDownClass(cls):
+        if os.name == 'nt' and hasattr(cls, 'lib') and getattr(cls.lib, '_handle', None):
+            c.windll.kernel32.FreeLibrary.argtypes = [c.c_void_p]
+            c.windll.kernel32.FreeLibrary(cls.lib._handle)
         cls.temp.cleanup()
 
     def setUp(self):

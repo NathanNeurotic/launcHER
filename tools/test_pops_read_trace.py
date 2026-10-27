@@ -124,6 +124,9 @@ int test_dependency(const char *path, void *buffer, size_t capacity, size_t *out
 
     @classmethod
     def tearDownClass(cls):
+        if os.name == 'nt' and hasattr(cls, 'lib') and getattr(cls.lib, '_handle', None):
+            c.windll.kernel32.FreeLibrary.argtypes = [c.c_void_p]
+            c.windll.kernel32.FreeLibrary(cls.lib._handle)
         cls.temp.cleanup()
 
     def setUp(self):
