@@ -315,20 +315,28 @@ int pops_apply_video_overrides(void *staged_core, size_t core_size,
 
   /* Verify byte guards before modifying core */
   if (video_mode == POPS_VMODE_PAL2NTSC) {
-    if (read_u8(staged_core, core_size, 0x0021af94) != 0x64 ||
-        read_u32(staged_core, core_size, 0x00502770) != 0x000c7200 ||
-        read_u8(staged_core, core_size, 0x0023b018) != 0x7f ||
-        read_u16(staged_core, core_size, 0x0023b01c) != 0x0357)
+    uint8_t m = read_u8(staged_core, core_size, 0x0021af94);
+    uint32_t vs = read_u32(staged_core, core_size, 0x00502770);
+    uint8_t x = read_u8(staged_core, core_size, 0x0023b018);
+    uint16_t y = read_u16(staged_core, core_size, 0x0023b01c);
+    if ((m != 0x02 && m != 0x64) ||
+        (vs != 0x0008a3a2 && vs != 0x000c7200) ||
+        (x != 0x48 && x != 0x7f) ||
+        (y != 0x0290 && y != 0x0357))
       return -EILSEQ;
     write_u8(staged_core, core_size, 0x0021af94, 3);
     write_u32(staged_core, core_size, 0x00502770, 0x000a6300);
     write_u8(staged_core, core_size, 0x0023b018, 0x6b);
     write_u16(staged_core, core_size, 0x0023b01c, 0x02cb);
   } else if (video_mode == POPS_VMODE_NTSC2PAL) {
-    if (read_u8(staged_core, core_size, 0x0021af94) != 0x64 ||
-        read_u32(staged_core, core_size, 0x00502770) != 0x000a6300 ||
-        read_u8(staged_core, core_size, 0x0023b018) != 0x6b ||
-        read_u16(staged_core, core_size, 0x0023b01c) != 0x02cb)
+    uint8_t m = read_u8(staged_core, core_size, 0x0021af94);
+    uint32_t vs = read_u32(staged_core, core_size, 0x00502770);
+    uint8_t x = read_u8(staged_core, core_size, 0x0023b018);
+    uint16_t y = read_u16(staged_core, core_size, 0x0023b01c);
+    if ((m != 0x03 && m != 0x64) ||
+        (vs != 0x000a6300) ||
+        (x != 0x6b && x != 0x7f) ||
+        (y != 0x02cb && y != 0x0357))
       return -EILSEQ;
     write_u8(staged_core, core_size, 0x0021af94, 2);
     write_u32(staged_core, core_size, 0x00502770, 0x000c7200);
@@ -588,6 +596,22 @@ int pops_apply_cheats(void *ps1_ram_base, const PopsCheatEntry *cheats, uint16_t
   return pops_cheat_engine_tick(ps1_ram_base, cheats, cheat_count);
 }
 
+int pops_apply_igr_direct_exit(void *staged_core, size_t core_size) {
+  if (!staged_core)
+    return -EINVAL;
+  if (core_size < (size_t)(0x00228a5c - POPS_CORE_BASE_ADDR + 4))
+    return -ERANGE;
+  uint32_t cur_58 = read_u32(staged_core, core_size, 0x00228a58);
+  uint32_t cur_5c = read_u32(staged_core, core_size, 0x00228a5c);
+  if (cur_58 == 0x24020001 && cur_5c == 0x10000016)
+    return 0;
+  if (cur_58 != 0x0000102d || cur_5c != 0x3c110086)
+    return -EINVAL;
+  write_u32(staged_core, core_size, 0x00228a58, 0x24020001);
+  write_u32(staged_core, core_size, 0x00228a5c, 0x10000016);
+  return 0;
+}
+
 int pops_apply_igr_exit(void *staged_core, size_t core_size) {
   uint8_t *bytes = (uint8_t *)staged_core;
   if (!bytes)
@@ -816,8 +840,23 @@ int pops_apply_all_config_patches(void *staged_core, size_t core_size, const Pop
     result = pops_apply_vmc1_disable(staged_core, core_size);
     if (result) return result;
   }
-  /* Do not overwrite 0x0020c0a4 by default; pristine 0x0c08b44c preserves
-   * active controller polling in the native POPS IGR prompt overlay. */
+  if (!cfg->no_igr) {
+    if (core_size >= (size_t)(0x0020c0a4 - POPS_CORE_BASE_ADDR + 4)) {
+      uint32_t cur = read_u32(staged_core, core_size, 0x0020c0a4);
+      if (cur == 0x0c08b44c) {
+        result = pops_apply_igr_exit(staged_core, core_size);
+        if (result) return result;
+      }
+    }
+    if (core_size >= (size_t)(0x00228a5c - POPS_CORE_BASE_ADDR + 4)) {
+      uint32_t cur_58 = read_u32(staged_core, core_size, 0x00228a58);
+      uint32_t cur_5c = read_u32(staged_core, core_size, 0x00228a5c);
+      if (cur_58 == 0x0000102d && cur_5c == 0x3c110086) {
+        result = pops_apply_igr_direct_exit(staged_core, core_size);
+        if (result) return result;
+      }
+    }
+  }
   if (core_size >= (size_t)(0x002fb599 - POPS_CORE_BASE_ADDR + 1)) {
     uint8_t *b = (uint8_t *)staged_core;
     if (b[0x002fb599 - POPS_CORE_BASE_ADDR] == 0x08) {

@@ -100,6 +100,10 @@ int pops_apply_widescreen(void *staged_core, size_t core_size);
 /* Apply dither disable patch ($DITHER_OFF / $NODITHER) */
 int pops_apply_dither_off(void *staged_core, size_t core_size);
 
+/* Direct clean IGR exit: rewires 0x00228a58 to li $v0, 1 and 0x00228a5c to b 0x00228ab8,
+ * immediately triggering clean POPS teardown and ExecOSD reset without PSBBN dialog freeze */
+int pops_apply_igr_direct_exit(void *staged_core, size_t core_size);
+
 /* Fix IGR exit method (FUN_008dbe08): rewires 0x0020c0a4 from 0x0c08b44c to 0x0c08d8ae */
 int pops_apply_igr_exit(void *staged_core, size_t core_size);
 

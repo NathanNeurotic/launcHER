@@ -117,6 +117,8 @@ class FeatureTests(unittest.TestCase):
         LIB.pops_apply_dither_off.restype = c.c_int
         LIB.pops_apply_igr_exit.argtypes = [c.c_void_p, c.c_size_t]
         LIB.pops_apply_igr_exit.restype = c.c_int
+        LIB.pops_apply_igr_direct_exit.argtypes = [c.c_void_p, c.c_size_t]
+        LIB.pops_apply_igr_direct_exit.restype = c.c_int
         LIB.pops_apply_iopcd_stack_size.argtypes = [c.c_void_p, c.c_size_t, c.c_uint8]
         LIB.pops_apply_iopcd_stack_size.restype = c.c_int
         LIB.pops_apply_hdd_init_exit.argtypes = [c.c_void_p, c.c_size_t]
@@ -942,6 +944,29 @@ class FeatureTests(unittest.TestCase):
 
         # Buffer too small
         self.assertEqual(LIB.pops_apply_igr_exit(ptr, off), -errno.ERANGE)
+
+    def test_igr_direct_exit_patch(self):
+        buf_size = 0x100000
+        buf = bytearray(buf_size)
+        ptr = (c.c_uint8 * buf_size).from_buffer(buf)
+
+        # Mismatch guard test
+        self.assertEqual(LIB.pops_apply_igr_direct_exit(ptr, buf_size), -errno.EINVAL)
+
+        # Pristine site: 0x00228a58 has 0x0000102d, 0x00228a5c has 0x3c110086
+        off_58 = 0x00228a58 - 0x00200000
+        off_5c = 0x00228a5c - 0x00200000
+        struct.pack_into("<I", buf, off_58, 0x0000102d)
+        struct.pack_into("<I", buf, off_5c, 0x3c110086)
+        self.assertEqual(LIB.pops_apply_igr_direct_exit(ptr, buf_size), 0)
+        self.assertEqual(struct.unpack_from("<I", buf, off_58)[0], 0x24020001)
+        self.assertEqual(struct.unpack_from("<I", buf, off_5c)[0], 0x10000016)
+
+        # Idempotent call
+        self.assertEqual(LIB.pops_apply_igr_direct_exit(ptr, buf_size), 0)
+
+        # Buffer too small
+        self.assertEqual(LIB.pops_apply_igr_direct_exit(ptr, off_5c), -errno.ERANGE)
 
     def test_iopcd_stack_size_patch(self):
         buf_size = 0x150000

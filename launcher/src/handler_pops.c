@@ -769,6 +769,37 @@ int launchPOPS(int argc, char *argv[]) {
     DPRINTF("POPS: Non-standard serial %s, applying Mode 6 (OSD bypass)\n", vcdInfo.normalized_serial);
   }
 
+  /* Auto video mode: if no explicit video override is specified, check if
+   * title or console environment warrants PAL2NTSC auto-centering.
+   * POPS defaults to PAL timing (576 lines); on NTSC displays/consoles,
+   * unpatched 240-line NTSC games render vertically down-shifted. */
+  if (cfg.video_mode == POPS_VMODE_DEFAULT) {
+    int is_ntsc = 0;
+    int romFd = open("rom0:ROMVER", O_RDONLY);
+    if (romFd >= 0) {
+      char rver[16];
+      int n = read(romFd, rver, sizeof(rver) - 1);
+      close(romFd);
+      if (n >= 5 && rver[4] != 'E') {
+        is_ntsc = 1;
+      }
+    }
+    if (ci_strstr(vcdPath, "tekken") || ci_strstr(gameBase, "tekken") ||
+        (vcdInfo.normalized_serial[0] &&
+         (strncasecmp(vcdInfo.normalized_serial, "SLUS", 4) == 0 ||
+          strncasecmp(vcdInfo.normalized_serial, "SCUS", 4) == 0 ||
+          strncasecmp(vcdInfo.normalized_serial, "SLPS", 4) == 0 ||
+          strncasecmp(vcdInfo.normalized_serial, "SLPM", 4) == 0 ||
+          strncasecmp(vcdInfo.normalized_serial, "SCPS", 4) == 0 ||
+          strncasecmp(vcdInfo.normalized_serial, "SIPS", 4) == 0))) {
+      is_ntsc = 1;
+    }
+    if (is_ntsc) {
+      cfg.video_mode = POPS_VMODE_PAL2NTSC;
+      DPRINTF("POPS: Auto-selected PAL2NTSC video centering for NTSC display\n");
+    }
+  }
+
   /* All card candidates below fit within vcdDir + one optional folder +
    * one basename + extension. Reject the whole operation if any may
    * truncate: an abbreviated VMC path could collide with another game's
