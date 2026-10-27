@@ -1,0 +1,25 @@
+{
+  "date": "2026-10-27",
+  "run_id": "20261027T161456-0112",
+  "source_commit": "cab66683f1dfb00b46beeb7c6f03080fa0f5cefa",
+  "ci_run_id": 40532233056,
+  "elf_sha256": "87c44f802e3d6267920131fd03330a6a09f04dca6fc63a7b9c949ed0e2827b1e",
+  "observation_source": "User observation on physical hardware: Sony POPS entered, executed main emulation loop, successfully polled DualShock 2 controller, detected IGR combo (L1+L2+R1+R2+Select+Start), and rendered the IGR menu on the display.",
+  "target": "ata0:/LAUNCHER-TEST-20261013-A/TEST.VCD",
+  "staged_core": {
+    "size": 3166988,
+    "entry": "0x00200008",
+    "main": "0x002004f0",
+    "trampoline_addr": "0x00084000"
+  },
+  "verified_hardware_behavior": {
+    "trampoline_execution": "Passed; cleared low RAM, copied staged core to 0x00200000, flushed caches, called ExecPS2",
+    "sony_pops_entry": "Passed; FUN_002004f0 initialized subsystems without aborting",
+    "iop_services": "Passed; embedded modules loaded, IOPCD bound",
+    "controller_polling": "Passed; FUN_0020bc60 actively polled controller",
+    "graphics_synthesizer": "Passed; GS output active, rendered IGR overlay menu",
+    "igr_combo_detection": "Passed; detected 6-button combo and triggered IGR sequence"
+  },
+  "interpretation": "Sony POPS executed successfully on physical PlayStation 2 hardware from launcHER. The bootstrap gate is cleared. Subsystem execution reached active controller polling and GS rendering. Next phase investigates disc sector streaming (TOC read and game startup) and clean IGR exit handling.",
+  "next_gate": "Read-only gameplay gate: verify VCD disc sector streaming through IOPCD/popfs to advance PS1 game past black loading screen into active gameplay."
+}
