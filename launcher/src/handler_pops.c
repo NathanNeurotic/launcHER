@@ -1091,6 +1091,23 @@ int launchPOPS(int argc, char *argv[]) {
   if (res)
     return res;
 
+  /* Apply SLBB-00001 VCD check bypass (FUN_008dbcdc) after fix-file staging
+   * so compat site invariants in PopsFixContext remain pristine during staging. */
+  if (plan.core_size >= (size_t)(0x0020085c - POPS_CORE_ADDR + 4)) {
+    size_t off = 0x00200834 - POPS_CORE_ADDR;
+    uint8_t *b = (uint8_t *)stagedCore;
+    uint32_t cur = (uint32_t)b[off] | ((uint32_t)b[off + 1] << 8) |
+                   ((uint32_t)b[off + 2] << 16) | ((uint32_t)b[off + 3] << 24);
+    if (cur == 0x0c08b520) {
+      res = pops_apply_slbb_vcd_check_bypass((void *)stagedCore, plan.core_size);
+      if (res) {
+        msg("POPS: SLBB check bypass failed: %d\n", res);
+        return res;
+      }
+      DPRINTF("POPS: Applied SLBB-00001 check bypass\n");
+    }
+  }
+
   /* Check the unreturnable trampoline before touching save images or
    * rebooting the IOP. Keep the actual low-RAM argument write immediately
    * before handoff, because it must remain valid through the foreign reset. */

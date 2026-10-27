@@ -729,16 +729,6 @@ int pops_apply_all_config_patches(void *staged_core, size_t core_size, const Pop
       if (result) return result;
     }
   }
-  if (core_size >= (size_t)(0x0020085c - POPS_CORE_BASE_ADDR + 4)) {
-    size_t off = 0x00200834 - POPS_CORE_BASE_ADDR;
-    uint8_t *b = (uint8_t *)staged_core;
-    uint32_t cur = (uint32_t)b[off] | ((uint32_t)b[off + 1] << 8) |
-                   ((uint32_t)b[off + 2] << 16) | ((uint32_t)b[off + 3] << 24);
-    if (cur == 0x0c08b520) {
-      result = pops_apply_slbb_vcd_check_bypass(staged_core, core_size);
-      if (result) return result;
-    }
-  }
   if (core_size >= (size_t)(0x002525b0 - POPS_CORE_BASE_ADDR + 2)) {
     size_t off = 0x002525b0 - POPS_CORE_BASE_ADDR;
     uint8_t *b = (uint8_t *)staged_core;
