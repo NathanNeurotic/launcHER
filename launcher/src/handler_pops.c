@@ -68,6 +68,17 @@ static void extractDirectory(const char *path, char *dir, size_t dir_size) {
   }
 }
 
+static const char *ci_strstr(const char *haystack, const char *needle) {
+  if (!haystack || !needle) return NULL;
+  size_t nlen = strlen(needle);
+  if (!nlen) return haystack;
+  for (; *haystack; ++haystack) {
+    if (strncasecmp(haystack, needle, nlen) == 0)
+      return haystack;
+  }
+  return NULL;
+}
+
 static void extractGameBase(const char *path, char *base, size_t base_size) {
   if (!path || !base || base_size == 0)
     return;
@@ -110,7 +121,7 @@ static int findPopsDependenciesForMode(const char *vcdPath, char *popsPath,
   }
 
   /* Candidate directories to search for POPS packages / binaries */
-  const char *searchDirs[8];
+  const char *searchDirs[16];
   int searchCount = 0;
 
   if (vcdDir[0])
@@ -127,6 +138,11 @@ static int findPopsDependenciesForMode(const char *vcdPath, char *popsPath,
   searchDirs[searchCount++] = "mc0:/POPS/";
   searchDirs[searchCount++] = "mc1:/POPS/";
   searchDirs[searchCount++] = "hdd0:__.POPS:pfs:/";
+  searchDirs[searchCount++] = "usb0:/POPS/";
+  searchDirs[searchCount++] = "usb1:/POPS/";
+  searchDirs[searchCount++] = "mass:/POPS/";
+  searchDirs[searchCount++] = "mass0:/POPS/";
+  searchDirs[searchCount++] = "ata0:/LAUNCHER-TEST-20261013-A/";
 
   for (int d = 0; d < searchCount; ++d) {
     const char *dir = searchDirs[d];
@@ -725,11 +741,22 @@ int launchPOPS(int argc, char *argv[]) {
   /* Look up known compatibility modes and LibCrypt bypass */
   const char *matchSerial = vcdInfo.normalized_serial[0] ? vcdInfo.normalized_serial : gameBase;
   const PopsCompatEntry *compat = pops_compat_db_lookup(matchSerial);
+  if (!compat && vcdInfo.normalized_serial[0]) {
+    compat = pops_compat_db_lookup(gameBase);
+  }
+  if (!compat) {
+    compat = pops_compat_db_lookup_title(gameBase);
+  }
   if (compat) {
     DPRINTF("POPS: Matched title in DB: %s (%s), default_modes=0x%02X, libcrypt=%d\n",
             compat->title, compat->serial, compat->default_modes, compat->has_libcrypt);
     if (cfg.compat_modes == 0 && compat->default_modes != 0) {
       cfg.compat_modes = compat->default_modes;
+    }
+  } else if (cfg.compat_modes == 0) {
+    if (ci_strstr(vcdPath, "tekken") || ci_strstr(gameBase, "tekken")) {
+      cfg.compat_modes |= 0x02;
+      DPRINTF("POPS: Title matched Tekken, applying Mode 2\n");
     }
   }
 

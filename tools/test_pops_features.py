@@ -100,6 +100,8 @@ class FeatureTests(unittest.TestCase):
         LIB.pops_config_export_table.restype = None
         LIB.pops_compat_db_lookup.argtypes = [c.c_char_p]
         LIB.pops_compat_db_lookup.restype = c.POINTER(PopsCompatEntry)
+        LIB.pops_compat_db_lookup_title.argtypes = [c.c_char_p]
+        LIB.pops_compat_db_lookup_title.restype = c.POINTER(PopsCompatEntry)
         LIB.pops_compat_db_count.restype = c.c_size_t
         LIB.pops_apply_compat_modes.argtypes = [c.c_void_p, c.c_size_t, c.c_uint8]
         LIB.pops_apply_compat_modes.restype = c.c_int
@@ -739,6 +741,11 @@ class FeatureTests(unittest.TestCase):
         entry_tk = LIB.pops_compat_db_lookup(b"SLUS-00402")
         self.assertTrue(bool(entry_tk))
         self.assertTrue(entry_tk.contents.default_modes & 0x02)  # Mode 2
+
+        # Title substring lookup
+        entry_tk_title = LIB.pops_compat_db_lookup_title(b"Tekken 3")
+        self.assertTrue(bool(entry_tk_title))
+        self.assertTrue(entry_tk_title.contents.default_modes & 0x02)
 
     def test_modes_and_patches_application(self):
         core_size = 0x303000

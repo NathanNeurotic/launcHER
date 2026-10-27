@@ -616,3 +616,21 @@ const PopsCompatEntry *pops_compat_db_lookup(const char *serial) {
 
   return NULL;
 }
+
+const PopsCompatEntry *pops_compat_db_lookup_title(const char *title) {
+  if (!title || !title[0])
+    return NULL;
+
+  size_t tlen = strlen(title);
+  for (size_t i = 0; i < COMPAT_ENTRY_COUNT; ++i) {
+    const char *ctitle = s_compat_entries[i].title;
+    if (!ctitle)
+      continue;
+    for (const char *h = ctitle; *h; ++h) {
+      if (!strncasecmp(h, title, tlen))
+        return &s_compat_entries[i];
+    }
+  }
+
+  return NULL;
+}
