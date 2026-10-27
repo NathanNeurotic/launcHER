@@ -746,12 +746,14 @@ class FeatureTests(unittest.TestCase):
         # Tekken 3
         entry_tk = LIB.pops_compat_db_lookup(b"SLUS-00402")
         self.assertTrue(bool(entry_tk))
-        self.assertTrue(entry_tk.contents.default_modes & 0x02)  # Mode 2
+        self.assertTrue(entry_tk.contents.default_modes & 0x01)  # Mode 1
+        self.assertTrue(entry_tk.contents.default_modes & 0x20)  # Mode 6 (OSD bypass)
 
         # Title substring lookup
         entry_tk_title = LIB.pops_compat_db_lookup_title(b"Tekken 3")
         self.assertTrue(bool(entry_tk_title))
-        self.assertTrue(entry_tk_title.contents.default_modes & 0x02)
+        self.assertTrue(entry_tk_title.contents.default_modes & 0x01)
+        self.assertTrue(entry_tk_title.contents.default_modes & 0x20)
 
     def test_modes_and_patches_application(self):
         core_size = 0x303000

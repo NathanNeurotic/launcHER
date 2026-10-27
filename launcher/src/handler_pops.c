@@ -755,9 +755,18 @@ int launchPOPS(int argc, char *argv[]) {
     }
   } else if (cfg.compat_modes == 0) {
     if (ci_strstr(vcdPath, "tekken") || ci_strstr(gameBase, "tekken")) {
-      cfg.compat_modes |= 0x02;
-      DPRINTF("POPS: Title matched Tekken, applying Mode 2\n");
+      cfg.compat_modes |= 0x20;
+      DPRINTF("POPS: Title matched Tekken, applying Mode 6 (OSD bypass)\n");
     }
+  }
+
+  /* Non-standard boot executables (e.g. MENU.EXE) fail virtual OSD authentication */
+  if (vcdInfo.normalized_serial[0] &&
+      (!strncasecmp(vcdInfo.normalized_serial, "MENU", 4) ||
+       strstr(vcdInfo.normalized_serial, ".EXE") ||
+       strstr(vcdInfo.normalized_serial, ".exe"))) {
+    cfg.compat_modes |= 0x20;
+    DPRINTF("POPS: Non-standard serial %s, applying Mode 6 (OSD bypass)\n", vcdInfo.normalized_serial);
   }
 
   /* All card candidates below fit within vcdDir + one optional folder +

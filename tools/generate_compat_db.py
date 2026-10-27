@@ -53,8 +53,11 @@ KNOWN_MODES = {
     # Gran Turismo 2: Mode 2 (fast cache) + Mode 4 (skip GPU locks)
     "SCES-02380": 0x0A, "SCES-12380": 0x0A, "SCUS-94455": 0x0A, "SCUS-94488": 0x0A,
     "SCPS-10116": 0x0A, "SCPS-10117": 0x0A,
-    # Tekken 3: Mode 2
-    "SCES-01237": 0x02, "SLUS-00402": 0x02, "SLPS-01300": 0x02, "SLPS-91202": 0x02,
+    # Tekken 3: Mode 1 (DMA sync) + Mode 6 (OSD bypass)
+    "SCES-01237": 0x21, "SLUS-00402": 0x21, "SLPS-01300": 0x21, "SLPS-91202": 0x21,
+    # Tekken 1 & 2: Mode 6 (OSD bypass)
+    "SCES-00005": 0x20, "SLUS-00006": 0x20, "SLPS-00040": 0x20,
+    "SCES-00255": 0x20, "SLUS-00213": 0x20, "SLPS-00300": 0x20,
     # Castlevania: SOTN: Mode 1 + Mode 2
     "SLES-00524": 0x03, "SLUS-00067": 0x03, "SLPM-86023": 0x03,
     # Chrono Cross: Mode 1

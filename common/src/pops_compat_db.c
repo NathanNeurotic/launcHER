@@ -5,8 +5,10 @@
 
 static const PopsCompatEntry s_compat_entries[] = {
   { "PAPX-90026", "Gran Turismo", 0x00, 0, 0x0000, 0, 0 },
+  { "SCES-00005", "Tekken", 0x20, 0, 0x0000, 0, 0 },
   { "SCES-00010", "WipEout v1.0", 0x00, 0, 0x0000, 0, 0 },
   { "SCES-00242", "Ridge Racer Revolution", 0x00, 0, 0x0000, 0, 0 },
+  { "SCES-00255", "Tekken 2", 0x20, 0, 0x0000, 0, 0 },
   { "SCES-00311", "MediEvil v1.1", 0x21, 1, 0x87AA, 0, 0 },
   { "SCES-00344", "Crash Bandicoot", 0x00, 0, 0x0000, 0, 0 },
   { "SCES-00394", "Rapid Racer", 0x00, 0, 0x0000, 0, 0 },
@@ -16,7 +18,7 @@ static const PopsCompatEntry s_compat_entries[] = {
   { "SCES-00743", "PaRappa The Rapper", 0x00, 0, 0x0000, 0, 0 },
   { "SCES-00984", "Gran Turismo", 0x00, 0, 0x0000, 0, 0 },
   { "SCES-00992", "Cool Boarders 2", 0x00, 0, 0x0000, 0, 0 },
-  { "SCES-01237", "Tekken 3", 0x02, 0, 0x0000, 0, 0 },
+  { "SCES-01237", "Tekken 3", 0x21, 0, 0x0000, 0, 0 },
   { "SCES-01259", "Dead Or Alive", 0x00, 0, 0x0000, 0, 0 },
   { "SCES-01313", "Bust-A-Groove", 0x00, 0, 0x0000, 0, 0 },
   { "SCES-01431", "Disney's Tarzan", 0x20, 1, 0x6547, 0, 0 },
@@ -448,11 +450,13 @@ static const PopsCompatEntry s_compat_entries[] = {
   { "SLPM-87089", "Pop'n Music", 0x00, 0, 0x0000, 0, 0 },
   { "SLPM-87405", "Tobal No.1", 0x00, 0, 0x0000, 0, 0 },
   { "SLPS-00024", "Myst v1.0", 0x00, 0, 0x0000, 0, 0 },
+  { "SLPS-00040", "Tekken", 0x20, 0, 0x0000, 0, 0 },
   { "SLPS-00083", "Zero Divide", 0x00, 0, 0x0000, 0, 0 },
   { "SLPS-00150", "Ridge Racer Revolution v1.0", 0x00, 0, 0x0000, 0, 0 },
   { "SLPS-00179", "Agile Warrior: F-111X", 0x00, 0, 0x0000, 0, 0 },
   { "SLPS-00191", "Double Dragon", 0x00, 0, 0x0000, 0, 0 },
   { "SLPS-00222", "Bio Hazard v1.1", 0x00, 0, 0x0000, 0, 0 },
+  { "SLPS-00300", "Tekken 2", 0x20, 0, 0x0000, 0, 0 },
   { "SLPS-00310", "Captain Tsubasa J: Get In The Tomorrow", 0x00, 0, 0x0000, 0, 0 },
   { "SLPS-00400", "Tobal No.1", 0x00, 0, 0x0000, 0, 0 },
   { "SLPS-00407", "Strikers 1945", 0x00, 0, 0x0000, 0, 0 },
@@ -470,7 +474,7 @@ static const PopsCompatEntry s_compat_entries[] = {
   { "SLPS-01232", "Bust A Move: Dance & Rhythm Action v1.0", 0x00, 0, 0x0000, 0, 0 },
   { "SLPS-01289", "Dead Or Alive", 0x00, 0, 0x0000, 0, 0 },
   { "SLPS-01290", "Clock Tower: Ghost Head", 0x00, 0, 0x0000, 0, 0 },
-  { "SLPS-01300", "Tekken 3 v1.0", 0x02, 0, 0x0000, 0, 0 },
+  { "SLPS-01300", "Tekken 3 v1.0", 0x21, 0, 0x0000, 0, 0 },
   { "SLPS-01351", "Enigma (Disc 1)", 0x00, 0, 0x0000, 0, 0 },
   { "SLPS-01352", "Enigma (Disc 2)", 0x00, 0, 0x0000, 0, 0 },
   { "SLPS-01512", "Bio Hazard: Director's Cut: Dual Shock Ver.", 0x00, 0, 0x0000, 0, 0 },
@@ -498,7 +502,8 @@ static const PopsCompatEntry s_compat_entries[] = {
   { "SLPS-03355", "Harry Potter To Kenja No Ishi", 0x00, 0, 0x0000, 0, 0 },
   { "SLPS-91023", "Myst v1.1", 0x00, 0, 0x0000, 0, 0 },
   { "SLPS-91099", "V-Rally: Championship Edition", 0x00, 0, 0x0000, 0, 0 },
-  { "SLPS-91202", "Tekken 3 v1.0", 0x02, 0, 0x0000, 0, 0 },
+  { "SLPS-91202", "Tekken 3 v1.0", 0x21, 0, 0x0000, 0, 0 },
+  { "SLUS-00006", "Tekken", 0x20, 0, 0x0000, 0, 0 },
   { "SLUS-00023", "Agile Warrior: F-111X", 0x00, 0, 0x0000, 0, 0 },
   { "SLUS-00044", "X-Men: Children Of The Atom", 0x00, 0, 0x0000, 0, 0 },
   { "SLUS-00067", "Castlevania: Symphony Of The Night", 0x03, 0, 0x0000, 0, 0 },
@@ -506,10 +511,11 @@ static const PopsCompatEntry s_compat_entries[] = {
   { "SLUS-00152", "Tomb Raider v1.0", 0x00, 0, 0x0000, 0, 0 },
   { "SLUS-00170", "Resident Evil", 0x00, 0, 0x0000, 0, 0 },
   { "SLUS-00183", "Zero Divide", 0x00, 0, 0x0000, 0, 0 },
+  { "SLUS-00213", "Tekken 2", 0x20, 0, 0x0000, 0, 0 },
   { "SLUS-00214", "Ridge Racer Revolution", 0x00, 0, 0x0000, 0, 0 },
   { "SLUS-00372", "Star Gladiator: Episode 1: Final Crusade", 0x00, 0, 0x0000, 0, 0 },
   { "SLUS-00373", "Apocalypse", 0x00, 0, 0x0000, 0, 0 },
-  { "SLUS-00402", "Tekken 3", 0x02, 0, 0x0000, 0, 0 },
+  { "SLUS-00402", "Tekken 3", 0x21, 0, 0x0000, 0, 0 },
   { "SLUS-00403", "Rage Racer", 0x00, 0, 0x0000, 0, 0 },
   { "SLUS-00418", "Super Puzzle Fighter II Turbo", 0x00, 0, 0x0000, 0, 0 },
   { "SLUS-00425", "Wild 9", 0x00, 0, 0x0000, 0, 0 },
@@ -574,7 +580,7 @@ static const PopsCompatEntry s_compat_entries[] = {
   { "SLUS-90152", "Tomb Raider Gold", 0x00, 0, 0x0000, 0, 0 },
 };
 
-#define COMPAT_ENTRY_COUNT 568
+#define COMPAT_ENTRY_COUNT (sizeof(s_compat_entries) / sizeof(s_compat_entries[0]))
 
 size_t pops_compat_db_count(void) {
   return COMPAT_ENTRY_COUNT;
