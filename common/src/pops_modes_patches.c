@@ -582,6 +582,63 @@ int pops_apply_vmc1_disable(void *staged_core, size_t core_size) {
   return write_u32(staged_core, core_size, 0x0020d0e0, 0x24040000);
 }
 
+int pops_apply_slbb_vcd_check_bypass(void *staged_core, size_t core_size) {
+  uint8_t *bytes = (uint8_t *)staged_core;
+  if (!bytes)
+    return -EINVAL;
+  if (core_size < (size_t)(0x0020085c - POPS_CORE_BASE_ADDR + 4))
+    return -ERANGE;
+
+  size_t off_834 = 0x00200834 - POPS_CORE_BASE_ADDR;
+  size_t off_83c = 0x0020083c - POPS_CORE_BASE_ADDR;
+  size_t off_85c = 0x0020085c - POPS_CORE_BASE_ADDR;
+
+  uint32_t cur_834 = 0, cur_83c = 0, cur_85c = 0;
+  for (unsigned j = 0; j < 4; ++j) {
+    cur_834 |= (uint32_t)bytes[off_834 + j] << (8 * j);
+    cur_83c |= (uint32_t)bytes[off_83c + j] << (8 * j);
+    cur_85c |= (uint32_t)bytes[off_85c + j] << (8 * j);
+  }
+
+  if (cur_834 != 0x0c08b520 && cur_834 != 0x00000000)
+    return -EINVAL;
+  if (cur_83c != 0x0441000a && cur_83c != 0x1000000a)
+    return -EINVAL;
+  if (cur_85c != 0x1000fffa && cur_85c != 0x00000000)
+    return -EINVAL;
+
+  write_u32(staged_core, core_size, 0x00200834, 0x00000000);
+  write_u32(staged_core, core_size, 0x0020083c, 0x1000000a);
+  write_u32(staged_core, core_size, 0x0020085c, 0x00000000);
+  return 0;
+}
+
+int pops_apply_bios_osd_disable(void *staged_core, size_t core_size) {
+  uint8_t *bytes = (uint8_t *)staged_core;
+  if (!bytes)
+    return -EINVAL;
+  if (core_size < (size_t)(0x002525b0 - POPS_CORE_BASE_ADDR + 2))
+    return -ERANGE;
+  size_t off = 0x002525b0 - POPS_CORE_BASE_ADDR;
+  uint16_t cur = (uint16_t)bytes[off] | ((uint16_t)bytes[off + 1] << 8);
+  if (cur != 0x1bfc && cur != 0x0648)
+    return -EINVAL;
+  return write_u16(staged_core, core_size, 0x002525b0, 0x0648);
+}
+
+int pops_apply_bios_osd_enable(void *staged_core, size_t core_size) {
+  uint8_t *bytes = (uint8_t *)staged_core;
+  if (!bytes)
+    return -EINVAL;
+  if (core_size < (size_t)(0x002525b0 - POPS_CORE_BASE_ADDR + 2))
+    return -ERANGE;
+  size_t off = 0x002525b0 - POPS_CORE_BASE_ADDR;
+  uint16_t cur = (uint16_t)bytes[off] | ((uint16_t)bytes[off + 1] << 8);
+  if (cur != 0x1bfc && cur != 0x0648)
+    return -EINVAL;
+  return write_u16(staged_core, core_size, 0x002525b0, 0x1bfc);
+}
+
 int pops_apply_all_config_patches(void *staged_core, size_t core_size, const PopsConfig *cfg) {
   int result;
   int video_requested, auxiliary_requested;
@@ -669,6 +726,25 @@ int pops_apply_all_config_patches(void *staged_core, size_t core_size, const Pop
     uint16_t cur = (uint16_t)b[off] | ((uint16_t)b[off + 1] << 8);
     if (cur == 0x1040) {
       result = pops_apply_hdd_init_exit(staged_core, core_size);
+      if (result) return result;
+    }
+  }
+  if (core_size >= (size_t)(0x0020085c - POPS_CORE_BASE_ADDR + 4)) {
+    size_t off = 0x00200834 - POPS_CORE_BASE_ADDR;
+    uint8_t *b = (uint8_t *)staged_core;
+    uint32_t cur = (uint32_t)b[off] | ((uint32_t)b[off + 1] << 8) |
+                   ((uint32_t)b[off + 2] << 16) | ((uint32_t)b[off + 3] << 24);
+    if (cur == 0x0c08b520) {
+      result = pops_apply_slbb_vcd_check_bypass(staged_core, core_size);
+      if (result) return result;
+    }
+  }
+  if (core_size >= (size_t)(0x002525b0 - POPS_CORE_BASE_ADDR + 2)) {
+    size_t off = 0x002525b0 - POPS_CORE_BASE_ADDR;
+    uint8_t *b = (uint8_t *)staged_core;
+    uint16_t cur = (uint16_t)b[off] | ((uint16_t)b[off + 1] << 8);
+    if (cfg->no_boot && cur == 0x0648) {
+      result = pops_apply_bios_osd_enable(staged_core, core_size);
       if (result) return result;
     }
   }

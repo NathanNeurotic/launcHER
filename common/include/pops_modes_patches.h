@@ -115,6 +115,18 @@ int pops_apply_vmc0_disable(void *staged_core, size_t core_size);
 /* Disable Memory Card 1 emulation ($NOVMC1 / FUN_008dc12c(2)): rewires 0x0020d0e0 from 0x1480ffc1 to 0x24040000 */
 int pops_apply_vmc1_disable(void *staged_core, size_t core_size);
 
+/* Bypass SLBB-00001 VCD check (FUN_008dbcdc):
+ * rewires 0x00200834 from 0x0c08b520 to 0x00000000,
+ * 0x0020083c from 0x0441000a (or 0x1000000a) to 0x1000000a,
+ * and 0x0020085c from 0x1000fffa (or 0x00000000) to 0x00000000 */
+int pops_apply_slbb_vcd_check_bypass(void *staged_core, size_t core_size);
+
+/* Disable built-in BIOS OSD shell (FUN_008db97c): rewires 0x002525b0 from 0x1bfc to 0x0648 */
+int pops_apply_bios_osd_disable(void *staged_core, size_t core_size);
+
+/* Re-enable built-in BIOS OSD shell (FUN_008dba20): rewires 0x002525b0 from 0x0648 to 0x1bfc */
+int pops_apply_bios_osd_enable(void *staged_core, size_t core_size);
+
 /* Apply all settings from a PopsConfig structure to the staged core */
 int pops_apply_all_config_patches(void *staged_core, size_t core_size, const PopsConfig *cfg);
 

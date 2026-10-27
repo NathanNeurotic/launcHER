@@ -123,6 +123,12 @@ class FeatureTests(unittest.TestCase):
         LIB.pops_apply_vmc0_disable.restype = c.c_int
         LIB.pops_apply_vmc1_disable.argtypes = [c.c_void_p, c.c_size_t]
         LIB.pops_apply_vmc1_disable.restype = c.c_int
+        LIB.pops_apply_slbb_vcd_check_bypass.argtypes = [c.c_void_p, c.c_size_t]
+        LIB.pops_apply_slbb_vcd_check_bypass.restype = c.c_int
+        LIB.pops_apply_bios_osd_disable.argtypes = [c.c_void_p, c.c_size_t]
+        LIB.pops_apply_bios_osd_disable.restype = c.c_int
+        LIB.pops_apply_bios_osd_enable.argtypes = [c.c_void_p, c.c_size_t]
+        LIB.pops_apply_bios_osd_enable.restype = c.c_int
         LIB.pops_apply_throttling.argtypes = [c.c_void_p, c.c_size_t, c.c_uint8, c.c_uint8]
         LIB.pops_apply_throttling.restype = c.c_int
         LIB.pops_apply_bios_shell.argtypes = [c.c_void_p, c.c_size_t]
@@ -927,6 +933,57 @@ class FeatureTests(unittest.TestCase):
         struct.pack_into("<I", buf, off1, 0x1480ffc1)
         self.assertEqual(LIB.pops_apply_vmc1_disable(ptr, buf_size), 0)
         self.assertEqual(struct.unpack_from("<I", buf, off1)[0], 0x24040000)
+
+    def test_slbb_vcd_check_bypass_patch(self):
+        buf_size = 0x10000
+        buf = bytearray(buf_size)
+        ptr = (c.c_uint8 * buf_size).from_buffer(buf)
+
+        # Mismatch guard test
+        self.assertEqual(LIB.pops_apply_slbb_vcd_check_bypass(ptr, buf_size), -errno.EINVAL)
+
+        # Pristine sites:
+        # 0x00200834 has 0x0c08b520 (JAL 0x0022d480)
+        # 0x0020083c has 0x0441000a (bgez v1, +10)
+        # 0x0020085c has 0x1000fffa (b -6)
+        off_834 = 0x00200834 - 0x00200000
+        off_83c = 0x0020083c - 0x00200000
+        off_85c = 0x0020085c - 0x00200000
+        struct.pack_into("<I", buf, off_834, 0x0c08b520)
+        struct.pack_into("<I", buf, off_83c, 0x0441000a)
+        struct.pack_into("<I", buf, off_85c, 0x1000fffa)
+
+        self.assertEqual(LIB.pops_apply_slbb_vcd_check_bypass(ptr, buf_size), 0)
+        self.assertEqual(struct.unpack_from("<I", buf, off_834)[0], 0x00000000)
+        self.assertEqual(struct.unpack_from("<I", buf, off_83c)[0], 0x1000000a)
+        self.assertEqual(struct.unpack_from("<I", buf, off_85c)[0], 0x00000000)
+
+        # Compatibility with Mode 2 / Mode 5 pre-patched state
+        struct.pack_into("<I", buf, off_834, 0x0c08b520)
+        struct.pack_into("<I", buf, off_83c, 0x1000000a)
+        struct.pack_into("<I", buf, off_85c, 0x00000000)
+        self.assertEqual(LIB.pops_apply_slbb_vcd_check_bypass(ptr, buf_size), 0)
+        self.assertEqual(struct.unpack_from("<I", buf, off_834)[0], 0x00000000)
+
+    def test_bios_osd_control_patches(self):
+        buf_size = 0x60000
+        buf = bytearray(buf_size)
+        ptr = (c.c_uint8 * buf_size).from_buffer(buf)
+
+        off = 0x002525b0 - 0x00200000
+
+        # Mismatch guard test
+        self.assertEqual(LIB.pops_apply_bios_osd_disable(ptr, buf_size), -errno.EINVAL)
+        self.assertEqual(LIB.pops_apply_bios_osd_enable(ptr, buf_size), -errno.EINVAL)
+
+        # Disable OSD (0x1bfc -> 0x0648)
+        struct.pack_into("<H", buf, off, 0x1bfc)
+        self.assertEqual(LIB.pops_apply_bios_osd_disable(ptr, buf_size), 0)
+        self.assertEqual(struct.unpack_from("<H", buf, off)[0], 0x0648)
+
+        # Enable OSD (0x0648 -> 0x1bfc)
+        self.assertEqual(LIB.pops_apply_bios_osd_enable(ptr, buf_size), 0)
+        self.assertEqual(struct.unpack_from("<H", buf, off)[0], 0x1bfc)
 
 if __name__ == "__main__":
     unittest.main()
