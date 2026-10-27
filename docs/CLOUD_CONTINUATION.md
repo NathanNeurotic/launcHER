@@ -1,9 +1,106 @@
-# Continuation checkpoint - 2026-10-20
+# Continuation checkpoint - 2026-10-27
 
 Continue draft PR [#23](https://github.com/NathanNeurotic/launcHER/pull/23)
 on `codex/popstarter-replacement`. Do not merge. Fetch before editing and
 preserve newer work. Publish validated incremental commits on this branch.
 Include `Co-authored-by: ChatGPT <chatgpt@openai.com>` in new commits.
+
+## October 27 parity audit and next-agent handoff
+
+Audit date: 2026-10-27. launcHER `codex/popstarter-replacement` at commit `5a8e334`,
+REPOP `feat/psxcore-validation` at commit `bec9f29c`.
+
+Current status: POPStarter parity is incomplete. No PS1 game has booted through
+the replacement on console hardware. The most recent hardware run (2026-10-20,
+run `20261020T134413-0102` from commit `52253e5`, documented in
+`docs/evidence/pops_dependency_close_console.json`) stopped before Sony POPS
+started (`sony_entry_executed: false`), failing at POSIX `close` with result `-5`
+after reading all 3,166,988 bytes of `POPS.ELF`. Commit `637bfb0` changed
+`readFullFile` to reject only negative `close()` return values, but no hardware run
+has re-tested this change. Several shipped patch helpers write to addresses that the
+original POPStarter binary never touches. REPOP reports 0% functional coverage in
+its parity baseline, and most tagged functions in its runtime hooks are one-line stubs.
+
+### Verification status by subsystem
+
+| Area | Evidence level | Verification details |
+| --- | --- | --- |
+| External `POPS.ELF` / PAK / `IOPRP` checks, guarded staging, trampoline | Static + probe | Host unit tests pass. A console preflight probe reached staging before Sony entry. |
+| Six original core patch groups (HDD check, CD license, exception breakpoints, `sceCdPowerOff`, Delcro, `SifLoadModule` errors) | Static | Byte-exact against original exports with byte guards. Host tests pass. |
+| Compatibility modes 1 to 7 (`FUN_008dc2c4`) | Static | Matches measured original writes across all 128 bitmasks. Mode 8 is rejected. |
+| `TROJAN` / `PATCH` fix-file order and `PATCH` video actions | Static + probe | Host tests pass. A 37-case console staging probe passed staging. Sony code was not entered. |
+| IGR exit rewire, `IOPCD` stack, `HddInit` bypass, `$NOVMC0`/`$NOVMC1`, `SLBB-00001` check | Static | Target addresses and values match original functions. Host tests pass. |
+| Config parser and 32-byte config table | Static | Host unit tests pass. |
+| Network storage (SMB file I/O, network config) | Hardware | Console test from 2026-10-15 passed 8 KiB file I/O on ps2link stack. Validates storage access only, not game execution. |
+
+### Open P0 hardware gates
+
+1. **Dependency read gate:** Re-run build `637bfb0`+ on physical console hardware. Verify that `POPS.ELF` completes read and close without error `-5`.
+2. **Bootstrap gate:** Verify that Sony POPS enters (`FUN_002004f0`), loads embedded IOP modules (`FUN_002002a0`), binds disc SIF RPC `0x435052` (`FUN_00210540`), and initiates audio and controller polling.
+3. **Read-only gameplay gate:** Boot a retail game from APA and USB. Capture TOC and sector read logs (`0x435053` image requests).
+4. **Writable save gate:** Format a VMC, save in-game, reload after cold reboot, and verify data integrity on the host.
+5. **IOP I/O trace gate:** Capture same-session descriptor lifetime and seek/read offsets to verify parity against original POPStarter behavior.
+
+### Patch provenance audit: ungrounded helpers
+
+Running `tools/audit_pops_patch_provenance.py` checks all 99 POPS addresses targeted
+by launcHER against the 76 address targets in the unpacked original binary
+(`build/popstarter-main-unpacked.bin`, base `0x00870000`).
+
+The following helpers write to addresses that never appear in the original binary
+and lack byte guards:
+
+| Helper | Address(es) | Directive | Risk / behavior |
+| --- | --- | --- | --- |
+| `pops_apply_throttling` | `0x002010a0` | `$FASTMIPS` / `$SLOWMIPS` | Unguarded write; address not in original binary. |
+| `pops_apply_widescreen` | `0x00205b00` | `$WIDESCREEN` | Unguarded write; address not in original binary. |
+| `pops_apply_dither_off` | `0x00205d58` | `$DITHER_OFF` | Unguarded write; address not in original binary. |
+| `pops_apply_smooth` | `0x00205e00` | `$SMOOTH` | Unguarded write; address not in original binary. |
+| `pops_apply_video_overrides` | `0x002061a0`..`0x00206218` | 480p/576p/240p, X/Y offsets | Unguarded writes; addresses not in original binary. |
+| `pops_apply_libcrypt_bypass` | `0x0020c1f0`, `0x0020cfb0` | Compat DB `has_libcrypt` | Invoked automatically in `launcher/src/handler_pops.c:1072-1075` for any title marked LibCrypt; return code ignored. |
+| `pops_apply_bios_shell` | `0x00210cf8` | `$NOBOOT` / `$BIOS` | Writes byte `0x01` at `0x00210cf8`. Original uses this address only as code/call target (`0x8950c0`, `0x89cc9c`, `0x8e0654`). |
+| Compat DB `patch_offset` / `patch_val` | Per title | Title-specific compat fix | Raw unguarded write in `launcher/src/handler_pops.c:1077-1084`. |
+
+Action required: Put these helpers behind strict byte guards or remove them until original disassembly proves their locations. Stop running `pops_apply_libcrypt_bypass` and raw compat DB writes automatically.
+
+### Incomplete and unported runtime features
+
+- **Cheats:** `launcher/src/handler_pops.c:720-723` returns `-ENOTSUP` on any cheat directive. No resident cheat engine or hook exists.
+- **`$SAFEMODE`:** Parsed into `pops_config_t.safe_mode` in `common/src/pops_config.c`, never evaluated by launcher or patch code.
+- **In-Game Reset (IGR):** Only the exit rewire (`FUN_008dbe08` at `0x0020c0a4`) exists. In-game combo detection helpers lack a resident hook into controller polling. Alternate combo mode (`igr_type` 2) has not been checked against original code.
+- **LibCrypt:** The SubQ generator header explicitly states it is unverified.
+- **Multi-disc:** Path resolution and proxy arguments exist, but disc swap during active emulation has no test or verified handler.
+- **Compatibility Mode 6:** The OSD disable write (`0x0648` at `0x002525b0`) exists, but the original binary's precondition checking for `BIOS.BIN` absence (strings at `0x9b2738`..`0x9b280e`) is not implemented.
+- **Compatibility Mode 8:** Rejected as unsupported (`-ENOTSUP`).
+- **Unported original functions:**
+  - `FUN_008db7e4`: Resource path relinking.
+  - `FUN_008dbd6c`: VCD path redirect when `0x10e4 != 1`.
+  - `FUN_008d6da4`: Exception hook (`0x00232d08` -> `0x0c518000`).
+  - `FUN_008d7024`: IOP module hook.
+  - `FUN_0087c4a0`: Buffer relocation (`+0xC00` at `0x00200c62`).
+  - VMC directory relinker and resident cheat engines.
+
+### REPOP repository status
+
+- Baseline file `parity/baseline.json` reports 477 ground-truth functions, 0 claimed, and 0.0% coverage.
+- The unit test `test_all_477_clean_ee_functions_claimed_in_source` passes only because each function header contains an `@parity` comment tag. In `popstarter/src/runtime_hooks.c`, 268 of 283 tagged functions contain stubs of two lines or fewer (`return 0;`, `(void)arg;`).
+- In `popstarter/src/patches.c`, `patches_set_compatibility_mode` prints a message without applying patches, while `patches_apply_hdtv_fix` and LibCrypt patching contain empty comments.
+- GCC and LLVM toolchains compile clean, confirming build syntax but not functional behavior.
+
+### Matrix correction for commit `5a8e334`
+
+In `docs/POPSTARTER_ORIGINAL_BEHAVIOR_MATRIX.md`, line 65 previously stated that `FUN_008db97c` disables the BIOS OSD by default. This has been corrected. `pops_apply_all_config_patches` does not invoke `pops_apply_bios_osd_disable` by default. In the original binary, `FUN_008db97c` is gated on globals `0x3b98(gp)` and `0x38a4(gp)`. `$NOBOOT` currently calls the ungrounded helper `pops_apply_bios_shell` (`0x00210cf8`).
+
+### Prioritized checklist for the next agent
+
+1. Re-run dependency-trace build on physical console hardware. Verify that commit `637bfb0` resolved the POSIX `close` error (`result=-5`) and capture console logs into `docs/evidence/`.
+2. Guard or disable ungrounded patch helpers: disable automatic `pops_apply_libcrypt_bypass` and unguarded compat DB writes in `launcher/src/handler_pops.c:1072-1084`.
+3. Clear the bootstrap gate: verify entry into Sony POPS (`FUN_002004f0`), module binding, and controller initialization on hardware.
+4. Clear the read-only gameplay gate: boot one commercial game title from ATA and USB; capture TOC and sector read logs.
+5. Clear the writable save gate: format, write, and reload a test VMC.
+6. Reconstruct resident runtime hooks: cheat engine, IGR controller polling hook, disc swap handler, and unported original functions (`FUN_008db7e4`, `FUN_008dbd6c`, `FUN_008d6da4`, `FUN_008d7024`, `FUN_0087c4a0`).
+7. In REPOP, implement real function logic and update `parity/baseline.json` only when function bodies are reconstructed and tested against MIPS builds.
+
 
 ## October 20 source and CI continuation
 
