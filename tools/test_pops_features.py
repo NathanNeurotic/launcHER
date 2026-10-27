@@ -776,6 +776,24 @@ class FeatureTests(unittest.TestCase):
         self.assertLess(LIB.pops_apply_compat_modes(core_ptr, core_size, mask), 0)
         self.assertEqual(bytes(buf), before)
 
+        # Unguarded / mismatch test: helpers must reject ungrounded/corrupted sites with EILSEQ
+        self.assertEqual(LIB.pops_apply_widescreen(core_ptr, core_size), -errno.EILSEQ)
+        self.assertEqual(LIB.pops_apply_smooth(core_ptr, core_size), -errno.EILSEQ)
+        self.assertEqual(LIB.pops_apply_dither_off(core_ptr, core_size), -errno.EILSEQ)
+        self.assertEqual(LIB.pops_apply_throttling(core_ptr, core_size, 1, 0), -errno.EILSEQ)
+        self.assertEqual(LIB.pops_apply_bios_shell(core_ptr, core_size), -errno.EILSEQ)
+        self.assertEqual(LIB.pops_apply_libcrypt_bypass(core_ptr, core_size), -errno.EILSEQ)
+        self.assertEqual(LIB.pops_apply_video_overrides(core_ptr, core_size, 1, 1, -10, 20), -errno.EILSEQ)
+
+        # Seed pristine instructions for video overrides
+        buf[0x1AF94] = 0x64
+        struct.pack_into("<I", buf, 0x302770, 0x000c7200)
+        buf[0x3B018] = 0x7f
+        struct.pack_into("<H", buf, 0x3B01C, 0x0357)
+        struct.pack_into("<I", buf, 0x002061DC - 0x00200000, 0x10400006)
+        struct.pack_into("<H", buf, 0x00206214 - 0x00200000, 0x902d)
+        struct.pack_into("<H", buf, 0x00206218 - 0x00200000, 0x001b)
+
         # Test PAL2NTSC video override
         res = LIB.pops_apply_video_overrides(core_ptr, core_size, 1, 1, -10, 20)
         self.assertEqual(res, 0)
@@ -784,25 +802,53 @@ class FeatureTests(unittest.TestCase):
         val_vsync = struct.unpack_from("<I", buf, 0x302770)[0]  # 0x00502770 - 0x00200000 = 0x302770
         self.assertEqual(val_vsync, 0x000a6300)
 
+        # Seed 240p pristine instructions
+        struct.pack_into("<I", buf, 0x002061A0 - 0x00200000, 0x0080a02d)
+        struct.pack_into("<I", buf, 0x002061E0 - 0x00200000, 0x0220502d)
+
         # Test 240p video override (POPS_VMODE_240P = 8)
         res = LIB.pops_apply_video_overrides(core_ptr, core_size, 8, 0, 0, 0)
         self.assertEqual(res, 0)
         val_240p = struct.unpack_from("<I", buf, 0x002061A0 - 0x00200000)[0]
         self.assertEqual(val_240p, 0x24020000)
 
-        # Test Widescreen patch (0x00205B00)
+        # Seed Widescreen patch (0x00205B00)
+        struct.pack_into("<I", buf, 0x00205B00 - 0x00200000, 0x0080802d)
         res = LIB.pops_apply_widescreen(core_ptr, core_size)
         self.assertEqual(res, 0)
         val_ws = struct.unpack_from("<I", buf, 0x00205B00 - 0x00200000)[0]
         self.assertEqual(val_ws, 0x24020C00)
 
-        # Test Dither disable patch (0x00205D58)
+        # Seed Dither disable patch (0x00205D58)
+        struct.pack_into("<I", buf, 0x00205D58 - 0x00200000, 0xdfb30028)
         res = LIB.pops_apply_dither_off(core_ptr, core_size)
         self.assertEqual(res, 0)
         val_dither = struct.unpack_from("<I", buf, 0x00205D58 - 0x00200000)[0]
         self.assertEqual(val_dither, 0x00000000)
 
-        # Test LibCrypt bypass
+        # Seed Smooth patch (0x00205E00)
+        struct.pack_into("<I", buf, 0x00205E00 - 0x00200000, 0x0200202d)
+        res = LIB.pops_apply_smooth(core_ptr, core_size)
+        self.assertEqual(res, 0)
+        val_smooth = struct.unpack_from("<I", buf, 0x00205E00 - 0x00200000)[0]
+        self.assertEqual(val_smooth, 0x24020001)
+
+        # Seed Throttling patch (0x002010A0)
+        struct.pack_into("<I", buf, 0x002010A0 - 0x00200000, 0xffb00000)
+        res = LIB.pops_apply_throttling(core_ptr, core_size, 1, 0)
+        self.assertEqual(res, 0)
+        val_fast = struct.unpack_from("<I", buf, 0x002010A0 - 0x00200000)[0]
+        self.assertEqual(val_fast, 0x00000000)
+
+        # Seed BIOS shell patch (0x00210CF8)
+        buf[0x00210CF8 - 0x00200000] = 0xFF
+        res = LIB.pops_apply_bios_shell(core_ptr, core_size)
+        self.assertEqual(res, 0)
+        self.assertEqual(buf[0x00210CF8 - 0x00200000], 0x01)
+
+        # Seed LibCrypt bypass
+        struct.pack_into("<I", buf, 0x0020C1F0 - 0x00200000, 0x3463ffff)
+        struct.pack_into("<I", buf, 0x0020CFB0 - 0x00200000, 0x24020001)
         res = LIB.pops_apply_libcrypt_bypass(core_ptr, core_size)
         self.assertEqual(res, 0)
         val_lc = struct.unpack_from("<I", buf, 0x0020C1F0 - 0x00200000)[0]

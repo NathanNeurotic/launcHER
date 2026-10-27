@@ -35,6 +35,33 @@ static int write_u32(void *base, size_t size, uint32_t addr, uint32_t val) {
   return 0;
 }
 
+static uint8_t read_u8(const void *base, size_t size, uint32_t addr) {
+  if (addr < POPS_CORE_BASE_ADDR)
+    return 0;
+  uint32_t off = addr - POPS_CORE_BASE_ADDR;
+  if (off + 1 > size)
+    return 0;
+  return ((const uint8_t *)base)[off];
+}
+
+static uint16_t read_u16(const void *base, size_t size, uint32_t addr) {
+  if (addr < POPS_CORE_BASE_ADDR)
+    return 0;
+  uint32_t off = addr - POPS_CORE_BASE_ADDR;
+  if (off + 2 > size)
+    return 0;
+  return *(const uint16_t *)((const uint8_t *)base + off);
+}
+
+static uint32_t read_u32(const void *base, size_t size, uint32_t addr) {
+  if (addr < POPS_CORE_BASE_ADDR)
+    return 0;
+  uint32_t off = addr - POPS_CORE_BASE_ADDR;
+  if (off + 4 > size)
+    return 0;
+  return *(const uint32_t *)((const uint8_t *)base + off);
+}
+
 /* Measured POPSTARTER FUN_008dc2c4: modes 1..7, widths and
  * order retained. Expected bytes are from the supported external POPS ELF.
  * Mode 8 has no branch in this dispatcher. */
@@ -286,39 +313,63 @@ int pops_apply_video_overrides(void *staged_core, size_t core_size,
       core_size < (size_t)(0x00502770 - POPS_CORE_BASE_ADDR + 4))
     return -ERANGE;
 
-  /* PAL to NTSC conversion */
+  /* Verify byte guards before modifying core */
   if (video_mode == POPS_VMODE_PAL2NTSC) {
+    if (read_u8(staged_core, core_size, 0x0021af94) != 0x64 ||
+        read_u32(staged_core, core_size, 0x00502770) != 0x000c7200 ||
+        read_u8(staged_core, core_size, 0x0023b018) != 0x7f ||
+        read_u16(staged_core, core_size, 0x0023b01c) != 0x0357)
+      return -EILSEQ;
     write_u8(staged_core, core_size, 0x0021af94, 3);
     write_u32(staged_core, core_size, 0x00502770, 0x000a6300);
     write_u8(staged_core, core_size, 0x0023b018, 0x6b);
     write_u16(staged_core, core_size, 0x0023b01c, 0x02cb);
   } else if (video_mode == POPS_VMODE_NTSC2PAL) {
+    if (read_u8(staged_core, core_size, 0x0021af94) != 0x64 ||
+        read_u32(staged_core, core_size, 0x00502770) != 0x000a6300 ||
+        read_u8(staged_core, core_size, 0x0023b018) != 0x6b ||
+        read_u16(staged_core, core_size, 0x0023b01c) != 0x02cb)
+      return -EILSEQ;
     write_u8(staged_core, core_size, 0x0021af94, 2);
     write_u32(staged_core, core_size, 0x00502770, 0x000c7200);
     write_u8(staged_core, core_size, 0x0023b018, 0x7f);
     write_u16(staged_core, core_size, 0x0023b01c, 0x0357);
-  } else if (video_mode == POPS_VMODE_480P) {
-    write_u32(staged_core, core_size, 0x002061A0, 0x24020001); /* progressive */
-    write_u32(staged_core, core_size, 0x002061E0, 0x24050000); /* non-interlaced */
-  } else if (video_mode == POPS_VMODE_480I) {
-    write_u32(staged_core, core_size, 0x002061A0, 0x24020002);
-  } else if (video_mode == POPS_VMODE_576P) {
-    write_u32(staged_core, core_size, 0x002061A0, 0x24020003);
-  } else if (video_mode == POPS_VMODE_576I) {
-    write_u32(staged_core, core_size, 0x002061A0, 0x24020004);
-  } else if (video_mode == POPS_VMODE_240P) {
-    write_u32(staged_core, core_size, 0x002061A0, 0x24020000); /* 240p progressive */
-    write_u32(staged_core, core_size, 0x002061E0, 0x24050000); /* non-interlaced */
+  } else if (video_mode >= POPS_VMODE_480P && video_mode <= POPS_VMODE_240P) {
+    if (read_u32(staged_core, core_size, 0x002061A0) != 0x0080a02d)
+      return -EILSEQ;
+    if ((video_mode == POPS_VMODE_480P || video_mode == POPS_VMODE_240P) &&
+        read_u32(staged_core, core_size, 0x002061E0) != 0x0220502d)
+      return -EILSEQ;
+
+    if (video_mode == POPS_VMODE_480P) {
+      write_u32(staged_core, core_size, 0x002061A0, 0x24020001); /* progressive */
+      write_u32(staged_core, core_size, 0x002061E0, 0x24050000); /* non-interlaced */
+    } else if (video_mode == POPS_VMODE_480I) {
+      write_u32(staged_core, core_size, 0x002061A0, 0x24020002);
+    } else if (video_mode == POPS_VMODE_576P) {
+      write_u32(staged_core, core_size, 0x002061A0, 0x24020003);
+    } else if (video_mode == POPS_VMODE_576I) {
+      write_u32(staged_core, core_size, 0x002061A0, 0x24020004);
+    } else if (video_mode == POPS_VMODE_240P) {
+      write_u32(staged_core, core_size, 0x002061A0, 0x24020000); /* 240p progressive */
+      write_u32(staged_core, core_size, 0x002061E0, 0x24050000); /* non-interlaced */
+    }
   }
 
   if (hdtv_fix) {
+    if (read_u32(staged_core, core_size, 0x002061DC) != 0x10400006)
+      return -EILSEQ;
     write_u32(staged_core, core_size, 0x002061DC, 0x24040001);
   }
 
   if (x_offset != 0) {
+    if (read_u16(staged_core, core_size, 0x00206214) != 0x902d)
+      return -EILSEQ;
     write_u16(staged_core, core_size, 0x00206214, (uint16_t)x_offset);
   }
   if (y_offset != 0) {
+    if (read_u16(staged_core, core_size, 0x00206218) != 0x001b)
+      return -EILSEQ;
     write_u16(staged_core, core_size, 0x00206218, (uint16_t)y_offset);
   }
 
@@ -328,6 +379,9 @@ int pops_apply_video_overrides(void *staged_core, size_t core_size,
 int pops_apply_smooth(void *staged_core, size_t core_size) {
   if (!staged_core || core_size < 0x250000)
     return -EINVAL;
+  /* Guard: only apply if pristine instruction is present */
+  if (read_u32(staged_core, core_size, 0x00205E00) != 0x0200202d)
+    return -EILSEQ;
   /* Modify GS texture filter flag (TEX0.TFX bilinear) */
   return write_u32(staged_core, core_size, 0x00205E00, 0x24020001);
 }
@@ -335,6 +389,9 @@ int pops_apply_smooth(void *staged_core, size_t core_size) {
 int pops_apply_widescreen(void *staged_core, size_t core_size) {
   if (!staged_core || core_size < 0x250000)
     return -EINVAL;
+  /* Guard: only apply if pristine instruction is present */
+  if (read_u32(staged_core, core_size, 0x00205B00) != 0x0080802d)
+    return -EILSEQ;
   /* Horizontal 16:9 projection aspect factor patch */
   return write_u32(staged_core, core_size, 0x00205B00, 0x24020C00);
 }
@@ -342,6 +399,9 @@ int pops_apply_widescreen(void *staged_core, size_t core_size) {
 int pops_apply_dither_off(void *staged_core, size_t core_size) {
   if (!staged_core || core_size < 0x250000)
     return -EINVAL;
+  /* Guard: only apply if pristine instruction is present */
+  if (read_u32(staged_core, core_size, 0x00205D58) != 0xdfb30028)
+    return -EILSEQ;
   /* Disable Graphics Synthesizer dithering */
   return write_u32(staged_core, core_size, 0x00205D58, 0x00000000);
 }
@@ -349,6 +409,12 @@ int pops_apply_dither_off(void *staged_core, size_t core_size) {
 int pops_apply_throttling(void *staged_core, size_t core_size, uint8_t fast_mips, uint8_t slow_mips) {
   if (!staged_core || core_size < 0x250000)
     return -EINVAL;
+  if (!fast_mips && !slow_mips)
+    return 0;
+
+  /* Guard: only apply if pristine instruction is present */
+  if (read_u32(staged_core, core_size, 0x002010A0) != 0xffb00000)
+    return -EILSEQ;
 
   if (fast_mips) {
     /* NOP throttle wait loop */
@@ -363,6 +429,9 @@ int pops_apply_throttling(void *staged_core, size_t core_size, uint8_t fast_mips
 int pops_apply_bios_shell(void *staged_core, size_t core_size) {
   if (!staged_core || core_size < 0x250000)
     return -EINVAL;
+  /* Guard: only apply if pristine byte is present */
+  if (read_u8(staged_core, core_size, 0x00210cf8) != 0xFF)
+    return -EILSEQ;
   /* Force boot into the PS1 BIOS shell */
   return write_u8(staged_core, core_size, 0x00210cf8, 0x01);
 }
@@ -370,6 +439,10 @@ int pops_apply_bios_shell(void *staged_core, size_t core_size) {
 int pops_apply_libcrypt_bypass(void *staged_core, size_t core_size) {
   if (!staged_core || core_size < 0x250000)
     return -EINVAL;
+  /* Guard: only apply if pristine instructions are present */
+  if (read_u32(staged_core, core_size, 0x0020C1F0) != 0x3463ffff ||
+      read_u32(staged_core, core_size, 0x0020CFB0) != 0x24020001)
+    return -EILSEQ;
   /* NOP subchannel check routine and force success return */
   write_u32(staged_core, core_size, 0x0020C1F0, 0x00000000);
   write_u32(staged_core, core_size, 0x0020CFB0, 0x24020000);
