@@ -18,7 +18,11 @@ int boot_trace_vprintf(const char *format, va_list args) {
   scr_clear(); scr_setXY(0, 2);
   for (unsigned i = 0; i < count; ++i)
     scr_printf("%s", history[(next + 10 - count + i) % 10]);
-  if (size > 0) sio_write(text, (unsigned)size < sizeof(text) ? size : sizeof(text)-1);
+  if (size > 0) {
+    sio_write(text, (unsigned)size < sizeof(text) ? size : sizeof(text)-1);
+    printf("%s", text);
+    fflush(stdout);
+  }
   return size;
 }
 int boot_trace_printf(const char *format, ...) {

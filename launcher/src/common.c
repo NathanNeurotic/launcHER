@@ -73,6 +73,8 @@ void fail(const char *str, ...) {
   char *recoveryArgs[] = {(char *)LAUNCHER_BOOT_TRACE_RECOVERY_ELF};
   LoadExecPS2(LAUNCHER_BOOT_TRACE_RECOVERY_ELF, 1, recoveryArgs);
 #endif
+  printf("[ps2rig] exit=1\n");
+  fflush(stdout);
   SleepThread();
   return;
 #else

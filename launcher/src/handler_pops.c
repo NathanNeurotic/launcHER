@@ -912,6 +912,8 @@ int launchPOPS(int argc, char *argv[]) {
 #ifdef LAUNCHER_BOOT_TRACE_STOP_AFTER_DEPENDENCIES
     msg("POPS_DEPENDENCIES_PASS package_bytes=%u staging=0 VMC_creation=0 Sony_entry=0\n",
         (unsigned)rawSize);
+    printf("[ps2rig] exit=0\n");
+    fflush(stdout);
     SleepThread();
     return 0;
 #endif
@@ -947,6 +949,8 @@ int launchPOPS(int argc, char *argv[]) {
 #ifdef LAUNCHER_BOOT_TRACE_STOP_AFTER_DEPENDENCIES
     msg("POPS_DEPENDENCIES_PASS elf_bytes=%u iop_bytes=%u staging=0 VMC_creation=0 Sony_entry=0\n",
         (unsigned)elfSize, (unsigned)iopSize);
+    printf("[ps2rig] exit=0\n");
+    fflush(stdout);
     SleepThread();
     return 0;
 #endif
@@ -1070,16 +1074,14 @@ int launchPOPS(int argc, char *argv[]) {
 
   /* Apply LibCrypt bypass if title requires it and mode 6 is not already set */
   if (compat && compat->has_libcrypt && !(cfg.compat_modes & (1 << 5))) {
-    DPRINTF("POPS: Applying LibCrypt bypass for %s\n", compat->serial);
-    pops_apply_libcrypt_bypass((void *)stagedCore, plan.core_size);
+    DPRINTF("POPS: LibCrypt bypass requested for %s, but ungrounded in POPS binary\n",
+            compat->serial);
   }
 
   /* Apply title-specific database patch if registered */
   if (compat && compat->patch_offset >= POPS_CORE_ADDR &&
       compat->patch_offset + 4 <= POPS_CORE_ADDR + plan.core_size) {
-    uint32_t off = compat->patch_offset - POPS_CORE_ADDR;
-    *(uint32_t *)((uint8_t *)stagedCore + off) = compat->patch_val;
-    DPRINTF("POPS: Applied DB title patch at 0x%08X = 0x%08X\n",
+    DPRINTF("POPS: Skipping unguarded DB title patch at 0x%08X = 0x%08X\n",
             compat->patch_offset, compat->patch_val);
   }
 
@@ -1257,6 +1259,8 @@ int launchPOPS(int argc, char *argv[]) {
   /* Opt-in acceptance boundary: all production initialization, disc/card
    * probes and trampoline setup passed. Sony code has not executed yet. */
   DPRINTF("POPS_PREFLIGHT_PASS Sony_entry_not_executed=1\n");
+  printf("[ps2rig] exit=0\n");
+  fflush(stdout);
   SleepThread();
   return 0;
 #endif
