@@ -16,7 +16,7 @@ int pops_apply_compat_modes(void *staged_core, size_t core_size, uint8_t modes_m
  * Retains expected bytes across ordered/repeated mode dispatch and explicit
  * external payload writes. No executable is entered and no live RAM is used.
  * Discard the staged core on any failure in a sequence of fix files. */
-#define POPS_COMPAT_SITE_COUNT 38
+#define POPS_COMPAT_SITE_COUNT 39
 typedef struct {
   uint32_t expected[POPS_COMPAT_SITE_COUNT];
 } PopsFixContext;
@@ -24,7 +24,8 @@ int pops_fix_context_init(PopsFixContext *context, const void *staged_core,
                            size_t core_size, uint8_t initial_modes);
 /* expected_trojan selects TROJAN versus PATCH; slot must match the filename.
  * PATCH data precedes its four mode bytes, in recorded order. Video actions
- * and runtime-dependent mode 6 remain unsupported and fail before writes.
+ * (PAL, disable-auto, custom registers) and mode 6 are supported. Mode 8 remains
+ * unsupported and fails before writes.
  * Context, input container and staged core must be disjoint. */
 int pops_fix_stage(PopsFixContext *context, void *staged_core, size_t core_size,
                     const void *file, size_t file_size, unsigned slot,

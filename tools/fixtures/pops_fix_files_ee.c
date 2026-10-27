@@ -19,7 +19,7 @@ static void reset_core(void) {
   memset(core,0,sizeof(core));
   word(core+0x10318,0x8f828228);word(core+0x1032c,0x1443fffa);
   word(core+0x83c,0x0441000a);word(core+0x85c,0x1000fffa);
-  word(core+0xde9c,0x0c0836ee);core[0x1af70]=0x64;
+  word(core+0xde9c,0x0c0836ee);core[0x1af70]=0x64;word(core+0x525b0,0x1bfc);
 }
 static uint32_t checksum(const void *memory, size_t size) {
   const uint8_t *bytes=memory;uint32_t value=2166136261u;
@@ -53,7 +53,7 @@ int main(void) {
   if(!result) {
     uint32_t before=checksum(core,sizeof(core));
     uint32_t state=checksum(&context,sizeof(context));
-    patch(6,1);word(record+16,0x220000);word(record+28,4);
+    patch(8,1);word(record+16,0x220000);word(record+28,4);
     memcpy(record+64,"DATA",4);
     if(pops_fix_stage(&context,core,sizeof(core),record,sizeof(record),0,0)>=0||
        before!=checksum(core,sizeof(core))||state!=checksum(&context,sizeof(context))) result=-101;

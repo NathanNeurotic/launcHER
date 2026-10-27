@@ -35,9 +35,9 @@ static int write_u32(void *base, size_t size, uint32_t addr, uint32_t val) {
   return 0;
 }
 
-/* Measured POPSTARTER FUN_008dc2c4: modes 1..5 and 7, widths and
+/* Measured POPSTARTER FUN_008dc2c4: modes 1..7, widths and
  * order retained. Expected bytes are from the supported external POPS ELF.
- * Mode 6 needs original OSD state; mode 8 has no branch in this dispatcher. */
+ * Mode 8 has no branch in this dispatcher. */
 typedef struct {
   uint8_t mode;
   uint32_t address, expected, replacement;
@@ -81,6 +81,7 @@ static const CompatPatch compat_patches[] = {
   {5, 0x0020085c, 0x1000fffa, 0x00000000, 4},
   {5, 0x00200860, 0x00000000, 0x10002d13, 4},
   {5, 0x0020bcac, 0x00000000, 0x1000d2e8, 4},
+  {6, 0x002525b0, 0x00001bfc, 0x00000648, 2},
   {7, 0x0021e45c, 0x00000000, 0x00000040, 1},
 };
 
@@ -118,7 +119,7 @@ int pops_fix_context_init(PopsFixContext *context, const void *staged_core,
   if (!context || !staged_core ||
       fix_alias(context, sizeof(*context), staged_core, core_size))
     return -EINVAL;
-  if (initial_modes & 0xa0)
+  if (initial_modes & 0x80)
     return -ENOTSUP;
   for (unsigned i = 0; i < POPS_COMPAT_SITE_COUNT; ++i)
     candidate.expected[i] = compat_patches[i].expected;
@@ -165,10 +166,16 @@ int pops_fix_stage(PopsFixContext *context, void *staged_core, size_t core_size,
     result = pops_patch_options(&plan.container, &options);
     if (result)
       return result;
-    if (options.video != POPS_PATCH_VIDEO_NONE)
+    if (options.video > POPS_PATCH_VIDEO_CONTROL6)
       return -ENOTSUP;
+    if (options.video == POPS_PATCH_VIDEO_PAL &&
+        core_size < (size_t)(0x00502770 - POPS_CORE_BASE_ADDR + 4))
+      return -ERANGE;
+    if (options.video == POPS_PATCH_VIDEO_CONTROL6 &&
+        core_size < (size_t)(0x0023ad0c - POPS_CORE_BASE_ADDR + 4))
+      return -ERANGE;
     for (unsigned i = 0; i < 4; ++i)
-      if (options.modes[i] == 6 || options.modes[i] > 7)
+      if (options.modes[i] > 7)
         return -ENOTSUP;
   }
   result = compat_context_check(context, bytes, core_size);
@@ -198,6 +205,23 @@ int pops_fix_stage(PopsFixContext *context, void *staged_core, size_t core_size,
               (uint8_t)(patch->replacement >> (8 * j));
     }
   }
+  switch (options.video) {
+  case POPS_PATCH_VIDEO_NONE:
+  case POPS_PATCH_VIDEO_DISABLE_AUTO:
+    break;
+  case POPS_PATCH_VIDEO_PAL:
+    write_u8(bytes, core_size, 0x0021af94, 3);
+    write_u32(bytes, core_size, 0x00502770, 0x000a6300);
+    write_u8(bytes, core_size, 0x0023b018, 0x6b);
+    write_u16(bytes, core_size, 0x0023b01c, 0x02cb);
+    break;
+  case POPS_PATCH_VIDEO_CONTROL6:
+    write_u8(bytes, core_size, 0x0021af94, 0x50);
+    write_u32(bytes, core_size, 0x0021a094, 0x0808e53c);
+    write_u32(bytes, core_size, 0x0023acb0, 0x24040000);
+    write_u32(bytes, core_size, 0x0023ad0c, 0x24040000);
+    break;
+  }
   for (unsigned i = 0; i < POPS_COMPAT_SITE_COUNT; ++i)
     context->expected[i] = compat_read(bytes, &compat_patches[i]);
   return 0;
@@ -209,7 +233,7 @@ int pops_apply_compat_modes(void *staged_core, size_t core_size, uint8_t modes_m
   unsigned j;
   if (!bytes)
     return -EINVAL;
-  if (modes_mask & ((1 << 5) | (1 << 7)))
+  if (modes_mask & (1 << 7))
     return -ENOTSUP;
   /* Validate all sites before changing any. Overlapping modes deliberately
    * retain original ascending dispatch order, with later writes winning. */

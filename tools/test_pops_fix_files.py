@@ -19,14 +19,15 @@ WRITES = json.loads((ROOT / 'tools/fixtures/pops_compat_reference.json').read_te
 
 
 class Context(c.Structure):
-    _fields_ = [('expected', c.c_uint32 * 38)]
+    _fields_ = [('expected', c.c_uint32 * 39)]
 
 
 def pristine():
     data = bytearray(SIZE)
     for address, value, width in [(0x210318, 0x8f828228, 4), (0x21032c, 0x1443fffa, 4),
                                   (0x20083c, 0x0441000a, 4), (0x20085c, 0x1000fffa, 4),
-                                  (0x20de9c, 0x0c0836ee, 4), (0x21af70, 0x64, 1)]:
+                                  (0x20de9c, 0x0c0836ee, 4), (0x21af70, 0x64, 1),
+                                  (0x2525b0, 0x1bfc, 2)]:
         data[address-BASE:address-BASE+width] = value.to_bytes(width, 'little')
     return data
 
@@ -183,11 +184,9 @@ void test_io_failures(int reads, int closes) { fail_reads=reads; fail_closes=clo
         self.assertEqual(struct.unpack_from('<I', self.memory, 0x20100)[0], 0x0c088000)
 
     def test_invalid_and_unsupported_files_are_atomic(self):
-        for blob, slot, kind in [(patch(modes=(6,), payload=b'DATA', address=0x220000), 1, 0),
-                                  (patch(modes=(8,)), 1, 0),
+        for blob, slot, kind in [(patch(modes=(8,)), 1, 0),
                                   (patch(modes=(255,)), 1, 0),
-                                  (patch(control=2), 1, 0), (patch(control=4), 1, 0),
-                                  (patch(control=6), 1, 0),
+                                  (patch(control=8), 1, 0),
                                   (patch(modes=(1,)), 2, 0),
                                   (patch(modes=(1,)), 1, 1), (trojan(), 0, 0),
                                   (patch(payload=b'DATA', address=0x800000), 1, 0),
@@ -258,6 +257,36 @@ void test_io_failures(int reads, int closes) { fail_reads=reads; fail_closes=clo
         apply_modes(expected, (2, 1, 5, 3))
         self.assertEqual(data, expected)
 
+
+
+    def test_mode_6_disables_osd(self):
+        self.assertEqual(self.stage(patch(modes=(6,))), 0)
+        self.assertEqual(struct.unpack_from('<H', self.memory, 0x2525b0 - BASE)[0], 0x0648)
+
+    def test_video_action_pal(self):
+        self.assertEqual(self.stage(patch(control=2)), 0)
+        self.assertEqual(self.memory[0x21af94 - BASE], 3)
+        self.assertEqual(struct.unpack_from('<I', self.memory, 0x502770 - BASE)[0], 0x000a6300)
+        self.assertEqual(self.memory[0x23b018 - BASE], 0x6b)
+        self.assertEqual(struct.unpack_from('<H', self.memory, 0x23b01c - BASE)[0], 0x02cb)
+
+    def test_video_action_disable_auto(self):
+        self.assertEqual(self.stage(patch(control=4)), 0)
+        self.assertEqual(self.memory, pristine())
+
+    def test_video_action_control6(self):
+        self.assertEqual(self.stage(patch(control=6)), 0)
+        self.assertEqual(self.memory[0x21af94 - BASE], 0x50)
+        self.assertEqual(struct.unpack_from('<I', self.memory, 0x21a094 - BASE)[0], 0x0808e53c)
+        self.assertEqual(struct.unpack_from('<I', self.memory, 0x23acb0 - BASE)[0], 0x24040000)
+        self.assertEqual(struct.unpack_from('<I', self.memory, 0x23ad0c - BASE)[0], 0x24040000)
+
+    def test_video_action_with_modes(self):
+        self.assertEqual(self.stage(patch(control=3, modes=(6, 1))), 0)
+        self.assertEqual(struct.unpack_from('<H', self.memory, 0x2525b0 - BASE)[0], 0x0648)
+        self.assertEqual(struct.unpack_from('<I', self.memory, 0x210314 - BASE)[0], 0x3c02005a)
+        self.assertEqual(self.memory[0x21af94 - BASE], 3)
+        self.assertEqual(struct.unpack_from('<I', self.memory, 0x502770 - BASE)[0], 0x000a6300)
 
 if __name__ == '__main__':
     unittest.main()

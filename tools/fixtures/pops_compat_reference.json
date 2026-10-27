@@ -1,5 +1,5 @@
 {
-  "source": "Measured original POPSTARTER FUN_008dc2c4; state DAT_009b9d48 == 0; modes 6 and 8 excluded",
+  "source": "Measured original POPSTARTER FUN_008dc2c4; state DAT_009b9d48 == 0; mode 8 excluded",
   "writes": {
     "1": [
       [
@@ -194,6 +194,13 @@
         2145452,
         268489448,
         4
+      ]
+    ],
+    "6": [
+      [
+        2434480,
+        1608,
+        2
       ]
     ],
     "7": [

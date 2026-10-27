@@ -16,7 +16,8 @@ def prepare(out):
     pristine = bytearray(0x302e60)
     for address, value, width in [(0x210318, 0x8f828228, 4), (0x21032c, 0x1443fffa, 4),
                                   (0x20083c, 0x0441000a, 4), (0x20085c, 0x1000fffa, 4),
-                                  (0x20de9c, 0x0c0836ee, 4), (0x21af70, 0x64, 1)]:
+                                  (0x20de9c, 0x0c0836ee, 4), (0x21af70, 0x64, 1),
+                                  (0x2525b0, 0x1bfc, 2)]:
         pristine[address-0x200000:address-0x200000+width] = value.to_bytes(width, 'little')
     expected = []
     for first in (1, 2, 3, 4, 5, 7):
