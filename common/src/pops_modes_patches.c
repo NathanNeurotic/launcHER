@@ -515,6 +515,73 @@ int pops_apply_cheats(void *ps1_ram_base, const PopsCheatEntry *cheats, uint16_t
   return pops_cheat_engine_tick(ps1_ram_base, cheats, cheat_count);
 }
 
+int pops_apply_igr_exit(void *staged_core, size_t core_size) {
+  uint8_t *bytes = (uint8_t *)staged_core;
+  if (!bytes)
+    return -EINVAL;
+  if (core_size < (size_t)(0x0020c0a4 - POPS_CORE_BASE_ADDR + 4))
+    return -ERANGE;
+  size_t off = 0x0020c0a4 - POPS_CORE_BASE_ADDR;
+  uint32_t current = 0;
+  for (unsigned j = 0; j < 4; ++j)
+    current |= (uint32_t)bytes[off + j] << (8 * j);
+  if (current != 0x0c08b44c)
+    return -EINVAL;
+  return write_u32(staged_core, core_size, 0x0020c0a4, 0x0c08d8ae);
+}
+
+int pops_apply_iopcd_stack_size(void *staged_core, size_t core_size, uint8_t stack_size) {
+  uint8_t *bytes = (uint8_t *)staged_core;
+  if (!bytes)
+    return -EINVAL;
+  if (core_size < (size_t)(0x002fb599 - POPS_CORE_BASE_ADDR + 1))
+    return -ERANGE;
+  size_t off = 0x002fb599 - POPS_CORE_BASE_ADDR;
+  if (bytes[off] != 0x08)
+    return -EINVAL;
+  return write_u8(staged_core, core_size, 0x002fb599, stack_size ? stack_size : 0x40);
+}
+
+int pops_apply_hdd_init_exit(void *staged_core, size_t core_size) {
+  uint8_t *bytes = (uint8_t *)staged_core;
+  if (!bytes)
+    return -EINVAL;
+  if (core_size < (size_t)(0x00200766 - POPS_CORE_BASE_ADDR + 2))
+    return -ERANGE;
+  size_t off = 0x00200766 - POPS_CORE_BASE_ADDR;
+  uint16_t current = (uint16_t)bytes[off] | ((uint16_t)bytes[off + 1] << 8);
+  if (current != 0x1040)
+    return -EINVAL;
+  return write_u16(staged_core, core_size, 0x00200766, 0x1000);
+}
+
+int pops_apply_vmc0_disable(void *staged_core, size_t core_size) {
+  uint8_t *bytes = (uint8_t *)staged_core;
+  if (!bytes)
+    return -EINVAL;
+  if (core_size < (size_t)(0x002007b4 - POPS_CORE_BASE_ADDR + 1))
+    return -ERANGE;
+  size_t off = 0x002007b4 - POPS_CORE_BASE_ADDR;
+  if (bytes[off] != 0x01)
+    return -EINVAL;
+  return write_u8(staged_core, core_size, 0x002007b4, 0x00);
+}
+
+int pops_apply_vmc1_disable(void *staged_core, size_t core_size) {
+  uint8_t *bytes = (uint8_t *)staged_core;
+  if (!bytes)
+    return -EINVAL;
+  if (core_size < (size_t)(0x0020d0e0 - POPS_CORE_BASE_ADDR + 4))
+    return -ERANGE;
+  size_t off = 0x0020d0e0 - POPS_CORE_BASE_ADDR;
+  uint32_t current = 0;
+  for (unsigned j = 0; j < 4; ++j)
+    current |= (uint32_t)bytes[off + j] << (8 * j);
+  if (current != 0x1480ffc1)
+    return -EINVAL;
+  return write_u32(staged_core, core_size, 0x0020d0e0, 0x24040000);
+}
+
 int pops_apply_all_config_patches(void *staged_core, size_t core_size, const PopsConfig *cfg) {
   int result;
   int video_requested, auxiliary_requested;
@@ -570,6 +637,40 @@ int pops_apply_all_config_patches(void *staged_core, size_t core_size, const Pop
   if (cfg->no_boot) {
     result = pops_apply_bios_shell(staged_core, core_size);
     if (result) return result;
+  }
+  if (cfg->no_vmc0) {
+    result = pops_apply_vmc0_disable(staged_core, core_size);
+    if (result) return result;
+  }
+  if (cfg->no_vmc1) {
+    result = pops_apply_vmc1_disable(staged_core, core_size);
+    if (result) return result;
+  }
+  if (!cfg->no_igr && core_size >= (size_t)(0x0020c0a4 - POPS_CORE_BASE_ADDR + 4)) {
+    size_t off = 0x0020c0a4 - POPS_CORE_BASE_ADDR;
+    uint8_t *b = (uint8_t *)staged_core;
+    uint32_t cur = (uint32_t)b[off] | ((uint32_t)b[off + 1] << 8) |
+                   ((uint32_t)b[off + 2] << 16) | ((uint32_t)b[off + 3] << 24);
+    if (cur == 0x0c08b44c) {
+      result = pops_apply_igr_exit(staged_core, core_size);
+      if (result) return result;
+    }
+  }
+  if (core_size >= (size_t)(0x002fb599 - POPS_CORE_BASE_ADDR + 1)) {
+    uint8_t *b = (uint8_t *)staged_core;
+    if (b[0x002fb599 - POPS_CORE_BASE_ADDR] == 0x08) {
+      result = pops_apply_iopcd_stack_size(staged_core, core_size, 0x40);
+      if (result) return result;
+    }
+  }
+  if (core_size >= (size_t)(0x00200766 - POPS_CORE_BASE_ADDR + 2)) {
+    uint8_t *b = (uint8_t *)staged_core;
+    size_t off = 0x00200766 - POPS_CORE_BASE_ADDR;
+    uint16_t cur = (uint16_t)b[off] | ((uint16_t)b[off + 1] << 8);
+    if (cur == 0x1040) {
+      result = pops_apply_hdd_init_exit(staged_core, core_size);
+      if (result) return result;
+    }
   }
   return 0;
 }

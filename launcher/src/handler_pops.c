@@ -1121,15 +1121,19 @@ int launchPOPS(int argc, char *argv[]) {
   }
 
   /* Ensure backing save images exist before handoff */
-  res = pops_vmc_ensure(card0Path);
-  if (res) {
-    msg("POPS: Cannot prepare card %s: %d\n", card0Path, res);
-    return res;
+  if (!cfg.no_vmc0) {
+    res = pops_vmc_ensure(card0Path);
+    if (res) {
+      msg("POPS: Cannot prepare card %s: %d\n", card0Path, res);
+      return res;
+    }
   }
-  res = pops_vmc_ensure(card1Path);
-  if (res) {
-    msg("POPS: Cannot prepare card %s: %d\n", card1Path, res);
-    return res;
+  if (!cfg.no_vmc1) {
+    res = pops_vmc_ensure(card1Path);
+    if (res) {
+      msg("POPS: Cannot prepare card %s: %d\n", card1Path, res);
+      return res;
+    }
   }
 
   /* Reboot IOP with verified external IOPRP image */

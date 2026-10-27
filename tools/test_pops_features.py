@@ -33,6 +33,8 @@ class PopsConfig(c.Structure):
         ("igr_type", c.c_uint8),
         ("safe_mode", c.c_uint8),
         ("usb_delay", c.c_uint8),
+        ("no_vmc0", c.c_uint8),
+        ("no_vmc1", c.c_uint8),
         ("compat_modes", c.c_uint8),
         ("runtime_corrections", c.c_uint8),
         ("disc_count", c.c_uint8),
@@ -111,6 +113,16 @@ class FeatureTests(unittest.TestCase):
         LIB.pops_apply_widescreen.restype = c.c_int
         LIB.pops_apply_dither_off.argtypes = [c.c_void_p, c.c_size_t]
         LIB.pops_apply_dither_off.restype = c.c_int
+        LIB.pops_apply_igr_exit.argtypes = [c.c_void_p, c.c_size_t]
+        LIB.pops_apply_igr_exit.restype = c.c_int
+        LIB.pops_apply_iopcd_stack_size.argtypes = [c.c_void_p, c.c_size_t, c.c_uint8]
+        LIB.pops_apply_iopcd_stack_size.restype = c.c_int
+        LIB.pops_apply_hdd_init_exit.argtypes = [c.c_void_p, c.c_size_t]
+        LIB.pops_apply_hdd_init_exit.restype = c.c_int
+        LIB.pops_apply_vmc0_disable.argtypes = [c.c_void_p, c.c_size_t]
+        LIB.pops_apply_vmc0_disable.restype = c.c_int
+        LIB.pops_apply_vmc1_disable.argtypes = [c.c_void_p, c.c_size_t]
+        LIB.pops_apply_vmc1_disable.restype = c.c_int
         LIB.pops_apply_throttling.argtypes = [c.c_void_p, c.c_size_t, c.c_uint8, c.c_uint8]
         LIB.pops_apply_throttling.restype = c.c_int
         LIB.pops_apply_bios_shell.argtypes = [c.c_void_p, c.c_size_t]
@@ -832,6 +844,89 @@ class FeatureTests(unittest.TestCase):
 
         # Out-of-bounds rejection
         self.assertLess(LIB.pops_apply_compat_modes(core_ptr, 0x10000, 1), 0)
+
+    def test_novmc_directives(self):
+        cfg = PopsConfig()
+        LIB.pops_config_init(c.byref(cfg))
+        self.assertEqual(cfg.no_vmc0, 0)
+        self.assertEqual(cfg.no_vmc1, 0)
+
+        line = b"$NOVMC0\n"
+        self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), line), 0)
+        self.assertEqual(cfg.no_vmc0, 1)
+
+        line = b"$NOVMC1\n"
+        self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), line), 0)
+        self.assertEqual(cfg.no_vmc1, 1)
+
+    def test_igr_exit_patch(self):
+        buf_size = 0x100000
+        buf = bytearray(buf_size)
+        ptr = (c.c_uint8 * buf_size).from_buffer(buf)
+
+        # Mismatch guard test
+        self.assertEqual(LIB.pops_apply_igr_exit(ptr, buf_size), -errno.EINVAL)
+
+        # Pristine site: 0x0020c0a4 has 0x0c08b44c
+        off = 0x0020c0a4 - 0x00200000
+        struct.pack_into("<I", buf, off, 0x0c08b44c)
+        self.assertEqual(LIB.pops_apply_igr_exit(ptr, buf_size), 0)
+        self.assertEqual(struct.unpack_from("<I", buf, off)[0], 0x0c08d8ae)
+
+        # Buffer too small
+        self.assertEqual(LIB.pops_apply_igr_exit(ptr, off), -errno.ERANGE)
+
+    def test_iopcd_stack_size_patch(self):
+        buf_size = 0x150000
+        buf = bytearray(buf_size)
+        ptr = (c.c_uint8 * buf_size).from_buffer(buf)
+
+        # Mismatch guard test
+        self.assertEqual(LIB.pops_apply_iopcd_stack_size(ptr, buf_size, 0x40), -errno.EINVAL)
+
+        # Pristine site: 0x002fb599 has 0x08 (2 KiB stack)
+        off = 0x002fb599 - 0x00200000
+        buf[off] = 0x08
+        self.assertEqual(LIB.pops_apply_iopcd_stack_size(ptr, buf_size, 0x40), 0)
+        self.assertEqual(buf[off], 0x40)
+
+        # Custom stack size
+        buf[off] = 0x08
+        self.assertEqual(LIB.pops_apply_iopcd_stack_size(ptr, buf_size, 0x20), 0)
+        self.assertEqual(buf[off], 0x20)
+
+    def test_hdd_init_exit_patch(self):
+        buf_size = 0x10000
+        buf = bytearray(buf_size)
+        ptr = (c.c_uint8 * buf_size).from_buffer(buf)
+
+        # Mismatch guard test
+        self.assertEqual(LIB.pops_apply_hdd_init_exit(ptr, buf_size), -errno.EINVAL)
+
+        # Pristine site: 0x00200766 has 0x1040 (beqz v0)
+        off = 0x00200766 - 0x00200000
+        struct.pack_into("<H", buf, off, 0x1040)
+        self.assertEqual(LIB.pops_apply_hdd_init_exit(ptr, buf_size), 0)
+        self.assertEqual(struct.unpack_from("<H", buf, off)[0], 0x1000)
+
+    def test_vmc_disable_patches(self):
+        buf_size = 0x20000
+        buf = bytearray(buf_size)
+        ptr = (c.c_uint8 * buf_size).from_buffer(buf)
+
+        # VMC0 disable: 0x002007b4 has 0x01
+        off0 = 0x002007b4 - 0x00200000
+        self.assertEqual(LIB.pops_apply_vmc0_disable(ptr, buf_size), -errno.EINVAL)
+        buf[off0] = 0x01
+        self.assertEqual(LIB.pops_apply_vmc0_disable(ptr, buf_size), 0)
+        self.assertEqual(buf[off0], 0x00)
+
+        # VMC1 disable: 0x0020d0e0 has 0x1480ffc1
+        off1 = 0x0020d0e0 - 0x00200000
+        self.assertEqual(LIB.pops_apply_vmc1_disable(ptr, buf_size), -errno.EINVAL)
+        struct.pack_into("<I", buf, off1, 0x1480ffc1)
+        self.assertEqual(LIB.pops_apply_vmc1_disable(ptr, buf_size), 0)
+        self.assertEqual(struct.unpack_from("<I", buf, off1)[0], 0x24040000)
 
 if __name__ == "__main__":
     unittest.main()

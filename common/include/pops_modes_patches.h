@@ -100,6 +100,21 @@ int pops_apply_widescreen(void *staged_core, size_t core_size);
 /* Apply dither disable patch ($DITHER_OFF / $NODITHER) */
 int pops_apply_dither_off(void *staged_core, size_t core_size);
 
+/* Fix IGR exit method (FUN_008dbe08): rewires 0x0020c0a4 from 0x0c08b44c to 0x0c08d8ae */
+int pops_apply_igr_exit(void *staged_core, size_t core_size);
+
+/* Increase IOPCD stack size (FUN_008dbee4): rewires 0x002fb599 from 0x08 to stack_size (default 0x40 = 16 KiB) */
+int pops_apply_iopcd_stack_size(void *staged_core, size_t core_size, uint8_t stack_size);
+
+/* Patch HddInit failure exit (FUN_008dc0c0): rewires 0x00200766 from 0x1040 to 0x1000 */
+int pops_apply_hdd_init_exit(void *staged_core, size_t core_size);
+
+/* Disable Memory Card 0 emulation ($NOVMC0 / FUN_008dc12c(1)): rewires 0x002007b4 from 0x01 to 0x00 */
+int pops_apply_vmc0_disable(void *staged_core, size_t core_size);
+
+/* Disable Memory Card 1 emulation ($NOVMC1 / FUN_008dc12c(2)): rewires 0x0020d0e0 from 0x1480ffc1 to 0x24040000 */
+int pops_apply_vmc1_disable(void *staged_core, size_t core_size);
+
 /* Apply all settings from a PopsConfig structure to the staged core */
 int pops_apply_all_config_patches(void *staged_core, size_t core_size, const PopsConfig *cfg);
 

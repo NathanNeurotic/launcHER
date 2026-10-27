@@ -150,6 +150,14 @@ static int parse_single_directive(PopsConfig *cfg, const char *token) {
     cfg->safe_mode = 1;
     return 1;
   }
+  if (!strcasecmp(token, "$NOVMC0")) {
+    cfg->no_vmc0 = 1;
+    return 1;
+  }
+  if (!strcasecmp(token, "$NOVMC1")) {
+    cfg->no_vmc1 = 1;
+    return 1;
+  }
   if (!strncasecmp(token, "$USBDELAY_", 10)) {
     cfg->usb_delay = (uint8_t)strtol(token + 10, NULL, 10);
     return 1;

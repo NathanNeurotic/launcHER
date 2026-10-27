@@ -49,6 +49,8 @@ typedef struct {
   uint8_t igr_type;     /* $IGR0 (0), $IGR1 (1), $IGR2 (2) */
   uint8_t safe_mode;    /* $SAFEMODE delays cheat activation */
   uint8_t usb_delay;    /* $USBDELAY_# seconds */
+  uint8_t no_vmc0;      /* $NOVMC0 disables Memory Card 0 emulation */
+  uint8_t no_vmc1;      /* $NOVMC1 disables Memory Card 1 emulation */
 
   /* Compatibility modes bitmask: (1 << (mode - 1)) for Modes 1..8 */
   uint8_t compat_modes;
