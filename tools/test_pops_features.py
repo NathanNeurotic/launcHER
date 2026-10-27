@@ -127,6 +127,12 @@ class FeatureTests(unittest.TestCase):
         LIB.pops_apply_vmc1_disable.restype = c.c_int
         LIB.pops_apply_slbb_vcd_check_bypass.argtypes = [c.c_void_p, c.c_size_t]
         LIB.pops_apply_slbb_vcd_check_bypass.restype = c.c_int
+        LIB.pops_apply_slbb_vcd_path_redirect.argtypes = [c.c_void_p, c.c_size_t]
+        LIB.pops_apply_slbb_vcd_path_redirect.restype = c.c_int
+        LIB.pops_apply_resource_relink.argtypes = [c.c_void_p, c.c_size_t, c.c_int]
+        LIB.pops_apply_resource_relink.restype = c.c_int
+        LIB.pops_apply_exception_hook.argtypes = [c.c_void_p, c.c_size_t]
+        LIB.pops_apply_exception_hook.restype = c.c_int
         LIB.pops_apply_bios_osd_disable.argtypes = [c.c_void_p, c.c_size_t]
         LIB.pops_apply_bios_osd_disable.restype = c.c_int
         LIB.pops_apply_bios_osd_enable.argtypes = [c.c_void_p, c.c_size_t]
@@ -971,6 +977,33 @@ class FeatureTests(unittest.TestCase):
         struct.pack_into("<I", buf, off_85c, 0x00000000)
         self.assertEqual(LIB.pops_apply_slbb_vcd_check_bypass(ptr, buf_size), 0)
         self.assertEqual(struct.unpack_from("<I", buf, off_834)[0], 0x00000000)
+
+    def test_unported_runtime_patches(self):
+        buf_size = 0x300000
+        buf = bytearray(buf_size)
+        ptr = (c.c_uint8 * buf_size).from_buffer(buf)
+
+        # 1. SLBB VCD path redirect (FUN_008dbd6c)
+        res = LIB.pops_apply_slbb_vcd_path_redirect(ptr, buf_size)
+        self.assertEqual(res, 0)
+        self.assertEqual(buf[0x004ffe8b - 0x00200000], 0x31)
+        self.assertEqual(buf[0x004ffe8e - 0x00200000], 0x50)
+        self.assertEqual(buf[0x004ffe8f - 0x00200000], 0x4f)
+        self.assertEqual(struct.unpack_from("<H", buf, 0x004ffe90 - 0x00200000)[0], 0x5350)
+
+        # 2. Resource relinking (FUN_008db7e4)
+        res = LIB.pops_apply_resource_relink(ptr, buf_size, 0)
+        self.assertEqual(res, 0)
+        self.assertEqual(struct.unpack_from("<H", buf, 0x00200784 - 0x00200000)[0], 0x8000)
+        self.assertEqual(struct.unpack_from("<H", buf, 0x0020cf58 - 0x00200000)[0], 0x8080)
+        self.assertEqual(struct.unpack_from("<H", buf, 0x0020c920 - 0x00200000)[0], 0x8100)
+        target = buf[0x004f8080 - 0x00200000:0x004f8080 - 0x00200000 + 12]
+        self.assertEqual(target.split(b"\0")[0], b"pfs1:/POPS/")
+
+        # 3. Exception hook (FUN_008d6da4)
+        res = LIB.pops_apply_exception_hook(ptr, buf_size)
+        self.assertEqual(res, 0)
+        self.assertEqual(struct.unpack_from("<I", buf, 0x00232d08 - 0x00200000)[0], 0x0c518000)
 
     def test_bios_osd_control_patches(self):
         buf_size = 0x60000

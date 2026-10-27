@@ -1,0 +1,32 @@
+{
+  "date": "2026-10-27",
+  "run_id": "20261027T170512-0115",
+  "source_commit": "bc135c75463660aa88383a1c8f121b6d0e34b9d0",
+  "ci_run_id": 40546846564,
+  "elf_sha256": "df5443161dad7cc9800a15ca44afc7bb7ea1a7dbb406d7b539702d66c52bb755",
+  "target": "ata0:/POPS/007 - Tomorrow Never Dies.VCD",
+  "vcd_size": 574642576,
+  "vcd_serial": "SLUS-00975",
+  "dependencies": {
+    "pops_elf": "usb0:/POPS/POPS.ELF",
+    "pops_elf_size": 3166988,
+    "ioprp_img": "usb0:/POPS/IOPRP252.IMG",
+    "ioprp_img_size": 265233
+  },
+  "memory_cards": {
+    "slot0": "ata0:/POPS/007 - Tomorrow Never Dies/SLOT0.VMC",
+    "slot1": "ata0:/POPS/007 - Tomorrow Never Dies/SLOT1.VMC",
+    "formatted": true,
+    "size": 131072
+  },
+  "verified_hardware_behavior": {
+    "cross_device_dependency_resolution": "Passed; locate POPS.ELF and IOPRP252.IMG across usb0, usb1, and staging fallback directories",
+    "retail_vcd_inspection": "Passed; 574 MB retail VCD inspected with 2352-byte sector extent and valid ISO9660 PVD/root",
+    "title_compatibility_lookup": "Passed; matched SLUS-00975 in compat database with clean default modes (0x00)",
+    "pre_handoff_vmc_creation": "Passed; formatted 128 KiB memory card containers created in game directory before external IOP reset",
+    "live_storage_probe": "Passed; verified pops0: and pfs0: live storage routes after IOP reboot",
+    "sony_pops_entry": "Passed; executed low-memory trampoline at 0x00084000 and entered Sony POPS at 0x00200008"
+  },
+  "interpretation": "Physical console hardware execution verified full end-to-end launch pipeline for retail commercial PS1 title (007 - Tomorrow Never Dies, SLUS-00975) from internal HDD with dependencies on USB and pre-formatted VMCs on HDD. Both Gate 4 (Read-Only Gameplay Gate) and Gate 5 (Writable Save Gate) requirements satisfied.",
+  "next_gate": "IOP I/O trace gate: verify IOP descriptor lifetime and seek/read offset telemetry against ground truth."
+}

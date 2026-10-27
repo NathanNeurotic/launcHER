@@ -639,6 +639,46 @@ int pops_apply_bios_osd_enable(void *staged_core, size_t core_size) {
   return write_u16(staged_core, core_size, 0x002525b0, 0x1bfc);
 }
 
+int pops_apply_slbb_vcd_path_redirect(void *staged_core, size_t core_size) {
+  uint8_t *bytes = (uint8_t *)staged_core;
+  if (!bytes)
+    return -EINVAL;
+  if (core_size < (size_t)(0x004ffe92 - POPS_CORE_BASE_ADDR))
+    return -ERANGE;
+  write_u8(staged_core, core_size, 0x004ffe8b, 0x31);
+  write_u8(staged_core, core_size, 0x004ffe8e, 0x50);
+  write_u8(staged_core, core_size, 0x004ffe8f, 0x4f);
+  write_u16(staged_core, core_size, 0x004ffe90, 0x5350);
+  return 0;
+}
+
+int pops_apply_resource_relink(void *staged_core, size_t core_size, int is_usb_flat) {
+  uint8_t *bytes = (uint8_t *)staged_core;
+  if (!bytes)
+    return -EINVAL;
+  if (core_size < (size_t)(0x004f8110 - POPS_CORE_BASE_ADDR))
+    return -ERANGE;
+  write_u16(staged_core, core_size, 0x00200784, 0x8000);
+  write_u16(staged_core, core_size, 0x0020cf58, 0x8080);
+  write_u16(staged_core, core_size, 0x0020c920, 0x8100);
+  write_u16(staged_core, core_size, 0x0020cfec, 0x8100);
+  write_u16(staged_core, core_size, 0x0020c8b8, 0x8100);
+  const char *target = is_usb_flat ? "pfs1:/" : "pfs1:/POPS/";
+  size_t len = strlen(target) + 1;
+  memcpy(bytes + (0x004f8080 - POPS_CORE_BASE_ADDR), target, len);
+  memcpy(bytes + (0x004f8100 - POPS_CORE_BASE_ADDR), target, len);
+  return 0;
+}
+
+int pops_apply_exception_hook(void *staged_core, size_t core_size) {
+  uint8_t *bytes = (uint8_t *)staged_core;
+  if (!bytes)
+    return -EINVAL;
+  if (core_size < (size_t)(0x00232d0c - POPS_CORE_BASE_ADDR))
+    return -ERANGE;
+  return write_u32(staged_core, core_size, 0x00232d08, 0x0c518000);
+}
+
 int pops_apply_all_config_patches(void *staged_core, size_t core_size, const PopsConfig *cfg) {
   int result;
   int video_requested, auxiliary_requested;

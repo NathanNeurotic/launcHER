@@ -127,6 +127,15 @@ int pops_apply_bios_osd_disable(void *staged_core, size_t core_size);
 /* Re-enable built-in BIOS OSD shell (FUN_008dba20): rewires 0x002525b0 from 0x0648 to 0x1bfc */
 int pops_apply_bios_osd_enable(void *staged_core, size_t core_size);
 
+/* Patch SLBB-00001 VCD path to pfs1:/POPS/ (FUN_008dbd6c) */
+int pops_apply_slbb_vcd_path_redirect(void *staged_core, size_t core_size);
+
+/* Relink resource paths to pfs1:/ or pfs1:/POPS/ (FUN_008db7e4) */
+int pops_apply_resource_relink(void *staged_core, size_t core_size, int is_usb_flat);
+
+/* Install exception hook at 0x00232d08 (FUN_008d6da4) */
+int pops_apply_exception_hook(void *staged_core, size_t core_size);
+
 /* Apply all settings from a PopsConfig structure to the staged core */
 int pops_apply_all_config_patches(void *staged_core, size_t core_size, const PopsConfig *cfg);
 

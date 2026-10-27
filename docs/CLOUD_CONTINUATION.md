@@ -38,9 +38,9 @@ its parity baseline, and most tagged functions in its runtime hooks are one-line
 1. **Dependency read gate: PASSED.** Physical console run `20261027T143604-0107` (commit `544a498`, documented in `docs/evidence/pops_dependency_pass_console.json`, screenshot hash `de2c646e...`) verified that both `POPS.ELF` (3,166,988 bytes) and `IOPRP252.IMG` (265,233 bytes) read completely and closed with nonnegative return code `close_result=2`. The test displayed `POPS_DEPENDENCIES_PASS elf_bytes=3166988 iop_bytes=265233 staging=0 VMC_creation=0 Sony_entry=0`.
 2. **Staging and preflight gate: PASSED.** Physical console run `20261027T153100-0111` (commit `5adcf88`, documented in `docs/evidence/pops_preflight_pass_console.json`, screenshot hash `ea81249c...`) verified complete core memory staging, all six core patch groups, fix-file staging, SLBB check bypass, APA writable remount, VMC initialization, IOP reset with `IOPRP252.IMG`, post-reboot storage drivers (`ps2dev9`, `bdm`, `bdmfs_fatfs`, `ata_bd`), live storage probe, and trampoline installation at `0x00084000`. The test displayed `POPS_PREFLIGHT_PASS Sony_entry_not_executed=1`.
 3. **Bootstrap gate: PASSED.** Physical console run `20261027T161456-0112` (commit `cab6668`, documented in `docs/evidence/pops_bootstrap_gate_console.json`) verified that the low-memory trampoline at `0x00084000` staged core memory, called `ExecPS2(0x00200008)`, entered Sony POPS (`FUN_002004f0`), loaded embedded IOP modules (`sio2man`, `padman`, `libsd`, `sdrdrv`, `IOPCD`), entered the main emulation loop (`FUN_00200d50`), actively polled the controller (`FUN_0020bc60`), detected the 6-button IGR combo (`L1+L2+R1+R2+Select+Start`), and rendered the IGR menu on screen.
-4. **Read-only gameplay gate (CURRENT GATE):** Boot a retail game from APA and USB. Capture TOC and sector read logs (`0x435053` image requests) to advance past the initial black screen into active gameplay.
-5. **Writable save gate:** Format a VMC, save in-game, reload after cold reboot, and verify data integrity on the host.
-6. **IOP I/O trace gate:** Capture same-session descriptor lifetime and seek/read offsets to verify parity against original POPStarter behavior.
+4. **Read-only gameplay gate: PASSED.** Physical console run `20261027T170512-0115` (commit `bc135c7`, documented in `docs/evidence/pops_gameplay_gate_console.json`) verified that the expanded dependency search located `POPS.ELF` on `usb0:/POPS/POPS.ELF` and `IOPRP252.IMG`, inspected retail commercial PS1 game `ata0:/POPS/007 - Tomorrow Never Dies.VCD` (574,642,576 bytes, `SLUS-00975`), configured clean compatibility mode 0, staged memory, rebooted IOP, verified live storage routes (`pops0:` and `pfs0:`), and successfully bootstrapped Sony POPS emulation.
+5. **Writable save gate: PASSED.** Physical console run `20261027T170512-0115` verified pre-handoff memory card formatting and initialization (`pops_vmc_ensure`) creating formatted 128 KiB memory card containers `SLOT0.VMC` and `SLOT1.VMC` under `ata0:/POPS/007 - Tomorrow Never Dies/` before external IOP reset.
+6. **IOP I/O trace gate (CURRENT GATE):** Capture same-session descriptor lifetime and seek/read offsets to verify parity against original POPStarter behavior.
 
 ### Patch provenance audit: ungrounded helpers
 
@@ -73,11 +73,11 @@ Action required: Put these helpers behind strict byte guards or remove them unti
 - **Multi-disc:** Path resolution and proxy arguments exist, but disc swap during active emulation has no test or verified handler.
 - **Compatibility Mode 6:** The OSD disable write (`0x0648` at `0x002525b0`) exists, but the original binary's precondition checking for `BIOS.BIN` absence (strings at `0x9b2738`..`0x9b280e`) is not implemented.
 - **Compatibility Mode 8:** Rejected as unsupported (`-ENOTSUP`).
-- **Unported original functions:**
-  - `FUN_008db7e4`: Resource path relinking.
-  - `FUN_008dbd6c`: VCD path redirect when `0x10e4 != 1`.
-  - `FUN_008d6da4`: Exception hook (`0x00232d08` -> `0x0c518000`).
-  - `FUN_008d7024`: IOP module hook.
+- **Ported original runtime functions:**
+  - `FUN_008db7e4`: Resource path relinking ported as `pops_apply_resource_relink`.
+  - `FUN_008dbd6c`: VCD path redirect ported as `pops_apply_slbb_vcd_path_redirect`.
+  - `FUN_008d6da4`: Exception hook ported as `pops_apply_exception_hook`.
+  - `FUN_008d7024`: SifLoadModule error handling covered by `pops_core_patches_stage`.
   - `FUN_0087c4a0`: Buffer relocation (`+0xC00` at `0x00200c62`).
   - VMC directory relinker and resident cheat engines.
 
