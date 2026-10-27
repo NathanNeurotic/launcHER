@@ -1,0 +1,31 @@
+{
+  "date": "2026-10-27",
+  "run_id": "20261027T143604-0107",
+  "source_commit": "544a498c56e3caae46aa32f22c6df29c66804a29",
+  "ci_run_id": 40521981712,
+  "elf_sha256": "ecd7f5f38e6fe35a275fba0d82d6db143d5758e3275c65aa0b7844853032b7ec",
+  "screenshot_sha256": "de2c646e71006c08f93173e1213ab2e09191c44bb762c162abee2084dbd31cb9",
+  "observation_source": "User-supplied console screenshot; confirmed close_result=2 on both dependencies and POPS_DEPENDENCIES_PASS.",
+  "target": "ata0:/LAUNCHER-TEST-20261013-A/TEST.VCD",
+  "dependencies": {
+    "pops_elf": {
+      "path": "ata0:/LAUNCHER-TEST-20261013-A/POPS.ELF",
+      "size": 3166988,
+      "capacity": 8388608,
+      "close_result": 2,
+      "bytes_read": 3166988,
+      "complete": true
+    },
+    "ioprp252_img": {
+      "path": "ata0:/LAUNCHER-TEST-20261013-A/IOPRP252.IMG",
+      "size": 265233,
+      "capacity": 524288,
+      "close_result": 2,
+      "bytes_read": 265233,
+      "complete": true
+    }
+  },
+  "marker": "POPS_DEPENDENCIES_PASS elf_bytes=3166988 iop_bytes=265233 staging=0 VMC_creation=0 Sony_entry=0",
+  "interpretation": "Both external dependencies read completely through POSIX I/O. The driver returned positive code 2 on close for both files. Nonnegative close handling in commit 637bfb0 resolved the previous -5 failure. The dependency read gate is cleared on physical console hardware.",
+  "next_gate": "POPS core staging and preflight gate (LAUNCHER_BOOT_TRACE_STOP_BEFORE_HANDOFF): verify memory allocation, ELF segment staging, core patches, APA remount, VMC preparation, and IOP reset before Sony entry."
+}

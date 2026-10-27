@@ -81,7 +81,7 @@ jobs:
       - name: Build boot-trace diagnostic
         if: github.event_name == 'pull_request'
         run: |
-          cmake -B build-trace -DLAUNCHER_BOOT_TRACE=ON -DDEBUG=ON -DLAUNCHER_BOOT_TRACE_STOP_AFTER_DEPENDENCIES=ON
+          cmake -B build-trace -DLAUNCHER_BOOT_TRACE=ON -DDEBUG=ON -DLAUNCHER_BOOT_TRACE_STOP_BEFORE_HANDOFF=ON
           cmake --build build-trace --target launcHER
 
       - name: Upload boot-trace diagnostic

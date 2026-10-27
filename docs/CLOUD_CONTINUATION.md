@@ -35,11 +35,12 @@ its parity baseline, and most tagged functions in its runtime hooks are one-line
 
 ### Open P0 hardware gates
 
-1. **Dependency read gate:** Re-run build `637bfb0`+ on physical console hardware. Verify that `POPS.ELF` completes read and close without error `-5`.
-2. **Bootstrap gate:** Verify that Sony POPS enters (`FUN_002004f0`), loads embedded IOP modules (`FUN_002002a0`), binds disc SIF RPC `0x435052` (`FUN_00210540`), and initiates audio and controller polling.
-3. **Read-only gameplay gate:** Boot a retail game from APA and USB. Capture TOC and sector read logs (`0x435053` image requests).
-4. **Writable save gate:** Format a VMC, save in-game, reload after cold reboot, and verify data integrity on the host.
-5. **IOP I/O trace gate:** Capture same-session descriptor lifetime and seek/read offsets to verify parity against original POPStarter behavior.
+1. **Dependency read gate: PASSED.** Physical console run `20261027T143604-0107` (commit `544a498`, documented in `docs/evidence/pops_dependency_pass_console.json`, screenshot hash `de2c646e...`) verified that both `POPS.ELF` (3,166,988 bytes) and `IOPRP252.IMG` (265,233 bytes) read completely and closed with nonnegative return code `close_result=2`. The test displayed `POPS_DEPENDENCIES_PASS elf_bytes=3166988 iop_bytes=265233 staging=0 VMC_creation=0 Sony_entry=0`.
+2. **Staging and preflight gate (CURRENT GATE):** Verify memory staging, six core patch groups, configuration patches, fix files, APA writable remount, VMC initialization, IOP reset with `IOPRP252.IMG`, `popfs` binding, live storage probe, and trampoline setup (`LAUNCHER_BOOT_TRACE_STOP_BEFORE_HANDOFF`, printing `POPS_PREFLIGHT_PASS Sony_entry_not_executed=1`).
+3. **Bootstrap gate:** Verify that Sony POPS enters (`FUN_002004f0`), loads embedded IOP modules (`FUN_002002a0`), binds disc SIF RPC `0x435052` (`FUN_00210540`), and initiates audio and controller polling.
+4. **Read-only gameplay gate:** Boot a retail game from APA and USB. Capture TOC and sector read logs (`0x435053` image requests).
+5. **Writable save gate:** Format a VMC, save in-game, reload after cold reboot, and verify data integrity on the host.
+6. **IOP I/O trace gate:** Capture same-session descriptor lifetime and seek/read offsets to verify parity against original POPStarter behavior.
 
 ### Patch provenance audit: ungrounded helpers
 
