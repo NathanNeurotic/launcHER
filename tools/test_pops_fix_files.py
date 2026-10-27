@@ -19,7 +19,9 @@ WRITES = json.loads((ROOT / 'tools/fixtures/pops_compat_reference.json').read_te
 
 
 class Context(c.Structure):
-    _fields_ = [('expected', c.c_uint32 * 39)]
+    _fields_ = [('expected', c.c_uint32 * 39),
+                ('video_auto_disabled', c.c_uint8),
+                ('video_custom_set', c.c_uint8)]
 
 
 def pristine():
@@ -287,6 +289,24 @@ void test_io_failures(int reads, int closes) { fail_reads=reads; fail_closes=clo
         self.assertEqual(struct.unpack_from('<I', self.memory, 0x210314 - BASE)[0], 0x3c02005a)
         self.assertEqual(self.memory[0x21af94 - BASE], 3)
         self.assertEqual(struct.unpack_from('<I', self.memory, 0x502770 - BASE)[0], 0x000a6300)
+
+    def test_video_action_disable_auto_prevents_subsequent_pal(self):
+        self.assertEqual(self.stage(patch(control=4, slot=0), slot=0), 0)
+        self.assertEqual(self.memory, pristine())
+        self.assertEqual(self.stage(patch(control=2, slot=1), slot=1), 0)
+        self.assertEqual(self.memory, pristine())
+
+    def test_video_action_pal_prevents_subsequent_control6(self):
+        self.assertEqual(self.stage(patch(control=2, slot=0), slot=0), 0)
+        self.assertEqual(self.memory[0x21af94 - BASE], 3)
+        self.assertEqual(self.stage(patch(control=6, slot=1), slot=1), 0)
+        self.assertEqual(self.memory[0x21af94 - BASE], 3)
+
+    def test_video_action_control6_prevents_subsequent_pal(self):
+        self.assertEqual(self.stage(patch(control=6, slot=0), slot=0), 0)
+        self.assertEqual(self.memory[0x21af94 - BASE], 0x50)
+        self.assertEqual(self.stage(patch(control=2, slot=1), slot=1), 0)
+        self.assertEqual(self.memory[0x21af94 - BASE], 0x50)
 
 if __name__ == '__main__':
     unittest.main()

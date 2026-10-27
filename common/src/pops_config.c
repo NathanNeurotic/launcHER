@@ -525,6 +525,7 @@ int pops_config_load_table(PopsConfig *cfg, const uint8_t table[32]) {
     return -EINVAL;
 
   cfg->hdtv_fix = (table[2] != 0);
+  cfg->usb_delay = table[3];
   for (int i = 0; i < 8; ++i) {
     if (table[8 + i]) {
       cfg->compat_modes |= (1 << i);
@@ -534,6 +535,7 @@ int pops_config_load_table(PopsConfig *cfg, const uint8_t table[32]) {
   if (table[18] == 0) {
     cfg->no_igr = 1;
   }
+  cfg->igr_type = table[20];
   if (table[26] == 0x02) {
     cfg->video_mode = POPS_VMODE_480P;
   } else if (table[26] == 0x00) {
@@ -555,6 +557,9 @@ void pops_config_export_table(const PopsConfig *cfg, uint8_t table[32]) {
   memcpy(table, defaults, 32);
 
   table[2] = cfg->hdtv_fix ? 0x01 : 0x00;
+  if (cfg->usb_delay > 0) {
+    table[3] = cfg->usb_delay;
+  }
   for (int i = 0; i < 8; ++i) {
     if (cfg->compat_modes & (1 << i)) {
       table[8 + i] = 0x01;
@@ -564,6 +569,7 @@ void pops_config_export_table(const PopsConfig *cfg, uint8_t table[32]) {
   if (cfg->no_igr) {
     table[18] = 0x00;
   }
+  table[20] = cfg->igr_type ? cfg->igr_type : 0x01;
   if (cfg->video_mode == POPS_VMODE_480P) {
     table[26] = 0x02;
   } else if (cfg->video_mode == POPS_VMODE_NOPAL) {

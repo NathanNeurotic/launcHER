@@ -19,6 +19,8 @@ int pops_apply_compat_modes(void *staged_core, size_t core_size, uint8_t modes_m
 #define POPS_COMPAT_SITE_COUNT 39
 typedef struct {
   uint32_t expected[POPS_COMPAT_SITE_COUNT];
+  uint8_t video_auto_disabled;
+  uint8_t video_custom_set;
 } PopsFixContext;
 int pops_fix_context_init(PopsFixContext *context, const void *staged_core,
                            size_t core_size, uint8_t initial_modes);

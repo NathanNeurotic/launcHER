@@ -175,6 +175,22 @@ class FeatureTests(unittest.TestCase):
             ptr, len(almost), c.byref(cfg)), -errno.ENOTSUP)
         self.assertEqual(almost, before)
 
+        # Mode 6 is accepted, writing 0x0648 at 0x002525b0
+        cfg = PopsConfig()
+        LIB.pops_config_init(c.byref(cfg))
+        cfg.compat_modes = 1 << 5
+        core_m6 = bytearray(almost)
+        struct.pack_into("<H", core_m6, 0x002525b0 - 0x00200000, 0x1bfc)
+        buf_m6 = (c.c_uint8 * len(core_m6)).from_buffer(core_m6)
+        self.assertEqual(LIB.pops_apply_all_config_patches(buf_m6, len(core_m6), c.byref(cfg)), 0)
+        self.assertEqual(struct.unpack_from("<H", core_m6, 0x002525b0 - 0x00200000)[0], 0x0648)
+
+        # Mode 8 remains unsupported and fails closed
+        cfg.compat_modes = 1 << 7
+        before_m8 = bytes(core_m6)
+        self.assertEqual(LIB.pops_apply_all_config_patches(buf_m6, len(core_m6), c.byref(cfg)), -errno.ENOTSUP)
+        self.assertEqual(core_m6, before_m8)
+
     def test_vcd_serial_normalization(self):
         norm = c.create_string_buffer(32)
         # Standard PS1 format
@@ -655,20 +671,26 @@ class FeatureTests(unittest.TestCase):
         self.assertEqual(cfg.runtime_corrections, 31)
 
         # 32-byte table export and reload
+        cfg.usb_delay = 5
+        cfg.igr_type = 2
         tbl = (c.c_uint8 * 32)()
         LIB.pops_config_export_table(c.byref(cfg), c.byref(tbl))
         self.assertEqual(tbl[2], 1)   # hdtv_fix
+        self.assertEqual(tbl[3], 5)   # usb_delay ($413)
         self.assertEqual(tbl[9], 1)   # mode 2
         self.assertEqual(tbl[11], 1)  # mode 4
         self.assertEqual(tbl[17], 1)  # no_boot ($421)
+        self.assertEqual(tbl[20], 2)  # igr_type ($424)
 
         cfg2 = PopsConfig()
         LIB.pops_config_init(c.byref(cfg2))
         self.assertEqual(LIB.pops_config_load_table(c.byref(cfg2), c.byref(tbl)), 0)
         self.assertEqual(cfg2.hdtv_fix, 1)
+        self.assertEqual(cfg2.usb_delay, 5)
         self.assertTrue(cfg2.compat_modes & (1 << 1))
         self.assertTrue(cfg2.compat_modes & (1 << 3))
         self.assertEqual(cfg2.no_boot, 1)
+        self.assertEqual(cfg2.igr_type, 2)
 
     def test_compat_db_lookup(self):
         count = LIB.pops_compat_db_count()

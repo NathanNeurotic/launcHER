@@ -121,6 +121,7 @@ int pops_fix_context_init(PopsFixContext *context, const void *staged_core,
     return -EINVAL;
   if (initial_modes & 0x80)
     return -ENOTSUP;
+  memset(&candidate, 0, sizeof(candidate));
   for (unsigned i = 0; i < POPS_COMPAT_SITE_COUNT; ++i)
     candidate.expected[i] = compat_patches[i].expected;
   /* The initial text/database mask uses the existing ascending dispatcher.
@@ -207,19 +208,29 @@ int pops_fix_stage(PopsFixContext *context, void *staged_core, size_t core_size,
   }
   switch (options.video) {
   case POPS_PATCH_VIDEO_NONE:
+    break;
   case POPS_PATCH_VIDEO_DISABLE_AUTO:
+    context->video_auto_disabled = 1;
     break;
   case POPS_PATCH_VIDEO_PAL:
-    write_u8(bytes, core_size, 0x0021af94, 3);
-    write_u32(bytes, core_size, 0x00502770, 0x000a6300);
-    write_u8(bytes, core_size, 0x0023b018, 0x6b);
-    write_u16(bytes, core_size, 0x0023b01c, 0x02cb);
+    if (!context->video_auto_disabled && !context->video_custom_set) {
+      write_u8(bytes, core_size, 0x0021af94, 3);
+      write_u32(bytes, core_size, 0x00502770, 0x000a6300);
+      write_u8(bytes, core_size, 0x0023b018, 0x6b);
+      write_u16(bytes, core_size, 0x0023b01c, 0x02cb);
+      context->video_auto_disabled = 1;
+      context->video_custom_set = 1;
+    }
     break;
   case POPS_PATCH_VIDEO_CONTROL6:
-    write_u8(bytes, core_size, 0x0021af94, 0x50);
-    write_u32(bytes, core_size, 0x0021a094, 0x0808e53c);
-    write_u32(bytes, core_size, 0x0023acb0, 0x24040000);
-    write_u32(bytes, core_size, 0x0023ad0c, 0x24040000);
+    if (!context->video_custom_set) {
+      write_u8(bytes, core_size, 0x0021af94, 0x50);
+      write_u32(bytes, core_size, 0x0021a094, 0x0808e53c);
+      write_u32(bytes, core_size, 0x0023acb0, 0x24040000);
+      write_u32(bytes, core_size, 0x0023ad0c, 0x24040000);
+      context->video_auto_disabled = 1;
+      context->video_custom_set = 1;
+    }
     break;
   }
   for (unsigned i = 0; i < POPS_COMPAT_SITE_COUNT; ++i)
@@ -519,7 +530,7 @@ int pops_apply_all_config_patches(void *staged_core, size_t core_size, const Pop
   /* These are mutually dependent writes to the staged executable. Fail
    * before applying an otherwise valid compatibility mode when any selected
    * later helper would reject this memory window. */
-  if (cfg->compat_modes & ((1 << 5) | (1 << 7)))
+  if (cfg->compat_modes & (1 << 7))
     return -ENOTSUP;
   if (cfg->video_mode > POPS_VMODE_240P)
     return -ENOTSUP;
