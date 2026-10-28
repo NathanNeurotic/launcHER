@@ -325,3 +325,18 @@ Reconstructed 10 functions in `popstarter/src/patch_engine.c` and `popstarter/sr
 10. `pops_jit_hook_009a0d70` (`FUN_009a0d70`, 120 B): Critical section invocation wrapper for vector 0x01452ad0.
 
 All 10 functions reached 1.00x size parity. Reconstructed C function count reached 404 (84.7% of clean functions). All 220 REPOP unit tests pass.
+
+### REPOP Batch 11 decompilation (Commit abf033cf)
+Reconstructed 10 functions across `patches.c` and `runtime_hooks.c`:
+1. `patches_apply_exception_suppression` (`FUN_008dbafc`, 480 B): Exception breakpoint suppression patch array over 23 distinct sites.
+2. `pops_core_runtime_0091d3d8` (`FUN_0091d3d8`, 256 B): FileXio devctl/ioctl2 synchronous RPC transaction dispatcher with 512-byte payload staging.
+3. `pops_jit_hook_009a1d60` (`FUN_009a1d60`, 220 B): JIT SIF RPC command packet queue worker and vector dispatcher loop.
+4. `pops_jit_hook_009a06ec` (`FUN_009a06ec`, 188 B): SIF RPC file write/transaction dispatcher (command 4) with dual semaphore locking.
+5. `pops_jit_hook_009a0de8` (`FUN_009a0de8`, 120 B): Critical section wrapper for vector 0x01452ae0 with DI/EI and sync barrier.
+6. `pops_jit_hook_009a1c88` (`FUN_009a1c88`, 120 B): Critical section wrapper for vector 0x01453920 with DI/EI and sync barrier.
+7. `pops_core_runtime_00914e90` (`FUN_00914e90`, 120 B): FileXio RPC command 1 query transaction builder and dispatcher.
+8. `pops_core_runtime_00915690` (`FUN_00915690`, 120 B): Device descriptor table slot batch synchronizer over active line count.
+9. `pops_core_runtime_0091c4b0` (`FUN_0091c4b0`, 120 B): FileXio descriptor close and synchronization RPC dispatcher (command 2).
+10. `pops_core_runtime_0091c7e8` (`FUN_0091c7e8`, 120 B): Core runtime atomic critical section wrapper for vector 0x0091cee0.
+
+All 10 functions reached 1.00x size parity. Reconstructed C function count reached 409 (85.7% of clean functions). All 220 REPOP unit tests pass.
