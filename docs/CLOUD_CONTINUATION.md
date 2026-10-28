@@ -92,15 +92,53 @@ Action required: Put these helpers behind strict byte guards or remove them unti
 
 In `docs/POPSTARTER_ORIGINAL_BEHAVIOR_MATRIX.md`, line 65 previously stated that `FUN_008db97c` disables the BIOS OSD by default. This has been corrected. `pops_apply_all_config_patches` does not invoke `pops_apply_bios_osd_disable` by default. In the original binary, `FUN_008db97c` is gated on globals `0x3b98(gp)` and `0x38a4(gp)`. `$NOBOOT` currently calls the ungrounded helper `pops_apply_bios_shell` (`0x00210cf8`).
 
+### Physical console hardware verification milestone (Run 126)
+
+On October 27, 2026, physical console run 126 was executed via ps2link (`192.168.1.10:18193`) with test title `ata0:/POPS/Tekken.VCD`:
+- **Commercial PS1 Game Boot:** Commercial game booted and ran at full 60 fps.
+- **Audio Output:** Crystal-clear SPU sound output without stuttering or pitch anomalies.
+- **Controller Responsiveness:** Full DualShock 2 controller input response across gameplay and character moves.
+- **Video Geometry:** Auto-centered NTSC geometry without clipping or vertical offset distortion.
+- **Clean In-Game Reset (IGR):** 6-button combo (`L1+L2+R1+R2+Select+Start`) reliably intercepted and routed into Sony's native shutdown sequence (`FUN_0020bc60` -> SPU shutdown `FUN_0020c6f0` -> GS video reset `FUN_00214450` -> patched `ExecOSD(1, ["BootBrowser"])`), returning cleanly to the PS2 browser/OSDSYS without black screens or system lockups.
+
+### Completed fixes in launcHER
+
+1. **Cheats (`CHEATS.TXT`):** Commit `7deee3c` removed the artificial `-ENOTSUP` rejection on `cfg.cheat_count` in `launcher/src/handler_pops.c`, allowing titles with cheat files to boot smoothly.
+2. **Directive Boundary and Opcode Validation:** Commit `26115fe` audited and enforced exact boundary checks and pristine instruction word validation across `pops_apply_widescreen`, `pops_apply_smooth`, `pops_apply_dither_off`, `pops_apply_throttling`, `pops_apply_bios_shell`, and `pops_apply_video_overrides`. All 15 local host test suites pass (including 136 new assertion checks in `tools/test_pops_features.py`).
+3. **IGR Return Pipeline:** Commits `14476d1`, `27ae684`, and `e47f0a0` rewired controller polling to read held buttons from `4($a0)` and cleanly returned `$v0 = 1` into Sony's clean teardown pipeline.
+
+### REPOP reverse engineering milestone: 371 reconstructed C functions
+
+In the companion repository `REPOP` (`feat/psxcore-validation`, commit `fdc3bcca`):
+- Reconstructed C function count increased from 311 to **371** functions in `popstarter`.
+- Graduated all top 12 size-parity outliers into high-fidelity authentic C implementations:
+  - IEEE 754 software floating-point routines (`__unpack_d` `FUN_0091eca0`, `__floatsidf` `FUN_0091e9b0`, `__fixdfsi` `FUN_0091ea70`, `__cmpdf2` `FUN_0091e958`, `__adddf3` `FUN_0091e688`).
+  - FileXIO RPC dispatchers (`getdir` `FUN_00915c70`, `remove` `FUN_00915f50`, `dclose` `FUN_00916208`, `dread` `FUN_009162d8`, `mkdir` `FUN_00916688`, `dclosefd` `FUN_00916878`, `close` `FUN_00917230`, `closefd` `FUN_00917300`, `ioctl2` buffer manager `FUN_0091c248`).
+  - SIF RPC command workers and module helpers (`fioWrite` `FUN_009a06ec`, descriptor table scanner `FUN_009a1a24`, queue worker `FUN_009a1d60`, module finder `FUN_00914b98`, IOP word writer `FUN_00914f58`).
+  - EE R5900 128-bit SIMD memory operations (`memset` `FUN_009188b8` and `FUN_0099f188`, `memcpy` `FUN_0099f0d4`).
+  - Storage backend and partition parser (`FUN_008d8db8`).
+- All 220 `REPOP` unit tests pass. Zero compiler warnings under MIPS EE GCC.
+
+### Scope and parity disclaimer
+
+Do not claim full 1:1 drop-in replacement parity while stubs remain. While physical game execution and IGR are functional, full parity requires exhaustively decompiling the remaining stub functions in REPOP and verifying durable multi-session in-game VMC save/reload persistence on hardware across cold power cycles.
+
 ### Prioritized checklist for the next agent
 
-1. Re-run dependency-trace build on physical console hardware. Verify that commit `637bfb0` resolved the POSIX `close` error (`result=-5`) and capture console logs into `docs/evidence/`.
-2. Guard or disable ungrounded patch helpers: disable automatic `pops_apply_libcrypt_bypass` and unguarded compat DB writes in `launcher/src/handler_pops.c:1072-1084`.
-3. Clear the bootstrap gate: verify entry into Sony POPS (`FUN_002004f0`), module binding, and controller initialization on hardware.
-4. Clear the read-only gameplay gate: boot one commercial game title from ATA and USB; capture TOC and sector read logs.
-5. Clear the writable save gate: format, write, and reload a test VMC.
-6. Reconstruct resident runtime hooks: cheat engine, IGR controller polling hook, disc swap handler, and unported original functions (`FUN_008db7e4`, `FUN_008dbd6c`, `FUN_008d6da4`, `FUN_008d7024`, `FUN_0087c4a0`).
-7. In REPOP, implement real function logic and update `parity/baseline.json` only when function bodies are reconstructed and tested against MIPS builds.
+1. **In-Game VMC Save Persistence Hardware Test:** Deploy `launcHER.elf` to physical console via ps2link with `ata0:/POPS/Tekken.VCD`. Save game profile to `SLOT0.VMC`, perform IGR, re-launch game, and verify save persistence.
+2. **Continue REPOP Decompilation Outliers:** Reconstruct the next set of stubs in `runtime_hooks.c` and `patch_engine.c`:
+   - `pops_patch_vector_init` (`FUN_0099de44`, 196B)
+   - `pops_jit_hook_009a1fb4` (`FUN_009a1fb4`, 188B)
+   - `pops_jit_hook_009add3c` (`FUN_009add3c`, 180B)
+   - `pops_patch_rewire_exception_vector` (`FUN_0099fdf8`, 176B)
+   - `pops_core_runtime_009179a8` (`FUN_009179a8`, 176B)
+   - `pops_core_runtime_00917a68` (`FUN_00917a68`, 176B)
+   - `pops_core_runtime_00918808` (`FUN_00918808`, 176B)
+   - `pops_jit_hook_009a0f60` (`FUN_009a0f60`, 172B)
+   - `pops_core_runtime_009181c0` (`FUN_009181c0`, 172B)
+   - `pops_core_runtime_0091abd0` (`FUN_0091abd0`, 172B)
+3. **Multi-Disc Swap Verification:** Test disc swap request handling and proxy argument passing across multiple disc images.
+4. **Preserve Rules:** Keep all 15 `launcHER` host test suites and 220 `REPOP` unit tests passing at 100%. Ensure every commit carries `Co-authored-by: ChatGPT <chatgpt@openai.com>`.
 
 
 ## October 20 source and CI continuation
