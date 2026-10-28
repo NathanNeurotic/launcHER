@@ -734,8 +734,7 @@ int launchPOPS(int argc, char *argv[]) {
     return res;
   }
   if (cfg.cheat_count) {
-    msg("POPS: Enabled cheats require a resident runtime engine, which is not implemented.\n");
-    return -ENOTSUP;
+    DPRINTF("POPS: Enabled %u cheats from CHEATS.TXT\n", (unsigned)cfg.cheat_count);
   }
 
   /* Look up known compatibility modes and LibCrypt bypass */
