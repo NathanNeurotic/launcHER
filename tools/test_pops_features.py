@@ -846,11 +846,11 @@ class FeatureTests(unittest.TestCase):
         val_fast = struct.unpack_from("<I", buf, 0x002010A0 - 0x00200000)[0]
         self.assertEqual(val_fast, 0x00000000)
 
-        # Seed BIOS shell patch (0x00210CF8)
-        buf[0x00210CF8 - 0x00200000] = 0xFF
+        # Seed BIOS shell patch (0x00210CF8: addiu $v0, $v0, -1 -> 0x2442FFFF)
+        struct.pack_into("<I", buf, 0x00210CF8 - 0x00200000, 0x2442FFFF)
         res = LIB.pops_apply_bios_shell(core_ptr, core_size)
         self.assertEqual(res, 0)
-        self.assertEqual(buf[0x00210CF8 - 0x00200000], 0x01)
+        self.assertEqual(struct.unpack_from("<I", buf, 0x00210CF8 - 0x00200000)[0], 0x2442FF01)
 
         # Seed LibCrypt bypass
         struct.pack_into("<I", buf, 0x0020C1F0 - 0x00200000, 0x3463ffff)
@@ -1129,6 +1129,136 @@ class FeatureTests(unittest.TestCase):
         # Enable OSD (0x0648 -> 0x1bfc)
         self.assertEqual(LIB.pops_apply_bios_osd_enable(ptr, buf_size), 0)
         self.assertEqual(struct.unpack_from("<H", buf, off)[0], 0x1bfc)
+
+    def test_directive_exact_boundaries_and_guards(self):
+        # 1. Null buffer checks
+        self.assertEqual(LIB.pops_apply_widescreen(None, 0x100000), -errno.EINVAL)
+        self.assertEqual(LIB.pops_apply_smooth(None, 0x100000), -errno.EINVAL)
+        self.assertEqual(LIB.pops_apply_dither_off(None, 0x100000), -errno.EINVAL)
+        self.assertEqual(LIB.pops_apply_throttling(None, 0x100000, 1, 0), -errno.EINVAL)
+        self.assertEqual(LIB.pops_apply_bios_shell(None, 0x100000), -errno.EINVAL)
+        self.assertEqual(LIB.pops_apply_libcrypt_bypass(None, 0x100000), -errno.EINVAL)
+        self.assertEqual(LIB.pops_apply_video_overrides(None, 0x100000, 1, 0, 0, 0), -errno.EINVAL)
+
+        # 2. Unsupported video mode
+        tiny_buf = bytearray(0x10)
+        tiny_ptr = (c.c_uint8 * len(tiny_buf)).from_buffer(tiny_buf)
+        self.assertEqual(LIB.pops_apply_video_overrides(tiny_ptr, len(tiny_buf), 9, 0, 0, 0), -errno.ENOTSUP)
+
+        # 3. Truncated buffer bounds for each directive
+        # Widescreen: 0x00205B00 - 0x00200000 + 4 = 0x5B04
+        ws_off = 0x00205B00 - 0x00200000
+        buf = bytearray(ws_off + 3)
+        ptr = (c.c_uint8 * len(buf)).from_buffer(buf)
+        self.assertEqual(LIB.pops_apply_widescreen(ptr, len(buf)), -errno.ERANGE)
+
+        # Smooth: 0x00205E00 - 0x00200000 + 4 = 0x5E04
+        sm_off = 0x00205E00 - 0x00200000
+        buf = bytearray(sm_off + 3)
+        ptr = (c.c_uint8 * len(buf)).from_buffer(buf)
+        self.assertEqual(LIB.pops_apply_smooth(ptr, len(buf)), -errno.ERANGE)
+
+        # Dither off: 0x00205D58 - 0x00200000 + 4 = 0x5D5C
+        dit_off = 0x00205D58 - 0x00200000
+        buf = bytearray(dit_off + 3)
+        ptr = (c.c_uint8 * len(buf)).from_buffer(buf)
+        self.assertEqual(LIB.pops_apply_dither_off(ptr, len(buf)), -errno.ERANGE)
+
+        # Throttling: 0x002010A0 - 0x00200000 + 4 = 0x10A4
+        th_off = 0x002010A0 - 0x00200000
+        buf = bytearray(th_off + 3)
+        ptr = (c.c_uint8 * len(buf)).from_buffer(buf)
+        self.assertEqual(LIB.pops_apply_throttling(ptr, len(buf), 1, 0), -errno.ERANGE)
+        self.assertEqual(LIB.pops_apply_throttling(ptr, len(buf), 0, 1), -errno.ERANGE)
+        self.assertEqual(LIB.pops_apply_throttling(ptr, len(buf), 0, 0), 0)
+
+        # BIOS shell: 0x00210cf8 - 0x00200000 + 4 = 0x10cfc
+        bios_off = 0x00210cf8 - 0x00200000
+        buf = bytearray(bios_off + 3)
+        ptr = (c.c_uint8 * len(buf)).from_buffer(buf)
+        self.assertEqual(LIB.pops_apply_bios_shell(ptr, len(buf)), -errno.ERANGE)
+
+        # Libcrypt: 0x0020CFB0 - 0x00200000 + 4 = 0xCFB4
+        lc_off = 0x0020CFB0 - 0x00200000
+        buf = bytearray(lc_off + 3)
+        ptr = (c.c_uint8 * len(buf)).from_buffer(buf)
+        self.assertEqual(LIB.pops_apply_libcrypt_bypass(ptr, len(buf)), -errno.ERANGE)
+
+        # Video overrides bounds checks
+        # PAL2NTSC / NTSC2PAL: needs 0x00502770 + 4 (off = 0x302774)
+        buf_pal = bytearray(0x302773)
+        ptr_pal = (c.c_uint8 * len(buf_pal)).from_buffer(buf_pal)
+        self.assertEqual(LIB.pops_apply_video_overrides(ptr_pal, len(buf_pal), 1, 0, 0, 0), -errno.ERANGE)
+        self.assertEqual(LIB.pops_apply_video_overrides(ptr_pal, len(buf_pal), 2, 0, 0, 0), -errno.ERANGE)
+
+        # 480P / 240P: needs 0x002061E0 + 4 (off = 0x61E4)
+        buf_480p = bytearray(0x61E3)
+        ptr_480p = (c.c_uint8 * len(buf_480p)).from_buffer(buf_480p)
+        self.assertEqual(LIB.pops_apply_video_overrides(ptr_480p, len(buf_480p), 4, 0, 0, 0), -errno.ERANGE)
+        self.assertEqual(LIB.pops_apply_video_overrides(ptr_480p, len(buf_480p), 8, 0, 0, 0), -errno.ERANGE)
+
+        # 480I / 576P / 576I: needs 0x002061A0 + 4 (off = 0x61A4)
+        buf_480i = bytearray(0x61A3)
+        ptr_480i = (c.c_uint8 * len(buf_480i)).from_buffer(buf_480i)
+        self.assertEqual(LIB.pops_apply_video_overrides(ptr_480i, len(buf_480i), 5, 0, 0, 0), -errno.ERANGE)
+        self.assertEqual(LIB.pops_apply_video_overrides(ptr_480i, len(buf_480i), 6, 0, 0, 0), -errno.ERANGE)
+        self.assertEqual(LIB.pops_apply_video_overrides(ptr_480i, len(buf_480i), 7, 0, 0, 0), -errno.ERANGE)
+
+        # HDTV fix: needs 0x002061DC + 4 (off = 0x61E0)
+        buf_hdtv = bytearray(0x61DF)
+        ptr_hdtv = (c.c_uint8 * len(buf_hdtv)).from_buffer(buf_hdtv)
+        self.assertEqual(LIB.pops_apply_video_overrides(ptr_hdtv, len(buf_hdtv), 0, 1, 0, 0), -errno.ERANGE)
+
+        # XPOS: needs 0x00206214 + 2 (off = 0x6216)
+        buf_x = bytearray(0x6215)
+        ptr_x = (c.c_uint8 * len(buf_x)).from_buffer(buf_x)
+        self.assertEqual(LIB.pops_apply_video_overrides(ptr_x, len(buf_x), 0, 0, 5, 0), -errno.ERANGE)
+
+        # YPOS: needs 0x00206218 + 2 (off = 0x621A)
+        buf_y = bytearray(0x6219)
+        ptr_y = (c.c_uint8 * len(buf_y)).from_buffer(buf_y)
+        self.assertEqual(LIB.pops_apply_video_overrides(ptr_y, len(buf_y), 0, 0, 0, 5), -errno.ERANGE)
+
+        # 4. Valid application and byte inspection on exact-sized buffers
+        # Widescreen
+        buf_ws = bytearray(ws_off + 4)
+        struct.pack_into("<I", buf_ws, ws_off, 0x0080802d)
+        ptr_ws = (c.c_uint8 * len(buf_ws)).from_buffer(buf_ws)
+        self.assertEqual(LIB.pops_apply_widescreen(ptr_ws, len(buf_ws)), 0)
+        self.assertEqual(struct.unpack_from("<I", buf_ws, ws_off)[0], 0x24020C00)
+
+        # Smooth
+        buf_sm = bytearray(sm_off + 4)
+        struct.pack_into("<I", buf_sm, sm_off, 0x0200202d)
+        ptr_sm = (c.c_uint8 * len(buf_sm)).from_buffer(buf_sm)
+        self.assertEqual(LIB.pops_apply_smooth(ptr_sm, len(buf_sm)), 0)
+        self.assertEqual(struct.unpack_from("<I", buf_sm, sm_off)[0], 0x24020001)
+
+        # Dither off
+        buf_dit = bytearray(dit_off + 4)
+        struct.pack_into("<I", buf_dit, dit_off, 0xdfb30028)
+        ptr_dit = (c.c_uint8 * len(buf_dit)).from_buffer(buf_dit)
+        self.assertEqual(LIB.pops_apply_dither_off(ptr_dit, len(buf_dit)), 0)
+        self.assertEqual(struct.unpack_from("<I", buf_dit, dit_off)[0], 0x00000000)
+
+        # Fast MIPS
+        buf_th = bytearray(th_off + 4)
+        struct.pack_into("<I", buf_th, th_off, 0xffb00000)
+        ptr_th = (c.c_uint8 * len(buf_th)).from_buffer(buf_th)
+        self.assertEqual(LIB.pops_apply_throttling(ptr_th, len(buf_th), 1, 0), 0)
+        self.assertEqual(struct.unpack_from("<I", buf_th, th_off)[0], 0x00000000)
+
+        # Slow MIPS
+        struct.pack_into("<I", buf_th, th_off, 0xffb00000)
+        self.assertEqual(LIB.pops_apply_throttling(ptr_th, len(buf_th), 0, 1), 0)
+        self.assertEqual(struct.unpack_from("<I", buf_th, th_off)[0], 0x24040004)
+
+        # BIOS shell
+        buf_bios = bytearray(bios_off + 4)
+        struct.pack_into("<I", buf_bios, bios_off, 0x2442FFFF)
+        ptr_bios = (c.c_uint8 * len(buf_bios)).from_buffer(buf_bios)
+        self.assertEqual(LIB.pops_apply_bios_shell(ptr_bios, len(buf_bios)), 0)
+        self.assertEqual(struct.unpack_from("<I", buf_bios, bios_off)[0], 0x2442FF01)
 
 if __name__ == "__main__":
     unittest.main()

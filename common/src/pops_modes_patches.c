@@ -301,16 +301,32 @@ int pops_apply_compat_modes(void *staged_core, size_t core_size, uint8_t modes_m
 int pops_apply_video_overrides(void *staged_core, size_t core_size,
                                uint8_t video_mode, uint8_t hdtv_fix,
                                int16_t x_offset, int16_t y_offset) {
-  if (!staged_core || core_size < 0x250000)
+  if (!staged_core)
     return -EINVAL;
   if (video_mode > POPS_VMODE_240P)
     return -ENOTSUP;
-  /* PAL/NTSC conversion writes the 0x00502770 word near the end of the
-   * verified core. Refuse the entire request before making earlier writes
-   * if that last site is not present in the caller-owned buffer. */
-  if ((video_mode == POPS_VMODE_PAL2NTSC ||
-       video_mode == POPS_VMODE_NTSC2PAL) &&
+
+  /* Check bounds per requested feature */
+  if ((video_mode == POPS_VMODE_PAL2NTSC || video_mode == POPS_VMODE_NTSC2PAL) &&
       core_size < (size_t)(0x00502770 - POPS_CORE_BASE_ADDR + 4))
+    return -ERANGE;
+
+  if ((video_mode == POPS_VMODE_480P || video_mode == POPS_VMODE_240P) &&
+      core_size < (size_t)(0x002061E0 - POPS_CORE_BASE_ADDR + 4))
+    return -ERANGE;
+
+  if ((video_mode == POPS_VMODE_480I || video_mode == POPS_VMODE_576P ||
+       video_mode == POPS_VMODE_576I) &&
+      core_size < (size_t)(0x002061A0 - POPS_CORE_BASE_ADDR + 4))
+    return -ERANGE;
+
+  if (hdtv_fix && core_size < (size_t)(0x002061DC - POPS_CORE_BASE_ADDR + 4))
+    return -ERANGE;
+
+  if (x_offset != 0 && core_size < (size_t)(0x00206214 - POPS_CORE_BASE_ADDR + 2))
+    return -ERANGE;
+
+  if (y_offset != 0 && core_size < (size_t)(0x00206218 - POPS_CORE_BASE_ADDR + 2))
     return -ERANGE;
 
   /* Verify byte guards before modifying core */
@@ -385,9 +401,10 @@ int pops_apply_video_overrides(void *staged_core, size_t core_size,
 }
 
 int pops_apply_smooth(void *staged_core, size_t core_size) {
-  if (!staged_core || core_size < 0x250000)
+  if (!staged_core)
     return -EINVAL;
-  /* Guard: only apply if pristine instruction is present */
+  if (core_size < (size_t)(0x00205E00 - POPS_CORE_BASE_ADDR + 4))
+    return -ERANGE;
   if (read_u32(staged_core, core_size, 0x00205E00) != 0x0200202d)
     return -EILSEQ;
   /* Modify GS texture filter flag (TEX0.TFX bilinear) */
@@ -395,9 +412,10 @@ int pops_apply_smooth(void *staged_core, size_t core_size) {
 }
 
 int pops_apply_widescreen(void *staged_core, size_t core_size) {
-  if (!staged_core || core_size < 0x250000)
+  if (!staged_core)
     return -EINVAL;
-  /* Guard: only apply if pristine instruction is present */
+  if (core_size < (size_t)(0x00205B00 - POPS_CORE_BASE_ADDR + 4))
+    return -ERANGE;
   if (read_u32(staged_core, core_size, 0x00205B00) != 0x0080802d)
     return -EILSEQ;
   /* Horizontal 16:9 projection aspect factor patch */
@@ -405,9 +423,10 @@ int pops_apply_widescreen(void *staged_core, size_t core_size) {
 }
 
 int pops_apply_dither_off(void *staged_core, size_t core_size) {
-  if (!staged_core || core_size < 0x250000)
+  if (!staged_core)
     return -EINVAL;
-  /* Guard: only apply if pristine instruction is present */
+  if (core_size < (size_t)(0x00205D58 - POPS_CORE_BASE_ADDR + 4))
+    return -ERANGE;
   if (read_u32(staged_core, core_size, 0x00205D58) != 0xdfb30028)
     return -EILSEQ;
   /* Disable Graphics Synthesizer dithering */
@@ -415,12 +434,13 @@ int pops_apply_dither_off(void *staged_core, size_t core_size) {
 }
 
 int pops_apply_throttling(void *staged_core, size_t core_size, uint8_t fast_mips, uint8_t slow_mips) {
-  if (!staged_core || core_size < 0x250000)
+  if (!staged_core)
     return -EINVAL;
   if (!fast_mips && !slow_mips)
     return 0;
+  if (core_size < (size_t)(0x002010A0 - POPS_CORE_BASE_ADDR + 4))
+    return -ERANGE;
 
-  /* Guard: only apply if pristine instruction is present */
   if (read_u32(staged_core, core_size, 0x002010A0) != 0xffb00000)
     return -EILSEQ;
 
@@ -435,19 +455,21 @@ int pops_apply_throttling(void *staged_core, size_t core_size, uint8_t fast_mips
 }
 
 int pops_apply_bios_shell(void *staged_core, size_t core_size) {
-  if (!staged_core || core_size < 0x250000)
+  if (!staged_core)
     return -EINVAL;
-  /* Guard: only apply if pristine byte is present */
-  if (read_u8(staged_core, core_size, 0x00210cf8) != 0xFF)
+  if (core_size < (size_t)(0x00210cf8 - POPS_CORE_BASE_ADDR + 4))
+    return -ERANGE;
+  if (read_u32(staged_core, core_size, 0x00210cf8) != 0x2442ffff)
     return -EILSEQ;
   /* Force boot into the PS1 BIOS shell */
   return write_u8(staged_core, core_size, 0x00210cf8, 0x01);
 }
 
 int pops_apply_libcrypt_bypass(void *staged_core, size_t core_size) {
-  if (!staged_core || core_size < 0x250000)
+  if (!staged_core)
     return -EINVAL;
-  /* Guard: only apply if pristine instructions are present */
+  if (core_size < (size_t)(0x0020CFB0 - POPS_CORE_BASE_ADDR + 4))
+    return -ERANGE;
   if (read_u32(staged_core, core_size, 0x0020C1F0) != 0x3463ffff ||
       read_u32(staged_core, core_size, 0x0020CFB0) != 0x24020001)
     return -EILSEQ;
