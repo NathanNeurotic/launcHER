@@ -157,6 +157,9 @@ class FeatureTests(unittest.TestCase):
         LIB.pops_check_disc_swap_combo.restype = c.c_int
         LIB.pops_generate_subq.argtypes = [c.c_uint32, c.c_uint16, c.POINTER(c.c_uint8 * 12)]
         LIB.pops_generate_subq.restype = c.c_int
+        cls.Devctl = c.CFUNCTYPE(c.c_int, c.c_char_p, c.c_int, c.c_void_p, c.c_size_t, c.c_void_p, c.c_size_t)
+        LIB.pops_cdrom_read_subq.argtypes = [cls.Devctl, c.c_uint32, c.POINTER(c.c_uint8 * 12)]
+        LIB.pops_cdrom_read_subq.restype = c.c_int
         LIB.pops_cheat_engine_tick.argtypes = [c.c_void_p, c.POINTER(CheatEntry), c.c_uint16]
         LIB.pops_cheat_engine_tick.restype = c.c_int
         LIB.pops_cheat_engine_tick_ex.argtypes = [c.c_void_p, c.POINTER(CheatEntry), c.c_uint16, c.c_uint32, c.c_uint8]
@@ -890,6 +893,10 @@ class FeatureTests(unittest.TestCase):
         self.assertEqual(subq[2], 0x01)
         self.assertEqual(subq[10], 0x7C)
         self.assertEqual(subq[11], 0x23)
+        # Verify LBA boundary validation
+        self.assertEqual(LIB.pops_generate_subq(c.c_uint32(-1).value, 0, c.byref(subq)), -errno.ERANGE)
+        self.assertEqual(LIB.pops_generate_subq(449850, 0, c.byref(subq)), -errno.ERANGE)
+        self.assertEqual(LIB.pops_generate_subq(0, 0, None), -errno.EINVAL)
         # Unprotected standard track-1 position Q is CRC-protected, and
         # absolute time starts at 00:02:00 when relative LBA = 0.
         self.assertEqual(LIB.pops_generate_subq(0, 0, c.byref(subq)), 0)
@@ -897,6 +904,31 @@ class FeatureTests(unittest.TestCase):
         self.assertEqual(LIB.pops_generate_subq(75, 0, c.byref(subq)), 0)
         self.assertEqual(tuple(subq[3:6]), (0x00, 0x01, 0x00))
         self.assertEqual(tuple(subq[7:10]), (0x00, 0x03, 0x00))
+
+        # Test LibCrypt key injection on protected range 12..20
+        for lba in range(12, 21):
+            self.assertEqual(LIB.pops_generate_subq(lba, 0xABCD, c.byref(subq)), 0)
+            self.assertEqual(subq[10], 0xAB)
+            self.assertEqual(subq[11], 0xCD)
+        # Outside range (e.g. LBA 21), CRC is computed normally instead of key
+        self.assertEqual(LIB.pops_generate_subq(21, 0xABCD, c.byref(subq)), 0)
+        self.assertNotEqual((subq[10] << 8) | subq[11], 0xABCD)
+
+        # Test pops_cdrom_read_subq devctl bridge
+        def mock_subq_devctl(dev, cmd, arg, arglen, buf, buflen):
+            dev_str = dev.decode('utf-8') if dev else ""
+            if dev_str == "pops:" and cmd == 0x06:
+                if buf and buflen >= 12:
+                    c.memmove(buf, bytes.fromhex("410101000000000002002832"), 12)
+                return 0
+            return -errno.ENODEV
+
+        cb_devctl = self.Devctl(mock_subq_devctl)
+        self.assertEqual(LIB.pops_cdrom_read_subq(cb_devctl, 0, c.byref(subq)), 0)
+        self.assertEqual(bytes(subq), bytes.fromhex("410101000000000002002832"))
+        null_devctl = c.cast(None, self.Devctl)
+        self.assertEqual(LIB.pops_cdrom_read_subq(null_devctl, 0, c.byref(subq)), -errno.EINVAL)
+        self.assertEqual(LIB.pops_cdrom_read_subq(cb_devctl, 0, None), -errno.EINVAL)
 
         # Test GameShark cheat RAM injector with 0xD0..0xD3 and 0xE0..0xE1 conditionals
         ram_size = 0x200000

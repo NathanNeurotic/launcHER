@@ -340,3 +340,27 @@ Reconstructed 10 functions across `patches.c` and `runtime_hooks.c`:
 10. `pops_core_runtime_0091c7e8` (`FUN_0091c7e8`, 120 B): Core runtime atomic critical section wrapper for vector 0x0091cee0.
 
 All 10 functions reached 1.00x size parity. Reconstructed C function count reached 409 (85.7% of clean functions). All 220 REPOP unit tests pass.
+
+### REPOP Batch 12 decompilation (Commit a338a30d)
+Reconstructed 12 functions across `runtime_hooks.c` and `patch_engine.c`:
+1. `pops_core_runtime_0091c860` (`FUN_0091c860`, 120 B): Critical section wrapper for vector 0x0091cef0.
+2. `pops_core_runtime_0091c8d8` (`FUN_0091c8d8`, 120 B): Critical section wrapper for vector 0x0091cf00.
+3. `pops_core_runtime_0091c950` (`FUN_0091c950`, 120 B): Critical section wrapper for vector 0x0091cf10.
+4. `pops_jit_hook_009a02ac` (`FUN_009a02ac`, 116 B): SIF RPC file query dispatcher and semaphore teardown.
+5. `pops_patch_clear_records` (`FUN_0099eba0`, 112 B): Reset/zero memory card and disc descriptor records into RPC queue.
+6. `pops_jit_hook_009a0b38` (`FUN_009a0b38`, 112 B): JIT interrupt completion and devctl transaction dispatcher.
+7. `pops_core_runtime_00915bb0` (`FUN_00915bb0`, 112 B): Core runtime FileXio subsystem teardown and table reset.
+8. `pops_core_runtime_00916940` (`FUN_00916940`, 112 B): SIF RPC dual packet completion dispatcher and uncached pointer mapper.
+9. `pops_jit_hook_009ae03c` (`FUN_009ae03c`, 108 B): Clamped buffer copy into PS1 BIOS memory area (0x800746a0).
+10. `pops_core_runtime_00917f10` (`FUN_00917f10`, 108 B): Core runtime FileXio semaphore allocation and cleanup handler.
+11. `pops_core_runtime_00918798` (`FUN_00918798`, 108 B): SIF RPC packet notification and semaphore signaler.
+12. `pops_core_runtime_0091c440` (`FUN_0091c440`, 108 B): FileXio descriptor close and synchronous query RPC dispatcher.
+
+All 12 functions reached 1.00x size parity. Reconstructed C function count reached 420 (88.0% of clean functions). All 220 REPOP unit tests pass.
+
+### launcHER LibCrypt SubQ sector pipeline integration
+Integrated Subchannel Q sector pipeline and devctl bridge:
+- Added LBA boundary verification to `pops_generate_subq` in `common/src/pops_modes_patches.c`, matching IOP popfs bridge bounds (`lba <= 449849`).
+- Implemented `pops_cdrom_read_subq` devctl bridge helper supporting `POPS_DEVCTL_GET_SUBQ` query with fallback from `pops:` to `pops0:`.
+- Added unit tests in `tools/test_pops_features.py` testing bounds, LibCrypt key injection on protected range 12..20, normal CRC integrity outside the protected range, and mock devctl bridging.
+- All 15 host test suites in launcHER pass.

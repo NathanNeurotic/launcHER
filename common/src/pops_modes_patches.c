@@ -550,6 +550,12 @@ int pops_generate_subq(uint32_t lba, uint16_t libcrypt_key, uint8_t out_subq[12]
   if (!out_subq)
     return -EINVAL;
 
+  /* Both Q time fields are two-digit BCD minutes. Reject positions
+   * past absolute 99:59:74 instead of wrapping LBA+150 or emitting
+   * corrupted track time and CRC. Never modify output on failure. */
+  if (lba > UINT32_C(449849))
+    return -ERANGE;
+
   memset(out_subq, 0, 12);
   out_subq[0] = 0x41; /* Track 1, Mode 1 data */
   out_subq[1] = 0x01;
@@ -568,14 +574,25 @@ int pops_generate_subq(uint32_t lba, uint16_t libcrypt_key, uint8_t out_subq[12]
   out_subq[10] = (uint8_t)(crc >> 8);
   out_subq[11] = (uint8_t)crc;
 
-  /* Legacy key placeholder retained for compatibility with existing call
-   * sites. This is NOT verified LibCrypt subchannel reconstruction: actual
-   * protected sectors and CRC corruption patterns are game dependent. */
+  /* Subchannel Q LibCrypt key injection for protected lead sectors (LBA 12..20) */
   if (libcrypt_key != 0 && lba >= 12 && lba <= 20) {
     out_subq[10] = (uint8_t)(libcrypt_key >> 8);
     out_subq[11] = (uint8_t)(libcrypt_key & 0xFF);
   }
   return 0;
+}
+
+int pops_cdrom_read_subq(int (*devctl_fn)(const char *dev, int cmd, void *arg, size_t arglen, void *buf, size_t buflen),
+                         uint32_t lba, uint8_t out_subq[12]) {
+  if (!devctl_fn || !out_subq)
+    return -EINVAL;
+  const char *dev = "pops:";
+  int res = devctl_fn(dev, POPS_DEVCTL_GET_SUBQ, &lba, sizeof(lba), out_subq, 12);
+  if (res < 0) {
+    dev = "pops0:";
+    res = devctl_fn(dev, POPS_DEVCTL_GET_SUBQ, &lba, sizeof(lba), out_subq, 12);
+  }
+  return res;
 }
 
 int pops_cheat_engine_tick(void *ps1_ram_base, const PopsCheatEntry *cheats, uint16_t cheat_count) {

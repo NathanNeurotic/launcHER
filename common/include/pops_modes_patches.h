@@ -108,6 +108,10 @@ int pops_handle_disc_swap(uint16_t buttons_active_low,
 /* Generates 12-byte Subchannel Q data for a requested LBA with BCD MSF and LibCrypt key in CRC */
 int pops_generate_subq(uint32_t lba, uint16_t libcrypt_key, uint8_t out_subq[12]);
 
+/* Queries CD-ROM Subchannel Q frame from popfs devctl bridge */
+int pops_cdrom_read_subq(int (*devctl_fn)(const char *dev, int cmd, void *arg, size_t arglen, void *buf, size_t buflen),
+                         uint32_t lba, uint8_t out_subq[12]);
+
 /* Periodically evaluates and applies GameShark codes to guest PS1 RAM with conditional support */
 int pops_cheat_engine_tick(void *ps1_ram_base, const PopsCheatEntry *cheats, uint16_t cheat_count);
 
