@@ -1,5 +1,7 @@
 # POPSTARTER replacement handoff — 2026-10-08
 
+> **Current continuation — 2026-10-28:** Read [the verified audit](POPS_PARITY_AUDIT_2026-10-28.md) and [current checkpoint](CLOUD_CONTINUATION.md). Later full-durability, resident-feature and exact-size completion claims are withdrawn. Earlier sections below retain their original, limited evidence scope.
+
 ## Verified hardware checkpoint — October 13, 2026
 
 Physical run `20261014T050940-0020` displayed `POPS_IOP_BINDING_PASS` and
