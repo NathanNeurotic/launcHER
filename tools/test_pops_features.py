@@ -966,10 +966,10 @@ class FeatureTests(unittest.TestCase):
         struct.pack_into("<I", buf, off_64, 0x2622a980)
         struct.pack_into("<I", buf, off_68, 0x0000202d)
         self.assertEqual(LIB.pops_apply_igr_direct_exit(ptr, buf_size), 0)
-        self.assertEqual(struct.unpack_from("<I", buf, off_5c)[0], 0x24040001)
-        self.assertEqual(struct.unpack_from("<I", buf, off_60)[0], 0x3c050050)
-        self.assertEqual(struct.unpack_from("<I", buf, off_64)[0], 0x0c08d8ae)
-        self.assertEqual(struct.unpack_from("<I", buf, off_68)[0], 0x24a59708)
+        self.assertEqual(struct.unpack_from("<I", buf, off_5c)[0], 0x24020001)
+        self.assertEqual(struct.unpack_from("<I", buf, off_60)[0], 0x10000015)
+        self.assertEqual(struct.unpack_from("<I", buf, off_64)[0], 0x00000000)
+        self.assertEqual(struct.unpack_from("<I", buf, off_68)[0], 0x00000000)
 
         # Idempotent call
         self.assertEqual(LIB.pops_apply_igr_direct_exit(ptr, buf_size), 0)

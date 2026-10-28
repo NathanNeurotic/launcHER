@@ -100,9 +100,9 @@ int pops_apply_widescreen(void *staged_core, size_t core_size);
 /* Apply dither disable patch ($DITHER_OFF / $NODITHER) */
 int pops_apply_dither_off(void *staged_core, size_t core_size);
 
-/* Direct clean IGR exit: rewires 0x00228a5c..0x00228a68 to call ExecOSD(1, ["BootBrowser"]),
- * preserving pristine delay slot 0x00228a58 (move $v0, $zero) so normal gameplay is untouched
- * and reset combo immediately reboots cleanly to OSDSYS / browser without dialog freeze */
+/* Direct clean IGR exit: rewires 0x00228a5c..0x00228a68 to set $v0 = 1 and branch to epilogue,
+ * preserving pristine delay slot 0x00228a58 (move $v0, $zero) so normal gameplay returns 0,
+ * while reset combo returns 1 triggering stock POPS audio/video shutdown and ExecOSD */
 int pops_apply_igr_direct_exit(void *staged_core, size_t core_size);
 
 /* Enable controller pad navigation and confirmation in native IGR prompt dialog:
