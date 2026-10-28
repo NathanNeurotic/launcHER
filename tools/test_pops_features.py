@@ -159,6 +159,11 @@ class FeatureTests(unittest.TestCase):
         LIB.pops_generate_subq.restype = c.c_int
         LIB.pops_cheat_engine_tick.argtypes = [c.c_void_p, c.POINTER(CheatEntry), c.c_uint16]
         LIB.pops_cheat_engine_tick.restype = c.c_int
+        LIB.pops_cheat_engine_tick_ex.argtypes = [c.c_void_p, c.POINTER(CheatEntry), c.c_uint16, c.c_uint32, c.c_uint8]
+        LIB.pops_cheat_engine_tick_ex.restype = c.c_int
+        cls.Devctl = c.CFUNCTYPE(c.c_int, c.c_char_p, c.c_int, c.c_void_p, c.c_size_t, c.c_void_p, c.c_size_t)
+        LIB.pops_handle_disc_swap.argtypes = [c.c_uint16, cls.Devctl]
+        LIB.pops_handle_disc_swap.restype = c.c_int
         LIB.pops_vcd_normalize_serial.argtypes = [c.c_char_p, c.c_char_p, c.c_size_t]
         LIB.pops_vcd_normalize_serial.restype = c.c_int
         LIB.pops_vcd_inspect_path.argtypes = [c.c_char_p, c.POINTER(PopsVcdInfo)]
@@ -913,8 +918,65 @@ class FeatureTests(unittest.TestCase):
         self.assertEqual(ram_buf[0x9A124], 0x56)
         self.assertEqual(ram_buf[0x9A126], 0x77)
 
+        # Test safe mode cheat deferral:
+        safe_ram = bytearray(ram_size)
+        safe_ptr = (c.c_uint8 * ram_size).from_buffer(safe_ram)
+        one_cheat = (CheatEntry * 1)(CheatEntry(0x0009A120, 0xBEEF, 0x10))
+
+        # Safe mode enabled, frame count < 180 (boot phase): should NOT write
+        res = LIB.pops_cheat_engine_tick_ex(safe_ptr, one_cheat, 1, 100, 1)
+        self.assertEqual(res, 0)
+        self.assertEqual(struct.unpack_from("<H", safe_ram, 0x9A120)[0], 0)
+
+        # Safe mode enabled, frame count >= 180 (post-boot): should apply write
+        res = LIB.pops_cheat_engine_tick_ex(safe_ptr, one_cheat, 1, 180, 1)
+        self.assertEqual(res, 0)
+        self.assertEqual(struct.unpack_from("<H", safe_ram, 0x9A120)[0], 0xBEEF)
+
+        # Safe mode disabled: applies immediately even at frame 0
+        safe_ram[0x9A120:0x9A122] = b"\x00\x00"
+        res = LIB.pops_cheat_engine_tick_ex(safe_ptr, one_cheat, 1, 0, 0)
+        self.assertEqual(res, 0)
+        self.assertEqual(struct.unpack_from("<H", safe_ram, 0x9A120)[0], 0xBEEF)
+
         # Out-of-bounds rejection
         self.assertLess(LIB.pops_apply_compat_modes(core_ptr, 0x10000, 1), 0)
+
+    def test_in_game_disc_swap_handler(self):
+        calls = []
+
+        def mock_devctl(dev, cmd, arg, arglen, buf, buflen):
+            calls.append((dev.decode(), cmd))
+            return 0
+
+        devctl_cb = self.Devctl(mock_devctl)
+
+        # Combo not pressed: no action taken
+        calls.clear()
+        res = LIB.pops_handle_disc_swap(0xFFFF, devctl_cb)
+        self.assertEqual(res, 0)
+        self.assertEqual(len(calls), 0)
+
+        # SELECT + L1 + R1 pressed: active low bits cleared
+        # POPS_PAD_SELECT = 0x0001, POPS_PAD_L1 = 0x0400, POPS_PAD_R1 = 0x0800
+        swap_combo = 0xFFFF & ~(0x0001 | 0x0400 | 0x0800)
+        calls.clear()
+        res = LIB.pops_handle_disc_swap(swap_combo, devctl_cb)
+        self.assertEqual(res, 1)
+        # Should execute OPEN_LID (3), NEXT_DISC (7), CLOSE_LID (4)
+        self.assertEqual(calls, [("pops:", 3), ("pops:", 7), ("pops:", 4)])
+
+        # Error during NEXT_DISC closes lid and propagates error
+        def failing_devctl(dev, cmd, arg, arglen, buf, buflen):
+            calls.append((dev.decode(), cmd))
+            if cmd == 7:
+                return -errno.EBUSY
+            return 0
+
+        calls.clear()
+        res = LIB.pops_handle_disc_swap(swap_combo, self.Devctl(failing_devctl))
+        self.assertEqual(res, -errno.EBUSY)
+        self.assertEqual(calls, [("pops:", 3), ("pops:", 7), ("pops:", 4)])
 
     def test_novmc_directives(self):
         cfg = PopsConfig()
