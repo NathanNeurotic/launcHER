@@ -955,20 +955,27 @@ class FeatureTests(unittest.TestCase):
         # Mismatch guard test
         self.assertEqual(LIB.pops_apply_igr_direct_exit(ptr, buf_size), -errno.EINVAL)
 
-        # Pristine site: 0x00228a58 has 0x0000102d, 0x00228a5c has 0x3c110086
-        off_58 = 0x00228a58 - 0x00200000
+        # Pristine site: 0x00228a5c has 0x3c110086, 0x00228a60 has 0x24030080,
+        # 0x00228a64 has 0x2622a980, 0x00228a68 has 0x0000202d
         off_5c = 0x00228a5c - 0x00200000
-        struct.pack_into("<I", buf, off_58, 0x0000102d)
+        off_60 = 0x00228a60 - 0x00200000
+        off_64 = 0x00228a64 - 0x00200000
+        off_68 = 0x00228a68 - 0x00200000
         struct.pack_into("<I", buf, off_5c, 0x3c110086)
+        struct.pack_into("<I", buf, off_60, 0x24030080)
+        struct.pack_into("<I", buf, off_64, 0x2622a980)
+        struct.pack_into("<I", buf, off_68, 0x0000202d)
         self.assertEqual(LIB.pops_apply_igr_direct_exit(ptr, buf_size), 0)
-        self.assertEqual(struct.unpack_from("<I", buf, off_58)[0], 0x24020001)
-        self.assertEqual(struct.unpack_from("<I", buf, off_5c)[0], 0x10000016)
+        self.assertEqual(struct.unpack_from("<I", buf, off_5c)[0], 0x24040001)
+        self.assertEqual(struct.unpack_from("<I", buf, off_60)[0], 0x3c050050)
+        self.assertEqual(struct.unpack_from("<I", buf, off_64)[0], 0x0c08d8ae)
+        self.assertEqual(struct.unpack_from("<I", buf, off_68)[0], 0x24a59708)
 
         # Idempotent call
         self.assertEqual(LIB.pops_apply_igr_direct_exit(ptr, buf_size), 0)
 
         # Buffer too small
-        self.assertEqual(LIB.pops_apply_igr_direct_exit(ptr, off_5c), -errno.ERANGE)
+        self.assertEqual(LIB.pops_apply_igr_direct_exit(ptr, off_68), -errno.ERANGE)
 
     def test_igr_pad_control_patch(self):
         buf_size = 0x100000

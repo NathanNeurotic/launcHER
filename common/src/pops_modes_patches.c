@@ -599,16 +599,22 @@ int pops_apply_cheats(void *ps1_ram_base, const PopsCheatEntry *cheats, uint16_t
 int pops_apply_igr_direct_exit(void *staged_core, size_t core_size) {
   if (!staged_core)
     return -EINVAL;
-  if (core_size < (size_t)(0x00228a5c - POPS_CORE_BASE_ADDR + 4))
+  if (core_size < (size_t)(0x00228a68 - POPS_CORE_BASE_ADDR + 4))
     return -ERANGE;
-  uint32_t cur_58 = read_u32(staged_core, core_size, 0x00228a58);
   uint32_t cur_5c = read_u32(staged_core, core_size, 0x00228a5c);
-  if (cur_58 == 0x24020001 && cur_5c == 0x10000016)
+  uint32_t cur_60 = read_u32(staged_core, core_size, 0x00228a60);
+  uint32_t cur_64 = read_u32(staged_core, core_size, 0x00228a64);
+  uint32_t cur_68 = read_u32(staged_core, core_size, 0x00228a68);
+  if (cur_5c == 0x24040001 && cur_60 == 0x3c050050 &&
+      cur_64 == 0x0c08d8ae && cur_68 == 0x24a59708)
     return 0;
-  if (cur_58 != 0x0000102d || cur_5c != 0x3c110086)
+  if (cur_5c != 0x3c110086 || cur_60 != 0x24030080 ||
+      cur_64 != 0x2622a980 || cur_68 != 0x0000202d)
     return -EINVAL;
-  write_u32(staged_core, core_size, 0x00228a58, 0x24020001);
-  write_u32(staged_core, core_size, 0x00228a5c, 0x10000016);
+  write_u32(staged_core, core_size, 0x00228a5c, 0x24040001); /* li $a0, 1 */
+  write_u32(staged_core, core_size, 0x00228a60, 0x3c050050); /* lui $a1, 0x0050 */
+  write_u32(staged_core, core_size, 0x00228a64, 0x0c08d8ae); /* jal 0x002362b8 (ExecOSD) */
+  write_u32(staged_core, core_size, 0x00228a68, 0x24a59708); /* addiu $a1, $a1, -0x68f8 ("BootBrowser") */
   return 0;
 }
 
@@ -864,11 +870,10 @@ int pops_apply_all_config_patches(void *staged_core, size_t core_size, const Pop
         if (result) return result;
       }
     }
-    if (core_size >= (size_t)(0x002264f4 - POPS_CORE_BASE_ADDR + 4)) {
-      uint32_t cur_4c4 = read_u32(staged_core, core_size, 0x002264c4);
-      uint32_t cur_4f4 = read_u32(staged_core, core_size, 0x002264f4);
-      if (cur_4c4 == 0x8c830000 && cur_4f4 == 0x30620020) {
-        result = pops_apply_igr_pad_control(staged_core, core_size);
+    if (core_size >= (size_t)(0x00228a68 - POPS_CORE_BASE_ADDR + 4)) {
+      uint32_t cur_5c = read_u32(staged_core, core_size, 0x00228a5c);
+      if (cur_5c == 0x3c110086) {
+        result = pops_apply_igr_direct_exit(staged_core, core_size);
         if (result) return result;
       }
     }
