@@ -103,33 +103,29 @@ On October 27, 2026, physical console run 126 was executed via ps2link (`192.168
 
 ### Completed fixes in launcHER
 
-1. **Cheats (`CHEATS.TXT`):** Commit `7deee3c` removed the artificial `-ENOTSUP` rejection on `cfg.cheat_count` in `launcher/src/handler_pops.c`, allowing titles with cheat files to boot smoothly.
-2. **Directive Boundary and Opcode Validation:** Commit `26115fe` audited and enforced exact boundary checks and pristine instruction word validation across `pops_apply_widescreen`, `pops_apply_smooth`, `pops_apply_dither_off`, `pops_apply_throttling`, `pops_apply_bios_shell`, and `pops_apply_video_overrides`. All 15 local host test suites pass (including 136 new assertion checks in `tools/test_pops_features.py`).
+1. **Cheats (`CHEATS.TXT`):** Commit `7deee3c` removed the artificial `-ENOTSUP` rejection on `cfg.cheat_count` in `launcher/src/handler_pops.c`, allowing titles with cheat files to boot smoothly. Commit `b891672` implemented `pops_cheat_engine_tick_ex` introducing safe mode boot frame delay deferral (`POPS_SAFE_MODE_FRAME_DELAY = 180`), delaying cheat application until post-boot.
+2. **Directive Boundary and Opcode Validation:** Commit `26115fe` audited and enforced exact boundary checks and pristine instruction word validation across `pops_apply_widescreen`, `pops_apply_smooth`, `pops_apply_dither_off`, `pops_apply_throttling`, `pops_apply_bios_shell`, and `pops_apply_video_overrides`. All 15 local host test suites pass (including 136 assertion checks in `tools/test_pops_features.py`).
 3. **IGR Return Pipeline:** Commits `14476d1`, `27ae684`, and `e47f0a0` rewired controller polling to read held buttons from `4($a0)` and cleanly returned `$v0 = 1` into Sony's clean teardown pipeline.
+4. **In-Game Multi-Disc Swapping:** Commit `b891672` implemented `pops_handle_disc_swap`, coordinating the `SELECT+L1+R1` hotkey with the IOP `popfs` bridge by sequencing `POPS_DEVCTL_OPEN_LID`, `POPS_DEVCTL_NEXT_DISC`, and `POPS_DEVCTL_CLOSE_LID`.
 
-### REPOP reverse engineering milestone: 386 reconstructed C functions
+### REPOP reverse engineering milestone: 395 reconstructed C functions
 
-In the companion repository `REPOP` (`feat/psxcore-validation`, commits `ec08992c` and `3f4d593f`):
-- Reconstructed C function count increased from 371 to **386** functions in `popstarter`.
-- Graduated 18 size-parity outliers across batches 7 and 8 into authentic C implementations:
-  - Batch 7 (commit `ec08992c`):
-    - LZMA Range Decoder bit decode helper (`pops_patch_vector_init` `FUN_0099de44`, 196B)
-    - SIF exception vector dispatch packet constructor (`pops_patch_rewire_exception_vector` `FUN_0099fdf8`, 176B)
-    - PFS filesystem mount and unit descriptor initializer (`pops_jit_hook_009a1fb4` `FUN_009a1fb4`, 188B)
-    - Virtual hardware register and JAL hook address translator (`pops_jit_hook_009add3c` `FUN_009add3c`, 180B)
-    - Data cache flush and writeback with 64-byte alignment (`pops_jit_hook_009a0f60` `FUN_009a0f60` and `pops_core_runtime_0091abd0` `FUN_0091abd0`, 172B each)
-    - FileXio subsystem state reader (`pops_core_runtime_009179a8` `FUN_009179a8`, 176B)
-    - Synchronous FileXio RPC 0x20 dispatcher (`pops_core_runtime_00917a68` `FUN_00917a68`, 176B)
-    - Asynchronous SIF RPC completion poller (`pops_core_runtime_009181c0` `FUN_009181c0`, 172B)
-    - 128-bit SIMD EE R5900 memcpy (`pops_core_runtime_00918808` `FUN_00918808`, 176B)
-  - Batch 8 (commit `3f4d593f`):
-    - SIF command queue enqueue worker (`pops_patch_dispatch_exception_log` `FUN_0099feac`, 164B)
-    - Device prefix and module table search (`pops_patch_install_subchannel_patch` `FUN_0099f958`, 160B)
-    - SIF RPC file query dispatcher (`pops_jit_hook_009a0830` `FUN_009a0830`, 168B)
-    - 4KB ICache and DCache index-invalidation loop (`pops_jit_hook_009a100c` `FUN_009a100c` and `pops_core_runtime_0091d000` `FUN_0091d000`, 168B and 164B)
-    - Synchronous FileXio RPC command 0x03 dispatcher (`pops_core_runtime_009183d8` `FUN_009183d8`, 160B)
-    - Path delimiter scanner and directory extractor (`pops_core_runtime_009194c0` `FUN_009194c0`, 168B)
-    - Table-driven device prefix scanner (`pops_core_runtime_0091a9c8` `FUN_0091a9c8`, 160B)
+In the companion repository `REPOP` (`feat/psxcore-validation`, commits `ec08992c`, `3f4d593f`, and `427a742b`):
+- Reconstructed C function count increased from 371 to **395** functions in `popstarter` (82.8% of clean functions).
+- Graduated 28 size-parity outliers across batches 7, 8, and 9 into authentic C implementations:
+  - Batch 7 (commit `ec08992c`, 10 functions): Range decoder bit unpacker, exception dispatch, PFS mount, hardware reg translator, 64-byte DCache flush, FileXio state/RPC, SIMD quadword memcpy.
+  - Batch 8 (commit `3f4d593f`, 8 functions): SIF command queue worker, module table search, FileXio 0x06 query, 4KB I/DCache invalidation loop, FileXio 0x03 open dispatcher, path delimiter scanner, table device scanner.
+  - Batch 9 (commit `427a742b`, 10 functions):
+    - SIF RPC command 0x01 control dispatcher (`pops_jit_hook_009a0408` `FUN_009a0408`, 152B)
+    - Guest SPU/GPU voice register bank reader and channel evaluator (`pops_jit_hook_009ae0a8` `FUN_009ae0a8`, 152B)
+    - SIF exception vector packet dispatcher and thread wake-up handler (`pops_patch_trap_recompiler_exception` `FUN_0099fd18`, 148B)
+    - JIT exception vector address and dispatch table (`pops_jit_hook_009ae37c` `FUN_009ae37c`, 148B)
+    - SIF RPC query dispatcher command 0x0E (`pops_core_runtime_00918128` `FUN_00918128`, 148B)
+    - FileXio synchronization semaphore allocator (`pops_core_runtime_00917e78` `FUN_00917e78`, 144B)
+    - Thread execution context manager and suspension coordinator (`pops_core_runtime_0091ca48` `FUN_0091ca48`, 144B)
+    - Guest register bank updater and 64-bit state sanitizer (`pops_jit_hook_009addf0` `FUN_009addf0`, 140B)
+    - Device partition unit allocator and path node formatter (`pops_core_runtime_009195d8` `FUN_009195d8`, 140B)
+    - String buffer cursor appender with boundary enforcement (`pops_core_runtime_0091a604` `FUN_0091a604`, 140B)
 - All 220 `REPOP` unit tests pass. Zero compiler warnings under MIPS EE GCC.
 
 ### Scope and parity disclaimer
@@ -139,19 +135,18 @@ Do not claim full 1:1 drop-in replacement parity while stubs remain. While physi
 ### Prioritized checklist for the next agent
 
 1. **In-Game VMC Save Persistence Hardware Test:** Deploy `launcHER.elf` to physical console via ps2link with `ata0:/POPS/Tekken.VCD`. Save game profile to `SLOT0.VMC`, perform IGR, re-launch game, and verify save persistence.
-2. **Continue REPOP Decompilation Outliers:** Reconstruct the next set of stubs in `runtime_hooks.c` and `patch_engine.c`:
+2. **Continue REPOP Decompilation Outliers (Batch 10):** Reconstruct the next set of stubs in `runtime_hooks.c` and `patch_engine.c`:
    - `pops_core_runtime_0091d3d8` (`FUN_0091d3d8`, 256B)
    - `patches_apply_exception_suppression` (`FUN_008dbafc`, 480B)
-   - `pops_jit_hook_009a0408` (`FUN_009a0408`, 152B)
-   - `pops_jit_hook_009ae0a8` (`FUN_009ae0a8`, 152B)
-   - `pops_patch_trap_recompiler_exception` (`FUN_0099fd18`, 148B)
-   - `pops_jit_hook_009ae37c` (`FUN_009ae37c`, 148B)
-   - `pops_core_runtime_00918128` (`FUN_00918128`, 148B)
    - `pops_jit_hook_009a1d60` (`FUN_009a1d60`, 220B)
-   - `pops_core_runtime_00917e78` (`FUN_00917e78`, 144B)
-   - `pops_core_runtime_0091ca48` (`FUN_0091ca48`, 144B)
-3. **Multi-Disc Swap Verification:** Test disc swap request handling and proxy argument passing across multiple disc images.
-4. **Preserve Rules:** Keep all 15 `launcHER` host test suites and 220 `REPOP` unit tests passing at 100%. Ensure every commit carries `Co-authored-by: ChatGPT <chatgpt@openai.com>`.
+   - `pops_jit_hook_009ae47c` (`FUN_009ae47c`, 136B)
+   - `pops_core_runtime_00918710` (`FUN_00918710`, 136B)
+   - `pops_core_runtime_0091c760` (`FUN_0091c760`, 136B)
+   - `pops_patch_install_vsync_hook` (`FUN_0099f6a0`, 132B)
+   - `pops_jit_hook_009a07a8` (`FUN_009a07a8`, 132B)
+   - `pops_jit_hook_009a0e60` (`FUN_009a0e60`, 128B)
+   - `pops_core_runtime_0091c9c8` (`FUN_0091c9c8`, 128B)
+3. **Preserve Rules:** Keep all 15 `launcHER` host test suites and 220 `REPOP` unit tests passing at 100%. Ensure every commit carries `Co-authored-by: ChatGPT <chatgpt@openai.com>`.
 
 
 ## October 20 source and CI continuation
