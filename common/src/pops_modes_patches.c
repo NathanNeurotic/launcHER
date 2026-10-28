@@ -612,6 +612,22 @@ int pops_apply_igr_direct_exit(void *staged_core, size_t core_size) {
   return 0;
 }
 
+int pops_apply_igr_pad_control(void *staged_core, size_t core_size) {
+  if (!staged_core)
+    return -EINVAL;
+  if (core_size < (size_t)(0x002264f4 - POPS_CORE_BASE_ADDR + 4))
+    return -ERANGE;
+  uint32_t cur_4c4 = read_u32(staged_core, core_size, 0x002264c4);
+  uint32_t cur_4f4 = read_u32(staged_core, core_size, 0x002264f4);
+  if (cur_4c4 == 0x8c830004 && cur_4f4 == 0x30620060)
+    return 0;
+  if (cur_4c4 != 0x8c830000 || cur_4f4 != 0x30620020)
+    return -EINVAL;
+  write_u32(staged_core, core_size, 0x002264c4, 0x8c830004);
+  write_u32(staged_core, core_size, 0x002264f4, 0x30620060);
+  return 0;
+}
+
 int pops_apply_igr_exit(void *staged_core, size_t core_size) {
   uint8_t *bytes = (uint8_t *)staged_core;
   if (!bytes)
@@ -848,11 +864,11 @@ int pops_apply_all_config_patches(void *staged_core, size_t core_size, const Pop
         if (result) return result;
       }
     }
-    if (core_size >= (size_t)(0x00228a5c - POPS_CORE_BASE_ADDR + 4)) {
-      uint32_t cur_58 = read_u32(staged_core, core_size, 0x00228a58);
-      uint32_t cur_5c = read_u32(staged_core, core_size, 0x00228a5c);
-      if (cur_58 == 0x0000102d && cur_5c == 0x3c110086) {
-        result = pops_apply_igr_direct_exit(staged_core, core_size);
+    if (core_size >= (size_t)(0x002264f4 - POPS_CORE_BASE_ADDR + 4)) {
+      uint32_t cur_4c4 = read_u32(staged_core, core_size, 0x002264c4);
+      uint32_t cur_4f4 = read_u32(staged_core, core_size, 0x002264f4);
+      if (cur_4c4 == 0x8c830000 && cur_4f4 == 0x30620020) {
+        result = pops_apply_igr_pad_control(staged_core, core_size);
         if (result) return result;
       }
     }

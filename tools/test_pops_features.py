@@ -119,6 +119,8 @@ class FeatureTests(unittest.TestCase):
         LIB.pops_apply_igr_exit.restype = c.c_int
         LIB.pops_apply_igr_direct_exit.argtypes = [c.c_void_p, c.c_size_t]
         LIB.pops_apply_igr_direct_exit.restype = c.c_int
+        LIB.pops_apply_igr_pad_control.argtypes = [c.c_void_p, c.c_size_t]
+        LIB.pops_apply_igr_pad_control.restype = c.c_int
         LIB.pops_apply_iopcd_stack_size.argtypes = [c.c_void_p, c.c_size_t, c.c_uint8]
         LIB.pops_apply_iopcd_stack_size.restype = c.c_int
         LIB.pops_apply_hdd_init_exit.argtypes = [c.c_void_p, c.c_size_t]
@@ -967,6 +969,29 @@ class FeatureTests(unittest.TestCase):
 
         # Buffer too small
         self.assertEqual(LIB.pops_apply_igr_direct_exit(ptr, off_5c), -errno.ERANGE)
+
+    def test_igr_pad_control_patch(self):
+        buf_size = 0x100000
+        buf = bytearray(buf_size)
+        ptr = (c.c_uint8 * buf_size).from_buffer(buf)
+
+        # Mismatch guard test
+        self.assertEqual(LIB.pops_apply_igr_pad_control(ptr, buf_size), -errno.EINVAL)
+
+        # Pristine site: 0x002264c4 has 0x8c830000, 0x002264f4 has 0x30620020
+        off_4c4 = 0x002264c4 - 0x00200000
+        off_4f4 = 0x002264f4 - 0x00200000
+        struct.pack_into("<I", buf, off_4c4, 0x8c830000)
+        struct.pack_into("<I", buf, off_4f4, 0x30620020)
+        self.assertEqual(LIB.pops_apply_igr_pad_control(ptr, buf_size), 0)
+        self.assertEqual(struct.unpack_from("<I", buf, off_4c4)[0], 0x8c830004)
+        self.assertEqual(struct.unpack_from("<I", buf, off_4f4)[0], 0x30620060)
+
+        # Idempotent call
+        self.assertEqual(LIB.pops_apply_igr_pad_control(ptr, buf_size), 0)
+
+        # Buffer too small
+        self.assertEqual(LIB.pops_apply_igr_pad_control(ptr, off_4f4), -errno.ERANGE)
 
     def test_iopcd_stack_size_patch(self):
         buf_size = 0x150000

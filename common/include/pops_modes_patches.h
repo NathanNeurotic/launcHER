@@ -104,6 +104,11 @@ int pops_apply_dither_off(void *staged_core, size_t core_size);
  * immediately triggering clean POPS teardown and ExecOSD reset without PSBBN dialog freeze */
 int pops_apply_igr_direct_exit(void *staged_core, size_t core_size);
 
+/* Enable controller pad navigation and confirmation in native IGR prompt dialog:
+ * rewires 0x002264c4 to read held buttons from 4($a0) instead of ephemeral 0($a0),
+ * and rewires 0x002264f4 to accept either Circle (0x20) or Cross (0x40) to confirm */
+int pops_apply_igr_pad_control(void *staged_core, size_t core_size);
+
 /* Fix IGR exit method (FUN_008dbe08): rewires 0x0020c0a4 from 0x0c08b44c to 0x0c08d8ae */
 int pops_apply_igr_exit(void *staged_core, size_t core_size);
 
