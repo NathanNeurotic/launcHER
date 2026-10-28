@@ -107,16 +107,29 @@ On October 27, 2026, physical console run 126 was executed via ps2link (`192.168
 2. **Directive Boundary and Opcode Validation:** Commit `26115fe` audited and enforced exact boundary checks and pristine instruction word validation across `pops_apply_widescreen`, `pops_apply_smooth`, `pops_apply_dither_off`, `pops_apply_throttling`, `pops_apply_bios_shell`, and `pops_apply_video_overrides`. All 15 local host test suites pass (including 136 new assertion checks in `tools/test_pops_features.py`).
 3. **IGR Return Pipeline:** Commits `14476d1`, `27ae684`, and `e47f0a0` rewired controller polling to read held buttons from `4($a0)` and cleanly returned `$v0 = 1` into Sony's clean teardown pipeline.
 
-### REPOP reverse engineering milestone: 371 reconstructed C functions
+### REPOP reverse engineering milestone: 386 reconstructed C functions
 
-In the companion repository `REPOP` (`feat/psxcore-validation`, commit `fdc3bcca`):
-- Reconstructed C function count increased from 311 to **371** functions in `popstarter`.
-- Graduated all top 12 size-parity outliers into high-fidelity authentic C implementations:
-  - IEEE 754 software floating-point routines (`__unpack_d` `FUN_0091eca0`, `__floatsidf` `FUN_0091e9b0`, `__fixdfsi` `FUN_0091ea70`, `__cmpdf2` `FUN_0091e958`, `__adddf3` `FUN_0091e688`).
-  - FileXIO RPC dispatchers (`getdir` `FUN_00915c70`, `remove` `FUN_00915f50`, `dclose` `FUN_00916208`, `dread` `FUN_009162d8`, `mkdir` `FUN_00916688`, `dclosefd` `FUN_00916878`, `close` `FUN_00917230`, `closefd` `FUN_00917300`, `ioctl2` buffer manager `FUN_0091c248`).
-  - SIF RPC command workers and module helpers (`fioWrite` `FUN_009a06ec`, descriptor table scanner `FUN_009a1a24`, queue worker `FUN_009a1d60`, module finder `FUN_00914b98`, IOP word writer `FUN_00914f58`).
-  - EE R5900 128-bit SIMD memory operations (`memset` `FUN_009188b8` and `FUN_0099f188`, `memcpy` `FUN_0099f0d4`).
-  - Storage backend and partition parser (`FUN_008d8db8`).
+In the companion repository `REPOP` (`feat/psxcore-validation`, commits `ec08992c` and `3f4d593f`):
+- Reconstructed C function count increased from 371 to **386** functions in `popstarter`.
+- Graduated 18 size-parity outliers across batches 7 and 8 into authentic C implementations:
+  - Batch 7 (commit `ec08992c`):
+    - LZMA Range Decoder bit decode helper (`pops_patch_vector_init` `FUN_0099de44`, 196B)
+    - SIF exception vector dispatch packet constructor (`pops_patch_rewire_exception_vector` `FUN_0099fdf8`, 176B)
+    - PFS filesystem mount and unit descriptor initializer (`pops_jit_hook_009a1fb4` `FUN_009a1fb4`, 188B)
+    - Virtual hardware register and JAL hook address translator (`pops_jit_hook_009add3c` `FUN_009add3c`, 180B)
+    - Data cache flush and writeback with 64-byte alignment (`pops_jit_hook_009a0f60` `FUN_009a0f60` and `pops_core_runtime_0091abd0` `FUN_0091abd0`, 172B each)
+    - FileXio subsystem state reader (`pops_core_runtime_009179a8` `FUN_009179a8`, 176B)
+    - Synchronous FileXio RPC 0x20 dispatcher (`pops_core_runtime_00917a68` `FUN_00917a68`, 176B)
+    - Asynchronous SIF RPC completion poller (`pops_core_runtime_009181c0` `FUN_009181c0`, 172B)
+    - 128-bit SIMD EE R5900 memcpy (`pops_core_runtime_00918808` `FUN_00918808`, 176B)
+  - Batch 8 (commit `3f4d593f`):
+    - SIF command queue enqueue worker (`pops_patch_dispatch_exception_log` `FUN_0099feac`, 164B)
+    - Device prefix and module table search (`pops_patch_install_subchannel_patch` `FUN_0099f958`, 160B)
+    - SIF RPC file query dispatcher (`pops_jit_hook_009a0830` `FUN_009a0830`, 168B)
+    - 4KB ICache and DCache index-invalidation loop (`pops_jit_hook_009a100c` `FUN_009a100c` and `pops_core_runtime_0091d000` `FUN_0091d000`, 168B and 164B)
+    - Synchronous FileXio RPC command 0x03 dispatcher (`pops_core_runtime_009183d8` `FUN_009183d8`, 160B)
+    - Path delimiter scanner and directory extractor (`pops_core_runtime_009194c0` `FUN_009194c0`, 168B)
+    - Table-driven device prefix scanner (`pops_core_runtime_0091a9c8` `FUN_0091a9c8`, 160B)
 - All 220 `REPOP` unit tests pass. Zero compiler warnings under MIPS EE GCC.
 
 ### Scope and parity disclaimer
@@ -127,16 +140,16 @@ Do not claim full 1:1 drop-in replacement parity while stubs remain. While physi
 
 1. **In-Game VMC Save Persistence Hardware Test:** Deploy `launcHER.elf` to physical console via ps2link with `ata0:/POPS/Tekken.VCD`. Save game profile to `SLOT0.VMC`, perform IGR, re-launch game, and verify save persistence.
 2. **Continue REPOP Decompilation Outliers:** Reconstruct the next set of stubs in `runtime_hooks.c` and `patch_engine.c`:
-   - `pops_patch_vector_init` (`FUN_0099de44`, 196B)
-   - `pops_jit_hook_009a1fb4` (`FUN_009a1fb4`, 188B)
-   - `pops_jit_hook_009add3c` (`FUN_009add3c`, 180B)
-   - `pops_patch_rewire_exception_vector` (`FUN_0099fdf8`, 176B)
-   - `pops_core_runtime_009179a8` (`FUN_009179a8`, 176B)
-   - `pops_core_runtime_00917a68` (`FUN_00917a68`, 176B)
-   - `pops_core_runtime_00918808` (`FUN_00918808`, 176B)
-   - `pops_jit_hook_009a0f60` (`FUN_009a0f60`, 172B)
-   - `pops_core_runtime_009181c0` (`FUN_009181c0`, 172B)
-   - `pops_core_runtime_0091abd0` (`FUN_0091abd0`, 172B)
+   - `pops_core_runtime_0091d3d8` (`FUN_0091d3d8`, 256B)
+   - `patches_apply_exception_suppression` (`FUN_008dbafc`, 480B)
+   - `pops_jit_hook_009a0408` (`FUN_009a0408`, 152B)
+   - `pops_jit_hook_009ae0a8` (`FUN_009ae0a8`, 152B)
+   - `pops_patch_trap_recompiler_exception` (`FUN_0099fd18`, 148B)
+   - `pops_jit_hook_009ae37c` (`FUN_009ae37c`, 148B)
+   - `pops_core_runtime_00918128` (`FUN_00918128`, 148B)
+   - `pops_jit_hook_009a1d60` (`FUN_009a1d60`, 220B)
+   - `pops_core_runtime_00917e78` (`FUN_00917e78`, 144B)
+   - `pops_core_runtime_0091ca48` (`FUN_0091ca48`, 144B)
 3. **Multi-Disc Swap Verification:** Test disc swap request handling and proxy argument passing across multiple disc images.
 4. **Preserve Rules:** Keep all 15 `launcHER` host test suites and 220 `REPOP` unit tests passing at 100%. Ensure every commit carries `Co-authored-by: ChatGPT <chatgpt@openai.com>`.
 
