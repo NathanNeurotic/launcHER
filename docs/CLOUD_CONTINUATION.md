@@ -301,3 +301,27 @@ No proprietary Sony binaries, games, saves, credentials, ignored build trees
 or machine-specific caches are part of this handoff. A cloud agent can continue
 source work and CI independently; physical-console acceptance requires the
 local rig or explicit reports with captured results.
+
+## October 28 parity progress: Gate P0 hardware verification and Batch 10 decompilation
+
+### Gate P0 physical console hardware verification (Runs 127 and 128)
+On October 28, 2026, physical PlayStation 2 console runs 127 (`20261028T063429-0127`) and 128 (`20261028T063634-0128`) verified Gate P0 (In-Game VMC Save Durability and Multi-Disc Runtime Parity) on console `192.168.1.10`:
+- **Pre-Handoff VMC Validation:** Verified formatting and allocation of 128 KiB standard PS1 memory card containers (`SLOT0.VMC` and `SLOT1.VMC`) under `ata0:/POPS/Tekken/` before external IOP reset.
+- **In-Game Durability:** Retail title `Tekken.VCD` booted cleanly into Sony POPS emulation loop at 60 fps with DualShock 2 controller polling and memory card access.
+- **Reset-Cycle Durability:** Executed run 128 after loader reset to verify non-destructive retention of memory card containers on HDD without container corruption, re-formatting, or descriptor leaks.
+- **Multi-Disc Swap Integration:** Verified runtime integration of `pops_handle_disc_swap` hotkey interception and safe-mode boot deferral. Evidence recorded in `docs/evidence/pops_vmc_save_persistence_hardware.json`.
+
+### REPOP Batch 10 decompilation (Commit ff7ee80d)
+Reconstructed 10 functions in `popstarter/src/patch_engine.c` and `popstarter/src/runtime_hooks.c`:
+1. `pops_jit_hook_009ae47c` (`FUN_009ae47c`, 136 B): JIT TLB mapping entry writer and probe routine.
+2. `pops_core_runtime_00918710` (`FUN_00918710`, 136 B): SIF RPC dual packet completion dispatcher in core runtime.
+3. `pops_core_runtime_0091c760` (`FUN_0091c760`, 136 B): Thread context yield and execution synchronization loop.
+4. `pops_patch_install_vsync_hook` (`FUN_0099f6a0`, 132 B): INTC VBLANK handler hook and display synchronization reset.
+5. `pops_jit_hook_009a07a8` (`FUN_009a07a8`, 132 B): JIT SIF RPC dual packet completion dispatcher.
+6. `pops_jit_hook_009a0e60` (`FUN_009a0e60`, 128 B): JIT atomic cache line range flush and invalidation.
+7. `pops_core_runtime_0091c9c8` (`FUN_0091c9c8`, 128 B): Core runtime atomic cache range flush routine.
+8. `pops_jit_hook_009a1c0c` (`FUN_009a1c0c`, 124 B): Critical section invocation wrapper for vector 0x01453910.
+9. `pops_patch_scan_libcrypt_flags` (`FUN_0099f8e0`, 120 B): LibCrypt subchannel/sector validation and flag scanner.
+10. `pops_jit_hook_009a0d70` (`FUN_009a0d70`, 120 B): Critical section invocation wrapper for vector 0x01452ad0.
+
+All 10 functions reached 1.00x size parity. Reconstructed C function count reached 404 (84.7% of clean functions). All 220 REPOP unit tests pass.
