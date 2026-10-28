@@ -358,6 +358,24 @@ Reconstructed 12 functions across `runtime_hooks.c` and `patch_engine.c`:
 
 All 12 functions reached 1.00x size parity. Reconstructed C function count reached 420 (88.0% of clean functions). All 220 REPOP unit tests pass.
 
+### REPOP Batch 13 decompilation (Commit 56b7fa1c)
+Reconstructed 13 functions across `patch_engine.c` and `runtime_hooks.c`:
+1. `pops_core_runtime_0091e618` (`FUN_0091e618`, 108 B): Geometric transformation with parity inversion.
+2. `pops_patch_flush_instruction_cache` (`FUN_0099ff50`, 104 B): SIF RPC packet construction and JIT instruction cache flusher.
+3. `pops_core_runtime_009186a8` (`FUN_009186a8`, 104 B): Core runtime mode handler and descriptor table completion waiter.
+4. `pops_patch_remove_vsync_hook` (`FUN_0099f724`, 100 B): GS reset and INTC VBLANK handler removal.
+5. `pops_core_runtime_00919570` (`FUN_00919570`, 100 B): Core runtime sbrk memory allocator and heap break manager.
+6. `pops_core_runtime_00915988` (`FUN_00915988`, 96 B): Device descriptor table entry synchronizer.
+7. `pops_core_runtime_0091e5b8` (`FUN_0091e5b8`, 96 B): Geometric transformation handler.
+8. `pops_patch_dispatch_callbacks` (`FUN_0099f610`, 92 B): Reverse callback queue dispatcher in patch engine.
+9. `pops_jit_hook_009ae550` (`FUN_009ae550`, 92 B): JIT TLB entry query and register extractor.
+10. `pops_core_runtime_0091a808` (`FUN_0091a808`, 92 B): Core runtime reverse callback table dispatcher.
+11. `pops_core_runtime_0091cb18` (`FUN_0091cb18`, 92 B): Thread configuration mask validator.
+12. `pops_jit_hook_009ae424` (`FUN_009ae424`, 88 B): Linear key-value lookup in PS1 BIOS table.
+13. `pops_jit_hook_009ae5ac` (`FUN_009ae5ac`, 88 B): JIT TLB probe and entry reader.
+
+All 13 functions reached 1.00x size parity. Reconstructed C function count reached 431 (90.4% of clean functions). All 220 REPOP unit tests pass.
+
 ### launcHER LibCrypt SubQ sector pipeline integration
 Integrated Subchannel Q sector pipeline and devctl bridge:
 - Added LBA boundary verification to `pops_generate_subq` in `common/src/pops_modes_patches.c`, matching IOP popfs bridge bounds (`lba <= 449849`).
