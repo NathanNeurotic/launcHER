@@ -382,3 +382,24 @@ Integrated Subchannel Q sector pipeline and devctl bridge:
 - Implemented `pops_cdrom_read_subq` devctl bridge helper supporting `POPS_DEVCTL_GET_SUBQ` query with fallback from `pops:` to `pops0:`.
 - Added unit tests in `tools/test_pops_features.py` testing bounds, LibCrypt key injection on protected range 12..20, normal CRC integrity outside the protected range, and mock devctl bridging.
 - All 15 host test suites in launcHER pass.
+
+### REPOP Batch 14 decompilation (Commit c440417d)
+Reconstructed 16 functions across `patch_engine.c` and `runtime_hooks.c`:
+1. `pops_patch_set_state_flag` (`FUN_0099f568`, 80 B): Patch engine state record table cleaner and flag setter.
+2. `pops_core_runtime_00915c20` (`FUN_00915c20`, 80 B): Core runtime FileXio devctl completion dispatcher.
+3. `pops_patch_restore_exception_state` (`FUN_0099fdac`, 76 B): Linked-list exception breakpoint block search.
+4. `pops_jit_hook_009ae504` (`FUN_009ae504`, 76 B): JIT TLB indexed entry writer (`tlbwi`).
+5. `pops_core_runtime_0091c6f8` (`FUN_0091c6f8`, 76 B): Status register DI interrupt disabler.
+6. `pops_core_runtime_00915920` (`FUN_00915920`, 72 B): Screen console coordinate bounds updater.
+7. `pops_core_runtime_0091cbb0` (`FUN_0091cbb0`, 72 B): Fast 32-bit word range copier.
+8. `pops_core_runtime_00914f10` (`FUN_00914f10`, 68 B): Fast memory compare matcher.
+9. `pops_jit_hook_009a13e4` (`FUN_009a13e4`, 64 B): SIF RPC vector dispatch helper (command 1).
+10. `pops_core_runtime_0091cad8` (`FUN_0091cad8`, 64 B): Word range copier.
+11. `pops_core_runtime_0091ccb0` (`FUN_0091ccb0`, 64 B): Core runtime mode evaluator and dispatcher.
+12. `pops_jit_hook_009a13a8` (`FUN_009a13a8`, 60 B): SIF RPC vector dispatch helper (command 0).
+13. `pops_jit_hook_009a16f4` (`FUN_009a16f4`, 60 B): JIT descriptor table entry pair writer.
+14. `pops_core_runtime_0091a864` (`FUN_0091a864`, 60 B): VBLANK frame counter incrementer and GS CSR updater.
+15. `pops_core_runtime_0091d1d8` (`FUN_0091d1d8`, 60 B): SIF RPC command 0 synchronous dispatcher.
+16. `pops_core_runtime_0091d218` (`FUN_0091d218`, 60 B): SIF RPC command 1 synchronous dispatcher.
+
+All 16 functions reached 1.00x size parity. Reconstructed C function count reached 445 (93.3% of clean functions). All 220 REPOP unit tests pass.
