@@ -27,6 +27,7 @@ I_memset
 I_memcmp
 I_memcpy
 I_strcmp
+I_strncmp
 I_index
 I_strlen
 I_strncpy
