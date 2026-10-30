@@ -36,6 +36,12 @@ jobs:
         run: python tools/test_smap_ipconfig.py
       - name: Test network configuration, SMB creation and UDPFS reliability
         run: python tools/test_network_transports.py
+      - name: Test SubQ bridge contracts
+        run: python tools/test_subq_bridge.py
+      - name: Test POPS read trace
+        run: python tools/test_pops_read_trace.py
+      - name: Test POPS fix files
+        run: python tools/test_pops_fix_files.py
 
   build:
     runs-on: ubuntu-latest

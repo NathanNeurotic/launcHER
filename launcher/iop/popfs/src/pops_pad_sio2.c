@@ -53,12 +53,15 @@ static int pops_pad_reply_buttons(const sio2_transfer_data_t *td, uint16_t *butt
 static int pops_sio2_transfer_hook(sio2_transfer_data_t *td)
 {
   pops_pad_swap *sw = pops_pad_swap_instance();
+  int result = pops_original_sio2_transfer(td);
+  /* Feed the detector only after the original transfer fills td->out:
+   * reading the reply beforehand would see the previous poll's bytes. */
   if (sw && td) {
     uint16_t buttons = 0xFFFFu;
     int valid = pops_pad_reply_buttons(td, &buttons);
     pops_pad_swap_feed(sw, buttons, valid);
   }
-  return pops_original_sio2_transfer(td);
+  return result;
 }
 
 int pops_pad_sio2_install(void)
