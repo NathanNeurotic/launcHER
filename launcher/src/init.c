@@ -197,7 +197,12 @@ static ModuleListEntry moduleList[] = {
     INT_MODULE(udpbd, NULL, Device_UDPBD),
 #endif
 #if defined(ATA) || defined(APA)
-    INT_MODULE(ata_bd, NULL, Device_ATA | Device_APA),
+    /* ata_bd also serves USB-family launches: the test console's VCD
+     * library lives on the internal HDD's FAT32 partition (enumerated
+     * by ata_bd, mounted as mass0:), independent of the flaky USB
+     * drives. Hardware without an HDD skips it via tolerance.
+     * (docs/evidence/pops_hw_runs_2026-10-30.json run 0152) */
+    INT_MODULE(ata_bd, NULL, Device_ATA | Device_APA | Device_USB),
 #endif
 #ifdef USB
     INT_MODULE(usbd_mini, NULL, Device_USB),
@@ -317,7 +322,7 @@ static int loadModuleListResident(DeviceType device, int tolerant, int sonySio2)
       continue;
     }
   }
-  int ret = loadModuleList(device, tolerant, sonySio2, 1);
+  int ret = loadModuleList(device, 1, sonySio2, 1);
   if (ret)
     return ret;
   /* Probe-proven recipe: a quiet window with no EE RPC traffic before
