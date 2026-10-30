@@ -106,10 +106,12 @@ int handleBDM(DeviceType device, int argc, char *argv[]) {
     if (mf >= 0) {
       char altPath[300];
       snprintf(altPath, sizeof(altPath), "%s%s", mp, elfPath + mountpointLen);
-      iox_stat_t altStat;
-      int altRes = fileXioGetStat(altPath, &altStat);
-      DPRINTF("BDM: altfile %s stat=%d\n", altPath, altRes);
+      /* tryFile uses the POSIX layer, so this fallback works in normal
+       * builds too; fileXio is only linked by the trace build. */
+      int altRes = tryFile(altPath);
+      DPRINTF("BDM: altfile %s probe=%d\n", altPath, altRes);
       if (altRes >= 0) {
+        close(mf);
         /* the drives renumbered after the IOP reset; follow the file */
         strcpy(elfPath, altPath);
         res = 0;
