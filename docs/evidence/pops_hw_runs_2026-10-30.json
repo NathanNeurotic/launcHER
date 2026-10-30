@@ -9,21 +9,141 @@
     "Sony-phase behavior is observable via popfs's event trace at <disc0-device>:popfs_trace.log (written to the backing store, readable by a later probe run)."
   ],
   "runs": [
-    {"run_id": "20261030T103349-0129", "elf": "REPOP liveness hello", "outcome": "pass", "notes": "console reachable, exit=0"},
-    {"run_id": "20261030T104013-0130", "elf": "launcHER device inventory probe", "outcome": "pass", "notes": "152 VCDs on mass2:/POPS incl. '007 - Tomorrow Never Dies' and multi-disc sets (Resident Evil 2 Disc 1+2, Dracula, Alone in the Dark); existing cards at mass0:/VMC/ (SLUS_214.19_0.bin, generic_0.bin) - PRESERVE; two 256GB USB drives (usb0 partition type 0x07, usb1 type 0x0c)"},
-    {"run_id": "20261030T105838-0131", "elf": "launcHER b163ee32 (CI b08be6c)", "args": ["mass2:/POPS/007 - Tomorrow Never Dies.VCD"], "outcome": "no_result", "notes": "stdout ends at 'path:' - ps2link lost to the launcHER IOP reset. 007 is NOT in the compat DB (no LibCrypt key would be forwarded). Game never booted - see run 0135 for the actual failure mode."},
-    {"run_id": "20261030T110238-0132", "elf": "launcHER b163ee32", "args": ["mass2:/POPS/3Xtreme.VCD"], "outcome": "no_result", "notes": "empty stdout; console wedged by run 0131, needed power-cycle"},
-    {"run_id": "20261030T110338-0133", "elf": "REPOP liveness hello", "outcome": "no_result", "notes": "console still wedged"},
-    {"run_id": "20261030T110549-0134", "elf": "REPOP liveness hello", "outcome": "pass", "notes": "console healthy after user power-cycle"},
-    {"run_id": "20261030T111724-0135", "elf": "launcHER c72aa9db (CI b08be6c+trace)", "args": ["mass2:/POPS/CTR - Crash Team Racing.VCD"], "outcome": "no_result", "notes": "USER SCREENSHOT: 'BDM: root=mass2: open=-1 errno=19' x20 attempts then 'Failed to launch mass2:/POPS/CTR - Crash Team Racing.VCD: -19'. The mass2: mount fails under launcHER's post-IOP-reset module stack; the game never booted. CTR EU entry SCES-02105 has LibCrypt key 0xA371 in the compat DB."},
-    {"run_id": "20261030T135500-0136", "elf": "inventory probe (cat mode)", "outcome": "pass", "notes": "console healthy again; trace-file reader validated"},
-    {"run_id": "20261030T141358-0137", "elf": "launcHER 7a433783 (local docker 5302d51, printf diagnostics)", "args": ["mass2:/POPS/CTR - Crash Team Racing.VCD"], "outcome": "hang", "notes": "stdout ends at 'path:' - printf diagnostics unreachable after the IOP reset; screen carryover wedged the console for run 0138"},
-    {"run_id": "20261030T142440-0138", "elf": "launcHER a4d0a368 (local docker 4104e1f, DPRINTF screen diagnostics + BDM_MAX_DEVICES=6)", "args": ["mass?:/POPS/CTR - Crash Team Racing.VCD"], "outcome": "no_result", "notes": "empty stdout - console wedged by run 0137; user screenshot of the current screen pending"}
+    {
+      "run_id": "20261030T103349-0129",
+      "elf": "REPOP liveness hello",
+      "outcome": "pass",
+      "notes": "console reachable, exit=0"
+    },
+    {
+      "run_id": "20261030T104013-0130",
+      "elf": "launcHER device inventory probe",
+      "outcome": "pass",
+      "notes": "152 VCDs on mass2:/POPS incl. '007 - Tomorrow Never Dies' and multi-disc sets (Resident Evil 2 Disc 1+2, Dracula, Alone in the Dark); existing cards at mass0:/VMC/ (SLUS_214.19_0.bin, generic_0.bin) - PRESERVE; two 256GB USB drives (usb0 partition type 0x07, usb1 type 0x0c)"
+    },
+    {
+      "run_id": "20261030T105838-0131",
+      "elf": "launcHER b163ee32 (CI b08be6c)",
+      "args": [
+        "mass2:/POPS/007 - Tomorrow Never Dies.VCD"
+      ],
+      "outcome": "no_result",
+      "notes": "stdout ends at 'path:' - ps2link lost to the launcHER IOP reset. 007 is NOT in the compat DB (no LibCrypt key would be forwarded). Game never booted - see run 0135 for the actual failure mode."
+    },
+    {
+      "run_id": "20261030T110238-0132",
+      "elf": "launcHER b163ee32",
+      "args": [
+        "mass2:/POPS/3Xtreme.VCD"
+      ],
+      "outcome": "no_result",
+      "notes": "empty stdout; console wedged by run 0131, needed power-cycle"
+    },
+    {
+      "run_id": "20261030T110338-0133",
+      "elf": "REPOP liveness hello",
+      "outcome": "no_result",
+      "notes": "console still wedged"
+    },
+    {
+      "run_id": "20261030T110549-0134",
+      "elf": "REPOP liveness hello",
+      "outcome": "pass",
+      "notes": "console healthy after user power-cycle"
+    },
+    {
+      "run_id": "20261030T111724-0135",
+      "elf": "launcHER c72aa9db (CI b08be6c+trace)",
+      "args": [
+        "mass2:/POPS/CTR - Crash Team Racing.VCD"
+      ],
+      "outcome": "no_result",
+      "notes": "USER SCREENSHOT: 'BDM: root=mass2: open=-1 errno=19' x20 attempts then 'Failed to launch mass2:/POPS/CTR - Crash Team Racing.VCD: -19'. The mass2: mount fails under launcHER's post-IOP-reset module stack; the game never booted. CTR EU entry SCES-02105 has LibCrypt key 0xA371 in the compat DB."
+    },
+    {
+      "run_id": "20261030T135500-0136",
+      "elf": "inventory probe (cat mode)",
+      "outcome": "pass",
+      "notes": "console healthy again; trace-file reader validated"
+    },
+    {
+      "run_id": "20261030T141358-0137",
+      "elf": "launcHER 7a433783 (local docker 5302d51, printf diagnostics)",
+      "args": [
+        "mass2:/POPS/CTR - Crash Team Racing.VCD"
+      ],
+      "outcome": "hang",
+      "notes": "stdout ends at 'path:' - printf diagnostics unreachable after the IOP reset; screen carryover wedged the console for run 0138"
+    },
+    {
+      "run_id": "20261030T142440-0138",
+      "elf": "launcHER a4d0a368 (local docker 4104e1f, DPRINTF screen diagnostics + BDM_MAX_DEVICES=6)",
+      "args": [
+        "mass?:/POPS/CTR - Crash Team Racing.VCD"
+      ],
+      "outcome": "no_result",
+      "notes": "empty stdout - console wedged by run 0137; user screenshot of the current screen pending"
+    },
+    {
+      "run_id": "20261030T162229-0140",
+      "elf": "launcHER 7a433783 (live-IOP path, printf diagnostics)",
+      "args": [
+        "mass2:/POPS/CTR - Crash Team Racing.VCD"
+      ],
+      "outcome": "fail",
+      "notes": "ps2link SURVIVED the whole run (no IOP reset on the live path). Full remote diagnostics: modules load cleanly (bdm 38..usbmass 41, start=0) but ZERO mass nodes ever appear in 25s. USB enumeration failure is NOT reset-specific."
+    },
+    {
+      "run_id": "20261030T164642-0146",
+      "elf": "inventory probe (old stack)",
+      "outcome": "pass",
+      "notes": "old-bdm stack mounts immediately after cold boot - validated the vendoring candidate"
+    },
+    {
+      "run_id": "20261030T165253-0147",
+      "elf": "launcHER 4f2a2640 (vendored old bdm embedded, verified 1059a8ed)",
+      "outcome": "fail",
+      "notes": "STILL all mass nodes -1 with byte-identical modules: bdm is NOT the differentiator"
+    },
+    {
+      "run_id": "20261030T165729-0149",
+      "elf": "inventory probe WITHOUT ata_bd",
+      "outcome": "pass",
+      "notes": "DECISIVE BISECTION: ata_bd not required; the probe mounts with the same module set launcHER fails on"
+    },
+    {
+      "run_id": "20261030T170100-0150",
+      "elf": "launcHER 106d4ca4 (probe recipe: fileXioInit deferred + sleep 3)",
+      "outcome": "fail",
+      "notes": "exact probe recipe replicated in launcHER still fails: fileXio timing is NOT the differentiator"
+    },
+    {
+      "run_id": "20261030T172210-0152",
+      "elf": "inventory probe (full)",
+      "outcome": "pass",
+      "notes": "FULL ARTIFACT REVEALED THE TRUTH: enumeration messages show ata0p3 (internal HDD FAT32) and sdc1 (MX4SIO SD) mounting; USB drives enumerate FLAKILY (present run 0130, absent here). The 152-VCD library lives on the HDD's FAT32 partition, mounted as mass0: - not the USB drives"
+    },
+    {
+      "run_id": "20261030T172258-0153",
+      "elf": "launcHER 106d4ca4 with mass0: arg",
+      "outcome": "fail",
+      "notes": "failed because launcHER's USB path loads no ata_bd, so the HDD (mass0:) never enumerates in its session; module ids restart at 33 each rig run (ps2link unloads child modules) so the probe's stack does not persist"
+    },
+    {
+      "run_id": "20261030T172956-0155",
+      "elf": "launcHER d3d9711b (ata_bd added to USB set, tolerant live path)",
+      "args": [
+        "mass0:/POPS/CTR - Crash Team Racing.VCD"
+      ],
+      "outcome": "no_result",
+      "notes": "BREAKTHROUGH: full POPS pipeline ran - config discovery on mass0:, POPS_IOX.PAK read (938168 bytes), fix-file probing, SLBB bypass, 'Rebooting IOP with external image (245081 bytes)' = the Sony handoff. TCP died at the reboot (expected). Matched SCUS-94426 (US CTR, libcrypt=0 - no LibCrypt key for this VCD). Game state UNCONFIRMED: user screen report ambiguous (stale failure text vs OBS frame); no game-boot claim."
+    }
   ],
   "active_hypotheses": [
-    "After launcHER's SifIopReset, the USB drives enumerate at different massN: indices than under ps2link's IOP (mass2: may not exist post-reset), or take longer than 20s to mount. The screen-channel DPRINTF mass0-5 scan in run 0138's build will confirm once the console is power-cycled."
+    "USB enumeration on the two 256GB externals is inherently flaky (one is 2TB-total NTFS which fatfs cannot mount at all). RELIABLE PATH: the internal HDD's FAT32 partition (enumerated by ata_bd, mounted as mass0:) carries the VCD library - launcHER USB launches now load ata_bd (optional) for exactly this reason.",
+    "launcHER exits wedge ps2link (needs physical power-cycle) because it loads DUPLICATE modules; the probe's LOAD_MISSING-style skip (its runs exit cleanly) is the fix - launcHER's resident-skip must engage (slib names + sbv_patch_enable_lmb before checking, matching the probe)."
   ],
   "no_claims": [
-    "No game boot, LibCrypt, swap, or save behavior is claimed from this session; every game launch failed at the mount stage."
+    "No game boot, LibCrypt, swap, or save behavior is claimed. Run 0155 reached the Sony IOP reboot; what happened after is unconfirmed."
   ]
 }
