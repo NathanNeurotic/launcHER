@@ -962,7 +962,7 @@ class InspectorTests(unittest.TestCase):
         init = (ROOT / "launcher/src/init.c").read_text()
         check = init.index("int initPopsServices(")
         cache = init.index("forceIOPReset = 1;", check)
-        loader = init.index("ret = loadModuleList(devices, 0, 1);", check)
+        loader = init.index("ret = loadModuleList(devices, 0, 1, 0);", check)
         self.assertLess(cache, loader)
         # The normal loader checks this flag before reusing currentDevice.
         self.assertIn("if (!forceIOPReset && currentDevice && (currentDevice & device) == device)", init)
