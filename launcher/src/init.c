@@ -223,7 +223,7 @@ static DeviceType currentDevice = Device_None;
 static int forceIOPReset = 0;
 
 static int loadModules(DeviceType device, int tolerant);
-static int loadModuleList(DeviceType device, int tolerant, int sonySio2);
+static int loadModuleList(DeviceType device, int tolerant, int sonySio2, int deferFileXioInit);
 static int loadModuleListResident(DeviceType device, int tolerant, int sonySio2);
 
 // Initializes IOP modules for given device type
@@ -262,11 +262,6 @@ static int loadModules(DeviceType device, int tolerant) {
       sleep(3);
     int liveRes = loadModuleListResident(device, tolerant, 0);
     if (!liveRes) {
-      /* Quiet settle window: usbmass enumeration callbacks post
-       * asynchronously; EE RPC traffic during the window correlates
-       * with lost connects (probe loads ata_bd here and mounts
-       * reliably). */
-      sleep(6);
       currentDevice |= device;
       return 0;
     }
@@ -289,7 +284,7 @@ static int loadModules(DeviceType device, int tolerant) {
   if (currentDevice == Device_None)
     sbv_patch_fileio(); // Patch fileio only once
 
-  return loadModuleList(device, tolerant, 0);
+  return loadModuleList(device, tolerant, 0, 0);
 }
 
 /* This helper never resets the IOP. The POPS bootstrap must first reboot with
@@ -322,10 +317,17 @@ static int loadModuleListResident(DeviceType device, int tolerant, int sonySio2)
       continue;
     }
   }
-  return loadModuleList(device, tolerant, sonySio2);
+  int ret = loadModuleList(device, tolerant, sonySio2, 1);
+  if (ret)
+    return ret;
+  /* Probe-proven recipe: a quiet window with no EE RPC traffic before
+   * fileXioInit; early binding correlates with lost USB enumeration on the
+   * test console (docs/evidence/pops_hw_runs_2026-10-30.json run 0149). */
+  sleep(3);
+  return fileXioInit() < 0 ? -EIO : 0;
 }
 
-static int loadModuleList(DeviceType device, int tolerant, int sonySio2) {
+static int loadModuleList(DeviceType device, int tolerant, int sonySio2, int deferFileXioInit) {
   int ret = 0, iopret = 0;
   if ((device & Device_SMB) && (device & (Device_UDPFS | Device_UDPBD)))
     return -EINVAL;
@@ -385,7 +387,7 @@ static int loadModuleList(DeviceType device, int tolerant, int sonySio2) {
       ret = SifExecModuleBuffer(moduleList[i].irx, *moduleList[i].size, moduleList[i].argLength, moduleList[i].argStr, &iopret);
     DPRINTF("IOP: loaded %s id=%d start=%d\n", moduleList[i].name, ret, iopret);
 
-    if (!strcmp(moduleList[i].name, "fileXio")) {
+    if (!deferFileXioInit && !strcmp(moduleList[i].name, "fileXio")) {
       int fxio_ret = fileXioInit();
       if (fxio_ret < 0) {
         msg("ERROR: Failed to initialize fileXio RPC: %d\n", fxio_ret);
@@ -426,7 +428,7 @@ static int loadModuleList(DeviceType device, int tolerant, int sonySio2) {
     }
   }
 
-  ret = fileXioInit();
+  ret = deferFileXioInit ? 0 : fileXioInit();
   if (ret < 0) {
     msg("POPS: Cannot bind fileXio after IOP reset: %d\n", ret);
     return ret;
@@ -466,7 +468,7 @@ int initPopsServices(DeviceType devices, const void *core, size_t coreSize,
                            0x1999, 0, NULL, &moduleResult);
   if (ret < 0 || moduleResult != 0)
     return ret < 0 ? ret : -EIO;
-  ret = loadModuleList(devices, 0, 1);
+  ret = loadModuleList(devices, 0, 1, 0);
   if (ret)
     return ret;
   moduleResult = 0;
