@@ -15,6 +15,7 @@
 
 #ifdef _IOP
 #include "irx_imports.h"
+#include "pops_subq_bridge.h"
 #else
 #include <string.h>
 #include <types.h>
@@ -244,6 +245,11 @@ int IOMANX_ENTRYPOINT(int ac, char **av)
 
 	(void)ac;
 	(void)av;
+
+	/* Documented-hypothesis default: Sony IOPCD's subchannel request is
+	 * expected to look like devctl("cdrom0:", 0x05, ...). Confirmed or
+	 * retargeted by the Phase 6 hardware trace. */
+	pops_subq_bridge_configure("cdrom0", 0x05);
 
 	adddeldrv_in_process = 0;
 #ifdef IOMANX_USE_DEVICE_LINKED_LIST
@@ -913,6 +919,17 @@ int iomanX_devctl(const char *name, int cmd, void *arg, unsigned int arglen, voi
 	iomanX_iop_file_t f_stk;
 #endif
 
+	/* LibCrypt Subchannel-Q bridge: answer matching (device, command) pairs
+	 * from the popfs Q generator before any device dispatch. The intercepted
+	 * name/command pair is a documented hypothesis pending a hardware trace;
+	 * see pops_subq_bridge.h and docs/evidence/pops_resident_lifecycle.md. */
+	if ( pops_subq_bridge_should_intercept(name, cmd) )
+	{
+		uint32_t lba = 0;
+		if ( arg && arglen >= sizeof(lba) )
+			memcpy(&lba, arg, sizeof(lba));
+		return pops_subq_bridge_query(lba, buf, buflen, iomanX_devctl);
+	}
 #ifdef IOMAN_USE_FILE_STRUCT_TEMP_STACK
 	f = &f_stk;
 #else

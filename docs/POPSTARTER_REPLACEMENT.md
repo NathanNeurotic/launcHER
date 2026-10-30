@@ -465,7 +465,7 @@ replacement is not yet a faithful drop-in POPSTARTER implementation.
 | Cheats | Standalone evaluator and partial parser | Resident code, actual guest RAM mapping, periodic hook, master/slide codes and SAFEMODE activation; enabled cheats currently reject launch |
 | Compatibility modes | Guarded original-dispatch writes for 1..5 and 7 | Reconstruct runtime state gating and mode 6 OSD conditions; establish mode 8 provenance; validate games |
 | Video, BIOS and OSD | Parsed options and unverified patch helpers | Reconstruct original instructions, widths, runtime timing and behavior |
-| LibCrypt | Key database and standalone SubQ generator | Connect actual POPS request path and validate protected games |
+| LibCrypt | Key database, standalone SubQ generator, popfs GET_SUBQ devctl, and an iomanX_devctl interception bridge (pops_subq_bridge, default policy `devctl("cdrom0:", 0x05)`) | Confirm Sony's actual subchannel request pair via hardware trace; the intercepted name/command is a documented hypothesis until then |
 | Multi-disc | Proxy paths and popfs devctl helpers | Resident controls and switching already-open disc handles |
 | IGR | Combo helper | Resident input hook, original menu/assets, reset and shutdown paths |
 | External fixes | Guarded container inspector/stager; partial TROJAN discovery | PATCH discovery, original slot/order rules, error handling and runtime integration |
