@@ -3,6 +3,7 @@
 #include <stdint.h>
 
 #include "pops_pad_swap.h"
+#include "pops_trace.h"
 
 IRX_ID("launcHER_POP_filesystem", 1, 0);
 
@@ -335,6 +336,8 @@ int pops_pad_swap_fire_internal(void *ctx) {
     lid_open = 0;
   }
   CpuResumeIntr(state);
+  pops_trace_event("swap", (uint32_t)old, (uint32_t)(busy ? old : next),
+                   busy ? 0xfffffff0u : 0u);
   if (busy)
     return -EBUSY;
   return (next != old && paths[next][0]) ? 0 : -ENOENT;
@@ -415,7 +418,11 @@ static int bridge_devctl(iomanX_iop_file_t *file, const char *devname, int cmd,
         return -EBUSY;
       /* A single-disc configuration must not acknowledge a swap to
        * the same disc. The caller needs a reliable no-alternate signal. */
-      return next != old && paths[next][0] ? 0 : -ENOENT;
+      if (next != old && paths[next][0]) {
+        pops_trace_event("next", (uint32_t)old, (uint32_t)next, 0);
+        return 0;
+      }
+      return -ENOENT;
     }
     case POPS_DEVCTL_GET_SUBQ:
       if (arg && arglen < sizeof(uint32_t))
@@ -450,6 +457,7 @@ static int bridge_devctl(iomanX_iop_file_t *file, const char *devname, int cmd,
           out_subq[10] = (uint8_t)(active_libcrypt_key >> 8);
           out_subq[11] = (uint8_t)(active_libcrypt_key & 0xFF);
         }
+        pops_trace_event("subq", lba, active_libcrypt_key != 0 ? 1u : 0u, 0);
         return 0;
       }
       return -EINVAL;
@@ -564,6 +572,7 @@ int _start(int argc, char **argv) {
         ++disc_paths;
     pops_pad_swap_init(&pad_swap, pops_pad_swap_fire_internal, NULL, 25, disc_paths > 1);
     pad_swap_installed = disc_paths > 1;
+    pops_trace_init(paths[0]);
 #ifndef POPS_HOST_TEST
     if (pad_swap_installed)
       pops_pad_sio2_install();

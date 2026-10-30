@@ -8,6 +8,7 @@
 #define _start popfs_start
 #include "../../launcher/iop/popfs/src/popfs.c"
 #include "../../launcher/iop/popfs/src/pops_pad_swap.c"
+#include "../../launcher/iop/popfs/src/pops_trace.c"
 
 static int calls, next_open, close_result, io_result = 7;
 static int io_fd, io_size, open_flags, open_mode, operation, critical;
@@ -53,8 +54,15 @@ int iomanX_read(int fd, void *buffer, int size) {
   if (io_result > 0 && size >= io_result) memset(buffer, 0x5a, io_result);
   return io_result;
 }
+static char last_write[512];
 int iomanX_write(int fd, void *buffer, int size) {
-  (void)buffer; io_fd = fd; io_size = size; operation = 2; return io_result;
+  io_fd = fd; io_size = size; operation = 2;
+  if (buffer && size > 0) {
+    int n = size < (int)sizeof(last_write) - 1 ? size : (int)sizeof(last_write) - 1;
+    memcpy(last_write, buffer, n);
+    last_write[n] = 0;
+  }
+  return io_result;
 }
 int iomanX_lseek(int fd, int offset, int whence) {
   io_fd = fd; seek_offset = offset; seek_whence = whence; return offset;
@@ -160,6 +168,50 @@ static void test_pad_swap_popfs_integration(void) {
   assert(pops_pad_swap_feed(&sw, (uint16_t)~POPS_PAD_SWAP_COMBO, 1) == 0);
   assert(pops_pad_swap_feed(&sw, (uint16_t)~POPS_PAD_SWAP_COMBO, 1) == 1);
   assert(!ops->devctl(&file, "pops:", 0x02, NULL, 0, &disc, sizeof(disc)) && disc == 0);
+}
+
+/* Sony-phase event trace contract: popfs records SubQ requests, disc
+ * swaps, and EE-driven disc switches to a log file on the backing device so
+ * behavior during Sony execution is observable after the console resets. */
+static void test_event_trace(void) {
+  pops_pad_swap sw;
+  iomanX_iop_file_t file = {0};
+  iomanX_iop_device_ops_t *ops = registered->ops;
+  int saved_next_open = next_open, saved_io = io_result;
+  uint8_t q[12];
+  uint32_t lba = 16;
+
+  /* re-establish the two-disc config (the earlier restart left pops registered) */
+  char *args[] = {"popfs", "mass7:/POPS/Game.VCD", "udpfs:/saves/Card0.VMC",
+                   "mmce1:/POPS/Game/Card1.VMC", "pfs0:/disc/Second.VCD"};
+  assert(!iomanX_DelDrv("pops"));
+  assert(start_payload(5, args) == MODULE_RESIDENT_END);
+  ops = registered->ops;
+
+  /* no log until the first event; the trace path derives from disc0's device */
+  next_open = 60;
+  assert(!ops->devctl(&file, "pops:", 0x06, &lba, sizeof(lba), q, sizeof(q)));
+  assert(!strcmp(observed, "mass7:popfs_trace.log"));
+  assert(operation == 2 && strstr(last_write, "event=subq"));
+  assert(strstr(last_write, "a=16"));
+
+  /* a swap event is recorded with both disc slots and the result */
+  pops_pad_swap_init(&sw, pops_pad_swap_fire_internal, NULL, 2, 1);
+  assert(pops_pad_swap_feed(&sw, (uint16_t)~POPS_PAD_SWAP_COMBO, 1) == 0);
+  assert(pops_pad_swap_feed(&sw, (uint16_t)~POPS_PAD_SWAP_COMBO, 1) == 1);
+  assert(strstr(last_write, "event=swap"));
+  assert(strstr(last_write, "a=0"));
+  assert(strstr(last_write, "b=1"));
+
+  /* a failed trace open disables logging without breaking devctl */
+  next_open = -5;
+  pops_trace_reset();
+  memset(last_write, 0, sizeof(last_write));
+  assert(!ops->devctl(&file, "pops:", 0x06, &lba, sizeof(lba), q, sizeof(q)));
+  assert(last_write[0] == 0);
+
+  next_open = saved_next_open; io_result = saved_io;
+  pops_trace_reset();
 }
 
 int main(void) {
@@ -475,6 +527,7 @@ int main(void) {
   assert(registered == &device);
   test_pad_swap();
   test_pad_swap_popfs_integration();
+  test_event_trace();
   puts("POPFS production-driver contract PASS: paths, multi-disc, save backups, descriptor zero,");
   puts("short I/O, device errors, readonly discs, 64-bit seeks, devctl tray/disc, LibCrypt SubQ, and active-handle lifetime");
   return 0;
