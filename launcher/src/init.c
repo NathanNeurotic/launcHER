@@ -254,6 +254,12 @@ static int loadModules(DeviceType device, int tolerant) {
    * Duplicate-load-safe: already-resident libraries are skipped. On any
    * failure the original reset path below still runs. */
   if (!forceIOPReset && (device & (Device_USB | Device_MX4SIO | Device_iLink))) {
+    /* Cold-booted USB drives are not ready when the module stack
+     * initializes; give them spin-up time before enumerating
+     * (hardware evidence 2026-10-30: no device ever appears
+     * without it, on an otherwise-working stack). */
+    if (device & Device_USB)
+      sleep(3);
     int liveRes = loadModuleListResident(device, tolerant, 0);
     if (!liveRes) {
       currentDevice |= device;
