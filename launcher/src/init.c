@@ -1,4 +1,5 @@
 #include "init.h"
+#include <slib.h>
 #include "ipconfig_smap.h"
 #include "common.h"
 #include "dprintf.h"
@@ -223,6 +224,7 @@ static int forceIOPReset = 0;
 
 static int loadModules(DeviceType device, int tolerant);
 static int loadModuleList(DeviceType device, int tolerant, int sonySio2);
+static int loadModuleListResident(DeviceType device, int tolerant, int sonySio2);
 
 // Initializes IOP modules for given device type
 int initModules(DeviceType device) { return loadModules(device, 0); }
@@ -243,6 +245,22 @@ static int loadModules(DeviceType device, int tolerant) {
 
   if (currentDevice && !(currentDevice & (Device_APA | Device_ATA)) && !(currentDevice & (Device_APA | Device_ATA)))
     shutdownDEV9();
+
+  /* BDM-family fast path (2026-10-30 hardware evidence): loading the
+   * mini stack onto the LIVE IOP first matches the environment where
+   * these USB drives enumerate reliably. The reset-first path leaves
+   * every mass node unmounted on the test console (drive renumber plus
+   * cold-enumeration failure; see docs/evidence/pops_hw_runs_2026-10-30.json).
+   * Duplicate-load-safe: already-resident libraries are skipped. On any
+   * failure the original reset path below still runs. */
+  if (!forceIOPReset && (device & (Device_USB | Device_MX4SIO | Device_iLink))) {
+    int liveRes = loadModuleListResident(device, tolerant, 0);
+    if (!liveRes) {
+      currentDevice |= device;
+      return 0;
+    }
+    DPRINTF("BDM: live-stack load failed=%d; falling back to IOP reset\n", liveRes);
+  }
 
   // Initialize the RPC manager and reboot the IOP
   sceSifInitRpc(0);
@@ -266,6 +284,36 @@ static int loadModules(DeviceType device, int tolerant) {
 /* This helper never resets the IOP. The POPS bootstrap must first reboot with
  * its identified external IOP image. fileXio has a separate RPC ID from Sony's
  * FILEIO; iomanX bridges legacy imports to the modern filesystem drivers. */
+/* Library names registered by the production IRXs, for duplicate-safe loads
+ * onto a live IOP. NULL = unknown; the module is loaded normally. */
+static const char *residentLibraryName(const char *module) {
+  static const struct { const char *mod; const char *lib; } map[] = {
+    {"iomanX", "iomanx"}, {"fileXio", "fileXio"}, {"sio2man", "sio2man"},
+    {"mcman", "mcman"}, {"mcserv", "mcserv"}, {"bdm", "bdm"},
+    {"bdmfs_fatfs", "bdmfs_fatfs"}, {"usbd_mini", "usbd"},
+    {"usbmass_bd_mini", "usbmass_bd_mini"}, {"ata_bd", "ata_bd"},
+    {"mx4sio_bd_mini", "mx4sio_bd"}, {"iLinkman", "iLinkman"},
+    {"IEEE1394_bd_mini", "IEEE1394_bd_mini"},
+  };
+  for (size_t i = 0; i < sizeof(map) / sizeof(map[0]); ++i)
+    if (!strcmp(map[i].mod, module))
+      return map[i].lib;
+  return NULL;
+}
+
+static int loadModuleListResident(DeviceType device, int tolerant, int sonySio2) {
+  for (int i = 0; i < MODULE_COUNT; ++i) {
+    if (!(device & moduleList[i].type) && !(moduleList[i].type & Device_Basic))
+      continue;
+    const char *lib = residentLibraryName(moduleList[i].name);
+    if (lib && slib_get_exp_lib(lib, NULL)) {
+      DPRINTF("BDM: reusing resident %s\n", moduleList[i].name);
+      continue;
+    }
+  }
+  return loadModuleList(device, tolerant, sonySio2);
+}
+
 static int loadModuleList(DeviceType device, int tolerant, int sonySio2) {
   int ret = 0, iopret = 0;
   if ((device & Device_SMB) && (device & (Device_UDPFS | Device_UDPBD)))
