@@ -1,5 +1,7 @@
 #include "init.h"
 #include <slib.h>
+#include <smod.h>
+#include <sbv_patches.h>
 #include "ipconfig_smap.h"
 #include "common.h"
 #include "dprintf.h"
@@ -295,29 +297,53 @@ static int loadModules(DeviceType device, int tolerant) {
 /* This helper never resets the IOP. The POPS bootstrap must first reboot with
  * its identified external IOP image. fileXio has a separate RPC ID from Sony's
  * FILEIO; iomanX bridges legacy imports to the modern filesystem drivers. */
-/* Library names registered by the production IRXs, for duplicate-safe loads
- * onto a live IOP. NULL = unknown; the module is loaded normally. */
-static const char *residentLibraryName(const char *module) {
-  static const struct { const char *mod; const char *lib; } map[] = {
-    {"iomanX", "iomanx"}, {"fileXio", "fileXio"}, {"sio2man", "sio2man"},
-    {"mcman", "mcman"}, {"mcserv", "mcserv"}, {"bdm", "bdm"},
-    {"bdmfs_fatfs", "bdmfs_fatfs"}, {"usbd_mini", "usbd"},
-    {"usbmass_bd_mini", "usbmass_bd_mini"}, {"ata_bd", "ata_bd"},
-    {"mx4sio_bd_mini", "mx4sio_bd"}, {"iLinkman", "iLinkman"},
+/* smod module names of the production IRXs (.iopmod identifiers, extracted
+ * offline per the inventory probe; iomanX has none and is checked by its
+ * export library instead). Used to skip already-resident modules so a
+ * launched ELF reuses the live stack instead of loading duplicates -
+ * duplicate modules are what wedges ps2link when the ELF exits
+ * (docs/evidence/pops_hw_runs_2026-10-30.json). */
+static const char *residentModuleName(const char *module) {
+  static const struct { const char *mod; const char *smod; } map[] = {
+    {"iomanX", NULL},               /* no .iopmod id; checked via slib */
+    {"fileXio", "IOX/File_Manager_Rpc"},
+    {"sio2man", "sio2man"},
+    {"mcman", "mcman_cex"},
+    {"mcserv", "mcserv"},
+    {"bdm", "bdm"},
+    {"bdmfs_fatfs", "bdmff"},
+    {"usbd_mini", "USB_driver"},
+    {"usbmass_bd_mini", "usbmass_bd"},
+    {"ata_bd", "atad"},
+    {"mx4sio_bd_mini", "mx4sio_bd_mini"},
+    {"iLinkman", "iLinkman"},
     {"IEEE1394_bd_mini", "IEEE1394_bd_mini"},
   };
   for (size_t i = 0; i < sizeof(map) / sizeof(map[0]); ++i)
     if (!strcmp(map[i].mod, module))
-      return map[i].lib;
+      return map[i].smod;
   return NULL;
 }
 
+static int moduleResident(const char *module) {
+  if (!strcmp(module, "iomanX"))
+    return slib_get_exp_lib("iomanx", NULL) != NULL;
+  const char *smod = residentModuleName(module);
+  if (!smod)
+    return 0; /* unknown: never skips a needed module */
+  smod_mod_info_t info;
+  return smod_get_mod_by_name(smod, &info) == 0;
+}
+
 static int loadModuleListResident(DeviceType device, int tolerant, int sonySio2) {
+  /* The probe applies sbv patches before checking/loading; without them
+   * the slib/smod lookups silently see nothing and every module loads a
+   * duplicate copy. */
+  sbv_patch_enable_lmb();
   for (int i = 0; i < MODULE_COUNT; ++i) {
     if (!(device & moduleList[i].type) && !(moduleList[i].type & Device_Basic))
       continue;
-    const char *lib = residentLibraryName(moduleList[i].name);
-    if (lib && slib_get_exp_lib(lib, NULL)) {
+    if (moduleResident(moduleList[i].name)) {
       DPRINTF("BDM: reusing resident %s\n", moduleList[i].name);
       continue;
     }
