@@ -2,6 +2,8 @@
 #include <errno.h>
 #include <stdint.h>
 
+#include "pops_pad_swap.h"
+
 IRX_ID("launcHER_POP_filesystem", 1, 0);
 
 #define PATH_LIMIT 256
@@ -308,6 +310,43 @@ static uint8_t pops_bcd(uint32_t n) {
 
 static uint16_t active_libcrypt_key = 0;
 
+/* Resident pad-swap detector state. Armed only when the module arguments
+ * configure at least two disc images; the sio2 interposition glue in
+ * pops_pad_sio2.c feeds observed pad polls into this machine. */
+static pops_pad_swap pad_swap;
+static int pad_swap_installed;
+
+/* Internal OPEN_LID -> NEXT_DISC -> CLOSE_LID sequence for the pad-swap
+ * detector. Returns 0 on success, -EBUSY while a disc handle is open, and
+ * -ENOENT when no alternate disc is configured. The lid flags bracket the
+ * switch so a polling observer sees an eject/insert pair. */
+int pops_pad_swap_fire_internal(void *ctx) {
+  int state, next, old, busy;
+  (void)ctx;
+  CpuSuspendIntr(&state);
+  old = active_disc;
+  next = (old + 1) % DISC_COUNT;
+  while (next != old && !paths[next][0])
+    next = (next + 1) % DISC_COUNT;
+  busy = active_disc_handles != 0;
+  if (!busy && next != old && paths[next][0]) {
+    lid_open = 1;
+    active_disc = next;
+    lid_open = 0;
+  }
+  CpuResumeIntr(state);
+  if (busy)
+    return -EBUSY;
+  return (next != old && paths[next][0]) ? 0 : -ENOENT;
+}
+
+pops_pad_swap *pops_pad_swap_instance(void) {
+  return pad_swap_installed ? &pad_swap : NULL;
+}
+
+/* Defined by the IOP-only interposition glue (pops_pad_sio2.c). */
+int pops_pad_sio2_install(void);
+
 static int bridge_devctl(iomanX_iop_file_t *file, const char *devname, int cmd,
                          void *arg, unsigned int arglen, void *buf, unsigned int buflen) {
   (void)file; (void)devname;
@@ -490,6 +529,13 @@ int _start(int argc, char **argv) {
     if (!argv[i] || !valid_backend(argv[i]) || (alias && pfs_backing(argv[i])))
       return MODULE_NO_RESIDENT_END;
   memset(paths, 0, sizeof(paths));
+  /* Runtime state must not survive a module restart: a reloaded IRX
+  * starts from zeroed statics, and the host contract driver reuses
+  * the process across repeated _start calls. */
+  active = 0;
+  active_disc_handles = 0;
+  active_disc = 0;
+  lid_open = 0;
   for (i = 1; i < argc; ++i) {
     int index = i == 1 ? 0 : (i < 4 ? DISC_COUNT + i - 2 : i - 3);
     if (!valid_backend(argv[i]))
@@ -510,6 +556,18 @@ int _start(int argc, char **argv) {
           (!strncmp(paths[j], paths[i], card_length) && !strcmp(paths[j] + card_length, ".bak")))
         return MODULE_NO_RESIDENT_END;
     }
+  }
+  {
+    int disc_paths = 0;
+    for (i = 0; i < DISC_COUNT; ++i)
+      if (paths[i][0])
+        ++disc_paths;
+    pops_pad_swap_init(&pad_swap, pops_pad_swap_fire_internal, NULL, 25, disc_paths > 1);
+    pad_swap_installed = disc_paths > 1;
+#ifndef POPS_HOST_TEST
+    if (pad_swap_installed)
+      pops_pad_sio2_install();
+#endif
   }
   result = iomanX_AddDrv(&device);
   if (result < 0)

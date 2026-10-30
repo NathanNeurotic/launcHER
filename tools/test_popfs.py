@@ -15,6 +15,6 @@ compiler = shutil.which(os.environ.get("CC", "gcc"))
 if not compiler:
     raise RuntimeError("Host GCC-compatible compiler required")
 output = build / ("test_popfs.exe" if os.name == "nt" else "test_popfs")
-subprocess.run([compiler, "-std=c99", "-Wall", "-Wextra", "-Werror", "-I", str(build),
+subprocess.run([compiler, "-std=c99", "-Wall", "-Wextra", "-Werror", "-DPOPS_HOST_TEST", "-I", str(build),
                 str(root / "tools/fixtures/test_popfs.c"), "-o", str(output)], check=True)
 subprocess.run([str(output)], check=True)

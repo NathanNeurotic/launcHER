@@ -7,6 +7,7 @@
 #include <stdarg.h>
 #define _start popfs_start
 #include "../../launcher/iop/popfs/src/popfs.c"
+#include "../../launcher/iop/popfs/src/pops_pad_swap.c"
 
 static int calls, next_open, close_result, io_result = 7;
 static int io_fd, io_size, open_flags, open_mode, operation, critical;
@@ -85,6 +86,80 @@ static int start_payload(int argc, char **argv) {
   assert(argc >= 0 && argc <= 7);
   for (int i = 0; i < argc; ++i) loaded[i + 1] = argv[i];
   return popfs_start(argc + 1, loaded);
+}
+
+static int pad_fire_count, pad_fire_result;
+static int pad_fire_cb(void *ctx) { (void)ctx; ++pad_fire_count; return pad_fire_result; }
+
+/* Pad-swap detector contract: the state machine must debounce the
+ * SELECT+L1+R1 combo, fire exactly once per press, tolerate invalid polls,
+ * and stay silent while disarmed. This models the resident IOP path; the
+ * sio2 interposition glue itself is IOP-only and needs console validation. */
+static void test_pad_swap(void) {
+  pops_pad_swap sw;
+  const uint16_t NO_PRESS = 0xFFFFu;
+  const uint16_t PARTIAL = (uint16_t)~(POPS_PAD_BTN_SELECT | POPS_PAD_BTN_L1);
+  const uint16_t FULL = (uint16_t)~POPS_PAD_SWAP_COMBO;
+  pad_fire_count = 0; pad_fire_result = 0;
+
+  pops_pad_swap_init(&sw, pad_fire_cb, NULL, 25, 1);
+  for (int i = 0; i < 100; ++i) assert(pops_pad_swap_feed(&sw, NO_PRESS, 1) == 0);
+  assert(pad_fire_count == 0);
+  for (int i = 0; i < 60; ++i) assert(pops_pad_swap_feed(&sw, PARTIAL, 1) == 0);
+  assert(pad_fire_count == 0);
+  for (int i = 0; i < 24; ++i) assert(pops_pad_swap_feed(&sw, FULL, 1) == 0);
+  assert(pad_fire_count == 0);
+  assert(pops_pad_swap_feed(&sw, FULL, 1) == 1);
+  assert(pad_fire_count == 1);
+  /* Held combo must not refire. */
+  for (int i = 0; i < 200; ++i) assert(pops_pad_swap_feed(&sw, FULL, 1) == 0);
+  assert(pad_fire_count == 1);
+  /* An invalid poll is a release: the full debounce restarts after it. */
+  assert(pops_pad_swap_feed(&sw, 0, 0) == 0);
+  for (int i = 0; i < 24; ++i) assert(pops_pad_swap_feed(&sw, FULL, 1) == 0);
+  assert(pad_fire_count == 1);
+  assert(pops_pad_swap_feed(&sw, FULL, 1) == 1);
+  assert(pad_fire_count == 2);
+  /* A busy/failed swap reports the failure and requires a fresh press. */
+  pad_fire_result = -16;
+  assert(pops_pad_swap_feed(&sw, NO_PRESS, 1) == 0);
+  for (int i = 0; i < 25; ++i)
+    assert(pops_pad_swap_feed(&sw, FULL, 1) == (i == 24 ? -16 : 0));
+  assert(pad_fire_count == 3);
+  for (int i = 0; i < 40; ++i) assert(pops_pad_swap_feed(&sw, FULL, 1) == 0);
+  assert(pad_fire_count == 3);
+  pad_fire_result = 0;
+  assert(pops_pad_swap_feed(&sw, NO_PRESS, 1) == 0);
+  for (int i = 0; i < 24; ++i) assert(pops_pad_swap_feed(&sw, FULL, 1) == 0);
+  assert(pops_pad_swap_feed(&sw, FULL, 1) == 1);
+  assert(pad_fire_count == 4);
+  /* Disarmed detector never fires, and disarm mid-stream stays silent. */
+  pops_pad_swap_init(&sw, pad_fire_cb, NULL, 2, 0);
+  for (int i = 0; i < 10; ++i) assert(pops_pad_swap_feed(&sw, FULL, 1) == 0);
+  assert(pad_fire_count == 4);
+  pops_pad_swap_init(&sw, pad_fire_cb, NULL, 2, 1);
+  assert(pops_pad_swap_feed(&sw, FULL, 1) == 0);
+  pops_pad_swap_disarm(&sw);
+  assert(pops_pad_swap_feed(&sw, FULL, 1) == 0);
+  assert(pad_fire_count == 4);
+}
+
+/* Resident-path integration: firing the detector advances the active disc
+ * through the internal lid/next/close sequence on the real popfs state. */
+static void test_pad_swap_popfs_integration(void) {
+  pops_pad_swap sw;
+  iomanX_iop_file_t file = {0};
+  iomanX_iop_device_ops_t *ops = registered->ops;
+  int disc = -1;
+  pops_pad_swap_init(&sw, pops_pad_swap_fire_internal, NULL, 2, 1);
+  assert(pops_pad_swap_feed(&sw, (uint16_t)~POPS_PAD_SWAP_COMBO, 1) == 0);
+  assert(pops_pad_swap_feed(&sw, (uint16_t)~POPS_PAD_SWAP_COMBO, 1) == 1);
+  assert(!ops->devctl(&file, "pops:", 0x02, NULL, 0, &disc, sizeof(disc)) && disc == 1);
+  /* One swap per press: the combo must lift before the next fire. */
+  assert(pops_pad_swap_feed(&sw, 0xFFFFu, 1) == 0);
+  assert(pops_pad_swap_feed(&sw, (uint16_t)~POPS_PAD_SWAP_COMBO, 1) == 0);
+  assert(pops_pad_swap_feed(&sw, (uint16_t)~POPS_PAD_SWAP_COMBO, 1) == 1);
+  assert(!ops->devctl(&file, "pops:", 0x02, NULL, 0, &disc, sizeof(disc)) && disc == 0);
 }
 
 int main(void) {
@@ -395,6 +470,11 @@ int main(void) {
   assert(!virtual_pfs.ops->close(&file));
   assert(!iomanX_DelDrv("pfs"));
   assert(!iomanX_DelDrv("pops"));
+  /* Re-establish the two-disc configuration for the resident-path test. */
+  assert(start_payload(5, arguments) == MODULE_RESIDENT_END);
+  assert(registered == &device);
+  test_pad_swap();
+  test_pad_swap_popfs_integration();
   puts("POPFS production-driver contract PASS: paths, multi-disc, save backups, descriptor zero,");
   puts("short I/O, device errors, readonly discs, 64-bit seeks, devctl tray/disc, LibCrypt SubQ, and active-handle lifetime");
   return 0;
