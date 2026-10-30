@@ -12,7 +12,7 @@
 #include <fileXio_rpc.h>
 #endif
 
-#define BDM_MAX_DEVICES 2
+#define BDM_MAX_DEVICES 6
 
 // Launches ELF from BDM device
 int handleBDM(DeviceType device, int argc, char *argv[]) {
@@ -29,7 +29,7 @@ int handleBDM(DeviceType device, int argc, char *argv[]) {
 
   // Initialize device modules
   int res = initModules(device);
-  printf("BDM: initModules device=%d path=%s result=%d\n", device, elfPath, res);
+  DPRINTF("BDM: initModules device=%d path=%s result=%d\n", device, elfPath, res);
   if (res)
     return res;
 #ifdef LAUNCHER_BOOT_TRACE
@@ -63,7 +63,7 @@ int handleBDM(DeviceType device, int argc, char *argv[]) {
     while (delayAttempts != 0) {
       // Try to open the file to make sure it exists
       res = open(probeMountpoint, O_DIRECTORY | O_RDONLY);
-      printf("BDM: root=%s open=%d errno=%d attempts=%d\n", probeMountpoint, res, errno, delayAttempts);
+      DPRINTF("BDM: root=%s open=%d errno=%d attempts=%d\n", probeMountpoint, res, errno, delayAttempts);
       if (res < 0 && delayAttempts % 5 == 0) {
         /* hardware-trace: scan every mass node so a remote run can see which
          * BDM devices actually registered */
@@ -71,7 +71,7 @@ int handleBDM(DeviceType device, int argc, char *argv[]) {
           char mp[8];
           sprintf(mp, "mass%d:", m);
           int mf = open(mp, O_DIRECTORY | O_RDONLY);
-          printf("BDM: scan %s -> %d\n", mp, mf);
+          DPRINTF("BDM: scan %s -> %d\n", mp, mf);
           if (mf >= 0)
             close(mf);
         }
@@ -82,7 +82,7 @@ int handleBDM(DeviceType device, int argc, char *argv[]) {
 
         // Jump to launch if file exists
         res = tryFile(elfPath);
-        printf("BDM: file=%s probe=%d errno=%d\n", elfPath, res, errno);
+        DPRINTF("BDM: file=%s probe=%d errno=%d\n", elfPath, res, errno);
         if (!res)
           goto found;
         // Else, try next device
