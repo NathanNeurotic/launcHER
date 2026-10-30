@@ -20,6 +20,31 @@ enum PopsVideoMode {
   POPS_VMODE_240P,
 };
 
+/* Disc region from the licence text in sector 4 (POPStarter reads VCD offset
+ * 0x102514: "Euro", "Amer"/"of A" or "Inc."). */
+enum PopsRegion {
+  POPS_REGION_UNKNOWN = 0,
+  POPS_REGION_EUROPE,
+  POPS_REGION_AMERICA,
+  POPS_REGION_JAPAN,
+};
+
+/* Fixed-value POPStarter r13 CHEATS.TXT commands whose writes land in the
+ * POPS core itself (recovered from the original's command handlers). */
+#define POPS_TOK_SCANLINES        (1u << 0)
+#define POPS_TOK_SUBCDSTATUS      (1u << 1)
+#define POPS_TOK_MUTE_CDDA        (1u << 2)
+#define POPS_TOK_UNDO_MUTE_CDDA   (1u << 3)
+#define POPS_TOK_MUTE_VAB         (1u << 4)
+#define POPS_TOK_MUTE_ALL         (1u << 5)
+#define POPS_TOK_CODECACHE_ADDON0 (1u << 6)
+#define POPS_TOK_CODECACHE_ADDON1 (1u << 7)
+#define POPS_TOK_CODECACHE_ADDON2 (1u << 8)
+#define POPS_TOK_ROLLBACK         (1u << 9)
+#define POPS_TOK_CACHE1           (1u << 10)
+#define POPS_TOK_NOHDTVFIX        (1u << 11)
+#define POPS_TOK_COUNT            12
+
 #define POPS_MAX_DISCS    4
 #define POPS_MAX_CHEATS   256
 
@@ -35,18 +60,20 @@ typedef struct {
   uint8_t hdtv_fix;
   int16_t x_offset;
   int16_t y_offset;
+  /* Recorded but not applied: the original's $SMOOTH/$WIDESCREEN need
+   * POPStarter's resident code, and $DITHER_OFF is not a POPStarter command. */
   uint8_t smooth;
-  uint8_t widescreen;   /* $WIDESCREEN 16:9 projection patch */
-  uint8_t dither_off;   /* $DITHER_OFF / $NODITHER disables GS dithering */
+  uint8_t widescreen;
+  uint8_t dither_off;
 
-  /* Engine throttling */
+  /* Recorded but not applied: not POPStarter commands */
   uint8_t fast_mips;
   uint8_t slow_mips;
 
   /* System options */
-  uint8_t no_boot;      /* $NOBOOT / $BIOS forces PS1 BIOS OSD shell */
-  uint8_t no_igr;       /* $NOIGR disables In-Game Reset */
-  uint8_t igr_type;     /* $IGR0 (0), $IGR1 (1), $IGR2 (2) */
+  uint8_t no_boot;      /* $NOBOOT / $BIOS keeps the PS1 BIOS boot logo */
+  uint8_t no_igr;       /* $NOIGR: POPStarter's IGR-off writes */
+  uint8_t igr_type;     /* 0 = launcHER direct exit, 1..6 = $IGR0..$IGR5 */
   uint8_t safe_mode;    /* $SAFEMODE delays cheat activation */
   uint8_t usb_delay;    /* $USBDELAY_# seconds */
   uint8_t no_vmc0;      /* $NOVMC0 disables Memory Card 0 emulation */
@@ -68,6 +95,11 @@ typedef struct {
   /* Cheats from CHEATS.TXT */
   uint16_t cheat_count;
   PopsCheatEntry cheats[POPS_MAX_CHEATS];
+
+  /* POPS_TOK_* commands from CHEATS.TXT */
+  uint32_t original_tokens;
+  /* Disc region (POPS_REGION_*); set by the launcher from the VCD */
+  uint8_t disc_region;
 } PopsConfig;
 
 /* Initialize configuration with factory defaults */

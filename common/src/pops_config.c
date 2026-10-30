@@ -67,44 +67,27 @@ static int parse_single_directive(PopsConfig *cfg, const char *token) {
     cfg->video_mode = POPS_VMODE_480P;
     return 1;
   }
-  if (!strcasecmp(token, "$480i")) {
-    cfg->video_mode = POPS_VMODE_480I;
-    return 1;
+  /* Not POPStarter commands; no grounded POPS writes exist for them. */
+  if (!strcasecmp(token, "$480i") || !strcasecmp(token, "$576p") ||
+      !strcasecmp(token, "$576i") || !strcasecmp(token, "$240p") ||
+      !strncasecmp(token, "$VMODE", 6)) {
+    DPRINTF("POPS config: %s is not a POPStarter command; ignored\n", token);
+    return 0;
   }
-  if (!strcasecmp(token, "$576p")) {
-    cfg->video_mode = POPS_VMODE_576P;
-    return 1;
-  }
-  if (!strcasecmp(token, "$576i")) {
-    cfg->video_mode = POPS_VMODE_576I;
-    return 1;
-  }
-  if (!strcasecmp(token, "$240p")) {
-    cfg->video_mode = POPS_VMODE_240P;
-    return 1;
-  }
-  if (!strcasecmp(token, "$PAL2NTSC") || !strcasecmp(token, "$FORCENTSC")) {
-    cfg->video_mode = POPS_VMODE_PAL2NTSC;
-    return 1;
-  }
-  if (!strcasecmp(token, "$NTSC2PAL") || !strcasecmp(token, "$FORCEPAL")) {
-    cfg->video_mode = POPS_VMODE_NTSC2PAL;
-    return 1;
-  }
-  if (!strcasecmp(token, "$NOPAL")) {
+  /* POPS runs NTSC unless the PAL patch is applied, so "PAL to NTSC" is
+   * the original's $NOPAL: keep a European disc at 60 Hz. */
+  if (!strcasecmp(token, "$NOPAL") || !strcasecmp(token, "$PAL2NTSC") ||
+      !strcasecmp(token, "$FORCENTSC")) {
     cfg->video_mode = POPS_VMODE_NOPAL;
     return 1;
   }
-  if (!strncasecmp(token, "$VMODE_", 7) || !strncasecmp(token, "$VMODE", 6)) {
-    const char *num_str = (!strncasecmp(token, "$VMODE_", 7)) ? token + 7 : token + 6;
-    int vm = (int)strtol(num_str, NULL, 10);
-    if (vm >= POPS_VMODE_DEFAULT && vm <= POPS_VMODE_240P) {
-      cfg->video_mode = (uint8_t)vm;
-      return 1;
-    }
+  if (!strcasecmp(token, "$FORCEPAL") || !strcasecmp(token, "$NTSC2PAL")) {
+    cfg->video_mode = POPS_VMODE_NTSC2PAL;
+    return 1;
   }
   if (!strcasecmp(token, "$HDTVFIX")) {
     cfg->hdtv_fix = 1;
+    cfg->original_tokens &= ~POPS_TOK_NOHDTVFIX;
     return 1;
   }
   if (!strcasecmp(token, "$SMOOTH")) {
@@ -131,20 +114,43 @@ static int parse_single_directive(PopsConfig *cfg, const char *token) {
     cfg->no_boot = 1;
     return 1;
   }
-  if (!strcasecmp(token, "$NOIGR") || !strcasecmp(token, "$IGR0")) {
+  if (!strcasecmp(token, "$NOIGR")) {
     cfg->no_igr = 1;
     cfg->igr_type = 0;
     return 1;
   }
-  if (!strcasecmp(token, "$IGR1")) {
+  if (!strncasecmp(token, "$IGR", 4) && token[4] >= '0' && token[4] <= '5' &&
+      !token[5]) {
     cfg->no_igr = 0;
-    cfg->igr_type = 1;
+    cfg->igr_type = (uint8_t)(token[4] - '0' + 1);
     return 1;
   }
-  if (!strcasecmp(token, "$IGR2")) {
-    cfg->no_igr = 0;
-    cfg->igr_type = 2;
-    return 1;
+  {
+    static const struct {
+      const char *name;
+      uint32_t flag;
+    } tokens[] = {
+      {"$SCANLINES", POPS_TOK_SCANLINES},
+      {"$SUBCDSTATUS", POPS_TOK_SUBCDSTATUS},
+      {"$MUTE_CDDA", POPS_TOK_MUTE_CDDA},
+      {"$UNDO_MUTE_CDDA", POPS_TOK_UNDO_MUTE_CDDA},
+      {"$MUTE_VAB", POPS_TOK_MUTE_VAB},
+      {"$MUTE_ALL", POPS_TOK_MUTE_ALL},
+      {"$CODECACHE_ADDON_0", POPS_TOK_CODECACHE_ADDON0},
+      {"$CODECACHE_ADDON_1", POPS_TOK_CODECACHE_ADDON1},
+      {"$CODECACHE_ADDON_2", POPS_TOK_CODECACHE_ADDON2},
+      {"$ROLLBACK", POPS_TOK_ROLLBACK},
+      {"$CACHE1", POPS_TOK_CACHE1},
+      {"$NOHDTVFIX", POPS_TOK_NOHDTVFIX},
+    };
+    for (size_t i = 0; i < sizeof(tokens) / sizeof(tokens[0]); ++i) {
+      if (!strcasecmp(token, tokens[i].name)) {
+        cfg->original_tokens |= tokens[i].flag;
+        if (tokens[i].flag == POPS_TOK_NOHDTVFIX)
+          cfg->hdtv_fix = 0;
+        return 1;
+      }
+    }
   }
   if (!strcasecmp(token, "$SAFEMODE")) {
     cfg->safe_mode = 1;

@@ -33,19 +33,27 @@ int pops_fix_stage(PopsFixContext *context, void *staged_core, size_t core_size,
                     const void *file, size_t file_size, unsigned slot,
                     int expected_trojan);
 
-/* Apply Video Mode overrides (PAL/NTSC, 480p, 576p, HDTV fix, X/Y centering) */
+/* $FORCEPAL (POPS_VMODE_NTSC2PAL) PAL patch and $HDTVFIX. Every other
+ * mode and nonzero offsets return -ENOTSUP: they have no grounded writes. */
 int pops_apply_video_overrides(void *staged_core, size_t core_size,
                                uint8_t video_mode, uint8_t hdtv_fix,
                                int16_t x_offset, int16_t y_offset);
 
-/* Apply texture smoothing ($SMOOTH) */
-int pops_apply_smooth(void *staged_core, size_t core_size);
+/* POPS_REGION_* from the 4 licence bytes at VCD offset 0x102514 */
+int pops_region_from_licence(const char tag[4]);
 
-/* Apply recompiler throttling ($FASTMIPS, $SLOWMIPS) */
-int pops_apply_throttling(void *staged_core, size_t core_size, uint8_t fast_mips, uint8_t slow_mips);
+/* POPStarter's region pass: auto PAL for European discs (unless $NOPAL,
+ * $480p or a PATCH file disabled it) and the POPS/BIOS region letters.
+ * Run after the fix files. */
+int pops_apply_region(void *staged_core, size_t core_size, int region,
+                      uint8_t video_mode, int auto_video_disabled);
 
-/* Force boot into the PS1 BIOS OSD Shell ($NOBOOT / $BIOS) */
-int pops_apply_bios_shell(void *staged_core, size_t core_size);
+/* Fixed-value POPStarter commands (POPS_TOK_* mask) */
+int pops_apply_original_tokens(void *staged_core, size_t core_size, uint32_t tokens);
+
+/* POPStarter $IGR0..$IGR5 (igr_type 1..6) or $NOIGR writes */
+int pops_apply_igr_original(void *staged_core, size_t core_size,
+                            uint8_t igr_type, uint8_t no_igr);
 
 /* Apply LibCrypt subchannel Q emulation bypass */
 int pops_apply_libcrypt_bypass(void *staged_core, size_t core_size);
@@ -119,11 +127,6 @@ int pops_cheat_engine_tick(void *ps1_ram_base, const PopsCheatEntry *cheats, uin
 int pops_cheat_engine_tick_ex(void *ps1_ram_base, const PopsCheatEntry *cheats,
                              uint16_t cheat_count, uint32_t frame_count, uint8_t safe_mode);
 
-/* Apply widescreen 16:9 projection patch ($WIDESCREEN) */
-int pops_apply_widescreen(void *staged_core, size_t core_size);
-
-/* Apply dither disable patch ($DITHER_OFF / $NODITHER) */
-int pops_apply_dither_off(void *staged_core, size_t core_size);
 
 /* Direct clean IGR exit: rewires 0x00228a5c..0x00228a68 to set $v0 = 1 and branch to epilogue,
  * preserving pristine delay slot 0x00228a58 (move $v0, $zero) so normal gameplay returns 0,

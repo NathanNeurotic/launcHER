@@ -260,7 +260,7 @@ arg=-dev9=NIC</code></pre>
 
 <h3>Video Mode Directives</h3>
 <p>
-  Override Graphics Synthesizer registers (PMODE, SMODE2, DISPLAY1, DISPLAY2) to match your display equipment:
+  POPS runs in NTSC. Like POPStarter, launcHER reads the licence text on the disc and switches European discs to PAL automatically. Nothing on this page has been tested on a console yet.
 </p>
 
 <div class="table-wrap">
@@ -273,80 +273,38 @@ arg=-dev9=NIC</code></pre>
     </thead>
     <tbody>
       <tr>
+        <td><code>$NOPAL</code> / <code>$PAL2NTSC</code> / <code>$FORCENTSC</code></td>
+        <td>Keeps a European disc at 60 Hz NTSC instead of switching to PAL.</td>
+      </tr>
+      <tr>
+        <td><code>$FORCEPAL</code> / <code>$NTSC2PAL</code></td>
+        <td>Runs any disc in PAL 50 Hz and reports Europe to POPS.</td>
+      </tr>
+      <tr>
+        <td><code>$HDTVFIX</code> / <code>$NOHDTVFIX</code></td>
+        <td>POPStarter's HDTV fix on or off.</td>
+      </tr>
+      <tr>
         <td><code>$480p</code></td>
-        <td>Forces 480p progressive scan (DTV 720x480). Requires component cables or HDMI adapter.</td>
-      </tr>
-      <tr>
-        <td><code>$480i</code></td>
-        <td>Forces standard 480i NTSC interlaced video mode.</td>
-      </tr>
-      <tr>
-        <td><code>$576p</code></td>
-        <td>Forces 576p progressive scan (PAL progressive).</td>
-      </tr>
-      <tr>
-        <td><code>$576i</code></td>
-        <td>Forces standard 576i PAL interlaced video mode.</td>
-      </tr>
-      <tr>
-        <td><code>$240p</code></td>
-        <td>Forces 240p progressive scan mode (NTSC progressive timing without interlacing).</td>
-      </tr>
-      <tr>
-        <td><code>$PAL2NTSC</code> / <code>$FORCENTSC</code></td>
-        <td>Converts European PAL 50Hz video timings to NTSC 60Hz.</td>
-      </tr>
-      <tr>
-        <td><code>$NTSC2PAL</code> / <code>$FORCEPAL</code></td>
-        <td>Converts NTSC 60Hz video timings to PAL 50Hz.</td>
-      </tr>
-      <tr>
-        <td><code>$NOPAL</code></td>
-        <td>Disables PAL mode forcing and maintains standard NTSC timing.</td>
-      </tr>
-      <tr>
-        <td><code>$VMODE_#</code></td>
-        <td>Sets video mode by index (0=Default, 1=PAL2NTSC, 2=NTSC2PAL, 3=NOPAL, 4=480p, 5=480i, 6=576p, 7=576i, 8=240p).</td>
-      </tr>
-      <tr>
-        <td><code>$WIDESCREEN</code></td>
-        <td>Patches the horizontal projection scale factor at <code>0x00205B00</code> to 16:9 aspect ratio.</td>
-      </tr>
-      <tr>
-        <td><code>$DITHER_OFF</code> / <code>$NODITHER</code></td>
-        <td>Disables Graphics Synthesizer dithering at <code>0x00205D58</code> to remove banding noise.</td>
+        <td>Only turns off the automatic PAL switch for now. The progressive mode itself needs POPStarter's resident code, which launcHER does not have yet.</td>
       </tr>
     </tbody>
   </table>
 </div>
 
-<h3>Screen Centering &amp; Fixes</h3>
+<h3>Other POPStarter commands</h3>
 <p>
-  Fine-tune display position on digital monitors:
-</p>
-
-<ul>
-  <li><code>$HDTVFIX</code>: Applies horizontal and vertical adjustments for modern HDTV displays.</li>
-  <li><code>$XPOS_&lt;offset&gt;</code>: Adjusts horizontal screen position in pixels (e.g. <code>$XPOS_16</code> or <code>$XPOS_-8</code>).</li>
-  <li><code>$YPOS_&lt;offset&gt;</code>: Adjusts vertical screen position in scanlines (e.g. <code>$YPOS_10</code> or <code>$YPOS_-4</code>).</li>
-</ul>
-
-<h3>Visual Quality, Timing &amp; System Directives</h3>
-<p>
-  Multiple directives may appear on the same line separated by spaces (e.g. <code>$SAFEMODE $WIDESCREEN $DITHER_OFF</code>):
+  Multiple directives may appear on the same line separated by spaces (e.g. <code>$NOPAL $MUTE_CDDA</code>). The full list, including the commands launcHER cannot do yet, is in <a href="https://github.com/NathanNeurotic/launcHER/blob/codex/popstarter-replacement/docs/POPSTARTER_R13_INVENTORY.md">POPSTARTER_R13_INVENTORY.md</a>.
 </p>
 <ul>
-  <li><code>$SMOOTH</code>: Modifies Graphics Synthesizer texture sampling parameters (<code>TEX0.TFX</code>) to enable bilinear texture filtering.</li>
-  <li><code>$WIDESCREEN</code>: Patches horizontal projection scaling to 16:9 anamorphic widescreen.</li>
-  <li><code>$DITHER_OFF</code> or <code>$NODITHER</code>: Disables Graphics Synthesizer dithering to remove color-banding artifacts.</li>
-  <li><code>$FASTMIPS</code>: Overrides dynamic recompiler instruction wait loops, speeding up CPU execution for select titles.</li>
-  <li><code>$SLOWMIPS</code>: Inserts cycle padding into recompiler wait loops to prevent physics and audio glitches in timing-sensitive titles.</li>
-  <li><code>$SAFEMODE</code>: Delays RAM cheat staging during initial boot, preventing early boot crashes on games with dynamic memory layouts.</li>
-  <li><code>$USBDELAY_#</code>: Pauses boot for the specified number of seconds to allow slow USB storage drives and peripherals to initialize.</li>
-  <li><code>$NOBOOT</code> or <code>$BIOS</code>: Boots straight into the PlayStation 1 BIOS shell (Memory Card manager and CD Audio player) instead of executing the game executable.</li>
-  <li><code>$NOIGR</code> or <code>$IGR0</code>: Disables In-Game Reset button monitoring.</li>
-  <li><code>$IGR1</code>: Enables standard In-Game Reset button combo (<code>L1 + L2 + R1 + R2 + SELECT + START</code>).</li>
-  <li><code>$IGR2</code>: Enables alternate In-Game Reset button combo (<code>L1 + L2 + R1 + R2 + SELECT + CROSS</code>).</li>
+  <li><code>$SCANLINES</code>, <code>$SUBCDSTATUS</code>, <code>$CACHE1</code>, <code>$ROLLBACK</code>, <code>$CODECACHE_ADDON_0</code> to <code>$CODECACHE_ADDON_2</code>: the same core changes POPStarter makes.</li>
+  <li><code>$MUTE_CDDA</code>, <code>$UNDO_MUTE_CDDA</code>, <code>$MUTE_VAB</code>, <code>$MUTE_ALL</code>: mute CD audio, VAB sound or everything.</li>
+  <li><code>$IGR0</code> to <code>$IGR5</code>: POPStarter's In-Game Reset combos; 3 to 5 exit straight away instead of asking. <code>$NOIGR</code> turns In-Game Reset off. Without any of these, launcHER exits straight to the browser.</li>
+  <li><code>$SAFEMODE</code>: delays RAM cheat staging during boot.</li>
+  <li><code>$USBDELAY_#</code>: waits the given number of seconds for slow USB drives.</li>
+  <li><code>$NOBOOT</code> or <code>$BIOS</code>: keeps the PS1 BIOS boot logo.</li>
+  <li>Accepted but not applied yet: <code>$SMOOTH</code>, <code>$WIDESCREEN</code>, <code>$XPOS_&lt;n&gt;</code>, <code>$YPOS_&lt;n&gt;</code>.</li>
+  <li>Not POPStarter commands, ignored: <code>$480i</code>, <code>$576p</code>, <code>$576i</code>, <code>$240p</code>, <code>$VMODE_#</code>, <code>$DITHER_OFF</code>, <code>$FASTMIPS</code>, <code>$SLOWMIPS</code>.</li>
 </ul>
 
 <h2 id="step-5-compatibility-modes">Step 5: Compatibility Modes 1 through 8</h2>

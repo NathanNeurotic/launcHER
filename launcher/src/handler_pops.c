@@ -273,9 +273,10 @@ static int readPopsDependency(const char *path, void *buffer, size_t max_size,
  * The staged executable is discarded by the caller on any failure. */
 static int pops_stage_fix_files(void *stagedCore, size_t coreSize,
                                  const char *vcdDir, const char *titleDir,
-                                 uint8_t initialModes) {
+                                 uint8_t initialModes, int *autoVideoDisabled) {
   PopsFixContext context;
   int result = pops_fix_context_init(&context, stagedCore, coreSize, initialModes);
+  *autoVideoDisabled = 0;
   if (result)
     return result;
   const char *dirs[] = {vcdDir, titleDir};
@@ -303,6 +304,7 @@ static int pops_stage_fix_files(void *stagedCore, size_t coreSize,
       }
     }
   }
+  *autoVideoDisabled = context.video_auto_disabled;
   return 0;
 }
 
@@ -768,35 +770,26 @@ int launchPOPS(int argc, char *argv[]) {
     DPRINTF("POPS: Non-standard serial %s, applying Mode 6 (OSD bypass)\n", vcdInfo.normalized_serial);
   }
 
-  /* Auto video mode: if no explicit video override is specified, check if
-   * title or console environment warrants PAL2NTSC auto-centering.
-   * POPS defaults to PAL timing (576 lines); on NTSC displays/consoles,
-   * unpatched 240-line NTSC games render vertically down-shifted. */
-  if (cfg.video_mode == POPS_VMODE_DEFAULT) {
-    int is_ntsc = 0;
-    int romFd = open("rom0:ROMVER", O_RDONLY);
-    if (romFd >= 0) {
-      char rver[16];
-      int n = read(romFd, rver, sizeof(rver) - 1);
-      close(romFd);
-      if (n >= 5 && rver[4] != 'E') {
-        is_ntsc = 1;
+  /* POPStarter's region pass reads the licence text of sector 4 (VCD
+   * offset 0x102514 for a raw image behind the 1 MiB header). POPS itself
+   * is NTSC; pops_apply_region adds PAL only for European discs. */
+  cfg.disc_region = POPS_REGION_UNKNOWN;
+  int regionRead = 0;
+  {
+    int64_t licence = (int64_t)vcdInfo.image_offset + 4 * (int64_t)vcdInfo.sector_size +
+                      vcdInfo.data_offset + 60;
+    int vcdFd = open(vcdPath, O_RDONLY);
+    if (vcdFd >= 0) {
+      char tag[4];
+      if (lseek(vcdFd, (off_t)licence, SEEK_SET) == (off_t)licence &&
+          read(vcdFd, tag, sizeof(tag)) == (int)sizeof(tag)) {
+        cfg.disc_region = (uint8_t)pops_region_from_licence(tag);
+        regionRead = 1;
       }
+      close(vcdFd);
     }
-    if (ci_strstr(vcdPath, "tekken") || ci_strstr(gameBase, "tekken") ||
-        (vcdInfo.normalized_serial[0] &&
-         (strncasecmp(vcdInfo.normalized_serial, "SLUS", 4) == 0 ||
-          strncasecmp(vcdInfo.normalized_serial, "SCUS", 4) == 0 ||
-          strncasecmp(vcdInfo.normalized_serial, "SLPS", 4) == 0 ||
-          strncasecmp(vcdInfo.normalized_serial, "SLPM", 4) == 0 ||
-          strncasecmp(vcdInfo.normalized_serial, "SCPS", 4) == 0 ||
-          strncasecmp(vcdInfo.normalized_serial, "SIPS", 4) == 0))) {
-      is_ntsc = 1;
-    }
-    if (is_ntsc) {
-      cfg.video_mode = POPS_VMODE_PAL2NTSC;
-      DPRINTF("POPS: Auto-selected PAL2NTSC video centering for NTSC display\n");
-    }
+    DPRINTF("POPS: Disc region %u (licence at 0x%llx)\n", (unsigned)cfg.disc_region,
+            (unsigned long long)licence);
   }
 
   /* All card candidates below fit within vcdDir + one optional folder +
@@ -1152,10 +1145,21 @@ int launchPOPS(int argc, char *argv[]) {
   }
 
   /* Preserve original root/title and TROJAN/PATCH ordering. */
+  int autoVideoDisabled = 0;
   res = pops_stage_fix_files((void *)stagedCore, plan.core_size, vcdDir,
-                              gameConfigDir, cfg.compat_modes);
+                              gameConfigDir, cfg.compat_modes, &autoVideoDisabled);
   if (res)
     return res;
+
+  /* POPStarter's region pass: European auto PAL and region letters. An
+   * unreadable licence leaves POPS as shipped rather than "unknown". */
+  res = regionRead ? pops_apply_region((void *)stagedCore, plan.core_size, cfg.disc_region,
+                                       cfg.video_mode, autoVideoDisabled)
+                   : 0;
+  if (res) {
+    msg("POPS: Region patch failed: %d\n", res);
+    return res;
+  }
 
   /* Apply SLBB-00001 VCD check bypass (FUN_008dbcdc) after fix-file staging
    * so compat site invariants in PopsFixContext remain pristine during staging. */

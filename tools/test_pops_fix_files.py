@@ -96,7 +96,9 @@ static int test_close(int fd) {
 #define close test_close
 ''' + functions + '''
 int test_directory(void *core, size_t size, const char *root, const char *title) {
-  return pops_stage_fix_files(core, size, root, title, 0);
+  int auto_disabled = -1;
+  int result = pops_stage_fix_files(core, size, root, title, 0, &auto_disabled);
+  return !result && auto_disabled != 0 && auto_disabled != 1 ? -1000 : result;
 }
 int test_dependency(const char *path, void *buffer, size_t size, size_t *read_size) {
   return readPopsDependency(path, buffer, size, read_size);

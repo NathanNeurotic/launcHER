@@ -648,16 +648,15 @@ If you launch without a `launcHER.CNF` file, launcHER identifies adjacent game i
 
 ### Per-game configuration directives
 
-Place optional configuration files alongside your `.VCD` image or inside its per-game subfolder (for example, `POPS/Crash Bandicoot/` for `POPS/Crash Bandicoot.VCD`). `VMCDIR.TXT` redirects save files only; cheats and TROJAN fixes remain in the original per-game folder. Multiple directives can share a line (e.g. `$SAFEMODE $WIDESCREEN $DITHER_OFF`):
+Place optional configuration files alongside your `.VCD` image or inside its per-game subfolder (for example, `POPS/Crash Bandicoot/` for `POPS/Crash Bandicoot.VCD`). `VMCDIR.TXT` redirects save files only; cheats and TROJAN fixes remain in the original per-game folder. Multiple directives can share a line (e.g. `$NOPAL $HDTVFIX`). The full list of original POPStarter commands and what launcHER does with each is in [docs/POPSTARTER_R13_INVENTORY.md](docs/POPSTARTER_R13_INVENTORY.md):
 
 - **`PATCHES.TXT` / `MODES.TXT`:** Directives and compatibility modes.
-  - Video overrides: `$480p`, `$480i`, `$576p`, `$576i`, `$240p`, `$PAL2NTSC`, `$NTSC2PAL`, `$NOPAL`, `$FORCEPAL`, `$FORCENTSC`, `$VMODE_<0..8>`.
-  - Screen geometry: `$HDTVFIX`, `$WIDESCREEN` (16:9 projection patch), `$XPOS_<offset>`, `$YPOS_<offset>`.
-  - Visual filtering: `$SMOOTH` (bilinear texture filtering), `$DITHER_OFF` / `$NODITHER` (removes GS dithering banding).
-  - CPU recompiler throttling: `$FASTMIPS`, `$SLOWMIPS`.
-  - Boot and IGR: `$NOBOOT` / `$BIOS`, `$NOIGR` / `$IGR0`, `$IGR1`, `$IGR2`.
+  - Video: European discs switch to PAL automatically, as in POPStarter. `$NOPAL` (aliases `$PAL2NTSC`, `$FORCENTSC`) keeps them at 60 Hz; `$FORCEPAL` (alias `$NTSC2PAL`) runs any disc in PAL. `$HDTVFIX` / `$NOHDTVFIX`. `$480p` only turns off the automatic PAL switch for now.
+  - Sound and core: `$SCANLINES`, `$SUBCDSTATUS`, `$MUTE_CDDA`, `$UNDO_MUTE_CDDA`, `$MUTE_VAB`, `$MUTE_ALL`, `$CODECACHE_ADDON_0`..`2`, `$ROLLBACK`, `$CACHE1`.
+  - IGR: `$IGR0`..`$IGR5` (POPStarter's combo choices; 3 to 5 exit straight away) and `$NOIGR`. Without one, launcHER's direct exit is used.
+  - Accepted but not applied yet: `$SMOOTH`, `$WIDESCREEN`, `$XPOS_`/`$YPOS_`. Not POPStarter commands, ignored: `$480i`, `$576p`, `$576i`, `$240p`, `$VMODE_n`, `$DITHER_OFF`, `$FASTMIPS`, `$SLOWMIPS`. `$NOBOOT` / `$BIOS` keeps the PS1 boot logo.
   - Delays and stability: `$SAFEMODE` (delays RAM cheat staging), `$USBDELAY_<seconds>`.
-  - Compatibility modes: `$COMPATIBILITY_0x01` through `0x08`, or bare digits `1`..`8` in `MODES.TXT`.
+  - Compatibility modes: `$COMPATIBILITY_0x01` through `0x07`, or bare digits `1`..`7` in `MODES.TXT` (Mode 8 has no branch in the original and is refused).
 - **`DISCS.TXT`:** Multi-disc paths (up to 4 discs). Press **SELECT + L1 + R1** in-game to cycle discs.
 - **`CHEATS.TXT`:** GameShark / Action Replay codes with or without `$` prefix. Supports 16-bit writes (`80`, `10`), 8-bit writes (`30`, `20`), 16-bit conditionals (`D0`..`D3`), and 8-bit conditionals (`E0`..`E1`).
 - **`VMCDIR.TXT`:** Redirects Virtual Memory Card save files to a custom folder path.

@@ -42,6 +42,8 @@ class PopsConfig(c.Structure):
         ("vmc_dir", c.c_char * 128),
         ("cheat_count", c.c_uint16),
         ("cheats", CheatEntry * 256),
+        ("original_tokens", c.c_uint32),
+        ("disc_region", c.c_uint8),
     ]
 
 class PopsCompatEntry(c.Structure):
@@ -109,12 +111,6 @@ class FeatureTests(unittest.TestCase):
         LIB.pops_apply_all_config_patches.restype = c.c_int
         LIB.pops_apply_video_overrides.argtypes = [c.c_void_p, c.c_size_t, c.c_uint8, c.c_uint8, c.c_int16, c.c_int16]
         LIB.pops_apply_video_overrides.restype = c.c_int
-        LIB.pops_apply_smooth.argtypes = [c.c_void_p, c.c_size_t]
-        LIB.pops_apply_smooth.restype = c.c_int
-        LIB.pops_apply_widescreen.argtypes = [c.c_void_p, c.c_size_t]
-        LIB.pops_apply_widescreen.restype = c.c_int
-        LIB.pops_apply_dither_off.argtypes = [c.c_void_p, c.c_size_t]
-        LIB.pops_apply_dither_off.restype = c.c_int
         LIB.pops_apply_igr_exit.argtypes = [c.c_void_p, c.c_size_t]
         LIB.pops_apply_igr_exit.restype = c.c_int
         LIB.pops_apply_igr_direct_exit.argtypes = [c.c_void_p, c.c_size_t]
@@ -141,10 +137,14 @@ class FeatureTests(unittest.TestCase):
         LIB.pops_apply_bios_osd_disable.restype = c.c_int
         LIB.pops_apply_bios_osd_enable.argtypes = [c.c_void_p, c.c_size_t]
         LIB.pops_apply_bios_osd_enable.restype = c.c_int
-        LIB.pops_apply_throttling.argtypes = [c.c_void_p, c.c_size_t, c.c_uint8, c.c_uint8]
-        LIB.pops_apply_throttling.restype = c.c_int
-        LIB.pops_apply_bios_shell.argtypes = [c.c_void_p, c.c_size_t]
-        LIB.pops_apply_bios_shell.restype = c.c_int
+        LIB.pops_apply_original_tokens.argtypes = [c.c_void_p, c.c_size_t, c.c_uint32]
+        LIB.pops_apply_original_tokens.restype = c.c_int
+        LIB.pops_apply_igr_original.argtypes = [c.c_void_p, c.c_size_t, c.c_uint8, c.c_uint8]
+        LIB.pops_apply_igr_original.restype = c.c_int
+        LIB.pops_region_from_licence.argtypes = [c.c_char_p]
+        LIB.pops_region_from_licence.restype = c.c_int
+        LIB.pops_apply_region.argtypes = [c.c_void_p, c.c_size_t, c.c_int, c.c_uint8, c.c_int]
+        LIB.pops_apply_region.restype = c.c_int
         LIB.pops_apply_libcrypt_bypass.argtypes = [c.c_void_p, c.c_size_t]
         LIB.pops_apply_libcrypt_bypass.restype = c.c_int
         LIB.pops_apply_cheats.argtypes = [c.c_void_p, c.POINTER(CheatEntry), c.c_uint16]
@@ -183,7 +183,7 @@ class FeatureTests(unittest.TestCase):
         cfg = PopsConfig()
         LIB.pops_config_init(c.byref(cfg))
         cfg.compat_modes = 1
-        cfg.smooth = 1
+        cfg.hdtv_fix = 1
         small = bytearray(0x180000)
         struct.pack_into("<I", small, 0x00210318 - 0x00200000, 0x8F828228)
         struct.pack_into("<I", small, 0x0021032C - 0x00200000, 0x1443FFFA)
@@ -192,16 +192,16 @@ class FeatureTests(unittest.TestCase):
         self.assertLess(LIB.pops_apply_all_config_patches(buf, len(small), c.byref(cfg)), 0)
         self.assertEqual(small, before)
 
-        # PAL/NTSC writes a late word at 0x00502770. Previous code could
+        # $FORCEPAL writes a late word at 0x00502770. Previous code could
         # update earlier mode bytes, ignore the late write error and return 0.
         cfg = PopsConfig()
         LIB.pops_config_init(c.byref(cfg))
-        cfg.video_mode = 1
+        cfg.video_mode = 2
         almost = bytearray(0x302000)
         ptr = (c.c_uint8 * len(almost)).from_buffer(almost)
         before = bytes(almost)
         self.assertLess(LIB.pops_apply_video_overrides(ptr, len(almost),
-                        1, 0, 0, 0), 0)
+                        2, 0, 0, 0), 0)
         self.assertEqual(almost, before)
         self.assertLess(LIB.pops_apply_all_config_patches(ptr, len(almost),
                         c.byref(cfg)), 0)
@@ -669,24 +669,48 @@ class FeatureTests(unittest.TestCase):
         self.assertEqual(cfg.widescreen, 1)
         self.assertEqual(cfg.dither_off, 1)
 
-        # Additional video directives and aliases
+        # Video directives. $240p/$VMODE are not POPStarter commands and
+        # leave the mode alone; PAL2NTSC/FORCENTSC are the original $NOPAL.
         self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$240p"), 0)
-        self.assertEqual(cfg.video_mode, 8)
+        self.assertEqual(cfg.video_mode, 4)
 
         self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$FORCEPAL"), 0)
         self.assertEqual(cfg.video_mode, 2)
 
         self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$FORCENTSC"), 0)
-        self.assertEqual(cfg.video_mode, 1)
+        self.assertEqual(cfg.video_mode, 3)
 
         self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$VMODE_4"), 0)
-        self.assertEqual(cfg.video_mode, 4)
+        self.assertEqual(cfg.video_mode, 3)
+
+        self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$NOPAL"), 0)
+        self.assertEqual(cfg.video_mode, 3)
+
+        # Fixed-value original commands
+        self.assertEqual(LIB.pops_config_parse_line(
+            c.byref(cfg), b"$SCANLINES $MUTE_CDDA $CODECACHE_ADDON_2 $ROLLBACK $CACHE1"), 0)
+        self.assertEqual(cfg.original_tokens, (1 << 0) | (1 << 2) | (1 << 8) | (1 << 9) | (1 << 10))
+        self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$NOHDTVFIX"), 0)
+        self.assertEqual(cfg.hdtv_fix, 0)
+        self.assertTrue(cfg.original_tokens & (1 << 11))
+        self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$HDTVFIX"), 0)
+        self.assertEqual(cfg.hdtv_fix, 1)
+        self.assertFalse(cfg.original_tokens & (1 << 11))
 
         # Delays and IGR mode
         self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$USBDELAY_5"), 0)
         self.assertEqual(cfg.usb_delay, 5)
 
         self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$IGR2"), 0)
+        self.assertEqual((cfg.igr_type, cfg.no_igr), (3, 0))
+        self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$IGR0"), 0)
+        self.assertEqual((cfg.igr_type, cfg.no_igr), (1, 0))
+        self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$IGR5"), 0)
+        self.assertEqual(cfg.igr_type, 6)
+        self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$IGR6"), 0)
+        self.assertEqual(cfg.igr_type, 6)
+        self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$NOIGR"), 0)
+        self.assertEqual((cfg.igr_type, cfg.no_igr), (0, 1))
         # Runtime core corrections directives
         self.assertEqual(cfg.runtime_corrections, 0)
         self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$FIX_TEXTURE_WINDOW"), 0)
@@ -790,75 +814,62 @@ class FeatureTests(unittest.TestCase):
         self.assertLess(LIB.pops_apply_compat_modes(core_ptr, core_size, mask), 0)
         self.assertEqual(bytes(buf), before)
 
-        # Unguarded / mismatch test: helpers must reject ungrounded/corrupted sites with EILSEQ
-        self.assertEqual(LIB.pops_apply_widescreen(core_ptr, core_size), -errno.EILSEQ)
-        self.assertEqual(LIB.pops_apply_smooth(core_ptr, core_size), -errno.EILSEQ)
-        self.assertEqual(LIB.pops_apply_dither_off(core_ptr, core_size), -errno.EILSEQ)
-        self.assertEqual(LIB.pops_apply_throttling(core_ptr, core_size, 1, 0), -errno.EILSEQ)
-        self.assertEqual(LIB.pops_apply_bios_shell(core_ptr, core_size), -errno.EILSEQ)
+        # Guard mismatches leave the core untouched.
         self.assertEqual(LIB.pops_apply_libcrypt_bypass(core_ptr, core_size), -errno.EILSEQ)
-        self.assertEqual(LIB.pops_apply_video_overrides(core_ptr, core_size, 1, 1, -10, 20), -errno.EILSEQ)
+        self.assertEqual(LIB.pops_apply_video_overrides(core_ptr, core_size, 2, 0, 0, 0), -errno.EILSEQ)
+        self.assertEqual(LIB.pops_apply_video_overrides(core_ptr, core_size, 0, 1, 0, 0), -errno.EILSEQ)
+        self.assertEqual(LIB.pops_apply_igr_original(core_ptr, core_size, 1, 0), -errno.EILSEQ)
+        self.assertEqual(bytes(buf), before)
 
-        # Seed pristine instructions for video overrides
-        buf[0x1AF94] = 0x64
+        # Modes without grounded writes and position offsets are refused.
+        for mode in (4, 5, 6, 7, 8):
+            self.assertEqual(LIB.pops_apply_video_overrides(core_ptr, core_size, mode, 0, 0, 0),
+                             -errno.ENOTSUP)
+        self.assertEqual(LIB.pops_apply_video_overrides(core_ptr, core_size, 0, 0, -10, 0),
+                         -errno.ENOTSUP)
+        # $NOPAL / PAL2NTSC never writes: POPS is NTSC unless patched.
+        self.assertEqual(LIB.pops_apply_video_overrides(core_ptr, core_size, 1, 0, 0, 0), 0)
+        self.assertEqual(LIB.pops_apply_video_overrides(core_ptr, core_size, 3, 0, 0, 0), 0)
+        self.assertEqual(bytes(buf), before)
+
+        # $FORCEPAL writes POPStarter's FUN_008dc218 values; $HDTVFIX li a0,1.
+        buf[0x1AF94] = 0x02
         struct.pack_into("<I", buf, 0x302770, 0x000c7200)
         buf[0x3B018] = 0x7f
         struct.pack_into("<H", buf, 0x3B01C, 0x0357)
-        struct.pack_into("<I", buf, 0x002061DC - 0x00200000, 0x10400006)
-        struct.pack_into("<H", buf, 0x00206214 - 0x00200000, 0x902d)
-        struct.pack_into("<H", buf, 0x00206218 - 0x00200000, 0x001b)
+        struct.pack_into("<I", buf, 0x3acb0, 0x32240001)
+        struct.pack_into("<I", buf, 0x3ad0c, 0x32240001)
+        self.assertEqual(LIB.pops_apply_video_overrides(core_ptr, core_size, 2, 1, 0, 0), 0)
+        self.assertEqual(buf[0x1AF94], 3)
+        self.assertEqual(struct.unpack_from("<I", buf, 0x302770)[0], 0x000a6300)
+        self.assertEqual(buf[0x3B018], 0x6b)
+        self.assertEqual(struct.unpack_from("<H", buf, 0x3B01C)[0], 0x02cb)
+        self.assertEqual(struct.unpack_from("<I", buf, 0x3acb0)[0], 0x24040001)
+        self.assertEqual(struct.unpack_from("<I", buf, 0x3ad0c)[0], 0x24040001)
+        # Idempotent on an already patched core.
+        self.assertEqual(LIB.pops_apply_video_overrides(core_ptr, core_size, 2, 1, 0, 0), 0)
 
-        # Test PAL2NTSC video override
-        res = LIB.pops_apply_video_overrides(core_ptr, core_size, 1, 1, -10, 20)
-        self.assertEqual(res, 0)
-        val_ntsc = buf[0x1AF94]  # 0x0021af94 - 0x00200000
-        self.assertEqual(val_ntsc, 3)
-        val_vsync = struct.unpack_from("<I", buf, 0x302770)[0]  # 0x00502770 - 0x00200000 = 0x302770
-        self.assertEqual(val_vsync, 0x000a6300)
+        # Fixed-value original commands; later commands win at shared sites.
+        tokens = (1 << 0) | (1 << 2) | (1 << 7) | (1 << 8) | (1 << 11)
+        self.assertEqual(LIB.pops_apply_original_tokens(core_ptr, core_size, tokens), 0)
+        self.assertEqual(struct.unpack_from("<I", buf, 0x1e454)[0], 0x22b50006)
+        self.assertEqual(buf[0xf0b6], 0)
+        self.assertEqual(struct.unpack_from("<I", buf, 0x2734)[0], 0x14600004)
+        self.assertEqual(struct.unpack_from("<I", buf, 0x3acb0)[0], 0x32240001)
+        self.assertEqual(LIB.pops_apply_original_tokens(core_ptr, core_size, 1 << 12), -errno.ENOTSUP)
+        self.assertEqual(LIB.pops_apply_original_tokens(core_ptr, 0x1e456, 1), -errno.ERANGE)
 
-        # Seed 240p pristine instructions
-        struct.pack_into("<I", buf, 0x002061A0 - 0x00200000, 0x0080a02d)
-        struct.pack_into("<I", buf, 0x002061E0 - 0x00200000, 0x0220502d)
-
-        # Test 240p video override (POPS_VMODE_240P = 8)
-        res = LIB.pops_apply_video_overrides(core_ptr, core_size, 8, 0, 0, 0)
-        self.assertEqual(res, 0)
-        val_240p = struct.unpack_from("<I", buf, 0x002061A0 - 0x00200000)[0]
-        self.assertEqual(val_240p, 0x24020000)
-
-        # Seed Widescreen patch (0x00205B00)
-        struct.pack_into("<I", buf, 0x00205B00 - 0x00200000, 0x0080802d)
-        res = LIB.pops_apply_widescreen(core_ptr, core_size)
-        self.assertEqual(res, 0)
-        val_ws = struct.unpack_from("<I", buf, 0x00205B00 - 0x00200000)[0]
-        self.assertEqual(val_ws, 0x24020C00)
-
-        # Seed Dither disable patch (0x00205D58)
-        struct.pack_into("<I", buf, 0x00205D58 - 0x00200000, 0xdfb30028)
-        res = LIB.pops_apply_dither_off(core_ptr, core_size)
-        self.assertEqual(res, 0)
-        val_dither = struct.unpack_from("<I", buf, 0x00205D58 - 0x00200000)[0]
-        self.assertEqual(val_dither, 0x00000000)
-
-        # Seed Smooth patch (0x00205E00)
-        struct.pack_into("<I", buf, 0x00205E00 - 0x00200000, 0x0200202d)
-        res = LIB.pops_apply_smooth(core_ptr, core_size)
-        self.assertEqual(res, 0)
-        val_smooth = struct.unpack_from("<I", buf, 0x00205E00 - 0x00200000)[0]
-        self.assertEqual(val_smooth, 0x24020001)
-
-        # Seed Throttling patch (0x002010A0)
-        struct.pack_into("<I", buf, 0x002010A0 - 0x00200000, 0xffb00000)
-        res = LIB.pops_apply_throttling(core_ptr, core_size, 1, 0)
-        self.assertEqual(res, 0)
-        val_fast = struct.unpack_from("<I", buf, 0x002010A0 - 0x00200000)[0]
-        self.assertEqual(val_fast, 0x00000000)
-
-        # Seed BIOS shell patch (0x00210CF8: addiu $v0, $v0, -1 -> 0x2442FFFF)
-        struct.pack_into("<I", buf, 0x00210CF8 - 0x00200000, 0x2442FFFF)
-        res = LIB.pops_apply_bios_shell(core_ptr, core_size)
-        self.assertEqual(res, 0)
-        self.assertEqual(struct.unpack_from("<I", buf, 0x00210CF8 - 0x00200000)[0], 0x2442FF01)
+        # Original IGR writes: $IGR4 jumps to 0x20c08c with the 0x900 mask.
+        struct.pack_into("<I", buf, 0x28a64, 0x2622a980)
+        self.assertEqual(LIB.pops_apply_igr_original(core_ptr, core_size, 5, 0), 0)
+        self.assertEqual(struct.unpack_from("<I", buf, 0x28a5c)[0], 0x08083023)
+        self.assertEqual(struct.unpack_from("<I", buf, 0x28a60)[0], 0)
+        self.assertEqual(struct.unpack_from("<H", buf, 0x28a20)[0], 0x0900)
+        self.assertEqual(struct.unpack_from("<H", buf, 0x28a56)[0], 0x1462)
+        self.assertEqual(LIB.pops_apply_igr_original(core_ptr, core_size, 0, 1), 0)
+        self.assertEqual(struct.unpack_from("<I", buf, 0x28a5c)[0], 0x3c110086)
+        self.assertEqual(struct.unpack_from("<H", buf, 0x28a56)[0], 0x1000)
+        self.assertEqual(LIB.pops_apply_igr_original(core_ptr, core_size, 7, 0), -errno.EINVAL)
 
         # Seed LibCrypt bypass
         struct.pack_into("<I", buf, 0x0020C1F0 - 0x00200000, 0x3463ffff)
@@ -1226,133 +1237,96 @@ class FeatureTests(unittest.TestCase):
 
     def test_directive_exact_boundaries_and_guards(self):
         # 1. Null buffer checks
-        self.assertEqual(LIB.pops_apply_widescreen(None, 0x100000), -errno.EINVAL)
-        self.assertEqual(LIB.pops_apply_smooth(None, 0x100000), -errno.EINVAL)
-        self.assertEqual(LIB.pops_apply_dither_off(None, 0x100000), -errno.EINVAL)
-        self.assertEqual(LIB.pops_apply_throttling(None, 0x100000, 1, 0), -errno.EINVAL)
-        self.assertEqual(LIB.pops_apply_bios_shell(None, 0x100000), -errno.EINVAL)
         self.assertEqual(LIB.pops_apply_libcrypt_bypass(None, 0x100000), -errno.EINVAL)
         self.assertEqual(LIB.pops_apply_video_overrides(None, 0x100000, 1, 0, 0, 0), -errno.EINVAL)
+        self.assertEqual(LIB.pops_apply_original_tokens(None, 0x100000, 1), -errno.EINVAL)
+        self.assertEqual(LIB.pops_apply_igr_original(None, 0x100000, 1, 0), -errno.EINVAL)
+        self.assertEqual(LIB.pops_apply_region(None, 0x100000, 1, 0, 0), -errno.EINVAL)
 
         # 2. Unsupported video mode
         tiny_buf = bytearray(0x10)
         tiny_ptr = (c.c_uint8 * len(tiny_buf)).from_buffer(tiny_buf)
         self.assertEqual(LIB.pops_apply_video_overrides(tiny_ptr, len(tiny_buf), 9, 0, 0, 0), -errno.ENOTSUP)
 
-        # 3. Truncated buffer bounds for each directive
-        # Widescreen: 0x00205B00 - 0x00200000 + 4 = 0x5B04
-        ws_off = 0x00205B00 - 0x00200000
-        buf = bytearray(ws_off + 3)
-        ptr = (c.c_uint8 * len(buf)).from_buffer(buf)
-        self.assertEqual(LIB.pops_apply_widescreen(ptr, len(buf)), -errno.ERANGE)
-
-        # Smooth: 0x00205E00 - 0x00200000 + 4 = 0x5E04
-        sm_off = 0x00205E00 - 0x00200000
-        buf = bytearray(sm_off + 3)
-        ptr = (c.c_uint8 * len(buf)).from_buffer(buf)
-        self.assertEqual(LIB.pops_apply_smooth(ptr, len(buf)), -errno.ERANGE)
-
-        # Dither off: 0x00205D58 - 0x00200000 + 4 = 0x5D5C
-        dit_off = 0x00205D58 - 0x00200000
-        buf = bytearray(dit_off + 3)
-        ptr = (c.c_uint8 * len(buf)).from_buffer(buf)
-        self.assertEqual(LIB.pops_apply_dither_off(ptr, len(buf)), -errno.ERANGE)
-
-        # Throttling: 0x002010A0 - 0x00200000 + 4 = 0x10A4
-        th_off = 0x002010A0 - 0x00200000
-        buf = bytearray(th_off + 3)
-        ptr = (c.c_uint8 * len(buf)).from_buffer(buf)
-        self.assertEqual(LIB.pops_apply_throttling(ptr, len(buf), 1, 0), -errno.ERANGE)
-        self.assertEqual(LIB.pops_apply_throttling(ptr, len(buf), 0, 1), -errno.ERANGE)
-        self.assertEqual(LIB.pops_apply_throttling(ptr, len(buf), 0, 0), 0)
-
-        # BIOS shell: 0x00210cf8 - 0x00200000 + 4 = 0x10cfc
-        bios_off = 0x00210cf8 - 0x00200000
-        buf = bytearray(bios_off + 3)
-        ptr = (c.c_uint8 * len(buf)).from_buffer(buf)
-        self.assertEqual(LIB.pops_apply_bios_shell(ptr, len(buf)), -errno.ERANGE)
-
-        # Libcrypt: 0x0020CFB0 - 0x00200000 + 4 = 0xCFB4
+        # 3. Truncated buffers
         lc_off = 0x0020CFB0 - 0x00200000
         buf = bytearray(lc_off + 3)
         ptr = (c.c_uint8 * len(buf)).from_buffer(buf)
         self.assertEqual(LIB.pops_apply_libcrypt_bypass(ptr, len(buf)), -errno.ERANGE)
 
-        # Video overrides bounds checks
-        # PAL2NTSC / NTSC2PAL: needs 0x00502770 + 4 (off = 0x302774)
+        # $FORCEPAL needs 0x00502770 + 4 (off = 0x302774)
         buf_pal = bytearray(0x302773)
         ptr_pal = (c.c_uint8 * len(buf_pal)).from_buffer(buf_pal)
-        self.assertEqual(LIB.pops_apply_video_overrides(ptr_pal, len(buf_pal), 1, 0, 0, 0), -errno.ERANGE)
         self.assertEqual(LIB.pops_apply_video_overrides(ptr_pal, len(buf_pal), 2, 0, 0, 0), -errno.ERANGE)
 
-        # 480P / 240P: needs 0x002061E0 + 4 (off = 0x61E4)
-        buf_480p = bytearray(0x61E3)
-        ptr_480p = (c.c_uint8 * len(buf_480p)).from_buffer(buf_480p)
-        self.assertEqual(LIB.pops_apply_video_overrides(ptr_480p, len(buf_480p), 4, 0, 0, 0), -errno.ERANGE)
-        self.assertEqual(LIB.pops_apply_video_overrides(ptr_480p, len(buf_480p), 8, 0, 0, 0), -errno.ERANGE)
-
-        # 480I / 576P / 576I: needs 0x002061A0 + 4 (off = 0x61A4)
-        buf_480i = bytearray(0x61A3)
-        ptr_480i = (c.c_uint8 * len(buf_480i)).from_buffer(buf_480i)
-        self.assertEqual(LIB.pops_apply_video_overrides(ptr_480i, len(buf_480i), 5, 0, 0, 0), -errno.ERANGE)
-        self.assertEqual(LIB.pops_apply_video_overrides(ptr_480i, len(buf_480i), 6, 0, 0, 0), -errno.ERANGE)
-        self.assertEqual(LIB.pops_apply_video_overrides(ptr_480i, len(buf_480i), 7, 0, 0, 0), -errno.ERANGE)
-
-        # HDTV fix: needs 0x002061DC + 4 (off = 0x61E0)
-        buf_hdtv = bytearray(0x61DF)
+        # $HDTVFIX needs 0x0023ad0c + 4
+        buf_hdtv = bytearray(0x3ad0f)
         ptr_hdtv = (c.c_uint8 * len(buf_hdtv)).from_buffer(buf_hdtv)
         self.assertEqual(LIB.pops_apply_video_overrides(ptr_hdtv, len(buf_hdtv), 0, 1, 0, 0), -errno.ERANGE)
 
-        # XPOS: needs 0x00206214 + 2 (off = 0x6216)
-        buf_x = bytearray(0x6215)
-        ptr_x = (c.c_uint8 * len(buf_x)).from_buffer(buf_x)
-        self.assertEqual(LIB.pops_apply_video_overrides(ptr_x, len(buf_x), 0, 0, 5, 0), -errno.ERANGE)
+        # Region pass needs the 0x2cbb72 letter
+        buf_rg = bytearray(0xcbb72)
+        ptr_rg = (c.c_uint8 * len(buf_rg)).from_buffer(buf_rg)
+        self.assertEqual(LIB.pops_apply_region(ptr_rg, len(buf_rg), 1, 0, 0), -errno.ERANGE)
+        self.assertEqual(LIB.pops_apply_region(ptr_rg, len(buf_rg), 9, 0, 0), -errno.EINVAL)
 
-        # YPOS: needs 0x00206218 + 2 (off = 0x621A)
-        buf_y = bytearray(0x6219)
-        ptr_y = (c.c_uint8 * len(buf_y)).from_buffer(buf_y)
-        self.assertEqual(LIB.pops_apply_video_overrides(ptr_y, len(buf_y), 0, 0, 0, 5), -errno.ERANGE)
+    def test_region_pass_matches_original(self):
+        self.assertEqual(LIB.pops_region_from_licence(b"Euro"), 1)
+        self.assertEqual(LIB.pops_region_from_licence(b"Amer"), 2)
+        self.assertEqual(LIB.pops_region_from_licence(b"of A"), 2)
+        self.assertEqual(LIB.pops_region_from_licence(b"Inc."), 3)
+        self.assertEqual(LIB.pops_region_from_licence(b"euro"), 0)
 
-        # 4. Valid application and byte inspection on exact-sized buffers
-        # Widescreen
-        buf_ws = bytearray(ws_off + 4)
-        struct.pack_into("<I", buf_ws, ws_off, 0x0080802d)
-        ptr_ws = (c.c_uint8 * len(buf_ws)).from_buffer(buf_ws)
-        self.assertEqual(LIB.pops_apply_widescreen(ptr_ws, len(buf_ws)), 0)
-        self.assertEqual(struct.unpack_from("<I", buf_ws, ws_off)[0], 0x24020C00)
+        def core():
+            buf = bytearray(0x303000)
+            buf[0x1AF94] = 0x02
+            struct.pack_into("<I", buf, 0x302770, 0x000c7200)
+            buf[0x3B018] = 0x7f
+            struct.pack_into("<H", buf, 0x3B01C, 0x0357)
+            return buf, (c.c_uint8 * len(buf)).from_buffer(buf)
 
-        # Smooth
-        buf_sm = bytearray(sm_off + 4)
-        struct.pack_into("<I", buf_sm, sm_off, 0x0200202d)
-        ptr_sm = (c.c_uint8 * len(buf_sm)).from_buffer(buf_sm)
-        self.assertEqual(LIB.pops_apply_smooth(ptr_sm, len(buf_sm)), 0)
-        self.assertEqual(struct.unpack_from("<I", buf_sm, sm_off)[0], 0x24020001)
+        def pal(buf):
+            return buf[0x1AF94] == 3 and struct.unpack_from("<I", buf, 0x302770)[0] == 0xa6300
 
-        # Dither off
-        buf_dit = bytearray(dit_off + 4)
-        struct.pack_into("<I", buf_dit, dit_off, 0xdfb30028)
-        ptr_dit = (c.c_uint8 * len(buf_dit)).from_buffer(buf_dit)
-        self.assertEqual(LIB.pops_apply_dither_off(ptr_dit, len(buf_dit)), 0)
-        self.assertEqual(struct.unpack_from("<I", buf_dit, dit_off)[0], 0x00000000)
+        # A European disc gets the PAL patch and E/E/'li a0,E'.
+        buf, ptr = core()
+        self.assertEqual(LIB.pops_apply_region(ptr, len(buf), 1, 0, 0), 0)
+        self.assertTrue(pal(buf))
+        self.assertEqual((buf[0xcbb72], buf[0xf6cc]), (ord('E'), ord('E')))
+        self.assertEqual(struct.unpack_from("<I", buf, 0x649a0)[0], 0x34040045)
 
-        # Fast MIPS
-        buf_th = bytearray(th_off + 4)
-        struct.pack_into("<I", buf_th, th_off, 0xffb00000)
-        ptr_th = (c.c_uint8 * len(buf_th)).from_buffer(buf_th)
-        self.assertEqual(LIB.pops_apply_throttling(ptr_th, len(buf_th), 1, 0), 0)
-        self.assertEqual(struct.unpack_from("<I", buf_th, th_off)[0], 0x00000000)
+        # $NOPAL, $480p and a PATCH file's disable-auto keep it NTSC.
+        for mode, auto_off in ((3, 0), (4, 0), (0, 1)):
+            buf, ptr = core()
+            self.assertEqual(LIB.pops_apply_region(ptr, len(buf), 1, mode, auto_off), 0)
+            self.assertFalse(pal(buf))
+            self.assertEqual(buf[0xcbb72], ord('E'))
 
-        # Slow MIPS
-        struct.pack_into("<I", buf_th, th_off, 0xffb00000)
-        self.assertEqual(LIB.pops_apply_throttling(ptr_th, len(buf_th), 0, 1), 0)
-        self.assertEqual(struct.unpack_from("<I", buf_th, th_off)[0], 0x24040004)
+        # American and Japanese discs stay NTSC with their letters.
+        buf, ptr = core()
+        self.assertEqual(LIB.pops_apply_region(ptr, len(buf), 2, 0, 0), 0)
+        self.assertFalse(pal(buf))
+        self.assertEqual((buf[0xcbb72], buf[0xf6cc]), (ord('A'), ord('A')))
+        self.assertEqual(struct.unpack_from("<I", buf, 0x649a0)[0], 0x34040041)
+        buf, ptr = core()
+        self.assertEqual(LIB.pops_apply_region(ptr, len(buf), 3, 0, 0), 0)
+        self.assertEqual((buf[0xcbb72], buf[0xf6cc]), (ord('J'), ord('I')))
+        self.assertEqual(struct.unpack_from("<I", buf, 0x649a0)[0], 0x34040049)
 
-        # BIOS shell
-        buf_bios = bytearray(bios_off + 4)
-        struct.pack_into("<I", buf_bios, bios_off, 0x2442FFFF)
-        ptr_bios = (c.c_uint8 * len(buf_bios)).from_buffer(buf_bios)
-        self.assertEqual(LIB.pops_apply_bios_shell(ptr_bios, len(buf_bios)), 0)
-        self.assertEqual(struct.unpack_from("<I", buf_bios, bios_off)[0], 0x2442FF01)
+        # $FORCEPAL reports Europe to POPS; the BIOS keeps the disc region.
+        buf, ptr = core()
+        buf[0xf6cc] = 0x55
+        self.assertEqual(LIB.pops_apply_region(ptr, len(buf), 2, 2, 0), 0)
+        self.assertEqual(buf[0xcbb72], ord('E'))
+        self.assertEqual(buf[0xf6cc], 0x55)
+        self.assertEqual(struct.unpack_from("<I", buf, 0x649a0)[0], 0x34040041)
+
+        # Unknown licence: 'T' and the four region checks zeroed.
+        buf, ptr = core()
+        self.assertEqual(LIB.pops_apply_region(ptr, len(buf), 0, 0, 0), 0)
+        self.assertEqual(buf[0xcbb72], ord('T'))
+        self.assertEqual(struct.unpack_from("<4I", buf, 0x64994),
+                         (0x34050000, 0x34020000, 0x34030000, 0x34040000))
 
 if __name__ == "__main__":
     unittest.main()

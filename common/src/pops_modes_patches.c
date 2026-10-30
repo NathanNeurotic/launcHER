@@ -298,171 +298,221 @@ int pops_apply_compat_modes(void *staged_core, size_t core_size, uint8_t modes_m
   return 0;
 }
 
+/* POPStarter r13 FUN_008dc218, the "to PAL" patch. The original applies it
+ * to European discs (unless $NOPAL) and for $FORCEPAL; POPS is NTSC
+ * otherwise. Accepted current bytes were measured on the reference core. */
+static int apply_pal_patch(void *staged_core, size_t core_size) {
+  uint8_t m = read_u8(staged_core, core_size, 0x0021af94);
+  uint32_t vs = read_u32(staged_core, core_size, 0x00502770);
+  uint8_t x = read_u8(staged_core, core_size, 0x0023b018);
+  uint16_t y = read_u16(staged_core, core_size, 0x0023b01c);
+  if (core_size < (size_t)(0x00502770 - POPS_CORE_BASE_ADDR + 4))
+    return -ERANGE;
+  if ((m != 0x02 && m != 0x64 && m != 0x03) ||
+      (vs != 0x0008a3a2 && vs != 0x000c7200 && vs != 0x000a6300) ||
+      (x != 0x48 && x != 0x7f && x != 0x6b) ||
+      (y != 0x0290 && y != 0x0357 && y != 0x02cb))
+    return -EILSEQ;
+  write_u8(staged_core, core_size, 0x0021af94, 3);
+  write_u32(staged_core, core_size, 0x00502770, 0x000a6300);
+  write_u8(staged_core, core_size, 0x0023b018, 0x6b);
+  write_u16(staged_core, core_size, 0x0023b01c, 0x02cb);
+  return 0;
+}
+
 int pops_apply_video_overrides(void *staged_core, size_t core_size,
                                uint8_t video_mode, uint8_t hdtv_fix,
                                int16_t x_offset, int16_t y_offset) {
+  int result;
   if (!staged_core)
     return -EINVAL;
   if (video_mode > POPS_VMODE_240P)
     return -ENOTSUP;
-
-  /* Check bounds per requested feature */
-  if ((video_mode == POPS_VMODE_PAL2NTSC || video_mode == POPS_VMODE_NTSC2PAL) &&
-      core_size < (size_t)(0x00502770 - POPS_CORE_BASE_ADDR + 4))
+  /* $480p needs POPStarter's resident code at 0x2394f0; the other modes
+   * and the position offsets have no grounded writes. */
+  if (video_mode >= POPS_VMODE_480P || x_offset || y_offset)
+    return -ENOTSUP;
+  if (hdtv_fix && core_size < (size_t)(0x0023ad0c - POPS_CORE_BASE_ADDR + 4))
     return -ERANGE;
+  if (video_mode == POPS_VMODE_NTSC2PAL) {
+    result = apply_pal_patch(staged_core, core_size);
+    if (result)
+      return result;
+  }
+  if (hdtv_fix) {
+    /* $HDTVFIX: li a0,1 over the original andi a0,s1,1 (see $NOHDTVFIX) */
+    static const uint32_t sites[] = {0x0023acb0, 0x0023ad0c};
+    for (unsigned i = 0; i < 2; ++i) {
+      uint32_t cur = read_u32(staged_core, core_size, sites[i]);
+      if (cur != 0x32240001 && cur != 0x24040001)
+        return -EILSEQ;
+    }
+    for (unsigned i = 0; i < 2; ++i)
+      write_u32(staged_core, core_size, sites[i], 0x24040001);
+  }
+  return 0;
+}
 
-  if ((video_mode == POPS_VMODE_480P || video_mode == POPS_VMODE_240P) &&
-      core_size < (size_t)(0x002061E0 - POPS_CORE_BASE_ADDR + 4))
+int pops_region_from_licence(const char tag[4]) {
+  if (!tag)
+    return POPS_REGION_UNKNOWN;
+  if (!memcmp(tag, "Euro", 4))
+    return POPS_REGION_EUROPE;
+  if (!memcmp(tag, "Amer", 4) || !memcmp(tag, "of A", 4))
+    return POPS_REGION_AMERICA;
+  if (!memcmp(tag, "Inc.", 4))
+    return POPS_REGION_JAPAN;
+  return POPS_REGION_UNKNOWN;
+}
+
+/* POPStarter r13 region pass (0x879034..0x8795f0). 0x2649a0 is the region
+ * check of the PS1 BIOS inside POPS; the original skips those writes only
+ * when a user BIOS/OSD replacement was loaded, which launcHER never does. */
+int pops_apply_region(void *staged_core, size_t core_size, int region,
+                      uint8_t video_mode, int auto_video_disabled) {
+  static const uint8_t pops_letter[] = {'T', 'E', 'A', 'J'};
+  static const uint8_t cd_letter[] = {0, 'E', 'A', 'I'};
+  static const uint32_t bios_li[] = {0, 0x34040045, 0x34040041, 0x34040049};
+  int force_pal = video_mode == POPS_VMODE_NTSC2PAL;
+  int result;
+  if (!staged_core)
+    return -EINVAL;
+  if (region < POPS_REGION_UNKNOWN || region > POPS_REGION_JAPAN)
+    return -EINVAL;
+  if (core_size < (size_t)(0x002cbb72 - POPS_CORE_BASE_ADDR + 1))
     return -ERANGE;
-
-  if ((video_mode == POPS_VMODE_480I || video_mode == POPS_VMODE_576P ||
-       video_mode == POPS_VMODE_576I) &&
-      core_size < (size_t)(0x002061A0 - POPS_CORE_BASE_ADDR + 4))
-    return -ERANGE;
-
-  if (hdtv_fix && core_size < (size_t)(0x002061DC - POPS_CORE_BASE_ADDR + 4))
-    return -ERANGE;
-
-  if (x_offset != 0 && core_size < (size_t)(0x00206214 - POPS_CORE_BASE_ADDR + 2))
-    return -ERANGE;
-
-  if (y_offset != 0 && core_size < (size_t)(0x00206218 - POPS_CORE_BASE_ADDR + 2))
-    return -ERANGE;
-
-  /* Verify byte guards before modifying core */
-  if (video_mode == POPS_VMODE_PAL2NTSC) {
-    uint8_t m = read_u8(staged_core, core_size, 0x0021af94);
-    uint32_t vs = read_u32(staged_core, core_size, 0x00502770);
-    uint8_t x = read_u8(staged_core, core_size, 0x0023b018);
-    uint16_t y = read_u16(staged_core, core_size, 0x0023b01c);
-    if ((m != 0x02 && m != 0x64) ||
-        (vs != 0x0008a3a2 && vs != 0x000c7200) ||
-        (x != 0x48 && x != 0x7f) ||
-        (y != 0x0290 && y != 0x0357))
-      return -EILSEQ;
-    write_u8(staged_core, core_size, 0x0021af94, 3);
-    write_u32(staged_core, core_size, 0x00502770, 0x000a6300);
-    write_u8(staged_core, core_size, 0x0023b018, 0x6b);
-    write_u16(staged_core, core_size, 0x0023b01c, 0x02cb);
-  } else if (video_mode == POPS_VMODE_NTSC2PAL) {
-    uint8_t m = read_u8(staged_core, core_size, 0x0021af94);
-    uint32_t vs = read_u32(staged_core, core_size, 0x00502770);
-    uint8_t x = read_u8(staged_core, core_size, 0x0023b018);
-    uint16_t y = read_u16(staged_core, core_size, 0x0023b01c);
-    if ((m != 0x03 && m != 0x64) ||
-        (vs != 0x000a6300) ||
-        (x != 0x6b && x != 0x7f) ||
-        (y != 0x02cb && y != 0x0357))
-      return -EILSEQ;
-    write_u8(staged_core, core_size, 0x0021af94, 2);
-    write_u32(staged_core, core_size, 0x00502770, 0x000c7200);
-    write_u8(staged_core, core_size, 0x0023b018, 0x7f);
-    write_u16(staged_core, core_size, 0x0023b01c, 0x0357);
-  } else if (video_mode >= POPS_VMODE_480P && video_mode <= POPS_VMODE_240P) {
-    if (read_u32(staged_core, core_size, 0x002061A0) != 0x0080a02d)
-      return -EILSEQ;
-    if ((video_mode == POPS_VMODE_480P || video_mode == POPS_VMODE_240P) &&
-        read_u32(staged_core, core_size, 0x002061E0) != 0x0220502d)
-      return -EILSEQ;
-
-    if (video_mode == POPS_VMODE_480P) {
-      write_u32(staged_core, core_size, 0x002061A0, 0x24020001); /* progressive */
-      write_u32(staged_core, core_size, 0x002061E0, 0x24050000); /* non-interlaced */
-    } else if (video_mode == POPS_VMODE_480I) {
-      write_u32(staged_core, core_size, 0x002061A0, 0x24020002);
-    } else if (video_mode == POPS_VMODE_576P) {
-      write_u32(staged_core, core_size, 0x002061A0, 0x24020003);
-    } else if (video_mode == POPS_VMODE_576I) {
-      write_u32(staged_core, core_size, 0x002061A0, 0x24020004);
-    } else if (video_mode == POPS_VMODE_240P) {
-      write_u32(staged_core, core_size, 0x002061A0, 0x24020000); /* 240p progressive */
-      write_u32(staged_core, core_size, 0x002061E0, 0x24050000); /* non-interlaced */
+  if (!force_pal && region == POPS_REGION_EUROPE && !auto_video_disabled &&
+      video_mode != POPS_VMODE_NOPAL && video_mode != POPS_VMODE_480P) {
+    result = apply_pal_patch(staged_core, core_size);
+    if (result)
+      return result;
+  }
+  /* $FORCEPAL reports Europe to POPS whatever the disc says. */
+  write_u8(staged_core, core_size, 0x002cbb72,
+           force_pal ? 'E' : pops_letter[region]);
+  if (!force_pal)
+    write_u8(staged_core, core_size, 0x0020f6cc, cd_letter[region]);
+  if (region != POPS_REGION_UNKNOWN) {
+    write_u32(staged_core, core_size, 0x002649a0, bios_li[region]);
+  } else {
+    write_u32(staged_core, core_size, 0x00264994, 0x34050000);
+    write_u32(staged_core, core_size, 0x00264998, 0x34020000);
+    write_u32(staged_core, core_size, 0x0026499c, 0x34030000);
+    write_u32(staged_core, core_size, 0x002649a0, 0x34040000);
+    if (!force_pal) {
+      write_u8(staged_core, core_size, 0x0020f6d8, 0);
+      write_u8(staged_core, core_size, 0x0020f6dc, 0);
+      write_u8(staged_core, core_size, 0x0020f6e0, 0);
     }
   }
-
-  if (hdtv_fix) {
-    if (read_u32(staged_core, core_size, 0x002061DC) != 0x10400006)
-      return -EILSEQ;
-    write_u32(staged_core, core_size, 0x002061DC, 0x24040001);
-  }
-
-  if (x_offset != 0) {
-    if (read_u16(staged_core, core_size, 0x00206214) != 0x902d)
-      return -EILSEQ;
-    write_u16(staged_core, core_size, 0x00206214, (uint16_t)x_offset);
-  }
-  if (y_offset != 0) {
-    if (read_u16(staged_core, core_size, 0x00206218) != 0x001b)
-      return -EILSEQ;
-    write_u16(staged_core, core_size, 0x00206218, (uint16_t)y_offset);
-  }
-
   return 0;
 }
 
-int pops_apply_smooth(void *staged_core, size_t core_size) {
-  if (!staged_core)
-    return -EINVAL;
-  if (core_size < (size_t)(0x00205E00 - POPS_CORE_BASE_ADDR + 4))
-    return -ERANGE;
-  if (read_u32(staged_core, core_size, 0x00205E00) != 0x0200202d)
-    return -EILSEQ;
-  /* Modify GS texture filter flag (TEX0.TFX bilinear) */
-  return write_u32(staged_core, core_size, 0x00205E00, 0x24020001);
+/* Fixed-value POPStarter r13 commands. Values are the original handlers'
+ * writes; where the original restores a site ($UNDO_MUTE_CDDA, $NOHDTVFIX,
+ * $ROLLBACK) that value is the pristine POPS byte. The core is SHA-256
+ * pinned before any of these run. */
+typedef struct {
+  uint32_t flag;
+  uint32_t address;
+  uint32_t value;
+  uint8_t width;
+} TokenWrite;
+static const TokenWrite token_writes[] = {
+  {POPS_TOK_SCANLINES, 0x0021e454, 0x22b50006, 4},
+  {POPS_TOK_SUBCDSTATUS, 0x0020e850, 0x06, 1},
+  {POPS_TOK_SUBCDSTATUS, 0x0020e86c, 0x24030020, 4},
+  {POPS_TOK_SUBCDSTATUS, 0x0020e87c, 0x00431022, 4},
+  {POPS_TOK_MUTE_CDDA, 0x0020f0b6, 0x00, 1},
+  {POPS_TOK_MUTE_CDDA, 0x0020ebf2, 0x00, 1},
+  {POPS_TOK_MUTE_CDDA, 0x0020f0e0, 0x00000000, 4},
+  {POPS_TOK_UNDO_MUTE_CDDA, 0x0020f0b6, 0x02, 1},
+  {POPS_TOK_UNDO_MUTE_CDDA, 0x0020ebf2, 0x03, 1},
+  {POPS_TOK_UNDO_MUTE_CDDA, 0x0020f0e0, 0xae000014, 4},
+  {POPS_TOK_MUTE_VAB, 0x00210e7c, 0x00, 1},
+  {POPS_TOK_MUTE_VAB, 0x00210ed6, 0x00, 1},
+  {POPS_TOK_MUTE_VAB, 0x002120ca, 0xa0, 1},
+  {POPS_TOK_MUTE_VAB, 0x00213abc, 0x00, 1},
+  {POPS_TOK_MUTE_VAB, 0x002110b6, 0x1000, 2},
+  {POPS_TOK_MUTE_ALL, 0x00213ff4, 0x00000000, 4},
+  {POPS_TOK_CODECACHE_ADDON0, 0x00202734, 0x10000004, 4},
+  {POPS_TOK_CODECACHE_ADDON1, 0x00202734, 0x00000000, 4},
+  {POPS_TOK_CODECACHE_ADDON2, 0x00202734, 0x14600004, 4},
+  {POPS_TOK_ROLLBACK, 0x0020b908, 0x0d, 1},
+  {POPS_TOK_ROLLBACK, 0x00207e34, 0x0000000d, 4},
+  {POPS_TOK_ROLLBACK, 0x00207e74, 0x0000000d, 4},
+  {POPS_TOK_ROLLBACK, 0x00207eb8, 0x0000000d, 4},
+  {POPS_TOK_ROLLBACK, 0x00207ebc, 0x1000009c, 4},
+  {POPS_TOK_ROLLBACK, 0x00207f54, 0x0000000d, 4},
+  {POPS_TOK_ROLLBACK, 0x00207f58, 0x10000075, 4},
+  {POPS_TOK_ROLLBACK, 0x00207e9c, 0x0a, 1},
+  {POPS_TOK_ROLLBACK, 0x00208a84, 0x01cd, 2},
+  {POPS_TOK_ROLLBACK, 0x00204790, 0x000d, 2},
+  {POPS_TOK_CACHE1, 0x0020fff4, 0x01, 1},
+  {POPS_TOK_CACHE1, 0x00210120, 0x01, 1},
+  {POPS_TOK_CACHE1, 0x002101ac, 0x0c20, 2},
+  {POPS_TOK_NOHDTVFIX, 0x0023acb0, 0x32240001, 4},
+  {POPS_TOK_NOHDTVFIX, 0x0023ad0c, 0x32240001, 4},
+};
+
+static void write_width(void *core, size_t size, uint32_t address,
+                        uint32_t value, uint8_t width) {
+  if (width == 1)
+    write_u8(core, size, address, (uint8_t)value);
+  else if (width == 2)
+    write_u16(core, size, address, (uint16_t)value);
+  else
+    write_u32(core, size, address, value);
 }
 
-int pops_apply_widescreen(void *staged_core, size_t core_size) {
+int pops_apply_original_tokens(void *staged_core, size_t core_size, uint32_t tokens) {
   if (!staged_core)
     return -EINVAL;
-  if (core_size < (size_t)(0x00205B00 - POPS_CORE_BASE_ADDR + 4))
-    return -ERANGE;
-  if (read_u32(staged_core, core_size, 0x00205B00) != 0x0080802d)
-    return -EILSEQ;
-  /* Horizontal 16:9 projection aspect factor patch */
-  return write_u32(staged_core, core_size, 0x00205B00, 0x24020C00);
+  if (tokens >> POPS_TOK_COUNT)
+    return -ENOTSUP;
+  for (size_t i = 0; i < sizeof(token_writes) / sizeof(token_writes[0]); ++i)
+    if ((tokens & token_writes[i].flag) &&
+        token_writes[i].address + token_writes[i].width >
+            POPS_CORE_BASE_ADDR + core_size)
+      return -ERANGE;
+  /* Table order is the original command order, so later commands win. */
+  for (size_t i = 0; i < sizeof(token_writes) / sizeof(token_writes[0]); ++i)
+    if (tokens & token_writes[i].flag)
+      write_width(staged_core, core_size, token_writes[i].address,
+                  token_writes[i].value, token_writes[i].width);
+  return 0;
 }
 
-int pops_apply_dither_off(void *staged_core, size_t core_size) {
+/* POPStarter r13 $IGR0..$IGR5 (igr_type 1..6) and $NOIGR. Masks select the
+ * pad combination; $IGR3..5 jump straight to 0x20c08c instead of the dialog. */
+int pops_apply_igr_original(void *staged_core, size_t core_size,
+                            uint8_t igr_type, uint8_t no_igr) {
+  static const uint16_t masks[] = {0x404f, 0x0900, 0x090f};
   if (!staged_core)
     return -EINVAL;
-  if (core_size < (size_t)(0x00205D58 - POPS_CORE_BASE_ADDR + 4))
+  if (!no_igr && (igr_type < 1 || igr_type > 6))
+    return -EINVAL;
+  if (core_size < (size_t)(0x00228a64 - POPS_CORE_BASE_ADDR))
     return -ERANGE;
-  if (read_u32(staged_core, core_size, 0x00205D58) != 0xdfb30028)
+  if (read_u32(staged_core, core_size, 0x00228a64) != 0x2622a980)
     return -EILSEQ;
-  /* Disable Graphics Synthesizer dithering */
-  return write_u32(staged_core, core_size, 0x00205D58, 0x00000000);
-}
-
-int pops_apply_throttling(void *staged_core, size_t core_size, uint8_t fast_mips, uint8_t slow_mips) {
-  if (!staged_core)
-    return -EINVAL;
-  if (!fast_mips && !slow_mips)
+  if (no_igr) {
+    write_u32(staged_core, core_size, 0x00228a5c, 0x3c110086);
+    write_u32(staged_core, core_size, 0x00228a60, 0x24030080);
+    write_u16(staged_core, core_size, 0x00228a56, 0x1000);
     return 0;
-  if (core_size < (size_t)(0x002010A0 - POPS_CORE_BASE_ADDR + 4))
-    return -ERANGE;
-
-  if (read_u32(staged_core, core_size, 0x002010A0) != 0xffb00000)
-    return -EILSEQ;
-
-  if (fast_mips) {
-    /* NOP throttle wait loop */
-    return write_u32(staged_core, core_size, 0x002010A0, 0x00000000);
-  } else if (slow_mips) {
-    /* Multiplier for throttle wait loop */
-    return write_u32(staged_core, core_size, 0x002010A0, 0x24040004);
   }
+  write_u16(staged_core, core_size, 0x00228a56, 0x1462);
+  if (igr_type <= 3) {
+    write_u32(staged_core, core_size, 0x00228a5c, 0x3c110086);
+    write_u32(staged_core, core_size, 0x00228a60, 0x24030080);
+  } else {
+    write_u32(staged_core, core_size, 0x00228a5c, 0x08083023);
+    write_u32(staged_core, core_size, 0x00228a60, 0x00000000);
+  }
+  write_u16(staged_core, core_size, 0x00228a20, masks[(igr_type - 1) % 3]);
+  write_u16(staged_core, core_size, 0x00228a50, masks[(igr_type - 1) % 3]);
   return 0;
-}
-
-int pops_apply_bios_shell(void *staged_core, size_t core_size) {
-  if (!staged_core)
-    return -EINVAL;
-  if (core_size < (size_t)(0x00210cf8 - POPS_CORE_BASE_ADDR + 4))
-    return -ERANGE;
-  if (read_u32(staged_core, core_size, 0x00210cf8) != 0x2442ffff)
-    return -EILSEQ;
-  /* Force boot into the PS1 BIOS shell */
-  return write_u8(staged_core, core_size, 0x00210cf8, 0x01);
 }
 
 int pops_apply_libcrypt_bypass(void *staged_core, size_t core_size) {
@@ -884,15 +934,13 @@ int pops_apply_exception_hook(void *staged_core, size_t core_size) {
 
 int pops_apply_all_config_patches(void *staged_core, size_t core_size, const PopsConfig *cfg) {
   int result;
-  int video_requested, auxiliary_requested;
+  int video_requested;
   if (!staged_core || !cfg)
     return -EINVAL;
 
-  video_requested = cfg->video_mode || cfg->hdtv_fix ||
-                    cfg->x_offset || cfg->y_offset;
-  auxiliary_requested = video_requested || cfg->smooth || cfg->widescreen ||
-                        cfg->dither_off || cfg->fast_mips || cfg->slow_mips ||
-                        cfg->no_boot;
+  /* $NOPAL and the European auto-PAL pass run from pops_apply_region after
+   * the fix files; here only $FORCEPAL and $HDTVFIX touch the core. */
+  video_requested = cfg->video_mode == POPS_VMODE_NTSC2PAL || cfg->hdtv_fix;
 
   /* These are mutually dependent writes to the staged executable. Fail
    * before applying an otherwise valid compatibility mode when any selected
@@ -901,12 +949,14 @@ int pops_apply_all_config_patches(void *staged_core, size_t core_size, const Pop
     return -ENOTSUP;
   if (cfg->video_mode > POPS_VMODE_240P)
     return -ENOTSUP;
-  if (auxiliary_requested && core_size < 0x250000)
+  if ((video_requested || cfg->original_tokens || cfg->no_igr || cfg->igr_type) &&
+      core_size < 0x250000)
     return -EINVAL;
-  if ((cfg->video_mode == POPS_VMODE_PAL2NTSC ||
-       cfg->video_mode == POPS_VMODE_NTSC2PAL) &&
+  if (cfg->video_mode == POPS_VMODE_NTSC2PAL &&
       core_size < (size_t)(0x00502770 - POPS_CORE_BASE_ADDR + 4))
     return -ERANGE;
+  if (cfg->igr_type > 6)
+    return -EINVAL;
 
   if (cfg->compat_modes) {
     result = pops_apply_compat_modes(staged_core, core_size, cfg->compat_modes);
@@ -914,28 +964,14 @@ int pops_apply_all_config_patches(void *staged_core, size_t core_size, const Pop
       return result;
   }
   if (video_requested) {
-    result = pops_apply_video_overrides(staged_core, core_size, cfg->video_mode,
-                                        cfg->hdtv_fix, cfg->x_offset, cfg->y_offset);
+    result = pops_apply_video_overrides(staged_core, core_size,
+                                        cfg->video_mode == POPS_VMODE_NTSC2PAL
+                                            ? POPS_VMODE_NTSC2PAL : POPS_VMODE_DEFAULT,
+                                        cfg->hdtv_fix, 0, 0);
     if (result) return result;
   }
-  if (cfg->smooth) {
-    result = pops_apply_smooth(staged_core, core_size);
-    if (result) return result;
-  }
-  if (cfg->widescreen) {
-    result = pops_apply_widescreen(staged_core, core_size);
-    if (result) return result;
-  }
-  if (cfg->dither_off) {
-    result = pops_apply_dither_off(staged_core, core_size);
-    if (result) return result;
-  }
-  if (cfg->fast_mips || cfg->slow_mips) {
-    result = pops_apply_throttling(staged_core, core_size, cfg->fast_mips, cfg->slow_mips);
-    if (result) return result;
-  }
-  if (cfg->no_boot) {
-    result = pops_apply_bios_shell(staged_core, core_size);
+  if (cfg->original_tokens) {
+    result = pops_apply_original_tokens(staged_core, core_size, cfg->original_tokens);
     if (result) return result;
   }
   if (cfg->no_vmc0) {
@@ -946,6 +982,10 @@ int pops_apply_all_config_patches(void *staged_core, size_t core_size, const Pop
     result = pops_apply_vmc1_disable(staged_core, core_size);
     if (result) return result;
   }
+  if (cfg->no_igr || cfg->igr_type) {
+    result = pops_apply_igr_original(staged_core, core_size, cfg->igr_type, cfg->no_igr);
+    if (result) return result;
+  }
   if (!cfg->no_igr) {
     if (core_size >= (size_t)(0x0020c0a4 - POPS_CORE_BASE_ADDR + 4)) {
       uint32_t cur = read_u32(staged_core, core_size, 0x0020c0a4);
@@ -954,7 +994,9 @@ int pops_apply_all_config_patches(void *staged_core, size_t core_size, const Pop
         if (result) return result;
       }
     }
-    if (core_size >= (size_t)(0x00228a68 - POPS_CORE_BASE_ADDR + 4)) {
+    /* Without an $IGRn command keep launcHER's direct exit, which the user
+     * confirmed on hardware; with one, the original writes above stand. */
+    if (!cfg->igr_type && core_size >= (size_t)(0x00228a68 - POPS_CORE_BASE_ADDR + 4)) {
       uint32_t cur_5c = read_u32(staged_core, core_size, 0x00228a5c);
       if (cur_5c == 0x3c110086) {
         result = pops_apply_igr_direct_exit(staged_core, core_size);
