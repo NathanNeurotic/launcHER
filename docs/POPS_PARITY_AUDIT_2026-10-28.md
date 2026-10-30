@@ -58,3 +58,17 @@ The original-code differential run is **incomplete**: fresh Unicorn CPUs progres
 3. Use a **new dedicated VMC** for a real in-game save/reload/cold-power-cycle test with content hashes and integrity checks. Preserve existing cards and installed games. Formatting a 128 KiB container is not save persistence.
 4. Verify original PATCH/TROJAN state/precedence and video actions, original-supported USB/APA/SMB behavior, loss/restart handling, CDDA/video/controllers, representative games and Ember forwarding. Extensions and inherited-stack network probes remain separate from original runtime parity.
 5. Keep this PR and REPOP's continuation evidence synchronized. Publish validated incremental work with `Co-authored-by: ChatGPT <chatgpt@openai.com>`. No automatic merge, proprietary Sony/game/save files, paid services or workflow enabling.
+
+## Successor addendum — 2026-10-30
+
+The three orphaned helpers now have host-verified resident mechanisms with
+explicit evidence gates, documented in
+[evidence/pops_resident_lifecycle.md](evidence/pops_resident_lifecycle.md):
+disc swap via sio2 interposition in popfs (commit bb0fc1a), LibCrypt SubQ via
+the pops_iomanx bridge with a documented-hypothesis request pair (02e39fe),
+and cheats concluded as the fix-file execution path with the built-in engine
+deferred for lack of an evidenced hook anchor (1e8aa18). All 16 host test
+entry points pass. Console validation remains the explicitly gated Phase 6;
+no working/resident claim is made for hardware behavior. REPOP's side
+(EE build repair, FP oracle full pass, 81-claim demotion to honest 83%
+coverage) is recorded in its continuation document; branches are synchronized.
