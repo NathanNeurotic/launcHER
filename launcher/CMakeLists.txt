@@ -81,7 +81,11 @@ set(EE_LIBS
 set(IRX_SOURCES)
 foreach(irx ${IRX_FILES})
   get_filename_component(irx_name ${irx} NAME_WE)
-  irx_to_source("$ENV{PS2SDK}/iop/irx/${irx}" irx_source "${irx_name}_irx" "")
+  if(IS_ABSOLUTE "${irx}")
+    irx_to_source("${irx}" irx_source "${irx_name}_irx" "")
+  else()
+    irx_to_source("$ENV{PS2SDK}/iop/irx/${irx}" irx_source "${irx_name}_irx" "")
+  endif()
   list(APPEND IRX_SOURCES ${irx_source})
 endforeach()
 
@@ -241,7 +245,10 @@ endif()
 
 if(BDM)
   list(APPEND EE_SOURCES src/handler_bdm.c)
-  list(APPEND IRX_FILES bdm.irx bdmfs_fatfs.irx)
+  # Vendored ps2sdk bdm (sha256 1059a8ed..., ~2026-10-15 SDK): the current
+  # rolling-SDK bdm fails to dispatch USB device connections on the test
+  # console (docs/evidence/pops_hw_runs_2026-10-30.json, runs 0140/0144).
+  list(APPEND IRX_FILES ${CMAKE_CURRENT_SOURCE_DIR}/irx/bdm.irx bdmfs_fatfs.irx)
   # Pin the FatFs dependency; SDK wrapper sources and local repairs are licensed
   # in-tree. The same module serves initial preflight and Sony post-reset I/O.
   include(ExternalProject)
@@ -341,6 +348,8 @@ foreach(irx ${IRX_FILES})
   elseif(irx_name STREQUAL "mmceman")
     # mmceman is built from submodule
     irx_to_source("${MMCEMAN_IRX}" irx_source "mmceman_irx" "")
+  elseif(IS_ABSOLUTE "${irx}")
+    irx_to_source("${irx}" irx_source "${irx_name_clean}_irx" "")
   else()
     irx_to_source("$ENV{PS2SDK}/iop/irx/${irx}" irx_source "${irx_name_clean}_irx" "")
   endif()
