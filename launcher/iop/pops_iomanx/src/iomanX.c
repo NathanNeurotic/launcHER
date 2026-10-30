@@ -919,6 +919,18 @@ int iomanX_devctl(const char *name, int cmd, void *arg, unsigned int arglen, voi
 	iomanX_iop_file_t f_stk;
 #endif
 
+	/* Phase 6 hardware-trace: log cdrom device devctl traffic (bounded) so a
+	 * console run can confirm or retarget the interception policy below. */
+	{
+		static int pops_subq_trace_count = 0;
+		if ( name && pops_subq_trace_count < 16 &&
+		     (name[0] == 'c' || name[0] == 'C') && strncmp(name, "cdrom", 5) == 0 )
+		{
+			pops_subq_trace_count++;
+			printf("pops_subq_bridge: devctl %s cmd 0x%x arglen %u buflen %u intercept %d\n",
+			       name, cmd, arglen, buflen, pops_subq_bridge_should_intercept(name, cmd));
+		}
+	}
 	/* LibCrypt Subchannel-Q bridge: answer matching (device, command) pairs
 	 * from the popfs Q generator before any device dispatch. The intercepted
 	 * name/command pair is a documented hypothesis pending a hardware trace;
