@@ -96,6 +96,28 @@ int handleBDM(DeviceType device, int argc, char *argv[]) {
     if (res < 0)
       break;
   }
+  /* hardware-trace: bottom-of-screen summary so a post-failure screenshot
+   * shows which BDM devices actually registered after the IOP reset. */
+  for (int m = 0; m < 6; ++m) {
+    char mp[8];
+    sprintf(mp, "mass%d:", m);
+    int mf = open(mp, O_DIRECTORY | O_RDONLY);
+    DPRINTF("BDM: summary %s -> %d\n", mp, mf);
+    if (mf >= 0) {
+      char altPath[300];
+      snprintf(altPath, sizeof(altPath), "%s%s", mp, elfPath + mountpointLen);
+      iox_stat_t altStat;
+      int altRes = fileXioGetStat(altPath, &altStat);
+      DPRINTF("BDM: altfile %s stat=%d\n", altPath, altRes);
+      if (altRes >= 0) {
+        /* the drives renumbered after the IOP reset; follow the file */
+        strcpy(elfPath, altPath);
+        res = 0;
+        goto found;
+      }
+      close(mf);
+    }
+  }
   return -ENODEV;
 
 found:
