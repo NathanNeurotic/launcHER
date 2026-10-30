@@ -262,6 +262,11 @@ static int loadModules(DeviceType device, int tolerant) {
       sleep(3);
     int liveRes = loadModuleListResident(device, tolerant, 0);
     if (!liveRes) {
+      /* Quiet settle window: usbmass enumeration callbacks post
+       * asynchronously; EE RPC traffic during the window correlates
+       * with lost connects (probe loads ata_bd here and mounts
+       * reliably). */
+      sleep(6);
       currentDevice |= device;
       return 0;
     }
