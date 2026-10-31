@@ -35,7 +35,7 @@ When argv[0] is `rom0:PS2LOGO`, the loader gets the target video mode from the d
 
 ### eGSM
 
-Based on [Neutrino GSM](https://github.com/rickgaiser/neutrino) by Rick Gaiser.  
+Based on [Neutrino GSM](https://github.com/rickgaiser/neutrino) by [Rick Gaiser](https://github.com/rickgaiser).  
 This loader supports running the target executable via Neutrino GSM, forcing the application video mode.
 
 eGSM options are inherited from Neutrino GSM and defined in the `v:c` format, where
