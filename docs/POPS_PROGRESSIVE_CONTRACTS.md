@@ -79,3 +79,34 @@ register effects of a new live bridge, GS output, timing or physical acceptance.
 Next work is the live wrapper's displaced-load/delay-slot/register contract,
 ordered state writes, static core guards and text/PATCH sequencing. Preserve
 PATCH 6/7 rejection until those production dependencies exist and are verified.
+
+
+## Original-address adapter checkpoint — 2026-10-31
+
+`pops_progressive_live()` now implements the same state operations at the
+original addresses, including all three intermediate scratch doubleword
+writes and the exact ordered byte/word/doubleword stores. Its production form
+uses volatile memory operations. Host tests replace only those operations
+with a bounded memory map; no arithmetic or branch behavior is stubbed.
+The blocked path performs no stores, while unknown widths keep stale DX/DW.
+
+All **428 native adapter traces match original write addresses, values,
+widths and order**, and return the same DISPLAY. The actual compiled EE adapter
+also passes **428 cases** using its real loads/stores, with full final-memory
+comparison across 32 MiB RAM plus 16 KiB scratchpad. Only a bounded 0x400-byte
+C working-stack window is excluded; saved GPRs, restored SP and the 64-bit
+return are checked. Earlier pure-state native/EE cases remain passing.
+[Live-adapter metadata](evidence/pops_progressive_live_component_2026-10-31.json)
+records current source and compiled function hashes. The earlier component
+report remains pinned to its historical source checkpoint.
+
+This adapter is **still not installed in the launcher**. The next bridge must
+preserve the interrupted Sony function's register context (including opaque
+upper lanes), HI/LO banks and stack, then resume at 0x21a098 with DISPLAY in
+a1 and v0=0x12000000. It also needs static core guards and the original sticky
+progressive/manual-display/text/PATCH sequencing. No scanout or console result
+is established by memory comparisons. Reads are stable fixture inputs; this
+does not claim equivalence under concurrent modification of the source fields.
+
+Aggregate external suite: 118 tests with original/core/compiler/Unicorn;
+default CI skips 10 optional cases. The native adapter runs in default CI.

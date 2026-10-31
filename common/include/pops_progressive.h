@@ -20,4 +20,9 @@ typedef struct {
 
 void pops_progressive_update(PopsProgressiveState *state);
 
+/* Original-address live state adapter candidate. Not installed by the
+ * launcher yet: the mid-function register bridge and loader sequencing must
+ * be verified first. Host tests replace only these memory operations. */
+uint64_t pops_progressive_live(void);
+
 #endif

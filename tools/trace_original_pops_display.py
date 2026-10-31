@@ -78,6 +78,8 @@ class _Window:
 
     def store(self, address, value, width):
         self.store_bytes(address, (value & ((1 << (width * 8)) - 1)).to_bytes(width, 'little'))
+        if hasattr(self, 'write_events'):
+            self.write_events.append([address, value & ((1 << (width * 8)) - 1), width])
 
     def put(self, reg, value):
         if reg:
@@ -232,7 +234,7 @@ class OriginalDisplay:
         m.run()
         return {'values': values, 'flags': flags, 'writes': m.writes}
 
-    def progressive(self, state):
+    def progressive(self, state, with_writes=False):
         """Original 0x2394f0 entry at its source location, 64-bit GPR view.
 
         The original loader copies the block from 0x983890 to 0x238a90.
@@ -259,6 +261,7 @@ class OriginalDisplay:
             m.memory.update((address + i, 0) for i in range(width))
             m.store(address, state[name], width)
         before = dict(m.memory)
+        m.write_events = []
         m.run()
         result = dict(state)
         result.update((name, m.load(address, width)) for name, (address, width) in fields.items())
@@ -268,7 +271,7 @@ class OriginalDisplay:
         allowed = {fields[name][0] + i for name in outputs for i in range(fields[name][1])}
         if any(before[a] != value and a not in allowed for a, value in m.memory.items()):
             raise ValueError('unexpected progressive memory change')
-        return result
+        return {'state': result, 'writes': m.write_events} if with_writes else result
 
     def region(self, licence, force_pal=False, auto_disabled=False, auto_selector=True):
         """Original region control flow; PAL helper/pokes modeled explicitly.

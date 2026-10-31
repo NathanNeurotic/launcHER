@@ -46,6 +46,14 @@ that last change. Continue from current HEAD, fetching again before editing.
   Unicorn memory-write hooks caused a separately reproduced SD-delay fault;
   the compiled runner audits every mapped byte after execution instead.
   No live progressive or hardware acceptance is claimed.
+- The original-address progressive adapter now also matches all 428 native
+  ordered-write traces and 428 actual compiled EE final-memory cases. The
+  target audit covers 32 MiB plus scratchpad, except a 0x400-byte C working
+  stack. It preserves blocked no-write and unknown-width stale-field paths.
+  Aggregate suite: 118 tests; default skips 10 optional cases. Read the live
+  checkpoint in [progressive contracts](POPS_PROGRESSIVE_CONTRACTS.md).
+  Still not installed: next verify the stackless-caller bridge's complete
+  GPR/HI/LO preservation, static guards and sticky mode/file/PATCH sequencing.
 - Latest catch-up merges: launcHER **`b34affc`** integrates EMBER through
   `f0e5948` (explicit CUE forwarding coverage/docs and newer credit links).
   Its build/host/argv CI passes. REPOP **`feeb3346`** integrates main through
