@@ -28,6 +28,7 @@ class CheatEntry(c.Structure):
 
 class ResidentConfig(c.Structure):
     _fields_ = [
+        ("gs_display", c.c_uint64),
         ("flags", c.c_uint32),
         ("pops_vblank", c.c_uint32),
         ("ram_base_ptr", c.c_uint32),
@@ -43,6 +44,7 @@ class Header(c.Structure):
         ("magic", c.c_uint32), ("version", c.c_uint16), ("header_size", c.c_uint16),
         ("file_size", c.c_uint32), ("image_size", c.c_uint32),
         ("vblank_entry", c.c_uint32), ("config_addr", c.c_uint32),
+        ("display_entry", c.c_uint32),
     ]
 
 
@@ -67,6 +69,7 @@ L.pops_resident_cheat_pass.restype = None
 L.pops_resident_frame.argtypes = [c.POINTER(ResidentConfig), c.c_void_p]
 L.pops_resident_check_image.argtypes = [c.c_void_p, c.c_size_t, c.POINTER(Header)]
 L.pops_resident_hook_core.argtypes = [c.c_void_p, c.c_size_t, c.c_uint32]
+L.pops_resident_hook_display.argtypes = [c.c_void_p, c.c_size_t, c.c_uint32]
 L.pops_resident_install.argtypes = [c.c_void_p, c.c_size_t, c.c_uint32, c.c_void_p, c.c_size_t,
                                     c.POINTER(ResidentConfig)]
 L.pops_resident_build_config.argtypes = [c.POINTER(ResidentConfig), c.c_void_p]
@@ -195,6 +198,20 @@ class BuildConfig(unittest.TestCase):
         self.assertEqual(out.pops_vblank, 0x0021CD68)
         self.assertEqual(out.ram_base_ptr, 0x70003364)
 
+    def test_display_without_cheats_and_combined(self):
+        out = ResidentConfig()
+        manual = '$DX_10 $DY_20 $MAGH_3 $MAGV_1 $DW_100 $DH_200'
+        cfg = self.parsed(manual)
+        self.assertEqual(L.pops_resident_build_config(c.byref(out), c.addressof(cfg)), 1)
+        self.assertEqual(out.flags, 2)
+        self.assertEqual(out.gs_display, (199 << 44) | (99 << 32) | (1 << 27) | (3 << 23) | (20 << 12) | 10)
+        self.assertEqual(out.cheat_count, 0)
+        cfg = self.parsed(manual, '$30000010 0001')
+        self.assertEqual(L.pops_resident_build_config(c.byref(out), c.addressof(cfg)), 1)
+        self.assertEqual((out.flags, out.cheat_count), (3, 1))
+        cfg = self.parsed('$480p', manual)
+        self.assertEqual(L.pops_resident_build_config(c.byref(out), c.addressof(cfg)), -errno.ENOTSUP)
+
 
 def core_with(lui=LUI_PRISTINE, addiu=ADDIU_PRISTINE, size=0x1C000):
     core = bytearray(size)
@@ -237,7 +254,7 @@ class HookCore(unittest.TestCase):
 
 def image(file_size=0x60, image_size=0x900, entry=BASE + 0x40, config=BASE + 0x60, magic=0x5352484C):
     img = bytearray(file_size)
-    struct.pack_into("<IHHIIII", img, 0, magic, 1, 24, file_size, image_size, entry, config)
+    struct.pack_into("<IHHIIIII", img, 0, magic, 2, 28, file_size, image_size, entry, config, BASE + 0x44)
     img[0x40:0x44] = b"\x08\x00\xe0\x03"
     return img
 
@@ -261,6 +278,10 @@ class Install(unittest.TestCase):
         self.assertEqual(self.check(image(entry=BASE + 0x42))[0], -errno.ERANGE)
         self.assertEqual(self.check(image(entry=BASE + 0x10))[0], -errno.ERANGE)
         self.assertEqual(self.check(image(config=BASE + 0x900 - 8))[0], -errno.ERANGE)
+        self.assertEqual(self.check(image(config=BASE + 0x64))[0], -errno.ERANGE)
+        img = image()
+        struct.pack_into('<I', img, 24, BASE + len(img))
+        self.assertEqual(self.check(img)[0], -errno.ERANGE)
         img = image()
         buf = (c.c_uint8 * len(img)).from_buffer(img)
         self.assertEqual(L.pops_resident_check_image(buf, len(img) - 4, None), -errno.ERANGE)
@@ -295,7 +316,7 @@ class Install(unittest.TestCase):
 
 class Layout(unittest.TestCase):
     def test_config_fits_in_the_reserved_range(self):
-        self.assertEqual(c.sizeof(Header), 24)
+        self.assertEqual(c.sizeof(Header), 28)
         self.assertLess(c.sizeof(ResidentConfig) + 0x1000, LIMIT - BASE)
 
     def test_launcher_installs_after_the_last_staging_read(self):

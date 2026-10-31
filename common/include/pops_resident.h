@@ -7,13 +7,14 @@
  * cheat engine, pad and video commands need. This is an independent
  * implementation, not a copy: it is linked at a fixed address in the range
  * POPS leaves alone (the original uses the same range for its own code),
- * installed just before handoff, and reached through one hook in POPS.
+ * installed just before handoff, and reached through guarded hooks in POPS.
  *
  * The hook: POPS registers its VBLANK_START handler (0x0021cd68) with
  * AddIntcHandler at 0x0021b190, loading the address with
  * lui $a1,0x22 / addiu $a1,$a1,-0x3298 at 0x0021b184 and 0x0021b18c. Those
  * two words are pointed at pops_resident_vblank instead, which does its work
- * and then calls POPS's handler, so POPS behaves as before. */
+ * and then calls POPS's handler, so POPS behaves as before. The separate
+ * display hook replaces the load at 0x21a094 and rejoins at 0x21a098. */
 
 #include <stddef.h>
 #include <stdint.h>
@@ -26,7 +27,7 @@ extern "C" {
 #define POPS_RESIDENT_BASE        UINT32_C(0x0143a000)
 #define POPS_RESIDENT_LIMIT       UINT32_C(0x01460000)
 #define POPS_RESIDENT_MAGIC       UINT32_C(0x5352484c) /* "LHRS" */
-#define POPS_RESIDENT_VERSION     1
+#define POPS_RESIDENT_VERSION     2
 
 /* POPS's VBLANK_START registration and handler (verified on the pinned core) */
 #define POPS_VBLANK_LUI_ADDR      UINT32_C(0x0021b184)
@@ -50,11 +51,14 @@ typedef struct {
   uint32_t image_size;   /* bytes the resident occupies, including zeroed data */
   uint32_t vblank_entry; /* address of pops_resident_vblank */
   uint32_t config_addr;  /* address of the PopsResidentConfig */
+  uint32_t display_entry; /* mid-function GS DISPLAY hook; no C call ABI */
 } PopsResidentHeader;
 
 #define POPS_RES_F_CHEATS         (1u << 0)
+#define POPS_RES_F_DISPLAY        (1u << 1)
 
 typedef struct {
+  uint64_t gs_display;   /* offset zero, read by the stackless display entry */
   uint32_t flags;        /* POPS_RES_F_* */
   uint32_t pops_vblank;  /* POPS's own VBLANK_START handler, always called */
   uint32_t ram_base_ptr; /* where POPS keeps its PS1 RAM base */
@@ -86,6 +90,11 @@ int pops_resident_build_config(PopsResidentConfig *out, const PopsConfig *cfg);
 /* Point POPS's VBLANK_START registration at the resident entry. All or
  * nothing: both words are checked before either is written. */
 int pops_resident_hook_core(void *staged_core, size_t core_size, uint32_t entry);
+
+/* Manual DISPLAY override at 0x21a094. Guard the displaced load, delay slot
+ * and both interlace argument sites before writing the hook. The image
+ * entry sets a1 to gs_display, restores v0=0x12000000, then jumps to 0x21a098. */
+int pops_resident_hook_display(void *staged_core, size_t core_size, uint32_t entry);
 
 /* Copy the image to dest (the resident base on the console), zero its data,
  * and write the configuration. dest_addr is the address dest stands for. */

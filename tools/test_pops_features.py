@@ -50,6 +50,10 @@ class PopsConfig(c.Structure):
         ("display_crop", c.c_uint16),
         ("display_mask", c.c_uint8),
         ("left_adjust", c.c_uint8),
+        ("gs_display", c.c_uint64),
+        ("gs_values", c.c_uint32 * 6),
+        ("gs_mask", c.c_uint8),
+        ("gs_display_valid", c.c_uint8),
     ]
 
 class PopsCompatEntry(c.Structure):

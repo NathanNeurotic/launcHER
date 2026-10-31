@@ -69,11 +69,23 @@ int pops_resident_frame(PopsResidentConfig *cfg, uint8_t *ram) {
 typedef int (*PopsIntcHandler)(int cause);
 
 int pops_resident_vblank(int cause);
+void pops_resident_display(void);
 extern char _pops_resident_file_end[];
 extern char _pops_resident_end[];
 
 /* Filled by the launcher after the image is copied (lives in .bss). */
 PopsResidentConfig pops_resident_config;
+_Static_assert(offsetof(PopsResidentConfig, gs_display) == 0, "display entry ABI");
+
+/* Independent stackless bridge for POPS's mid-function load. v0 and a1 are
+ * the only clobbers; v0 is restored before the stock continuation. No gp,
+ * stack, callback or compiler-generated function prologue is involved. */
+__asm__(".set push\n.set noreorder\n.text\n.align 2\n"
+        ".globl pops_resident_display\npops_resident_display:\n"
+        "lui $v0, %hi(pops_resident_config)\n"
+        "ld $a1, %lo(pops_resident_config)($v0)\n"
+        "j 0x0021a098\n"
+        "lui $v0, 0x1200\n.set pop\n");
 
 __attribute__((section(".resident.head"), used))
 const PopsResidentHeader pops_resident_header = {
@@ -84,6 +96,7 @@ const PopsResidentHeader pops_resident_header = {
   (uint32_t)_pops_resident_end - POPS_RESIDENT_BASE,
   (uint32_t)pops_resident_vblank,
   (uint32_t)&pops_resident_config,
+  (uint32_t)pops_resident_display,
 };
 
 int pops_resident_vblank(int cause) {

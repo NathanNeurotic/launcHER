@@ -1,4 +1,4 @@
-# POPStarter r13 feature inventory (2026-10-30)
+# POPStarter r13 feature inventory (2026-10-31)
 
 What "100% POPStarter" means, measured against the original binary rather than
 against wikis or memory. Ground truth is POPSLoader's
@@ -38,8 +38,10 @@ design is launcHER's own: the original hooks other places (its code at
 `0x01450000`, reached from POPS's `ExecOSD` tail call at `0x002362fc`, is its
 exit program, not a cheat engine).
 
-So far the resident code runs the cheat engine. The commands still BLOCKED
-below need their behaviour worked out and added to it.
+The resident code runs the cheat engine and an independent manual GS DISPLAY
+bridge. [Manual DISPLAY contracts](POPS_MANUAL_DISPLAY_CONTRACTS.md) record
+all-six, per-file acceptance and the guarded bridge. Commands still BLOCKED
+below need their behavior worked out and added to it.
 
 ## CHEATS.TXT commands
 
@@ -48,7 +50,7 @@ below need their behaviour worked out and added to it.
 | `$8/3/1/2/D0..D3/E0/E1` codes | resident cheat engine | **PRESENT**: launcHER's resident code, every VBLANK_START; host tests plus the built image run under emulation, **NOT TESTED** on a console |
 | `$Cxxxxxxx`, `$S…`, `$T…` | resident cheat engine | **MISSING** (not parsed) |
 | `$SMOOTH` | `0x21af88=0xa21a22a0341a0001` (64-bit) | **PRESENT**: guarded, original-command differential; no console run |
-| `$DX_n $DY_n $MAGH_n $MAGV_n $DW_n $DH_n` | display registers via resident code | **MISSING** |
+| `$DX_n $DY_n $MAGH_n $MAGV_n $DW_n $DH_n` | all-six, first-valid per file; fixed GS DISPLAY override | **PRESENT**: independent guarded resident bridge; 228 original file cases plus built-image comparison; no console run |
 | `$480p` | flags + `0x21af94=0x50`, `0x23acb0/0x23ad0c=li a0,0`, jump into resident code | **BLOCKED**; parsed, disables European auto PAL as in the original, no core writes |
 | `$LEFTADJ_` | `1..255`: `0x21a0a4=0x64a50f00 + ((4096-n)&255)`, `0x21a0a8=0xfc450000` | **PRESENT**: guarded, original-command differential; no console run |
 | `$SCANLINES` | `0x21e454=0x22b50006` | **PRESENT** |
@@ -139,8 +141,9 @@ record 60 original region-control-flow combinations. **No console test.**
 2. Grow the resident code (it exists and runs the cheat engine, NOT TESTED)
    to cover the BLOCKED commands: pads, `$480p`, widescreen, timings, and
    PATCH video actions 6/7.
-3. Recover the remaining resident display-register commands (`$DX/$DY`,
-   `$MAGH/$MAGV`, `$DW/$DH`), `$PAD01ID` and built-in per-game DB at `0x8e00d0`.
+3. Recover `$PAD01ID` and the built-in per-game DB at `0x8e00d0`.
+   The six manual DISPLAY commands now have an independent resident bridge
+   and 228 original file cases; see [manual contracts](POPS_MANUAL_DISPLAY_CONTRACTS.md).
    The six direct display commands now have a bounded original differential;
    see [display contracts](POPS_DISPLAY_CONTRACTS.md).
 4. IGR skin, OSD replacement, BIOS.BIN and physical disc boot.

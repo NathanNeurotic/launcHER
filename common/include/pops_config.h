@@ -112,6 +112,13 @@ typedef struct {
   uint16_t display_x, display_y, display_stretch, display_crop;
   uint8_t display_mask;
   uint8_t left_adjust; /* $LEFTADJ_1..255; zero is absent */
+
+  /* Manual GS DISPLAY override: all six first-valid decimal values must
+   * occur in one file. A later incomplete file keeps the previous override. */
+  uint64_t gs_display;
+  uint32_t gs_values[6]; /* DX, DY, MAGH, MAGV, DW, DH */
+  uint8_t gs_mask;
+  uint8_t gs_display_valid;
 } PopsConfig;
 
 /* Initialize configuration with factory defaults */

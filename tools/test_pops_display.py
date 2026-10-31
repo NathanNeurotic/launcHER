@@ -17,7 +17,7 @@ import tempfile
 import unittest
 
 from test_pops_features import PopsConfig
-from trace_original_pops_display import OriginalDisplay, _Window, BASE as ORIGINAL_BASE
+from trace_original_pops_display import OriginalDisplay, _Window, BASE as ORIGINAL_BASE, MANUAL_WINDOWS
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE, SIZE = 0x200000, 0x302e60
@@ -51,11 +51,13 @@ class DisplayTests(unittest.TestCase):
                         '-I', str(ROOT / 'common/include'),
                         *(str(ROOT / 'common/src' / name) for name in
                           ('pops_modes_patches.c', 'pops_resident_engine.c', 'pops_external.c',
-                           'pops_config.c')),
+                           'pops_config.c', 'pops_resident.c')),
                         '-o', str(lib)], check=True)
         cls.lib = c.CDLL(str(lib))
         cls.lib.pops_config_init.argtypes = [c.POINTER(PopsConfig)]
         cls.lib.pops_config_parse_line.argtypes = [c.POINTER(PopsConfig), c.c_char_p]
+        cls.lib.pops_config_load_file.argtypes = [c.POINTER(PopsConfig), c.c_char_p]
+        cls.lib.pops_resident_hook_display.argtypes = [c.c_void_p, c.c_size_t, c.c_uint32]
         for name in ('pops_apply_display_config', 'pops_apply_all_config_patches'):
             getattr(cls.lib, name).argtypes = [c.c_void_p, c.c_size_t, c.POINTER(PopsConfig)]
 
@@ -153,6 +155,136 @@ class DisplayTests(unittest.TestCase):
         self.assertEqual(data[0x21af70 - BASE], 0)
         self.assertEqual(struct.unpack_from('<Q', data, 0x21af88 - BASE)[0], 0xa21a22a0341a0001)
 
+    def test_manual_first_valid_all_six_and_ranges(self):
+        cfg = self.config('$DX_100000 $DX_-1 $DX_65536 $DX_1',
+                          '$DY_0 $MAGH_99999 $MAGV_00001 $DW_0')
+        self.assertEqual((cfg.gs_mask, cfg.gs_display_valid), (31, 0))
+        cfg = self.config('$DX_100000 $DX_-1 $DX_65536 $DX_1',
+                          '$DY_0 $MAGH_99999 $MAGV_00001 $DW_0 $DH_0')
+        self.assertEqual(list(cfg.gs_values), [65536, 0, 99999, 1, 0, 0])
+        self.assertEqual((cfg.gs_mask, cfg.gs_display_valid), (63, 1))
+        # Zero width/height preserve the original's 32-bit underflow.
+        self.assertEqual(cfg.gs_display, 0xffffffff00000000 | (99999 << 23) | (1 << 27) | 65536)
+        for prefix in MANUAL_WINDOWS:
+            for invalid in ('', '000000', '100000', '-1', '+1', '1x', '0x10'):
+                bad = self.config(prefix + invalid)
+                self.assertEqual((bad.gs_mask, bad.gs_display_valid), (0, 0), prefix + invalid)
+
+    def test_manual_flags_are_file_local_and_last_complete_file_wins(self):
+        cfg = self.config()
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'CHEATS.TXT'
+            def load(text):
+                path.write_text(text)
+                self.assertEqual(self.lib.pops_config_load_file(c.byref(cfg), os.fsencode(path)), 0)
+            load('$DX_10 $DY_20 $MAGH_3\n')
+            load('$MAGV_1 $DW_100 $DH_200\n')
+            self.assertEqual(cfg.gs_display_valid, 0)
+            load('$DX_10\n$DY_20\n$MAGH_3\n$MAGV_1\n$DW_100\n$DH_200\n$DX_30\n')
+            expected = (199 << 44) | (99 << 32) | (1 << 27) | (3 << 23) | (20 << 12) | 10
+            self.assertEqual((cfg.gs_display_valid, cfg.gs_display), (1, expected))
+            load('$DX_80\n')
+            self.assertEqual(cfg.gs_display, expected)
+            load('$DX_1 $DY_2 $MAGH_0 $MAGV_0 $DW_1 $DH_1\n')
+            self.assertEqual(cfg.gs_display, (2 << 12) | 1)
+            load('$DX_1 $DY_2 $MAGH_0 $MAGV_0 $DW_1 $DH_1 $HDTVFIX\n')
+            self.assertEqual(cfg.hdtv_fix, 0)
+            load('$HDTVFIX\n')
+            self.assertEqual((cfg.hdtv_fix, cfg.gs_display_valid), (1, 1))
+            load('$480p\n')
+            self.assertEqual(cfg.gs_display_valid, 0)
+            load('$480p $DX_1 $DY_2 $MAGH_0 $MAGV_0 $DW_1 $DH_1\n')
+            self.assertEqual(cfg.gs_display_valid, 1)
+            load('$DX_1 $DY_2 $MAGH_0 $MAGV_0 $DW_1 $DH_1 $480p\n')
+            self.assertEqual(cfg.gs_display_valid, 1)
+
+    def test_manual_hook_all_guards_atomic_and_idempotent(self):
+        sites = {0x21a094: 0xde050010, 0x21a098: 0x3c031200,
+                 0x23acb0: 0x32240001, 0x23ad0c: 0x24040001}
+        def data():
+            b = bytearray(b'\xa5') * SIZE
+            for a, v in sites.items():
+                patch(b, a, v, 4)
+            return b
+        def apply(b, size=SIZE, entry=0x143a020):
+            return self.lib.pops_resident_hook_display((c.c_uint8 * SIZE).from_buffer(b), size, entry)
+        b, expected = data(), data()
+        for a, v in {0x21a094: 0x08000000 | (0x143a020 >> 2)}.items():
+            patch(expected, a, v, 4)
+        for _ in range(2):
+            self.assertEqual(apply(b), 0)
+            self.assertEqual(b, expected)
+        for a in sites:
+            b = data()
+            b[a - BASE] ^= 1
+            before = bytes(b)
+            self.assertEqual(apply(b), -errno.EILSEQ)
+            self.assertEqual(b, before)
+        b = data()
+        self.assertEqual(apply(b, size=0x3ad0f), -errno.ERANGE)
+        self.assertEqual(apply(b, entry=0x143a021), -errno.EINVAL)
+        self.assertEqual(apply(b, entry=0x1460000), -errno.EINVAL)
+        self.assertEqual(b, data())
+
+    @unittest.skipUnless(os.environ.get('POPSTARTER_TEST_ELF'), 'optional external POPStarter MAIN')
+    def test_original_manual_display_differential(self):
+        original = OriginalDisplay(Path(os.environ['POPSTARTER_TEST_ELF']).read_bytes())
+        rng = random.Random(0x4753)
+        cases = []
+        prefixes = list(MANUAL_WINDOWS)
+        for n in (0, 1, 9, 10, 99, 100, 999, 1000, 9999, 10000, 65535, 65536, 99999, 100000):
+            cases.append([p + str(n) for p in prefixes])
+        for p in prefixes:
+            for suffix in ('', '000000', '100000', '-1', '+1', '1x', '0x10', '00001'):
+                cases.append([p + suffix])
+            cases.append([p + '0', p + '99999'])
+        for _ in range(96):
+            commands = [p + str(rng.randrange(100000)) for p in prefixes]
+            rng.shuffle(commands)
+            cases.append(commands)
+        for mask in range(64):
+            cases.append([p + '1' for i, p in enumerate(prefixes) if mask & (1 << i)])
+        for commands in cases:
+            measured = original.manual(commands)
+            cfg = self.config(*commands)
+            self.assertEqual(list(cfg.gs_values), measured['values'], commands)
+            self.assertEqual([bool(cfg.gs_mask & (1 << i)) for i in range(6)], measured['flags'], commands)
+            self.assertEqual(bool(cfg.gs_display_valid), bool(measured['writes']), commands)
+            if measured['writes']:
+                self.assertEqual(cfg.gs_display, measured['writes'][0][1], commands)
+                self.assertEqual(measured['writes'][1:], [[0x21a094, 0x0808e5da, 4],
+                                                         [0x23acb0, 0x32240001, 4],
+                                                         [0x23ad0c, 0x32240001, 4]])
+        print(f'Original manual DISPLAY differential PASS: {len(cases)} file cases')
+
+    @unittest.skipUnless(os.environ.get('POPSTARTER_TEST_ELF'), 'optional external POPStarter MAIN')
+    def test_original_manual_option_order(self):
+        original = OriginalDisplay(Path(os.environ['POPSTARTER_TEST_ELF']).read_bytes())
+        full = [p + '1' for p in MANUAL_WINDOWS]
+        cases = []
+        for option in ('$HDTVFIX', '$NOHDTVFIX', '$480p'):
+            for at in (0, 3, 6):
+                cases.append([full[:at] + [option] + full[at:]])
+            cases.append([full, [option]])
+            cases.append([[option], full])
+            cases.append([full, ['$DX_2', option]])
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'CHEATS.TXT'
+            for files in cases:
+                cfg = self.config()
+                writes = {0x23acb0: 0x32240001, 0x21a094: 0xde050010}
+                for commands in files:
+                    path.write_text('\n'.join(commands) + '\n')
+                    self.assertEqual(self.lib.pops_config_load_file(c.byref(cfg), os.fsencode(path)), 0)
+                    for address, value, _ in original.manual(commands)['writes']:
+                        writes[address] = value
+                self.assertEqual(bool(cfg.gs_display_valid), writes[0x21a094] == 0x0808e5da, files)
+                # Progressive mode is intentionally still unsupported; its
+                # li a0,0 sites are not claimed by the fixed override.
+                if cfg.gs_display_valid:
+                    self.assertEqual(cfg.hdtv_fix, writes[0x23acb0] == 0x24040001, files)
+        print(f'Original manual DISPLAY option-order PASS: {len(cases)} file sequences')
+
     @unittest.skipUnless(os.environ.get('POPS_TEST_ELF'), 'optional external Sony core')
     def test_identified_external_core_guards(self):
         elf = Path(os.environ['POPS_TEST_ELF']).read_bytes()
@@ -167,6 +299,19 @@ class DisplayTests(unittest.TestCase):
                 data[va - BASE:va - BASE + fs] = elf[off:off + fs]
         for address, value, width in SITES:
             self.assertEqual(int.from_bytes(data[address - BASE:address - BASE + width], 'little'), value)
+        # The resident manual hook uses the same measured core independently
+        # of the immediate-field display commands above.
+        manual = bytearray(data)
+        pointer = (c.c_ubyte * SIZE).from_buffer(manual)
+        self.assertEqual(self.lib.pops_resident_hook_display(pointer, SIZE, 0x143a020), 0)
+        full = '$DX_10 $DY_20 $MAGH_3 $MAGV_1 $DW_100 $DH_200'
+        for command in (full, '$HDTVFIX ' + full, full + ' $HDTVFIX'):
+            staged, cfg = bytearray(data), self.config(command)
+            pointer = (c.c_ubyte * SIZE).from_buffer(staged)
+            self.assertEqual(self.lib.pops_apply_all_config_patches(pointer, SIZE, c.byref(cfg)), 0)
+            self.assertEqual(self.lib.pops_resident_hook_display(pointer, SIZE, 0x143a020), 0)
+            for address in (0x23acb0, 0x23ad0c):
+                self.assertEqual(struct.unpack_from('<I', staged, address - BASE)[0], 0x32240001)
         cfg = self.config('$SMOOTH $LEFTADJ_255 $XPOS_0 $YPOS_65535 $DWSTRETCH_9999 $DWCROP_0')
         self.assertEqual(self.apply(data, cfg), 0)
 

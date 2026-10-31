@@ -61,8 +61,8 @@ static int try_parse_cheat(PopsConfig *cfg, const char *tok1, const char *tok2) 
 
 /* Original commands accept decimal digits only, with bounded digit counts.
  * Do not let strtol accept a sign, suffix or overflow as a display patch. */
-static int display_decimal(const char *text, unsigned digits, unsigned maximum,
-                             uint16_t *value) {
+static int display_decimal32(const char *text, unsigned digits, unsigned maximum,
+                               uint32_t *value) {
   unsigned n = 0, result = 0;
   while (*text) {
     if (*text < '0' || *text > '9' || ++n > digits)
@@ -70,6 +70,15 @@ static int display_decimal(const char *text, unsigned digits, unsigned maximum,
     result = result * 10 + (unsigned)(*text++ - '0');
   }
   if (!n || result > maximum)
+    return 0;
+  *value = result;
+  return 1;
+}
+
+static int display_decimal(const char *text, unsigned digits, unsigned maximum,
+                             uint16_t *value) {
+  uint32_t result;
+  if (!display_decimal32(text, digits, maximum, &result))
     return 0;
   *value = (uint16_t)result;
   return 1;
@@ -79,8 +88,38 @@ static int parse_single_directive(PopsConfig *cfg, const char *token) {
   if (!cfg || !token || !*token)
     return 0;
 
+  static const char *const gs_commands[] = {
+    "$DX_", "$DY_", "$MAGH_", "$MAGV_", "$DW_", "$DH_"
+  };
+  for (unsigned i = 0; i < 6; ++i) {
+    size_t n = strlen(gs_commands[i]);
+    if (!strncasecmp(token, gs_commands[i], n)) {
+      uint32_t value;
+      if (!(cfg->gs_mask & (1u << i)) &&
+          display_decimal32(token + n, 5, 99999, &value)) {
+        cfg->gs_values[i] = value;
+        cfg->gs_mask |= (uint8_t)(1u << i);
+        if (cfg->gs_mask == 0x3f) {
+          /* Original unsigned 32-bit DW/DH subtraction and 64-bit ORs.
+           * Do not silently mask inputs to the nominal GS field widths. */
+          cfg->gs_display = (uint64_t)(uint32_t)(cfg->gs_values[5] - 1) << 44 |
+                            (uint64_t)(uint32_t)(cfg->gs_values[4] - 1) << 32 |
+                            (uint64_t)cfg->gs_values[3] << 27 |
+                            (uint64_t)cfg->gs_values[2] << 23 |
+                            (uint64_t)cfg->gs_values[1] << 12 | cfg->gs_values[0];
+          cfg->gs_display_valid = 1;
+          cfg->hdtv_fix = 0;
+          cfg->original_tokens |= POPS_TOK_NOHDTVFIX;
+        }
+      }
+      return 1;
+    }
+  }
+
   if (!strcasecmp(token, "$480p")) {
     cfg->video_mode = POPS_VMODE_480P;
+    if (cfg->gs_mask != 0x3f)
+      cfg->gs_display_valid = 0;
     return 1;
   }
   /* Not POPStarter commands; no grounded POPS writes exist for them. */
@@ -102,8 +141,12 @@ static int parse_single_directive(PopsConfig *cfg, const char *token) {
     return 1;
   }
   if (!strcasecmp(token, "$HDTVFIX")) {
-    cfg->hdtv_fix = 1;
-    cfg->original_tokens &= ~POPS_TOK_NOHDTVFIX;
+    /* A complete manual DISPLAY in this file restores these sites at EOF,
+     * even when HDTVFIX occurs later in the file. A later file may set it. */
+    if (cfg->gs_mask != 0x3f) {
+      cfg->hdtv_fix = 1;
+      cfg->original_tokens &= ~POPS_TOK_NOHDTVFIX;
+    }
     return 1;
   }
   if (!strcasecmp(token, "$SMOOTH")) {
@@ -387,6 +430,8 @@ static int load_config_file(PopsConfig *cfg, const char *filepath, int optional_
       return 0;
     return result;
   }
+
+  cfg->gs_mask = 0; /* The original's six acceptance flags are file-local. */
 
   char line[256];
   int result = 0;

@@ -1,4 +1,4 @@
-# Continuation checkpoint — 2026-10-30
+# Continuation checkpoint — 2026-10-31
 
 Continue [draft launcHER PR #23](https://github.com/NathanNeurotic/launcHER/pull/23) on `codex/popstarter-replacement`. Fetch before editing, preserve newer work, publish validated incremental commits on this same PR, and include `Co-authored-by: ChatGPT <chatgpt@openai.com>`. Keep the PR draft and unmerged.
 
@@ -26,6 +26,16 @@ that last change. Continue from current HEAD, fetching again before editing.
   pass. Normal and `LAUNCHER_BOOT_TRACE=ON,DEBUG=ON` PS2 builds pass. The built
   2,672-byte resident image passes its Unicorn entry/chaining check. These are
   host/target-build/emulated results; no new physical console run occurred.
+- New manual GS DISPLAY increment: `$DX/$DY/$MAGH/$MAGV/$DW/$DH` now
+  follow all-six, first-valid, file-local acceptance (0..99999, 1..5 digits).
+  Independent stackless resident bridge at the guarded `0x21a094` hook;
+  image format v2 has a display entry and 8-byte-aligned config. Read
+  [manual DISPLAY contracts](POPS_MANUAL_DISPLAY_CONTRACTS.md). **228 original
+  file cases** plus 18 option-order sequences, 109 aggregate external tests, all 18 host entry points and
+  both PS2 builds pass. The 2,704-byte built resident image passes VBLANK and
+  display-entry checks; four display values also match original-entry GPR
+  results in Unicorn's 64-bit view. No console run. Progressive `$480p` and
+  PATCH actions 6/7 remain separate open work; the latter still reject.
 - Latest catch-up merges: launcHER **`b34affc`** integrates EMBER through
   `f0e5948` (explicit CUE forwarding coverage/docs and newer credit links).
   Its build/host/argv CI passes. REPOP **`feeb3346`** integrates main through
@@ -44,7 +54,7 @@ that last change. Continue from current HEAD, fetching again before editing.
   uninitialized descriptor fields, callback relocation/global ownership and
   complete runtime/device acceptance remain open. No baseline was promoted.
   **Next for the capability goal:** independently implement the remaining
-  launcHER resident display/pad/cheat features and built-in per-game data,
+  launcHER progressive display/pad/cheat features and built-in per-game data,
   using measured original contracts and guarded production integration.
   Existing REPOP `FUN_0091a604` bounds warning remains separate open work.
 - The user explicitly requested sustained work until 100% verified parity.

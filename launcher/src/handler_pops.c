@@ -1196,8 +1196,8 @@ int launchPOPS(int argc, char *argv[]) {
     }
   }
 
-  /* launcHER's resident code (cheat engine) runs inside POPS from its
-   * VBLANK_START interrupt. Validate and hook now, while failing is still
+  /* launcHER's resident cheat/display code runs inside POPS. Validate and
+   * hook now, while failing is still
    * harmless; the image itself is copied just before handoff. */
   int residentNeeded = pops_resident_build_config(&residentCfg, &cfg);
   if (residentNeeded < 0) {
@@ -1209,8 +1209,10 @@ int launchPOPS(int argc, char *argv[]) {
     res = pops_resident_check_image(pops_resident_bin, size_pops_resident_bin, &residentHdr);
     if (!res && (uint32_t)(uintptr_t)stagedCore + plan.core_size > POPS_RESIDENT_BASE)
       res = -ERANGE; /* the trampoline still reads the staged core from there */
-    if (!res)
+    if (!res && (residentCfg.flags & POPS_RES_F_CHEATS))
       res = pops_resident_hook_core((void *)stagedCore, plan.core_size, residentHdr.vblank_entry);
+    if (!res && (residentCfg.flags & POPS_RES_F_DISPLAY))
+      res = pops_resident_hook_display((void *)stagedCore, plan.core_size, residentHdr.display_entry);
     if (res) {
       msg("POPS: Resident code setup failed: %d\n", res);
       return res;
