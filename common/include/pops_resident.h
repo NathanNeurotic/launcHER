@@ -74,8 +74,8 @@ typedef struct {
  * The original keeps a copy of them at offset 0x800 of the slot 0 VMC
  * image POPS holds in RAM (signature "01->" then the three words) and
  * restores it once that image is loaded (its first word turns nonzero).
- * launcHER restores a copy that is already there; it writes one only with
- * POPS_RES_F_TIMINGS_SAVE, which the launcher does not set. */
+ * The launcher sets POPS_RES_F_TIMINGS_SAVE with it, so launcHER keeps that
+ * copy the same way; without the flag the card copy is only read. */
 #define POPS_TIMING_A_ADDR        UINT32_C(0x00502770) /* pad 2: +-1, R +-0x10 */
 #define POPS_TIMING_B_OFFSET      0x33e0u /* scratchpad; pad 1 L1/L2 */
 #define POPS_TIMING_C_OFFSET      0x33e4u /* scratchpad; pad 1 R1/R2 */

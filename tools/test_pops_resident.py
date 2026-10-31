@@ -777,10 +777,10 @@ class SetTimings(unittest.TestCase):
         out = ResidentConfig()
         cfg = BuildConfig.parsed(self, "$SET_TIMINGS")
         self.assertEqual(L.pops_resident_build_config(c.byref(out), c.addressof(cfg)), 1)
-        self.assertEqual(out.flags, F_TIMINGS)  # never the card-writing flag
+        self.assertEqual(out.flags, F_TIMINGS | F_TIMINGS_SAVE)  # saves like POPStarter
         cfg = BuildConfig.parsed(self, "$set_timings")
         L.pops_resident_build_config(c.byref(out), c.addressof(cfg))
-        self.assertEqual(out.flags, F_TIMINGS)
+        self.assertEqual(out.flags, F_TIMINGS | F_TIMINGS_SAVE)
         for line in ("$SET_TIMINGS1", "$SET_TIMING"):
             cfg = BuildConfig.parsed(self, line)
             self.assertEqual(L.pops_resident_build_config(c.byref(out), c.addressof(cfg)), 0, line)
@@ -799,7 +799,7 @@ class SetTimings(unittest.TestCase):
         self.assertEqual(m.timings(), (0x100, 0x201, 0x300))
         self.assertEqual(m.copy(), (0x3E2D3130, 0x100, 0x200, 0x300))  # card untouched
 
-    def test_never_writes_the_card_by_default(self):
+    def test_never_writes_the_card_without_the_save_flag(self):
         m, cfg = _TimingMachine(), self.config()
         m.ee32(VMC0, 1)
         m.ee32(TIMING_A, 5)

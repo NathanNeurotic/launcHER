@@ -307,8 +307,8 @@ print('resident widescreen GTE stubs: PASS (%d values x 3 modes, both sites, 28 
 
 # $SET_TIMINGS through the built VBLANK entry: waits for the slot 0 VMC
 # image, restores a saved copy once, then adjusts from the pads every frame.
-# Without the save flag (never set by the launcher) the card copy is not
-# written; with it, new values are mirrored there.
+# Without the save flag the card copy is not written; with it (the launcher
+# sets it for $SET_TIMINGS) new values are mirrored there, as in POPStarter.
 TREADY = cfga + 32 + 256 * 8
 u32 = lambda a: struct.unpack('<I', mu.mem_read(a, 4))[0]
 w32 = lambda a, v: mu.mem_write(a, struct.pack('<I', v & 0xffffffff))
