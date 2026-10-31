@@ -182,6 +182,56 @@ void pops_resident_pad_read_done(int32_t bytes) {
   pops_resident_d2ls((uint8_t *)buf, (uint32_t)bytes);
 }
 
+/* Widescreen stubs inside POPS's GTE perspective transform. They are
+ * jumped to in place of a store, after its delay slot has run, and use only
+ * $v0, $v1 and LO/HI (dead at both sites). x * 75 is formed from shifts so
+ * the product wraps to 32 bits the same way a 32-bit multiply does; the
+ * quotient truncates toward zero. A zero divisor leaves x unscaled.
+ *   scale:  x = x * 75 / divisor, store MAC1, resume at 0x2089b0
+ *   divide: x = x / divisor (the $EYEFINITY entry), same store and resume
+ *   ultra:  x = x * 75 / divisor at the IR1 store; like the original, the
+ *           result goes to MAC1 (0x64) and the stock IR1 store is not made;
+ *           resume at 0x208a34.
+ * POPS's $t0 is register 8 (o32 naming); this toolchain's EABI calls $8
+ * "a4", so the stubs name it by number. */
+#define GTE_DIV_STR2(x) #x
+#define GTE_DIV_STR(x) GTE_DIV_STR2(x)
+#define GTE_DIVISOR "pops_resident_config+" GTE_DIV_STR(POPS_RESIDENT_GTE_DIVISOR_OFFSET)
+_Static_assert(offsetof(PopsResidentConfig, gte_divisor) == POPS_RESIDENT_GTE_DIVISOR_OFFSET,
+               "widescreen stub ABI");
+#define GTE_TIMES_75 \
+  "sll $v0, $8, 6\n" \
+  "sll $v1, $8, 3\n" \
+  "addu $v0, $v0, $v1\n" \
+  "sll $v1, $8, 1\n" \
+  "addu $v0, $v0, $v1\n" \
+  "addu $8, $v0, $8\n"
+#define GTE_DIVIDE(label) \
+  "lui $v1, %hi(" GTE_DIVISOR ")\n" \
+  "lbu $v1, %lo(" GTE_DIVISOR ")($v1)\n" \
+  "beqz $v1, " label "\n" \
+  "nop\n" \
+  "div $zero, $8, $v1\n" \
+  "mflo $8\n"
+void pops_resident_gte_scale(void);
+void pops_resident_gte_divide(void);
+void pops_resident_gte_ultra(void);
+__asm__(".set push\n.set noreorder\n.text\n.align 2\n"
+        ".globl pops_resident_gte_scale\npops_resident_gte_scale:\n"
+        GTE_TIMES_75
+        ".globl pops_resident_gte_divide\npops_resident_gte_divide:\n"
+        GTE_DIVIDE("1f")
+        "1:\n"
+        "j 0x002089b0\n"
+        "sw $8, 0x64($a0)\n"
+        ".globl pops_resident_gte_ultra\npops_resident_gte_ultra:\n"
+        GTE_TIMES_75
+        GTE_DIVIDE("2f")
+        "2:\n"
+        "j 0x00208a34\n"
+        "sw $8, 0x64($a0)\n"
+        ".set pop\n");
+
 __attribute__((section(".resident.head"), used))
 const PopsResidentHeader pops_resident_header = {
   POPS_RESIDENT_MAGIC,
@@ -195,6 +245,9 @@ const PopsResidentHeader pops_resident_header = {
   (uint32_t)pops_resident_progressive,
   (uint32_t)pops_resident_pad_read_entry,
   (uint32_t)pops_resident_pad_read_exit,
+  (uint32_t)pops_resident_gte_scale,
+  (uint32_t)pops_resident_gte_divide,
+  (uint32_t)pops_resident_gte_ultra,
 };
 
 int pops_resident_vblank(int cause) {

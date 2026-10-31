@@ -25,7 +25,7 @@ MASK = (1 << 64) - 1
 
 def inspect(image):
     magic, ver, hs, fsz, isz, _, _, _, entry = struct.unpack_from('<IHHIIIIII', image)
-    assert (magic, ver, hs, fsz) == (0x5352484c, 4, 40, len(image))
+    assert (magic, ver, hs, fsz) == (0x5352484c, 5, 52, len(image))
     assert fsz <= isz <= 0x26000 and BASE + hs <= entry < BASE + fsz
     words = {BASE + i: struct.unpack_from('<I', image, i)[0] for i in range(0, fsz, 4)}
     end = next(pc + 8 for pc in range(entry, BASE + fsz, 4) if words[pc] == 0x08086826)

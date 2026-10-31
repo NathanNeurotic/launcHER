@@ -39,7 +39,8 @@ design is launcHER's own: the original hooks other places (its code at
 exit program, not a cheat engine).
 
 The resident code runs the cheat engine, an independent manual GS DISPLAY
-bridge, the text `$480p` progressive bridge and the pad commands (below). [Manual DISPLAY contracts](POPS_MANUAL_DISPLAY_CONTRACTS.md) record
+bridge, the text `$480p` progressive bridge, the pad commands and the
+widescreen family (below). [Manual DISPLAY contracts](POPS_MANUAL_DISPLAY_CONTRACTS.md) record
 all-six, per-file acceptance and the guarded bridge. Commands still BLOCKED
 below need their behavior worked out and added to it.
 
@@ -65,7 +66,7 @@ below need their behavior worked out and added to it.
 | `$RECOMPILER_ADDON_3/4` | jumps into resident code | **BLOCKED** |
 | `$ORIGINAL_OPCODES` | flag | **MISSING** |
 | `$UNDO_COMPATIBILITY_CODES`, `$UNDO_GAME_FIXES`, `$UNDO_LIBCRYPT_FIX` | restore sites the built-in DB patched | **MISSING** (no built-in DB to undo) |
-| `$WIDESCREEN`, `$ULTRA_WIDESCREEN`, `$EYEFINITY` | GTE hooks into resident code | **BLOCKED**; the old invented `0x205B00` patch is removed |
+| `$WIDESCREEN`, `$ULTRA_WIDESCREEN`, `$EYEFINITY` | hooks POPS's GTE perspective transform (RTPS/RTPT): the MAC1 store at `0x2089a8` becomes x·75/100 (`$WIDESCREEN`, 16:9) or x/4 (`$EYEFINITY`, 48:9); `$ULTRA_WIDESCREEN` also scales again at the IR1 store `0x208a2c` (x·0.5625 overall), writing the result to MAC1 and leaving IR1 unstored. Each handler rewrites all sites, so the last command wins | **PRESENT**: own guarded stubs, same arithmetic (32-bit product, truncating division) and the same ULTRA register effect; handler writes checked against the original, built stubs run under emulation on 414 values per mode; **NOT TESTED** on a console |
 | `$ROLLBACK` | restores 10 breakpoint sites | **PRESENT** |
 | `$SET_TIMINGS` | writes inside the copied code | **BLOCKED** |
 | `$BREAKPOINT0/1` | exception hook | **MISSING** |
@@ -140,7 +141,7 @@ record 60 original region-control-flow combinations. **No console test.**
 1. Hardware check of this change: a US disc and a European disc on an NTSC
    console, plus `$FORCEPAL` and `$NOPAL` (picture rate and colour).
 2. Grow the resident code (cheats, manual/progressive display and pad
-   commands exist, NOT TESTED on a console) for widescreen and timings. Complete PATCH video
+   commands and widescreen exist, NOT TESTED on a console) for `$SET_TIMINGS`. Complete PATCH video
    actions 6/7 session/owned-entry dispatch separately; text `$480p` now works
    at the component/staging level. [Progressive contracts](POPS_PROGRESSIVE_CONTRACTS.md).
 3. Recover the built-in per-game DB at `0x8e00d0`. (The pad commands are

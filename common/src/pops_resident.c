@@ -33,6 +33,9 @@ int pops_resident_check_image(const void *image, size_t image_len, PopsResidentH
   h.progressive_entry = get_u32(b + 28);
   h.pad_read_entry = get_u32(b + 32);
   h.pad_read_exit = get_u32(b + 36);
+  h.gte_scale_entry = get_u32(b + 40);
+  h.gte_divide_entry = get_u32(b + 44);
+  h.gte_ultra_entry = get_u32(b + 48);
 
   if (h.magic != POPS_RESIDENT_MAGIC || h.version != POPS_RESIDENT_VERSION ||
       h.header_size != sizeof(PopsResidentHeader))
@@ -56,6 +59,12 @@ int pops_resident_check_image(const void *image, size_t image_len, PopsResidentH
   if ((h.pad_read_exit & 3) || h.pad_read_exit < POPS_RESIDENT_BASE + h.header_size ||
       h.pad_read_exit >= POPS_RESIDENT_BASE + h.file_size)
     return -ERANGE;
+  const uint32_t gte[] = {h.gte_scale_entry, h.gte_divide_entry, h.gte_ultra_entry};
+  for (unsigned i = 0; i < 3; ++i) {
+    if ((gte[i] & 3) || gte[i] < POPS_RESIDENT_BASE + h.header_size ||
+        gte[i] >= POPS_RESIDENT_BASE + h.file_size)
+      return -ERANGE;
+  }
   /* The configuration must fit inside the image, in its zeroed part or not. */
   if ((h.config_addr & 7) || h.config_addr < POPS_RESIDENT_BASE + h.header_size ||
       h.config_addr > POPS_RESIDENT_BASE + h.image_size - sizeof(PopsResidentConfig))
@@ -92,6 +101,12 @@ int pops_resident_build_config(PopsResidentConfig *out, const PopsConfig *cfg) {
   }
   if (cfg->pad_d2ls)
     out->flags |= POPS_RES_F_D2LS;
+  if (cfg->widescreen > POPS_WIDESCREEN_EYEFINITY)
+    return -EINVAL;
+  if (cfg->widescreen) {
+    out->flags |= POPS_RES_F_WIDESCREEN;
+    out->gte_divisor = cfg->widescreen == POPS_WIDESCREEN_EYEFINITY ? 4 : 100;
+  }
 
   uint16_t count = cfg->cheat_count;
   if (count > POPS_MAX_CHEATS)
@@ -249,5 +264,51 @@ int pops_resident_hook_pads(void *staged_core, size_t core_size, uint32_t flags,
     return -EILSEQ;
   put_u32(entry, jump_entry);
   put_u32(ret, jump_exit);
+  return 0;
+}
+
+int pops_resident_hook_widescreen(void *staged_core, size_t core_size, uint8_t mode,
+                                  const PopsResidentHeader *hdr) {
+  uint8_t *core = staged_core;
+  /* Neighbours the stubs rely on: the delay slots they let run, the stores
+   * they return to, and the next writes of $v0/$v1 (dead registers). */
+  static const uint32_t fixed[][2] = {
+    {0x002089ac, 0xac890068}, /* sw    $t1, 0x68($a0) (delay slot) */
+    {0x002089b0, 0xac8a006c}, /* sw    $t2, 0x6c($a0) (resume) */
+    {0x002089b8, 0x24028000}, /* addiu $v0, $zero, -0x8000 */
+    {0x002089bc, 0x24037fff}, /* addiu $v1, $zero, 0x7fff */
+    {0x00208a30, 0xac890028}, /* sw    $t1, 0x28($a0) (delay slot) */
+    {0x00208a34, 0xac8a002c}, /* sw    $t2, 0x2c($a0) (resume) */
+    {0x00208a38, 0x3402ffff}, /* ori   $v0, $zero, 0xffff */
+    {0x00208a3c, 0x3c038006}, /* lui   $v1, 0x8006 */
+  };
+  if (!core || !hdr || mode > POPS_WIDESCREEN_EYEFINITY)
+    return -EINVAL;
+  if (mode == POPS_WIDESCREEN_NONE)
+    return 0;
+  const uint32_t entries[] = {hdr->gte_scale_entry, hdr->gte_divide_entry, hdr->gte_ultra_entry};
+  for (unsigned i = 0; i < 3; ++i) {
+    if ((entries[i] & 3) || entries[i] < POPS_RESIDENT_BASE || entries[i] >= POPS_RESIDENT_LIMIT)
+      return -EINVAL;
+  }
+  if (core_size < POPS_GTE_IR1_STORE_ADDR + 0x14 - POPS_CORE_BASE)
+    return -ERANGE;
+  for (unsigned i = 0; i < sizeof(fixed) / sizeof(fixed[0]); ++i) {
+    if (get_u32(core + fixed[i][0] - POPS_CORE_BASE) != fixed[i][1])
+      return -EILSEQ;
+  }
+  uint32_t j_scale = 0x08000000u | (hdr->gte_scale_entry >> 2);
+  uint32_t j_divide = 0x08000000u | (hdr->gte_divide_entry >> 2);
+  uint32_t j_ultra = 0x08000000u | (hdr->gte_ultra_entry >> 2);
+  uint8_t *mac1 = core + POPS_GTE_MAC1_STORE_ADDR - POPS_CORE_BASE;
+  uint8_t *ir1 = core + POPS_GTE_IR1_STORE_ADDR - POPS_CORE_BASE;
+  uint32_t cur = get_u32(mac1);
+  if (cur != 0xac880064 && cur != j_scale && cur != j_divide)
+    return -EILSEQ;
+  cur = get_u32(ir1);
+  if (cur != 0xac880024 && cur != j_ultra)
+    return -EILSEQ;
+  put_u32(mac1, mode == POPS_WIDESCREEN_EYEFINITY ? j_divide : j_scale);
+  put_u32(ir1, mode == POPS_WIDESCREEN_ULTRA ? j_ultra : 0xac880024);
   return 0;
 }

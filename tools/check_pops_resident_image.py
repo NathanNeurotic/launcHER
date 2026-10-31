@@ -18,9 +18,9 @@ from unicorn.mips_const import *
 img = open(sys.argv[1], 'rb').read()
 BASE = 0x0143A000
 (magic, ver, hs, fsz, isz, entry, cfga, display_entry, progressive_entry,
- pad_read_entry, pad_read_exit) = struct.unpack_from('<IHHIIIIIIII', img, 0)
+ pad_read_entry, pad_read_exit, gte_scale, gte_divide, gte_ultra) = struct.unpack_from('<IHHIIIIIIIIIII', img, 0)
 assert magic == 0x5352484C and fsz == len(img), (hex(magic), fsz, len(img))
-assert ver == 4 and hs == 40
+assert ver == 5 and hs == 52
 
 mu = Uc(UC_ARCH_MIPS, UC_MODE_MIPS64 + UC_MODE_LITTLE_ENDIAN)
 # The R5900 has MIPS IV's movz/movn, which unicorn's default R4000 model
@@ -35,8 +35,8 @@ mu.mem_write(BASE, img + bytes(isz - fsz))
 code = [0x3c020000, 0x8c431000, 0x24630001, 0xac431000, 0x03e00008, 0x2402ffff]
 mu.mem_write(0x0021CD68, b''.join(struct.pack('<I', w) for w in code))
 
-def config(codes, safe=0, flags=1, pads=(0, 0, 0)):
-    blob = struct.pack('<QIIIIHHBBBx', 0, flags, 0x0021CD68, 0x70003364, 0, safe, len(codes), *pads)
+def config(codes, safe=0, flags=1, pads=(0, 0, 0), divisor=0):
+    blob = struct.pack('<QIIIIHHBBBB', 0, flags, 0x0021CD68, 0x70003364, 0, safe, len(codes), *pads, divisor)
     for addr, val in codes:
         blob += struct.pack('<IHBx', addr & 0x1FFFFF, val, addr >> 24)
     mu.mem_write(cfga, blob)
@@ -225,3 +225,81 @@ if os.environ.get('POPSTARTER_TEST_ELF'):
     assert theirs == built, next((s.hex(), a.hex(), b.hex()) for s, a, b in
                                  zip([d for d in samples for _ in (0, 1)], built, theirs) if a != b)
     print('original D2LS swap vs built resident: PASS (%d readings)' % len(theirs))
+
+
+# Widescreen family. POPS's GTE perspective transform stores MAC1 at
+# 0x2089a8 and IR1 at 0x208a2c (both sw $8, ...($a0)); the hooks replace
+# those stores and their delay slots (sw $9) still run. Expected values use
+# the original's arithmetic: 32-bit product x * 75, then a 32-bit signed
+# division truncating toward zero.
+def s32(v):
+    v &= 0xFFFFFFFF
+    return v - (1 << 32) if v >> 31 else v
+
+def div_trunc(a, d):
+    q = abs(a) // abs(d)
+    return q if (a < 0) == (d < 0) else -q
+
+def gte_words(mac1_store, ir1_store):
+    words = {0x2089A8: mac1_store, 0x2089AC: 0xAC890068, 0x2089B0: 0xAC8A006C,
+             0x208A2C: ir1_store, 0x208A30: 0xAC890028, 0x208A34: 0xAC8A002C}
+    for a, w in words.items():
+        mu.mem_write(a, struct.pack('<I', w))
+    mu.ctl_remove_cache(0x2089A0, 0x208A40)
+
+GTE = 0x00090000
+REGS = [getattr(sys.modules['unicorn.mips_const'], 'UC_MIPS_REG_%d' % i) for i in range(1, 32)]
+
+def gte_store(start, stop, x, y):
+    mu.mem_write(GTE, b'\xa5' * 0x100)
+    before = {}
+    for i, reg in enumerate(REGS, 1):
+        before[i] = (0x11110000 + i) & 0xFFFFFFFFFFFFFFFF
+        mu.reg_write(reg, before[i])
+    mu.reg_write(UC_MIPS_REG_A0, GTE)
+    before[4] = GTE
+    mu.reg_write(UC_MIPS_REG_8, x & 0xFFFFFFFFFFFFFFFF)
+    before[8] = x & 0xFFFFFFFFFFFFFFFF
+    mu.reg_write(UC_MIPS_REG_9, 0x0BADF00D)
+    before[9] = 0x0BADF00D
+    # Stop with a code hook: unicorn's `until` misbehaves when consecutive
+    # runs start inside the same translated block.
+    mu.ctl_remove_cache(0x208900, 0x208B00)
+    h = mu.hook_add(UC_HOOK_CODE, lambda uc, pc, size, u: uc.emu_stop(), begin=stop, end=stop)
+    mu.emu_start(start, 0x00080000, count=64)
+    mu.hook_del(h)
+    assert mu.reg_read(UC_MIPS_REG_PC) == stop, (hex(start), hex(mu.reg_read(UC_MIPS_REG_PC)), x)
+    for i, reg in enumerate(REGS, 1):
+        if i not in (2, 3, 8):
+            assert mu.reg_read(reg) == before[i], ('register clobbered', i)
+    return s32(mu.reg_read(UC_MIPS_REG_8)), bytes(mu.mem_read(GTE, 0x100))
+
+rng = random.Random(0x57494445)
+xs = [0, 1, -1, 99, -99, 100, -100, 0x7FFF, -0x8000, 28633115, 28633116, -28633116,
+      0x7FFFFFFF, -0x80000000] + [s32(rng.getrandbits(32)) for _ in range(200)] + \
+     [rng.randrange(-0x10000, 0x10000) for _ in range(200)]
+cases = 0
+for mode, divisor in (('16:9', 100), ('ultra', 100), ('eyefinity', 4)):
+    config([], flags=1 << 5, divisor=divisor)
+    mac1 = gte_divide if mode == 'eyefinity' else gte_scale
+    gte_words(0x08000000 | (mac1 >> 2), 0x08000000 | (gte_ultra >> 2) if mode == 'ultra' else 0xAC880024)
+    for x in xs:
+        want = div_trunc(x if mode == 'eyefinity' else s32(x * 75), divisor)
+        t0, mem = gte_store(0x2089A8, 0x2089B0, x, 0)
+        assert t0 == want, (mode, x, t0, want)
+        assert struct.unpack_from('<i', mem, 0x64)[0] == want and mem[0x68:0x6C] == b'\x0d\xf0\xad\x0b'
+        assert mem[:0x64] == b'\xa5' * 0x64 and mem[0x6C:] == b'\xa5' * 0x94
+        t0, mem = gte_store(0x208A2C, 0x208A34, x, 0)
+        if mode == 'ultra':
+            want2 = div_trunc(s32(x * 75), 100)
+            assert t0 == want2 and struct.unpack_from('<i', mem, 0x64)[0] == want2
+            assert mem[0x24:0x28] == b'\xa5' * 4, 'ultra leaves IR1 unstored, like the original'
+        else:
+            assert t0 == s32(x) and struct.unpack_from('<i', mem, 0x24)[0] == s32(x)
+        assert mem[0x28:0x2C] == b'\x0d\xf0\xad\x0b'
+        cases += 1
+# Zero divisor: x passes through unscaled except for the product.
+config([], flags=1 << 5, divisor=0)
+gte_words(0x08000000 | (gte_divide >> 2), 0xAC880024)
+assert gte_store(0x2089A8, 0x2089B0, 12345, 0)[0] == 12345
+print('resident widescreen GTE stubs: PASS (%d values x 3 modes, both sites, 28 registers kept)' % len(xs))

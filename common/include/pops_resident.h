@@ -28,7 +28,7 @@ extern "C" {
 #define POPS_RESIDENT_BASE        UINT32_C(0x0143a000)
 #define POPS_RESIDENT_LIMIT       UINT32_C(0x01460000)
 #define POPS_RESIDENT_MAGIC       UINT32_C(0x5352484c) /* "LHRS" */
-#define POPS_RESIDENT_VERSION     4
+#define POPS_RESIDENT_VERSION     5
 
 /* POPS's VBLANK_START registration and handler (verified on the pinned core) */
 #define POPS_VBLANK_LUI_ADDR      UINT32_C(0x0021b184)
@@ -56,6 +56,9 @@ typedef struct {
   uint32_t progressive_entry; /* context-preserving progressive DISPLAY bridge */
   uint32_t pad_read_entry; /* $D2LS: start of POPS's pad read, no C call ABI */
   uint32_t pad_read_exit;  /* $D2LS: return of POPS's pad read, no C call ABI */
+  uint32_t gte_scale_entry;  /* widescreen: MAC1 store at 0x2089a8, scale then divide */
+  uint32_t gte_divide_entry; /* $EYEFINITY: same site, divide only */
+  uint32_t gte_ultra_entry;  /* $ULTRA_WIDESCREEN: IR1 store at 0x208a2c */
 } PopsResidentHeader;
 
 #define POPS_RES_F_CHEATS         (1u << 0)
@@ -63,6 +66,19 @@ typedef struct {
 #define POPS_RES_F_PROGRESSIVE    (1u << 2)
 #define POPS_RES_F_PAD_ID         (1u << 3)
 #define POPS_RES_F_D2LS           (1u << 4)
+#define POPS_RES_F_WIDESCREEN     (1u << 5)
+
+/* Widescreen: POPS's GTE perspective transform (RTPS/RTPT, loop at
+ * 0x00208900) stores MAC1 at 0x002089a8 (sw $t0,0x64($a0)) and IR1 at
+ * 0x00208a2c (sw $t0,0x24($a0)); $t0 then feeds the screen X projection.
+ * The resident stubs scale $t0 (x * 75 / gte_divisor, or x / gte_divisor)
+ * at those stores. $v0/$v1 and LO/HI are dead there and are the only
+ * clobbers. */
+#define POPS_GTE_MAC1_STORE_ADDR  UINT32_C(0x002089a8)
+#define POPS_GTE_MAC1_RESUME_ADDR UINT32_C(0x002089b0)
+#define POPS_GTE_IR1_STORE_ADDR   UINT32_C(0x00208a2c)
+#define POPS_GTE_IR1_RESUME_ADDR  UINT32_C(0x00208a34)
+#define POPS_RESIDENT_GTE_DIVISOR_OFFSET 31
 
 /* POPS keeps one 0x90-byte state block per controller port at 0x00507000.
  * The word at +0x34 is the controller ID its SIO emulation answers the
@@ -89,7 +105,7 @@ typedef struct {
   uint16_t cheat_count;
   uint8_t pad_override;  /* bit n: port n reports pad_id[n] */
   uint8_t pad_id[2];
-  uint8_t pad_reserved;
+  uint8_t gte_divisor;   /* widescreen: 100, or 4 for $EYEFINITY */
   PopsCheatEntry cheats[POPS_MAX_CHEATS];
 } PopsResidentConfig;
 
@@ -144,6 +160,13 @@ uint32_t pops_resident_progressive_interlace(const PopsConfig *cfg);
  * All sites are checked before either word is written. */
 int pops_resident_hook_pads(void *staged_core, size_t core_size, uint32_t flags,
                             uint32_t read_entry, uint32_t read_exit);
+
+/* Widescreen family (POPS_WIDESCREEN_*). Points the MAC1 store at the scale
+ * or divide entry and, for ULTRA only, the IR1 store at the ultra entry;
+ * the other modes restore the IR1 store, like the original. All sites are
+ * checked before any write. NONE checks and writes nothing. */
+int pops_resident_hook_widescreen(void *staged_core, size_t core_size, uint8_t mode,
+                                  const PopsResidentHeader *hdr);
 
 /* Copy the image to dest (the resident base on the console), zero its data,
  * and write the configuration. dest_addr is the address dest stands for. */

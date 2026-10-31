@@ -180,7 +180,15 @@ static int parse_single_directive(PopsConfig *cfg, const char *token) {
     return 1;
   }
   if (!strcasecmp(token, "$WIDESCREEN")) {
-    cfg->widescreen = 1;
+    cfg->widescreen = POPS_WIDESCREEN_16_9;
+    return 1;
+  }
+  if (!strcasecmp(token, "$ULTRA_WIDESCREEN")) {
+    cfg->widescreen = POPS_WIDESCREEN_ULTRA;
+    return 1;
+  }
+  if (!strcasecmp(token, "$EYEFINITY")) {
+    cfg->widescreen = POPS_WIDESCREEN_EYEFINITY;
     return 1;
   }
   if (!strcasecmp(token, "$DITHER_OFF") || !strcasecmp(token, "$NODITHER")) {

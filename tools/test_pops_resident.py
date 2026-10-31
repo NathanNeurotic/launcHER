@@ -38,7 +38,7 @@ class ResidentConfig(c.Structure):
         ("cheat_count", c.c_uint16),
         ("pad_override", c.c_uint8),
         ("pad_id", c.c_uint8 * 2),
-        ("pad_reserved", c.c_uint8),
+        ("gte_divisor", c.c_uint8),
         ("cheats", CheatEntry * MAX_CHEATS),
     ]
 
@@ -52,6 +52,9 @@ class Header(c.Structure):
         ("progressive_entry", c.c_uint32),
         ("pad_read_entry", c.c_uint32),
         ("pad_read_exit", c.c_uint32),
+        ("gte_scale_entry", c.c_uint32),
+        ("gte_divide_entry", c.c_uint32),
+        ("gte_ultra_entry", c.c_uint32),
     ]
 
 
@@ -84,6 +87,7 @@ L.pops_resident_pad_ids.restype = None
 L.pops_resident_d2ls.argtypes = [c.c_void_p, c.c_uint32]
 L.pops_resident_d2ls.restype = None
 L.pops_resident_hook_pads.argtypes = [c.c_void_p, c.c_size_t, c.c_uint32, c.c_uint32, c.c_uint32]
+L.pops_resident_hook_widescreen.argtypes = [c.c_void_p, c.c_size_t, c.c_uint8, c.POINTER(Header)]
 L.pops_resident_build_config.argtypes = [c.POINTER(ResidentConfig), c.c_void_p]
 L.pops_config_init.argtypes = [c.c_void_p]
 L.pops_config_parse_line.argtypes = [c.c_void_p, c.c_char_p]
@@ -270,8 +274,9 @@ class HookCore(unittest.TestCase):
 
 def image(file_size=0x60, image_size=0x900, entry=BASE + 0x40, config=BASE + 0x60, magic=0x5352484C):
     img = bytearray(file_size)
-    struct.pack_into("<IHHIIIIIIII", img, 0, magic, 4, 40, file_size, image_size, entry, config,
-                     BASE + 0x44, BASE + 0x48, BASE + 0x4C, BASE + 0x50)
+    struct.pack_into("<IHHIIIIIIIIIII", img, 0, magic, 5, 52, file_size, image_size, entry, config,
+                     BASE + 0x44, BASE + 0x48, BASE + 0x4C, BASE + 0x50, BASE + 0x54, BASE + 0x58,
+                     BASE + 0x5C)
     img[0x40:0x44] = b"\x08\x00\xe0\x03"
     return img
 
@@ -296,7 +301,7 @@ class Install(unittest.TestCase):
         self.assertEqual(self.check(image(entry=BASE + 0x10))[0], -errno.ERANGE)
         self.assertEqual(self.check(image(config=BASE + 0x900 - 8))[0], -errno.ERANGE)
         self.assertEqual(self.check(image(config=BASE + 0x64))[0], -errno.ERANGE)
-        for offset in (24, 28, 32, 36):
+        for offset in (24, 28, 32, 36, 40, 44, 48):
             img = image()
             struct.pack_into('<I', img, offset, BASE + len(img))
             self.assertEqual(self.check(img)[0], -errno.ERANGE)
@@ -456,8 +461,7 @@ class PadCommands(unittest.TestCase):
         self.assertEqual(self.hook(core, F_D2LS, size=0x237810 - CORE), -errno.ERANGE)
         self.assertEqual(self.hook(core, 0, size=16), 0)  # no pad command: nothing checked
 
-    @unittest.skipUnless(os.environ.get("POPS_TEST_ELF"), "optional external Sony core")
-    def test_identified_external_core(self):
+    def load_external_core(self):
         import hashlib
         elf = Path(os.environ["POPS_TEST_ELF"]).read_bytes()
         self.assertEqual(hashlib.sha256(elf).hexdigest(),
@@ -469,6 +473,11 @@ class PadCommands(unittest.TestCase):
             kind, off, va, _, fs, _, _, _ = struct.unpack_from("<8I", elf, at + i * ents)
             if kind == 1 and CORE <= va and va + fs <= CORE + len(core):
                 core[va - CORE:va - CORE + fs] = elf[off:off + fs]
+        return core
+
+    @unittest.skipUnless(os.environ.get("POPS_TEST_ELF"), "optional external Sony core")
+    def test_identified_external_core(self):
+        core = self.load_external_core()
         for a, v in {**PAD_STATE_SITES, **PAD_READ_SITES}.items():
             self.assertEqual(struct.unpack_from("<I", core, a - CORE)[0], v, hex(a))
         self.assertEqual(self.hook(core, F_PAD_ID | F_D2LS), 0)
@@ -547,9 +556,115 @@ class OriginalPadCommands(unittest.TestCase):
         print("Original pad command sequences PASS: %d" % len(cases))
 
 
+GTE_SITES = {0x2089A8: 0xAC880064, 0x2089AC: 0xAC890068, 0x2089B0: 0xAC8A006C,
+             0x2089B8: 0x24028000, 0x2089BC: 0x24037FFF, 0x208A2C: 0xAC880024,
+             0x208A30: 0xAC890028, 0x208A34: 0xAC8A002C, 0x208A38: 0x3402FFFF,
+             0x208A3C: 0x3C038006}
+F_WIDESCREEN = 1 << 5
+WIDE_HDR = dict(gte_scale_entry=BASE + 0x100, gte_divide_entry=BASE + 0x118,
+                gte_ultra_entry=BASE + 0x140)
+
+
+def jump(target):
+    return 0x08000000 | (target >> 2)
+
+
+class Widescreen(unittest.TestCase):
+    def resident(self, *lines):
+        out = ResidentConfig()
+        cfg = BuildConfig.parsed(self, *lines)
+        return L.pops_resident_build_config(c.byref(out), c.addressof(cfg)), out, cfg
+
+    def test_last_command_wins(self):
+        for lines, mode, divisor in ((["$WIDESCREEN"], 1, 100), (["$ULTRA_WIDESCREEN"], 2, 100),
+                                     (["$EYEFINITY"], 3, 4), (["$EYEFINITY", "$WIDESCREEN"], 1, 100),
+                                     (["$WIDESCREEN $EYEFINITY"], 3, 4)):
+            res, out, cfg = self.resident(*lines)
+            mode_byte = cfg[7]  # after video_mode, hdtv_fix, x/y offsets, smooth
+            self.assertEqual((res, out.flags, out.gte_divisor, mode_byte), (1, F_WIDESCREEN, divisor, mode), lines)
+
+    def core(self):
+        core = bytearray(0x10000)
+        base = 0x200000 + 0x8000
+        for a, v in GTE_SITES.items():
+            struct.pack_into("<I", core, a - base, v)
+        return core, base
+
+    def hook(self, core, base, mode, **over):
+        hdr = Header(**{**WIDE_HDR, **over})
+        # The helper takes the staged core base at 0x200000; offset the buffer.
+        full = bytearray(0x10000 + (base - 0x200000))
+        full[base - 0x200000:] = core
+        buf = (c.c_uint8 * len(full)).from_buffer(full)
+        res = L.pops_resident_hook_widescreen(buf, len(full), mode, c.byref(hdr))
+        core[:] = full[base - 0x200000:]
+        return res
+
+    def word(self, core, base, a):
+        return struct.unpack_from("<I", core, a - base)[0]
+
+    def test_hook_modes(self):
+        core, base = self.core()
+        self.assertEqual(self.hook(core, base, 2), 0)  # ULTRA
+        self.assertEqual(self.word(core, base, 0x2089A8), jump(BASE + 0x100))
+        self.assertEqual(self.word(core, base, 0x208A2C), jump(BASE + 0x140))
+        self.assertEqual(self.hook(core, base, 3), 0)  # then EYEFINITY: IR1 store restored
+        self.assertEqual(self.word(core, base, 0x2089A8), jump(BASE + 0x118))
+        self.assertEqual(self.word(core, base, 0x208A2C), 0xAC880024)
+        self.assertEqual(self.hook(core, base, 1), 0)
+        self.assertEqual(self.word(core, base, 0x2089A8), jump(BASE + 0x100))
+        before = bytes(core)
+        self.assertEqual(self.hook(core, base, 0), 0)
+        self.assertEqual(bytes(core), before)
+
+    def test_hook_refuses_unknown_core_untouched(self):
+        for site in GTE_SITES:
+            core, base = self.core()
+            struct.pack_into("<I", core, site - base, 0)
+            before = bytes(core)
+            self.assertEqual(self.hook(core, base, 2), -errno.EILSEQ, hex(site))
+            self.assertEqual(bytes(core), before)
+        core, base = self.core()
+        self.assertEqual(self.hook(core, base, 4), -errno.EINVAL)
+        self.assertEqual(self.hook(core, base, 1, gte_ultra_entry=BASE + 2), -errno.EINVAL)
+
+    @unittest.skipUnless(os.environ.get("POPS_TEST_ELF"), "optional external Sony core")
+    def test_identified_external_core(self):
+        core = PadCommands.load_external_core(self)
+        for a, v in GTE_SITES.items():
+            self.assertEqual(struct.unpack_from("<I", core, a - CORE)[0], v, hex(a))
+
+    @unittest.skipUnless(os.environ.get("POPSTARTER_TEST_ELF"), "optional external POPStarter MAIN")
+    def test_original_handlers(self):
+        """The original's handlers rewrite the same sites in full each time,
+        which is why the last command wins."""
+        from trace_original_pops_display import _Window
+        from trace_original_pops_io import decode_main
+        image = decode_main(Path(os.environ["POPSTARTER_TEST_ELF"]).read_bytes())
+
+        class Win(_Window):
+            def service(self, target):
+                if target == 0x8D6B9C and self.reg[5] == 0x143A6C0:  # resident divisor byte
+                    self.writes.append([self.reg[5], self.reg[4] & 0xFF, 1])
+                    return
+                super().service(target)
+
+        windows = {"$WIDESCREEN": (0x895438, 0x895690), "$ULTRA_WIDESCREEN": (0x895690, 0x8959A8),
+                   "$EYEFINITY": (0x8959A8, 0x895BE0)}
+        expect = {"$WIDESCREEN": (0x0850E9AE, 0xAC880024, 100),
+                  "$ULTRA_WIDESCREEN": (0x0850E9AE, 0x0850E9B8, 100),
+                  "$EYEFINITY": (0x0850E9B0, 0xAC880024, 4)}
+        for command, window in windows.items():
+            w = Win(image, *window, command)
+            w.run()
+            got = {a: v for a, v, _ in w.writes}
+            self.assertEqual((got[0x2089A8], got[0x208A2C], got[0x143A6C0]), expect[command], command)
+            self.assertEqual(set(got), {0x2089A8, 0x208A2C, 0x143A6C0}, command)
+
+
 class Layout(unittest.TestCase):
     def test_config_fits_in_the_reserved_range(self):
-        self.assertEqual(c.sizeof(Header), 40)
+        self.assertEqual(c.sizeof(Header), 52)
         self.assertEqual(ResidentConfig.cheats.offset, 32)
         self.assertLess(c.sizeof(ResidentConfig) + 0x1000, LIMIT - BASE)
 

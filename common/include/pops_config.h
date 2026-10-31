@@ -66,8 +66,8 @@ typedef struct {
   uint8_t hdtv_fix;
   int16_t x_offset;
   int16_t y_offset;
-  /* $SMOOTH patches the core directly. $WIDESCREEN still needs independent
-   * resident code; $DITHER_OFF is not a POPStarter command. */
+  /* $SMOOTH patches the core directly. widescreen is POPS_WIDESCREEN_*,
+   * applied by the resident code; $DITHER_OFF is not a POPStarter command. */
   uint8_t smooth;
   uint8_t widescreen;
   uint8_t dither_off;
@@ -130,6 +130,13 @@ typedef struct {
   uint8_t pad_id[2];
   uint8_t pad_d2ls;
 } PopsConfig;
+
+/* $WIDESCREEN, $ULTRA_WIDESCREEN, $EYEFINITY: the last one in the files wins,
+ * as each original handler rewrites all of the same sites. */
+#define POPS_WIDESCREEN_NONE      0
+#define POPS_WIDESCREEN_16_9      1 /* x * 75 / 100 */
+#define POPS_WIDESCREEN_ULTRA     2 /* 16:9 plus a second x * 75 / 100 */
+#define POPS_WIDESCREEN_EYEFINITY 3 /* x / 4 */
 
 #define POPS_PAD_ID_NONE    0x01 /* what $NOPADn makes a port report */
 #define POPS_PAD_ID_DIGITAL 0x41 /* PS1 digital pad */
