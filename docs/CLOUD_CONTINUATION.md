@@ -26,21 +26,24 @@ that last change. Continue from current HEAD, fetching again before editing.
   pass. Normal and `LAUNCHER_BOOT_TRACE=ON,DEBUG=ON` PS2 builds pass. The built
   2,672-byte resident image passes its Unicorn entry/chaining check. These are
   host/target-build/emulated results; no new physical console run occurred.
-- REPOP `feat/psxcore-validation` is now `5f41e074` (earlier synchronized
-  evidence `529579dd`). The FP oracle was independently rerun here: **16,393
-  patterns / 32,786 original calls pass**. R19 also repairs the CDVD query
-  candidate's return/RPC/semaphore/result contract: six focused tests include
-  60 original query combinations with modeled callees. Full REPOP Python suite:
-  **233 tests, 13 skipped, zero failures/errors**. A fresh EE archive of all
-  11 POPStarter translation units builds with GCC 15.2.0 and existing warnings.
-  **The gate `FUN_00918270` remains a zero stub**, so GCC folds the query to
-  eight bytes; its former parity annotation was removed. Read REPOP's
-  `POPSTARTER_CD_QUERY_CONTRACT.md` before treating this as usable runtime.
-  No full EE link, compiled-query execution or size/coverage baseline promotion
-  is claimed. Next dependencies: `FUN_00918270` and its semaphore/init helpers,
-  the four-argument `FUN_00917f80` read contract, `FUN_0091acb0`,
-  `FUN_009a1458` and lower SIF transport. Existing `FUN_0091a604` bounds warning
-  also remains open.
+- REPOP `feat/psxcore-validation` is now **`8d2714d5`**. R20 replaces the
+  zero CDVD gate, invented semaphore/pending state, and eight return-zero
+  kernel wrappers. **49 original-vs-compiled-EE component cases pass** with
+  modeled kernel/SIF callees and final RAM auditing. Full Python suite:
+  **237 tests, 13 skipped, zero failures/errors**. All 11 EE units compile
+  with existing warnings. The full-archive query is now 124 bytes and the gate
+  428 bytes; the old eight-byte-query blocker is superseded. Read REPOP's
+  `POPSTARTER_CD_GATE_CONTRACT.md` and R20 before making runtime claims.
+  Original-uninitialized semaphore fields are zeroed and excluded from strict
+  byte equivalence. Lower SIF/init behavior, global-state ownership, complete
+  runtime link and physical acceptance remain open; no baseline was promoted.
+  The independent FP run remains **16,393 patterns / 32,786 calls pass**.
+  **Next work:** the original four-argument `FUN_00917f80` mode/packet/cache
+  contract, then lower SIF/init dependencies and launcHER resident features.
+  Existing `FUN_0091a604` bounds warning is still open.
+- The user explicitly requested sustained work until 100% verified parity.
+  The thread goal is active. Continue making validated increments; do not
+  treat a checkpoint or green CI as completion of the full objective.
 
 ## Reproduction and preserved local work
 
