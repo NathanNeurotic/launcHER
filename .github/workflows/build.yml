@@ -42,6 +42,8 @@ jobs:
         run: python tools/test_pops_read_trace.py
       - name: Test POPS fix files
         run: python tools/test_pops_fix_files.py
+      - name: Test POPS resident code (cheat engine, hook and install)
+        run: python tools/test_pops_resident.py
 
   build:
     runs-on: ubuntu-latest

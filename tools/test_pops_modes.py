@@ -57,6 +57,7 @@ build.mkdir(parents=True, exist_ok=True)
 library = build / ('modes.dll' if os.name == 'nt' else 'modes.so')
 subprocess.run(['gcc', '-shared', '-fPIC', '-O2', '-I', str(ROOT / 'common/include'),
                 str(ROOT / 'common/src/pops_modes_patches.c'),
+                str(ROOT / 'common/src/pops_resident_engine.c'),
                 str(ROOT / 'common/src/pops_external.c'), '-o', str(library)], check=True)
 lib = c.CDLL(str(library))
 lib.pops_apply_compat_modes.argtypes = [c.c_void_p, c.c_size_t, c.c_uint8]

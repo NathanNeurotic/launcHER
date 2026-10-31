@@ -11,6 +11,7 @@
 #include "pops_config.h"
 #include "pops_compat_db.h"
 #include "pops_modes_patches.h"
+#include "pops_resident.h"
 #include "pops_read_trace.h"
 #include <ctype.h>
 #include <fcntl.h>
@@ -31,6 +32,11 @@
 
 extern const char pops_trampoline_code[];
 extern const char pops_trampoline_code_end[];
+extern unsigned char pops_resident_bin[];
+extern unsigned int size_pops_resident_bin;
+
+/* Large; kept out of the launcher stack. */
+static PopsResidentConfig residentCfg;
 
 #define POPS_LOAD_RAW_BUF   ((void *)0x01800000)
 #define POPS_LOAD_IOP_BUF   ((void *)0x01780000)
@@ -1178,6 +1184,30 @@ int launchPOPS(int argc, char *argv[]) {
     }
   }
 
+  /* launcHER's resident code (cheat engine) runs inside POPS from its
+   * VBLANK_START interrupt. Validate and hook now, while failing is still
+   * harmless; the image itself is copied just before handoff. */
+  int residentNeeded = pops_resident_build_config(&residentCfg, &cfg);
+  if (residentNeeded < 0) {
+    msg("POPS: Resident configuration failed: %d\n", residentNeeded);
+    return residentNeeded;
+  }
+  if (residentNeeded) {
+    PopsResidentHeader residentHdr;
+    res = pops_resident_check_image(pops_resident_bin, size_pops_resident_bin, &residentHdr);
+    if (!res && (uint32_t)(uintptr_t)stagedCore + plan.core_size > POPS_RESIDENT_BASE)
+      res = -ERANGE; /* the trampoline still reads the staged core from there */
+    if (!res)
+      res = pops_resident_hook_core((void *)stagedCore, plan.core_size, residentHdr.vblank_entry);
+    if (res) {
+      msg("POPS: Resident code setup failed: %d\n", res);
+      return res;
+    }
+    DPRINTF("POPS: Resident code at 0x%08X (%u bytes), %u cheat codes\n",
+            (unsigned)POPS_RESIDENT_BASE, (unsigned)residentHdr.image_size,
+            (unsigned)residentCfg.cheat_count);
+  }
+
   /* Check the unreturnable trampoline before touching save images or
    * rebooting the IOP. Keep the actual low-RAM argument write immediately
    * before handoff, because it must remain valid through the foreign reset. */
@@ -1333,6 +1363,18 @@ int launchPOPS(int argc, char *argv[]) {
   if (trampolineCodeSize == 0 || trampolineCodeSize > 0x180) {
     msg("POPS: Invalid trampoline code size\n");
     return -EINVAL;
+  }
+
+  /* Last write before handoff: nothing of launcHER's lives at the resident
+   * base, and the trampoline flushes caches before entering POPS. */
+  if (residentNeeded) {
+    res = pops_resident_install((void *)POPS_RESIDENT_BASE, POPS_RESIDENT_LIMIT - POPS_RESIDENT_BASE,
+                                POPS_RESIDENT_BASE, pops_resident_bin, size_pops_resident_bin,
+                                &residentCfg);
+    if (res) {
+      msg("POPS: Resident code install failed: %d\n", res);
+      return res;
+    }
   }
 
   memcpy((void *)POPS_TRAMPOLINE_ADDR, pops_trampoline_code, trampolineCodeSize);

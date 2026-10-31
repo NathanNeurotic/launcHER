@@ -1,4 +1,5 @@
 #include "pops_modes_patches.h"
+#include "pops_resident.h"
 #include "pops_external.h"
 #include <errno.h>
 #include <string.h>
@@ -698,69 +699,8 @@ int pops_cdrom_read_subq(int (*devctl_fn)(const char *dev, int cmd, void *arg, s
 int pops_cheat_engine_tick(void *ps1_ram_base, const PopsCheatEntry *cheats, uint16_t cheat_count) {
   if (!ps1_ram_base || !cheats || cheat_count == 0)
     return 0;
-
-  uint16_t i = 0;
-  while (i < cheat_count) {
-    uint32_t addr = cheats[i].address & 0x001FFFFF;
-    uint8_t type = cheats[i].type;
-    uint16_t val = cheats[i].value;
-
-    /* 16-bit conditionals */
-    if (type == 0xD0 || type == 0xD1 || type == 0xD2 || type == 0xD3) {
-      if (addr + 2 > 0x00200000) {
-        i += 2;
-        continue;
-      }
-      uint16_t cur = *(uint16_t *)((uint8_t *)ps1_ram_base + (addr & ~1U));
-      int cond = 0;
-      if (type == 0xD0) cond = (cur == val);
-      else if (type == 0xD1) cond = (cur != val);
-      else if (type == 0xD2) cond = (cur < val);
-      else if (type == 0xD3) cond = (cur > val);
-
-      if (!cond) {
-        i += 2;
-        continue;
-      }
-      i++;
-      continue;
-    }
-
-    /* 8-bit conditionals */
-    if (type == 0xE0 || type == 0xE1) {
-      if (addr + 1 > 0x00200000) {
-        i += 2;
-        continue;
-      }
-      uint8_t cur = *(uint8_t *)((uint8_t *)ps1_ram_base + addr);
-      uint8_t target = (uint8_t)val;
-      int cond = 0;
-      if (type == 0xE0) cond = (cur == target);
-      else if (type == 0xE1) cond = (cur != target);
-
-      if (!cond) {
-        i += 2;
-        continue;
-      }
-      i++;
-      continue;
-    }
-
-    /* 16-bit writes */
-    if (type == 0x80 || type == 0x10) {
-      if (addr + 2 <= 0x00200000) {
-        *(uint16_t *)((uint8_t *)ps1_ram_base + (addr & ~1U)) = val;
-      }
-    }
-    /* 8-bit writes */
-    else if (type == 0x30 || type == 0x20) {
-      if (addr + 1 <= 0x00200000) {
-        *(uint8_t *)((uint8_t *)ps1_ram_base + addr) = (uint8_t)val;
-      }
-    }
-
-    i++;
-  }
+  /* One implementation, shared with the resident code that runs in POPS. */
+  pops_resident_cheat_pass((uint8_t *)ps1_ram_base, cheats, cheat_count);
   return 0;
 }
 

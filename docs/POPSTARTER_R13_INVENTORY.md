@@ -14,7 +14,7 @@ Status key: **PRESENT** (launcHER does what the original does), **PARTIAL**
 (some of it, or an equivalent), **MISSING**, **BLOCKED** (needs POPStarter's
 own resident code, see below).
 
-## Why some commands are BLOCKED
+## Why some commands are BLOCKED, and launcHER's resident code
 
 At launch the original copies two blocks of its own code into the POPS image
 (`0x738` bytes to `0x232790`, `0xd60` bytes to `0x238a90`) and keeps more
@@ -23,14 +23,30 @@ that code: `$480p` (jump to `0x2394f0`), `$SET_TIMINGS`, `$D2LS(_ALT)`,
 `$NOPAD0/1`, `$PAD01ID_0X`, the `0x232c90` flag of `$NOVMC0`, `$WIDESCREEN`,
 `$ULTRA_WIDESCREEN`, `$EYEFINITY`, `$RECOMPILER_ADDON_3/4` and `$FAKELC`
 (copies 0x15 bytes from the original's image). Copying that code would ship
-POPStarter itself, so these need an independent resident implementation
-first (the "resident stub" item under Remaining work).
+POPStarter itself, so these need an independent resident implementation.
+
+**launcHER now has one** (`common/include/pops_resident.h`,
+`common/src/pops_resident_engine.c`). It is built as a small flat image linked
+at `0x0143a000`, inside the range the original also keeps for itself, and
+copied there as the launcher's last write before handoff. One hook reaches
+it: POPS registers its VBLANK_START handler `0x0021cd68` at `0x0021b190`, and
+the `lui`/`addiu` pair at `0x0021b184`/`0x0021b18c` that loads that address
+is pointed at launcHER's entry instead, which does its work and then calls
+POPS's handler. The PS1 RAM base comes from the word POPS itself stores at
+`0x70003364` (`0x0021af98`), so nothing assumes how POPS maps that RAM. The
+design is launcHER's own: the original hooks other places (its code at
+`0x01450000`, reached from POPS's `ExecOSD` tail call at `0x002362fc`, is its
+exit program, not a cheat engine).
+
+So far the resident code runs the cheat engine. The commands still BLOCKED
+below need their behaviour worked out and added to it.
 
 ## CHEATS.TXT commands
 
 | Command | Original effect | launcHER |
 |---|---|---|
-| `$Cxxxxxxx`, `$8/3/1/2/D0..D3/E0/E1` codes, `$S…`, `$T…` | resident cheat engine | **PARTIAL**: codes parse; no resident engine runs during POPS |
+| `$8/3/1/2/D0..D3/E0/E1` codes | resident cheat engine | **PRESENT**: launcHER's resident code, every VBLANK_START; host tests plus the built image run under emulation, **NOT TESTED** on a console |
+| `$Cxxxxxxx`, `$S…`, `$T…` | resident cheat engine | **MISSING** (not parsed) |
 | `$SMOOTH` | `0x21af88=0xa21a22a0341a0001` (64-bit) | **PRESENT**: guarded, original-command differential; no console run |
 | `$DX_n $DY_n $MAGH_n $MAGV_n $DW_n $DH_n` | display registers via resident code | **MISSING** |
 | `$480p` | flags + `0x21af94=0x50`, `0x23acb0/0x23ad0c=li a0,0`, jump into resident code | **BLOCKED**; parsed, disables European auto PAL as in the original, no core writes |
@@ -62,7 +78,8 @@ first (the "resident stub" item under Remaining work).
 | `$XPOS_n`, `$YPOS_n`, `$DWSTRETCH_n`, `$DWCROP_n` | unsigned decimal immediate fields plus store suppression; X/Y first valid command wins | **PRESENT**: guarded, original-command differential; X/Y 0..65535 (up to 5 digits), width commands 0..9999 (up to 4 digits); no console run |
 | `$CACHE1` | `0x20fff4`, `0x210120`, `0x2101ac` | **PRESENT** |
 | `$FAKELC` | copies LibCrypt code from the original | **BLOCKED** |
-| `$SAFEMODE`, `$SAFEMODE2`, `$NOSAFEMODE` | cheat-engine timing | **MISSING** (no resident engine) |
+| `$SAFEMODE` | cheat-engine timing | **PARTIAL**: cheats start after 180 frames; the original's exact timing is not recovered |
+| `$SAFEMODE2`, `$NOSAFEMODE` | cheat-engine timing | **MISSING** |
 | `$HDTVFIX` / `$NOHDTVFIX` | `0x23acb0/0x23ad0c` = `li a0,1` / pristine | **PRESENT**; `$HDTVFIX` was writing an invented site |
 | `$LOAD_PADMAN`, `$KILL_PADMAN` | IOP module choice | **MISSING** |
 | `$USBDELAY_n` | config byte `0x100017` | **PARTIAL** (parsed) |
@@ -117,8 +134,9 @@ the fix files so a PATCH file's disable-auto still wins. **NOT TESTED.**
 
 1. Hardware check of this change: a US disc and a European disc on an NTSC
    console, plus `$FORCEPAL` and `$NOPAL` (picture rate and colour).
-2. An independent resident stub in free POPS memory, so the BLOCKED commands
-   (pads, `$480p`, widescreen, timings) and the cheat engine can run.
+2. Grow the resident code (it exists and runs the cheat engine, NOT TESTED)
+   to cover the BLOCKED commands: pads, `$480p`, widescreen, timings, and
+   PATCH video actions 6/7.
 3. Recover the remaining resident display-register commands (`$DX/$DY`,
    `$MAGH/$MAGV`, `$DW/$DH`), `$PAD01ID` and built-in per-game DB at `0x8e00d0`.
    The six direct display commands now have a bounded original differential;

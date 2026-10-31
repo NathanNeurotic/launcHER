@@ -35,6 +35,7 @@ def prepare(out):
         expected.append(row)
     out.mkdir(parents=True)
     files = ['tools/fixtures/pops_fix_files_ee.c', 'common/src/pops_modes_patches.c',
+             'common/src/pops_resident_engine.c', 'common/include/pops_resident.h',
              'common/src/pops_external.c', 'common/include/pops_modes_patches.h',
              'common/include/pops_config.h', 'common/include/pops_external.h']
     hashes = {}
@@ -47,7 +48,8 @@ def prepare(out):
     (out / 'expected_fix_results.h').write_text(header + '\n};\n')
     config = {'project': 'pops-fix-files-probe', 'targets': [{
         'name': 'pops_fix_files', 'type': 'ee',
-        'sources': ['pops_fix_files_ee.c', 'pops_modes_patches.c', 'pops_external.c'],
+        'sources': ['pops_fix_files_ee.c', 'pops_modes_patches.c', 'pops_resident_engine.c',
+                    'pops_external.c'],
         'include_dirs': ['.'], 'libs': ['kernel', 'debug'], 'debug': True, 'opt': '-O2'}]}
     (out / 'ps2.yaml').write_text(json.dumps(config, indent=2) + '\n')
     (out / 'provenance.json').write_text(json.dumps(hashes, indent=2) + '\n')

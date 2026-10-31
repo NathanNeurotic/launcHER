@@ -83,6 +83,7 @@ def compile_shared_library():
         str(ROOT / "tools/fixtures/pops_config_host_io.c"),
         str(ROOT / "common/src/pops_compat_db.c"),
         str(ROOT / "common/src/pops_modes_patches.c"),
+        str(ROOT / "common/src/pops_resident_engine.c"),
         str(ROOT / "common/src/pops_external.c"),
         str(ROOT / "common/src/pops_vcd.c"),
     ]

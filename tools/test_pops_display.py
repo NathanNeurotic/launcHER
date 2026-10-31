@@ -50,7 +50,8 @@ class DisplayTests(unittest.TestCase):
         subprocess.run(['gcc', '-shared', '-fPIC', '-O2', '-Wall', '-Wextra', '-Werror',
                         '-I', str(ROOT / 'common/include'),
                         *(str(ROOT / 'common/src' / name) for name in
-                          ('pops_modes_patches.c', 'pops_external.c', 'pops_config.c')),
+                          ('pops_modes_patches.c', 'pops_resident_engine.c', 'pops_external.c',
+                           'pops_config.c')),
                         '-o', str(lib)], check=True)
         cls.lib = c.CDLL(str(lib))
         cls.lib.pops_config_init.argtypes = [c.POINTER(PopsConfig)]

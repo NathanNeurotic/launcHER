@@ -655,10 +655,10 @@ Place optional configuration files alongside your `.VCD` image or inside its per
   - Sound and core: `$SCANLINES`, `$SUBCDSTATUS`, `$MUTE_CDDA`, `$UNDO_MUTE_CDDA`, `$MUTE_VAB`, `$MUTE_ALL`, `$CODECACHE_ADDON_0`..`2`, `$ROLLBACK`, `$CACHE1`.
   - IGR: `$IGR0`..`$IGR5` (POPStarter's combo choices; 3 to 5 exit straight away) and `$NOIGR`. Without one, launcHER's direct exit is used.
   - Accepted but not applied yet: `$SMOOTH`, `$WIDESCREEN`, `$XPOS_`/`$YPOS_`. Not POPStarter commands, ignored: `$480i`, `$576p`, `$576i`, `$240p`, `$VMODE_n`, `$DITHER_OFF`, `$FASTMIPS`, `$SLOWMIPS`. `$NOBOOT` / `$BIOS` keeps the PS1 boot logo.
-  - Delays and stability: `$SAFEMODE` (delays RAM cheat staging), `$USBDELAY_<seconds>`.
+  - Delays and stability: `$SAFEMODE` (cheats start about 3 seconds after boot), `$USBDELAY_<seconds>`.
   - Compatibility modes: `$COMPATIBILITY_0x01` through `0x07`, or bare digits `1`..`7` in `MODES.TXT` (Mode 8 has no branch in the original and is refused).
 - **`DISCS.TXT`:** Multi-disc paths (up to 4 discs). Press **SELECT + L1 + R1** in-game to cycle discs.
-- **`CHEATS.TXT`:** GameShark / Action Replay codes with or without `$` prefix. Supports 16-bit writes (`80`, `10`), 8-bit writes (`30`, `20`), 16-bit conditionals (`D0`..`D3`), and 8-bit conditionals (`E0`..`E1`).
+- **`CHEATS.TXT`:** GameShark / Action Replay codes written POPStarter style, `$` then the code (`$8009A120 0004`). A code without the `$` is switched off, as in POPStarter. Supports 16-bit writes (`80`, `10`), 8-bit writes (`30`, `20`), 16-bit conditionals (`D0`..`D3`), and 8-bit conditionals (`E0`..`E1`). launcHER's own resident code applies them once per frame while the game runs (not yet tested on a console).
 - **`VMCDIR.TXT`:** Redirects Virtual Memory Card save files to a custom folder path.
 
 ### Custom IRX driver replacement and peripherals

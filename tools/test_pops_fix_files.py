@@ -109,6 +109,7 @@ void test_io_failures(int reads, int closes) { fail_reads=reads; fail_closes=clo
         subprocess.run(['gcc', '-shared', '-fPIC', '-std=c99', '-Wall', '-Wextra', '-Werror',
                         '-I', str(ROOT / 'common/include'), str(wrapper),
                         str(ROOT / 'common/src/pops_modes_patches.c'),
+                        str(ROOT / 'common/src/pops_resident_engine.c'),
                         str(ROOT / 'common/src/pops_external.c'), '-o', str(library)], check=True)
         cls.lib = c.CDLL(str(library))
         cls.lib.pops_fix_context_init.argtypes = [c.POINTER(Context), c.c_void_p, c.c_size_t, c.c_uint8]

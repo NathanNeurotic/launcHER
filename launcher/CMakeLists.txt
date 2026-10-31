@@ -45,6 +45,8 @@ list(APPEND EE_SOURCES
     ../common/src/pops_config.c
     ../common/src/pops_compat_db.c
     ../common/src/pops_modes_patches.c
+    ../common/src/pops_resident.c
+    ../common/src/pops_resident_engine.c
     ../third_party/lzma/LzmaDec.c
     ../common/src/dprintf.c
 )
@@ -365,6 +367,29 @@ if("ps1vn.elf" IN_LIST ELF_FILES)
   elf_to_source(ps1vn ps1vn_source "ps1vn_elf" "")
   list(APPEND ELF_SOURCES ${ps1vn_source})
 endif()
+
+# launcHER's own POPS resident code (common/include/pops_resident.h): a flat
+# image linked at its fixed EE address, embedded raw and installed at handoff.
+set(POPS_RESIDENT_SRC "${CMAKE_SOURCE_DIR}/common/src/pops_resident_engine.c")
+set(POPS_RESIDENT_LD "${CMAKE_SOURCE_DIR}/common/src/pops_resident.ld")
+set(POPS_RESIDENT_ELF "${CMAKE_CURRENT_BINARY_DIR}/pops_resident.elf")
+set(POPS_RESIDENT_BIN "${CMAKE_CURRENT_BINARY_DIR}/pops_resident.bin")
+add_custom_command(
+  OUTPUT "${POPS_RESIDENT_BIN}"
+  COMMAND ${CMAKE_C_COMPILER} -Os -G0 -fno-pic -mno-abicalls -ffreestanding -fno-builtin
+          -nostdlib -nostartfiles -Wall -Wextra -Werror -DPOPS_RESIDENT_IMAGE
+          "-I${CMAKE_SOURCE_DIR}/common/include"
+          "-Wl,-T,${POPS_RESIDENT_LD}" -Wl,--build-id=none
+          -o "${POPS_RESIDENT_ELF}" "${POPS_RESIDENT_SRC}"
+  COMMAND mips64r5900el-ps2-elf-objcopy -O binary "${POPS_RESIDENT_ELF}" "${POPS_RESIDENT_BIN}"
+  DEPENDS "${POPS_RESIDENT_SRC}" "${POPS_RESIDENT_LD}"
+          "${CMAKE_SOURCE_DIR}/common/include/pops_resident.h"
+          "${CMAKE_SOURCE_DIR}/common/include/pops_config.h"
+  COMMENT "Building POPS resident image"
+  VERBATIM
+)
+bin2c_source("${POPS_RESIDENT_BIN}" pops_resident_source "pops_resident_bin")
+list(APPEND ELF_SOURCES ${pops_resident_source})
 
 # Resource files
 set(RES_FILES
