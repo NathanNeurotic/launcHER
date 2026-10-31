@@ -241,6 +241,39 @@ static int parse_single_directive(PopsConfig *cfg, const char *token) {
     cfg->safe_mode = 1;
     return 1;
   }
+  /* Pad commands. The original's handlers write the same two per-port
+   * values (override on/off and the ID byte), so the last command wins. */
+  if (!strncasecmp(token, "$NOPAD", 6) && (token[6] == '0' || token[6] == '1') && !token[7]) {
+    unsigned port = (unsigned)(token[6] - '0');
+    cfg->pad_override |= (uint8_t)(1u << port);
+    cfg->pad_id[port] = POPS_PAD_ID_NONE;
+    return 1;
+  }
+  if (!strcasecmp(token, "$D2LS")) {
+    cfg->pad_override = 3;
+    cfg->pad_id[0] = cfg->pad_id[1] = POPS_PAD_ID_DIGITAL;
+    cfg->pad_d2ls = 1;
+    return 1;
+  }
+  if (!strcasecmp(token, "$D2LS_ALT")) {
+    /* Keeps the real controller ID when the swap was already requested;
+     * otherwise any earlier override now reports a digital pad. */
+    if (cfg->pad_d2ls)
+      cfg->pad_override = 0;
+    cfg->pad_id[0] = cfg->pad_id[1] = POPS_PAD_ID_DIGITAL;
+    cfg->pad_d2ls = 1;
+    return 1;
+  }
+  if (!strncasecmp(token, "$PAD", 4) && (token[4] == '0' || token[4] == '1') &&
+      !strncasecmp(token + 5, "ID_0X", 5)) {
+    /* Exactly two hex digits; anything else is ignored like the original. */
+    if (strlen(token) == 12 && is_hex_string(token + 10, 2)) {
+      unsigned port = (unsigned)(token[4] - '0');
+      cfg->pad_override |= (uint8_t)(1u << port);
+      cfg->pad_id[port] = (uint8_t)strtoul(token + 10, NULL, 16);
+    }
+    return 1;
+  }
   if (!strcasecmp(token, "$NOVMC0")) {
     cfg->no_vmc0 = 1;
     return 1;

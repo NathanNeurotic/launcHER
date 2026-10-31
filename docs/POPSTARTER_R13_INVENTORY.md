@@ -20,7 +20,7 @@ At launch the original copies two blocks of its own code into the POPS image
 (`0x738` bytes to `0x232790`, `0xd60` bytes to `0x238a90`) and keeps more
 resident at `0x143xxxx`. Several commands only set flags or install jumps into
 that code: `$480p` (jump to `0x2394f0`), `$SET_TIMINGS`, `$D2LS(_ALT)`,
-`$NOPAD0/1`, `$PAD01ID_0X`, the `0x232c90` flag of `$NOVMC0`, `$WIDESCREEN`,
+`$NOPAD0/1`, `$PAD0ID_0Xhh`/`$PAD1ID_0Xhh`, the `0x232c90` flag of `$NOVMC0`, `$WIDESCREEN`,
 `$ULTRA_WIDESCREEN`, `$EYEFINITY`, `$RECOMPILER_ADDON_3/4` and `$FAKELC`
 (copies 0x15 bytes from the original's image). Copying that code would ship
 POPStarter itself, so these need an independent resident implementation.
@@ -39,7 +39,7 @@ design is launcHER's own: the original hooks other places (its code at
 exit program, not a cheat engine).
 
 The resident code runs the cheat engine, an independent manual GS DISPLAY
-bridge and the text `$480p` progressive bridge. [Manual DISPLAY contracts](POPS_MANUAL_DISPLAY_CONTRACTS.md) record
+bridge, the text `$480p` progressive bridge and the pad commands (below). [Manual DISPLAY contracts](POPS_MANUAL_DISPLAY_CONTRACTS.md) record
 all-six, per-file acceptance and the guarded bridge. Commands still BLOCKED
 below need their behavior worked out and added to it.
 
@@ -71,7 +71,8 @@ below need their behavior worked out and added to it.
 | `$BREAKPOINT0/1` | exception hook | **MISSING** |
 | `$NOVMC0` | flag at `0x232c90` | **PARTIAL**: launcHER uses the original's other VMC-off helper (FUN_008dc12c slot 1, `0x2007b4=0`) |
 | `$NOVMC1` | flag + `0x20d0e0=li a0,0` | **PRESENT** (the core write) |
-| `$NOPAD0/1`, `$D2LS`, `$D2LS_ALT`, `$PAD01ID_0X` | resident pad code | **BLOCKED** |
+| `$NOPAD0/1`, `$PAD0ID_0Xhh`, `$PAD1ID_0Xhh` | enable a store in its copied code that forces the controller ID POPS reports for that port (`0x507034`/`0x5070c4`): 1 for `$NOPADn`, `hh` (two hex digits) for `$PADnID` | **PRESENT**: resident code writes the same ID every VBLANK_START; 310 command sequences match the original's own handlers; **NOT TESTED** on a console |
+| `$D2LS`, `$D2LS_ALT` | `$D2LS`: both ports report 0x41 (digital) and POPS's pad read (`0x237798`) swaps the D-pad and the left stick. `$D2LS_ALT`: the swap only; it switches the ID override back off when the swap was already on, and otherwise makes an earlier override report 0x41 | **PRESENT**: own hooks at the pad read's entry and return (guarded); the built image matches the original's swap on 604 readings under emulation; digital-mode readings are left alone (the original would cancel the real D-pad there); **NOT TESTED** on a console |
 | `$IGR0..$IGR5` | combo masks `0x404f/0x900/0x90f` at `0x228a20/0x228a50`; 3..5 jump to `0x20c08c` | **PRESENT** (was: `$IGR0` meant "IGR off") |
 | `$NOIGR` | `0x228a56=0x1000` + pristine `0x228a5c/60` | **PRESENT** |
 | no IGR command | POPS default | **PARTIAL**: launcHER's own direct exit stays the default; the user confirmed it on Tekken |
@@ -138,11 +139,14 @@ record 60 original region-control-flow combinations. **No console test.**
 
 1. Hardware check of this change: a US disc and a European disc on an NTSC
    console, plus `$FORCEPAL` and `$NOPAL` (picture rate and colour).
-2. Grow the resident code (cheats and manual/progressive display exist, NOT
-   TESTED on a console) for pads, widescreen and timings. Complete PATCH video
+2. Grow the resident code (cheats, manual/progressive display and pad
+   commands exist, NOT TESTED on a console) for widescreen and timings. Complete PATCH video
    actions 6/7 session/owned-entry dispatch separately; text `$480p` now works
    at the component/staging level. [Progressive contracts](POPS_PROGRESSIVE_CONTRACTS.md).
-3. Recover `$PAD01ID` and the built-in per-game DB at `0x8e00d0`.
+3. Recover the built-in per-game DB at `0x8e00d0`. (The pad commands are
+   done; the original also sets `+0x28` of both pad blocks to 1 on every pass
+   of its always-on block, a field POPS uses for actuator setup; launcHER
+   does not, pending a reason to.)
    The six manual DISPLAY commands now have an independent resident bridge
    and 228 original file cases; see [manual contracts](POPS_MANUAL_DISPLAY_CONTRACTS.md).
    The six direct display commands now have a bounded original differential;

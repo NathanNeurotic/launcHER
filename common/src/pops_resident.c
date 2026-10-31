@@ -31,6 +31,8 @@ int pops_resident_check_image(const void *image, size_t image_len, PopsResidentH
   h.config_addr = get_u32(b + 20);
   h.display_entry = get_u32(b + 24);
   h.progressive_entry = get_u32(b + 28);
+  h.pad_read_entry = get_u32(b + 32);
+  h.pad_read_exit = get_u32(b + 36);
 
   if (h.magic != POPS_RESIDENT_MAGIC || h.version != POPS_RESIDENT_VERSION ||
       h.header_size != sizeof(PopsResidentHeader))
@@ -47,6 +49,12 @@ int pops_resident_check_image(const void *image, size_t image_len, PopsResidentH
     return -ERANGE;
   if ((h.progressive_entry & 3) || h.progressive_entry < POPS_RESIDENT_BASE + h.header_size ||
       h.progressive_entry >= POPS_RESIDENT_BASE + h.file_size)
+    return -ERANGE;
+  if ((h.pad_read_entry & 3) || h.pad_read_entry < POPS_RESIDENT_BASE + h.header_size ||
+      h.pad_read_entry >= POPS_RESIDENT_BASE + h.file_size)
+    return -ERANGE;
+  if ((h.pad_read_exit & 3) || h.pad_read_exit < POPS_RESIDENT_BASE + h.header_size ||
+      h.pad_read_exit >= POPS_RESIDENT_BASE + h.file_size)
     return -ERANGE;
   /* The configuration must fit inside the image, in its zeroed part or not. */
   if ((h.config_addr & 7) || h.config_addr < POPS_RESIDENT_BASE + h.header_size ||
@@ -73,6 +81,17 @@ int pops_resident_build_config(PopsResidentConfig *out, const PopsConfig *cfg) {
     out->gs_display = cfg->gs_display;
     out->flags |= POPS_RES_F_DISPLAY;
   }
+
+  if (cfg->pad_override & ~3u)
+    return -EINVAL;
+  if (cfg->pad_override) {
+    out->flags |= POPS_RES_F_PAD_ID;
+    out->pad_override = cfg->pad_override;
+    out->pad_id[0] = cfg->pad_id[0];
+    out->pad_id[1] = cfg->pad_id[1];
+  }
+  if (cfg->pad_d2ls)
+    out->flags |= POPS_RES_F_D2LS;
 
   uint16_t count = cfg->cheat_count;
   if (count > POPS_MAX_CHEATS)
@@ -182,5 +201,53 @@ int pops_resident_hook_progressive(void *staged_core, size_t core_size,
   core[sites[2] - POPS_CORE_BASE] = 0x50;
   put_u32(core + sites[3] - POPS_CORE_BASE, interlace);
   put_u32(core + sites[4] - POPS_CORE_BASE, interlace);
+  return 0;
+}
+
+int pops_resident_hook_pads(void *staged_core, size_t core_size, uint32_t flags,
+                            uint32_t read_entry, uint32_t read_exit) {
+  uint8_t *core = staged_core;
+  /* The pad state references the resident code relies on. */
+  static const uint32_t state_sites[][2] = {
+    {0x0020c648, 0x3c070050}, /* lui   $a3, 0x50 */
+    {0x0020c64c, 0x24e77000}, /* addiu $a3, $a3, 0x7000 */
+    {0x0020c6c8, 0x8ce80034}, /* lw    $t0, 0x34($a3): the reported ID */
+  };
+  /* The pad read around the two hook words. */
+  static const uint32_t read_sites[][2] = {
+    {0x00237798, 0x0080382d}, /* move  $a3, $a0 */
+    {0x002377a0, 0x2404001c}, /* addiu $a0, $zero, 0x1c */
+    {0x00237810, 0x27bd0030}, /* addiu $sp, $sp, 0x30 (exit delay slot) */
+  };
+  if (!core)
+    return -EINVAL;
+  if (!(flags & (POPS_RES_F_PAD_ID | POPS_RES_F_D2LS)))
+    return 0;
+  if (core_size < POPS_PAD_READ_EXIT_ADDR + 8 - POPS_CORE_BASE)
+    return -ERANGE;
+  for (unsigned i = 0; i < 3; ++i) {
+    if (get_u32(core + state_sites[i][0] - POPS_CORE_BASE) != state_sites[i][1])
+      return -EILSEQ;
+  }
+  if (!(flags & POPS_RES_F_D2LS))
+    return 0;
+
+  if ((read_entry & 3) || read_entry < POPS_RESIDENT_BASE || read_entry >= POPS_RESIDENT_LIMIT ||
+      (read_exit & 3) || read_exit < POPS_RESIDENT_BASE || read_exit >= POPS_RESIDENT_LIMIT)
+    return -EINVAL;
+  for (unsigned i = 0; i < 3; ++i) {
+    if (get_u32(core + read_sites[i][0] - POPS_CORE_BASE) != read_sites[i][1])
+      return -EILSEQ;
+  }
+  uint8_t *entry = core + POPS_PAD_READ_ENTRY_ADDR - POPS_CORE_BASE;
+  uint8_t *ret = core + POPS_PAD_READ_EXIT_ADDR - POPS_CORE_BASE;
+  uint32_t jump_entry = 0x08000000u | (read_entry >> 2);
+  uint32_t jump_exit = 0x08000000u | (read_exit >> 2);
+  uint32_t cur_entry = get_u32(entry), cur_exit = get_u32(ret);
+  if ((cur_entry != 0x24030070 && cur_entry != jump_entry) ||
+      (cur_exit != 0x03e00008 && cur_exit != jump_exit))
+    return -EILSEQ;
+  put_u32(entry, jump_entry);
+  put_u32(ret, jump_exit);
   return 0;
 }

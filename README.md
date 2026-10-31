@@ -681,6 +681,7 @@ Place optional configuration files alongside your `.VCD` image or inside its per
   - Sound and core: `$SCANLINES`, `$SUBCDSTATUS`, `$MUTE_CDDA`, `$UNDO_MUTE_CDDA`, `$MUTE_VAB`, `$MUTE_ALL`, `$CODECACHE_ADDON_0`..`2`, `$ROLLBACK`, `$CACHE1`.
   - IGR: `$IGR0`..`$IGR5` (POPStarter's combo choices; 3 to 5 exit straight away) and `$NOIGR`. Without one, launcHER's direct exit is used.
   - Accepted but not applied yet: `$SMOOTH`, `$WIDESCREEN`, `$XPOS_`/`$YPOS_`. Not POPStarter commands, ignored: `$480i`, `$576p`, `$576i`, `$240p`, `$VMODE_n`, `$DITHER_OFF`, `$FASTMIPS`, `$SLOWMIPS`. `$NOBOOT` / `$BIOS` keeps the PS1 boot logo.
+  - Controllers (not yet tested on a console): `$NOPAD0` / `$NOPAD1` make the game see no controller in that port; `$PAD0ID_0Xhh` / `$PAD1ID_0Xhh` make the port report controller ID `hh` (for example `0X41` digital, `0X73` analog); `$D2LS` swaps the D-pad and the left stick and presents both ports as digital pads; `$D2LS_ALT` swaps them and keeps the real controller type.
   - Delays and stability: `$SAFEMODE` (cheats start about 3 seconds after boot), `$USBDELAY_<seconds>`.
   - Compatibility modes: `$COMPATIBILITY_0x01` through `0x07`, or bare digits `1`..`7` in `MODES.TXT` (Mode 8 has no branch in the original and is refused).
 - **`DISCS.TXT`:** Multi-disc paths (up to 4 discs). Press **SELECT + L1 + R1** in-game to cycle discs.

@@ -120,7 +120,19 @@ typedef struct {
   uint8_t gs_mask;
   uint8_t gs_display_valid;
   uint8_t progressive_requested; /* $480p remains active across region commands */
+
+  /* Pad commands, applied by the resident code (pops_resident.h). Bit n of
+   * pad_override forces the controller ID that port n reports to the game
+   * to pad_id[n]. Later commands overwrite earlier ones, as in the original:
+   * $NOPADn sets ID 1, $PADnID_0Xhh sets hh, $D2LS sets 0x41 on both ports.
+   * pad_d2ls swaps the D-pad and the left stick ($D2LS, $D2LS_ALT). */
+  uint8_t pad_override;
+  uint8_t pad_id[2];
+  uint8_t pad_d2ls;
 } PopsConfig;
+
+#define POPS_PAD_ID_NONE    0x01 /* what $NOPADn makes a port report */
+#define POPS_PAD_ID_DIGITAL 0x41 /* PS1 digital pad */
 
 /* Initialize configuration with factory defaults */
 void pops_config_init(PopsConfig *cfg);

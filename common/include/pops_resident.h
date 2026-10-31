@@ -28,7 +28,7 @@ extern "C" {
 #define POPS_RESIDENT_BASE        UINT32_C(0x0143a000)
 #define POPS_RESIDENT_LIMIT       UINT32_C(0x01460000)
 #define POPS_RESIDENT_MAGIC       UINT32_C(0x5352484c) /* "LHRS" */
-#define POPS_RESIDENT_VERSION     3
+#define POPS_RESIDENT_VERSION     4
 
 /* POPS's VBLANK_START registration and handler (verified on the pinned core) */
 #define POPS_VBLANK_LUI_ADDR      UINT32_C(0x0021b184)
@@ -54,11 +54,30 @@ typedef struct {
   uint32_t config_addr;  /* address of the PopsResidentConfig */
   uint32_t display_entry; /* mid-function GS DISPLAY hook; no C call ABI */
   uint32_t progressive_entry; /* context-preserving progressive DISPLAY bridge */
+  uint32_t pad_read_entry; /* $D2LS: start of POPS's pad read, no C call ABI */
+  uint32_t pad_read_exit;  /* $D2LS: return of POPS's pad read, no C call ABI */
 } PopsResidentHeader;
 
 #define POPS_RES_F_CHEATS         (1u << 0)
 #define POPS_RES_F_DISPLAY        (1u << 1)
 #define POPS_RES_F_PROGRESSIVE    (1u << 2)
+#define POPS_RES_F_PAD_ID         (1u << 3)
+#define POPS_RES_F_D2LS           (1u << 4)
+
+/* POPS keeps one 0x90-byte state block per controller port at 0x00507000.
+ * The word at +0x34 is the controller ID its SIO emulation answers the
+ * game with (0x0020c648/0x0020c64c/0x0020c6c8 on the pinned core); POPS
+ * rewrites it when the real pad changes mode. Bytes +0..+19 receive the
+ * raw pad data from its pad read at 0x00237798 (a2 = the state block). */
+#define POPS_PAD_STATE_ADDR       UINT32_C(0x00507000)
+#define POPS_PAD_STATE_STRIDE     0x90u
+#define POPS_PAD_STATE_ID         0x34u
+
+/* Pad read hook sites: the second instruction (addiu $v1,$zero,0x70, after
+ * move $a3,$a0) and the final jr $ra (delay slot addiu $sp,$sp,0x30). */
+#define POPS_PAD_READ_ENTRY_ADDR  UINT32_C(0x0023779c)
+#define POPS_PAD_READ_RESUME_ADDR UINT32_C(0x002377a4)
+#define POPS_PAD_READ_EXIT_ADDR   UINT32_C(0x0023780c)
 
 typedef struct {
   uint64_t gs_display;   /* offset zero, read by the stackless display entry */
@@ -68,6 +87,9 @@ typedef struct {
   uint32_t frame;        /* VBLANK_START count */
   uint16_t safe_delay;   /* $SAFEMODE: frames before cheats start */
   uint16_t cheat_count;
+  uint8_t pad_override;  /* bit n: port n reports pad_id[n] */
+  uint8_t pad_id[2];
+  uint8_t pad_reserved;
   PopsCheatEntry cheats[POPS_MAX_CHEATS];
 } PopsResidentConfig;
 
@@ -80,6 +102,17 @@ void pops_resident_cheat_pass(uint8_t *ram, const PopsCheatEntry *cheats, uint16
 /* Per-frame work, separate from the interrupt entry so host tests can run it.
  * Returns 1 when the codes ran this frame. */
 int pops_resident_frame(PopsResidentConfig *cfg, uint8_t *ram);
+
+/* Force the controller IDs selected by pad_override. state is the first of
+ * the two per-port blocks (POPS_PAD_STATE_ADDR on the console). */
+void pops_resident_pad_ids(const PopsResidentConfig *cfg, uint8_t *state);
+
+/* $D2LS: swap the D-pad and the left stick in one raw pad reading of
+ * `bytes` bytes. The stick drives the D-pad buttons (pressed beyond a
+ * quarter of its travel) and their pressure bytes; the D-pad pressures
+ * drive the stick. Readings without stick data (digital mode) are left
+ * alone, and without pressure data the stick reads centred. */
+void pops_resident_d2ls(uint8_t *pad, uint32_t bytes);
 
 /* Launcher side (pops_resident.c) */
 
@@ -105,6 +138,12 @@ int pops_resident_hook_display(void *staged_core, size_t core_size, uint32_t ent
 int pops_resident_hook_progressive(void *staged_core, size_t core_size,
                                     uint32_t entry, uint32_t interlace);
 uint32_t pops_resident_progressive_interlace(const PopsConfig *cfg);
+
+/* Pad commands. Checks the pad state references for any pad command, and
+ * for $D2LS points the pad read's entry and exit at the resident stubs.
+ * All sites are checked before either word is written. */
+int pops_resident_hook_pads(void *staged_core, size_t core_size, uint32_t flags,
+                            uint32_t read_entry, uint32_t read_exit);
 
 /* Copy the image to dest (the resident base on the console), zero its data,
  * and write the configuration. dest_addr is the address dest stands for. */
