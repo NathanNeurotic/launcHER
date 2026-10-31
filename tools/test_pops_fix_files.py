@@ -20,6 +20,7 @@ WRITES = json.loads((ROOT / 'tools/fixtures/pops_compat_reference.json').read_te
 
 class Context(c.Structure):
     _fields_ = [('expected', c.c_uint32 * 39),
+                ('video_expected', c.c_uint32 * 4),
                 ('video_auto_disabled', c.c_uint8),
                 ('video_custom_set', c.c_uint8)]
 
@@ -29,7 +30,9 @@ def pristine():
     for address, value, width in [(0x210318, 0x8f828228, 4), (0x21032c, 0x1443fffa, 4),
                                   (0x20083c, 0x0441000a, 4), (0x20085c, 0x1000fffa, 4),
                                   (0x20de9c, 0x0c0836ee, 4), (0x21af70, 0x64, 1),
-                                  (0x2525b0, 0x1bfc, 2)]:
+                                  (0x2525b0, 0x1bfc, 2),
+                                  (0x21af94, 2, 1), (0x502770, 0x8a3a2, 4),
+                                  (0x23b018, 0x48, 1), (0x23b01c, 0x290, 2)]:
         data[address-BASE:address-BASE+width] = value.to_bytes(width, 'little')
     return data
 
@@ -96,9 +99,15 @@ static int test_close(int fd) {
 #define close test_close
 ''' + functions + '''
 int test_directory(void *core, size_t size, const char *root, const char *title) {
-  int auto_disabled = -1;
-  int result = pops_stage_fix_files(core, size, root, title, 0, &auto_disabled);
-  return !result && auto_disabled != 0 && auto_disabled != 1 ? -1000 : result;
+  PopsFixContext state;
+  int result = pops_stage_fix_files(core, size, root, title, 0, 0, &state);
+  return !result && state.video_auto_disabled > 1 ? -1000 : result;
+}
+int test_directory_video(void *core, size_t size, const char *root, const char *title,
+                           unsigned video_mode) {
+  PopsFixContext state;
+  int result = pops_stage_fix_files(core, size, root, title, 0, video_mode, &state);
+  return result ? result : state.video_auto_disabled;
 }
 int test_dependency(const char *path, void *buffer, size_t size, size_t *read_size) {
   return readPopsDependency(path, buffer, size, read_size);
@@ -113,9 +122,17 @@ void test_io_failures(int reads, int closes) { fail_reads=reads; fail_closes=clo
                         str(ROOT / 'common/src/pops_external.c'), '-o', str(library)], check=True)
         cls.lib = c.CDLL(str(library))
         cls.lib.pops_fix_context_init.argtypes = [c.POINTER(Context), c.c_void_p, c.c_size_t, c.c_uint8]
+        cls.lib.pops_fix_context_init_video.argtypes = [c.POINTER(Context), c.c_void_p,
+                                                        c.c_size_t, c.c_uint8, c.c_uint8]
         cls.lib.pops_fix_stage.argtypes = [c.POINTER(Context), c.c_void_p, c.c_size_t,
                                           c.c_void_p, c.c_size_t, c.c_uint, c.c_int]
+        cls.lib.pops_fix_finalize_video.argtypes = [c.POINTER(Context), c.c_void_p,
+                                                    c.c_size_t, c.c_int, c.c_uint8]
+        cls.lib.pops_apply_region.argtypes = [c.c_void_p, c.c_size_t, c.c_int,
+                                              c.c_uint8, c.c_int]
         cls.lib.test_directory.argtypes = [c.c_void_p, c.c_size_t, c.c_char_p, c.c_char_p]
+        cls.lib.test_directory_video.argtypes = [c.c_void_p, c.c_size_t, c.c_char_p,
+                                                 c.c_char_p, c.c_uint]
         cls.lib.test_io_failures.argtypes = [c.c_int, c.c_int]
 
     @classmethod
@@ -309,6 +326,133 @@ void test_io_failures(int reads, int closes) { fail_reads=reads; fail_closes=clo
         self.assert_rejected_without_writes(patch(control=6, slot=0), slot=0)
         self.assertEqual(self.stage(patch(control=2, slot=1), slot=1), 0)
         self.assertEqual(self.memory[0x21af94 - BASE], 3)
+
+    def test_pal_guards_reject_initial_corruption_and_later_drift_atomically(self):
+        for address in (0x21af94, 0x502770, 0x23b018, 0x23b01c):
+            self.setUp()
+            self.memory[address - BASE] ^= 0x80
+            before = bytes(self.context)
+            self.assertEqual(self.lib.pops_fix_context_init(c.byref(self.context),
+                              self.pointer, SIZE, 0), -errno.EINVAL)
+            self.assertEqual(bytes(self.context), before)
+            # Include a payload and modes so rejection proves all phases atomic.
+            self.assert_rejected_without_writes(patch(control=3, modes=(1,),
+                                                      payload=b'DATA', address=0x220000))
+        self.setUp()
+        before = bytes(self.context)
+        self.assertEqual(self.lib.pops_fix_context_init(c.byref(self.context),
+                          self.pointer, 0x302773, 0), -errno.ERANGE)
+        self.assertEqual(bytes(self.context), before)
+
+    def test_explicit_payload_updates_video_expectations(self):
+        self.assertEqual(self.stage(patch(payload=b'\x99', address=0x21af94)), 0)
+        self.assertEqual(self.context.video_expected[0], 0x99)
+        # The original allows an explicit payload to precede/override settings.
+        self.assertEqual(self.stage(patch(control=2)), 0)
+        self.assertEqual(self.context.video_expected[0], 3)
+        self.assertEqual(self.stage(patch(modes=(1,))), 0)
+        self.memory[0x23b01c - BASE] ^= 0x80
+        self.assert_rejected_without_writes(patch(modes=(4,)))
+
+    def test_video_guard_snapshots_include_same_record_payload_then_pal(self):
+        self.assertEqual(self.stage(patch(control=2, payload=b'\x99', address=0x21af94)), 0)
+        self.assertEqual(self.memory[0x21af94 - BASE], 3)
+        self.assertEqual(self.context.video_expected[0], 3)
+        self.assertEqual(self.stage(patch(control=4)), 0)
+
+    def test_text_480p_suppresses_patch_pal_but_nopal_does_not(self):
+        for video_mode, disabled in ((4, 1), (3, 0)):
+            self.setUp()
+            self.assertEqual(self.lib.pops_fix_context_init_video(c.byref(self.context),
+                              self.pointer, SIZE, 0, video_mode), 0)
+            self.assertEqual(self.context.video_auto_disabled, disabled)
+            self.assertEqual(self.stage(patch(control=2)), 0)
+            self.assertEqual(self.memory[0x21af94 - BASE], 2 if disabled else 3)
+        # Execute the actual production discovery function, including its
+        # initial text video mode and returned region-pass suppression flag.
+        for video_mode, expected_mode in ((4, 2), (3, 3)):
+            self.setUp()
+            with tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                (root / 'PATCH_1.BIN').write_bytes(patch(control=2))
+                self.assertEqual(self.lib.test_directory_video(self.pointer, SIZE,
+                    os.fsencode(str(root)+'/'), os.fsencode(str(root/'missing')+'/'), video_mode), 1)
+                self.assertEqual(self.memory[0x21af94 - BASE], expected_mode)
+
+    def test_forcepal_is_deferred_and_keeps_explicit_pal_action(self):
+        self.assertEqual(self.lib.pops_fix_context_init_video(c.byref(self.context),
+                          self.pointer, SIZE, 0, 2), 0)
+        self.assertEqual((self.context.video_auto_disabled, self.context.video_custom_set), (0, 1))
+        self.assertEqual(self.memory[0x21af94 - BASE], 2)
+        # FORCEPAL's forced flag does not suppress an explicit PATCH PAL
+        # action: only auto_disabled gates that branch in FUN_00881de8.
+        self.assertEqual(self.stage(patch(control=2, payload=b'\x99', address=0x21af94)), 0)
+        self.assertEqual(self.memory[0x21af94 - BASE], 3)
+        self.assertEqual(self.context.video_auto_disabled, 1)
+
+    def test_final_video_respects_patch_disable_and_tracked_payloads(self):
+        for video_mode, region, control, want in ((2, 2, 0, 3), (2, 2, 4, 2),
+                                                  (0, 1, 0, 3), (3, 1, 0, 2),
+                                                  (4, 1, 0, 2), (0, 2, 0, 2)):
+            self.setUp()
+            self.assertEqual(self.lib.pops_fix_context_init_video(c.byref(self.context),
+                              self.pointer, SIZE, 0, video_mode), 0)
+            if control:
+                self.assertEqual(self.stage(patch(control=control)), 0)
+            self.assertEqual(self.lib.pops_fix_finalize_video(c.byref(self.context),
+                              self.pointer, SIZE, region, video_mode), 0)
+            self.assertEqual(self.memory[0x21af94 - BASE], want)
+        self.setUp()
+        self.assertEqual(self.stage(patch(payload=b'\x99', address=0x21af94)), 0)
+        self.assertEqual(self.lib.pops_fix_finalize_video(c.byref(self.context),
+                          self.pointer, SIZE, 2, 2), 0)
+        self.assertEqual(self.memory[0x21af94 - BASE], 3)
+        # Tracked bytes, rather than arbitrary current bytes, authorize final PAL.
+        self.memory[0x23b01c - BASE] ^= 1
+        before = bytes(self.memory), bytes(self.context)
+        self.assertEqual(self.lib.pops_fix_finalize_video(c.byref(self.context),
+                          self.pointer, SIZE, 1, 0), -errno.EINVAL)
+        self.assertEqual((bytes(self.memory), bytes(self.context)), before)
+
+    def test_aggregate_forcepal_waits_until_after_fix_files(self):
+        from test_pops_features import PopsConfig
+        cfg = PopsConfig()
+        cfg.video_mode = 2
+        self.lib.pops_apply_all_config_patches.argtypes = [c.c_void_p, c.c_size_t, c.POINTER(PopsConfig)]
+        before = bytes(self.memory)
+        self.assertEqual(self.lib.pops_apply_all_config_patches(self.pointer, SIZE, c.byref(cfg)), 0)
+        self.assertEqual(bytes(self.memory), before)
+        self.assertEqual(self.lib.pops_fix_context_init_video(c.byref(self.context),
+                          self.pointer, SIZE, 0, 2), 0)
+        self.assertEqual(self.stage(patch(control=4)), 0)
+        self.assertEqual(self.lib.pops_fix_finalize_video(c.byref(self.context),
+                          self.pointer, SIZE, 2, 2), 0)
+        self.assertEqual(bytes(self.memory), before)
+
+    @unittest.skipUnless(os.environ.get('POPSTARTER_TEST_ELF'), 'optional original region control flow')
+    def test_original_region_pass_after_ordered_patch_state(self):
+        from trace_original_pops_display import OriginalDisplay
+        original = OriginalDisplay(Path(os.environ['POPSTARTER_TEST_ELF']).read_bytes())
+        for video_mode, control, (licence, region) in itertools.product(
+                (0, 2, 3, 4), (0, 2, 4),
+                (('Euro', 1), ('Amer', 2), ('of A', 2), ('Inc.', 3), ('????', 0))):
+            self.setUp()
+            self.assertEqual(self.lib.pops_fix_context_init_video(c.byref(self.context),
+                              self.pointer, SIZE, 0, video_mode), 0)
+            if control:
+                self.assertEqual(self.stage(patch(control=control)), 0)
+            expected = bytearray(self.memory)
+            disabled = self.context.video_auto_disabled
+            selector = video_mode not in (3, 4) and not control
+            for address, value, width in original.region(licence, video_mode == 2,
+                                                          disabled, selector):
+                expected[address-BASE:address-BASE+width] = value.to_bytes(width, 'little')
+            self.assertEqual(self.lib.pops_fix_finalize_video(c.byref(self.context),
+                              self.pointer, SIZE, region, video_mode), 0)
+            self.assertEqual(self.lib.pops_apply_region(self.pointer, SIZE, region,
+                                                       video_mode, disabled), 0)
+            self.assertEqual(self.memory, expected, (video_mode, control, licence))
+        print('Original region control-flow differential PASS: 60 text/PATCH/licence combinations')
 
 if __name__ == '__main__':
     unittest.main()

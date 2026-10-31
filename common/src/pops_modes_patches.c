@@ -123,6 +123,38 @@ static uint32_t compat_read(const uint8_t *bytes, const CompatPatch *patch) {
   return value;
 }
 
+/* The PAL helper's four original writes; expected values are from the
+ * identified external core. Track them across explicit payload mutations,
+ * just like compatibility sites, rather than trusting arbitrary live bytes. */
+static const struct {
+  uint32_t address, pristine, pal;
+  uint8_t width;
+} fix_pal_sites[POPS_PATCH_PAL_SITE_COUNT] = {
+  {0x21af94, 0x02, 0x03, 1},
+  {0x502770, 0x0008a3a2, 0x000a6300, 4},
+  {0x23b018, 0x48, 0x6b, 1},
+  {0x23b01c, 0x0290, 0x02cb, 2},
+};
+
+static uint32_t fix_pal_read(const uint8_t *bytes, unsigned index) {
+  uint32_t value = 0;
+  for (unsigned j = 0; j < fix_pal_sites[index].width; ++j)
+    value |= (uint32_t)bytes[fix_pal_sites[index].address - POPS_CORE_BASE_ADDR + j] << (8 * j);
+  return value;
+}
+
+static int fix_pal_context_check(const PopsFixContext *context,
+                                  const uint8_t *bytes, size_t size) {
+  for (unsigned i = 0; i < POPS_PATCH_PAL_SITE_COUNT; ++i) {
+    size_t offset = fix_pal_sites[i].address - POPS_CORE_BASE_ADDR;
+    if (offset > size || fix_pal_sites[i].width > size - offset)
+      return -ERANGE;
+    if (fix_pal_read(bytes, i) != context->video_expected[i])
+      return -EINVAL;
+  }
+  return 0;
+}
+
 static int compat_context_check(const PopsFixContext *context,
                                  const uint8_t *bytes, size_t size) {
   for (unsigned i = 0; i < POPS_COMPAT_SITE_COUNT; ++i) {
@@ -133,7 +165,14 @@ static int compat_context_check(const PopsFixContext *context,
     if (compat_read(bytes, patch) != context->expected[i])
       return -EINVAL;
   }
-  return 0;
+  return fix_pal_context_check(context, bytes, size);
+}
+
+static void fix_pal_write(uint8_t *bytes) {
+  for (unsigned i = 0; i < POPS_PATCH_PAL_SITE_COUNT; ++i)
+    for (unsigned j = 0; j < fix_pal_sites[i].width; ++j)
+      bytes[fix_pal_sites[i].address - POPS_CORE_BASE_ADDR + j] =
+          (uint8_t)(fix_pal_sites[i].pal >> (8 * j));
 }
 
 static int fix_alias(const void *a, size_t asize, const void *b, size_t bsize) {
@@ -143,15 +182,29 @@ static int fix_alias(const void *a, size_t asize, const void *b, size_t bsize) {
 
 int pops_fix_context_init(PopsFixContext *context, const void *staged_core,
                            size_t core_size, uint8_t initial_modes) {
+  return pops_fix_context_init_video(context, staged_core, core_size,
+                                      initial_modes, POPS_VMODE_DEFAULT);
+}
+
+int pops_fix_context_init_video(PopsFixContext *context, const void *staged_core,
+                                 size_t core_size, uint8_t initial_modes,
+                                 uint8_t initial_video_mode) {
   PopsFixContext candidate;
   if (!context || !staged_core ||
       fix_alias(context, sizeof(*context), staged_core, core_size))
     return -EINVAL;
   if (initial_modes & 0x80)
     return -ENOTSUP;
+  if (initial_video_mode > POPS_VMODE_240P)
+    return -ENOTSUP;
   memset(&candidate, 0, sizeof(candidate));
   for (unsigned i = 0; i < POPS_COMPAT_SITE_COUNT; ++i)
     candidate.expected[i] = compat_patches[i].expected;
+  for (unsigned i = 0; i < POPS_PATCH_PAL_SITE_COUNT; ++i)
+    candidate.video_expected[i] = fix_pal_sites[i].pristine;
+  candidate.video_auto_disabled = initial_video_mode == POPS_VMODE_480P;
+  candidate.video_custom_set = initial_video_mode == POPS_VMODE_NTSC2PAL ||
+                               initial_video_mode == POPS_VMODE_480P;
   /* The initial text/database mask uses the existing ascending dispatcher.
    * Calculate its result independently; do not bless arbitrary current bytes. */
   for (unsigned i = 0; i < POPS_COMPAT_SITE_COUNT; ++i) {
@@ -166,6 +219,28 @@ int pops_fix_context_init(PopsFixContext *context, const void *staged_core,
   if (result)
     return result;
   *context = candidate;
+  return 0;
+}
+
+int pops_fix_finalize_video(PopsFixContext *context, void *staged_core,
+                             size_t core_size, int region, uint8_t video_mode) {
+  if (!context || !staged_core || region < POPS_REGION_UNKNOWN ||
+      region > POPS_REGION_JAPAN ||
+      fix_alias(context, sizeof(*context), staged_core, core_size))
+    return -EINVAL;
+  if (video_mode > POPS_VMODE_240P)
+    return -ENOTSUP;
+  int result = fix_pal_context_check(context, staged_core, core_size);
+  if (result)
+    return result;
+  if (!context->video_auto_disabled &&
+      (video_mode == POPS_VMODE_NTSC2PAL ||
+       (region == POPS_REGION_EUROPE && video_mode != POPS_VMODE_NOPAL &&
+        video_mode != POPS_VMODE_480P))) {
+    fix_pal_write(staged_core);
+    for (unsigned i = 0; i < POPS_PATCH_PAL_SITE_COUNT; ++i)
+      context->video_expected[i] = fix_pal_sites[i].pal;
+  }
   return 0;
 }
 
@@ -241,11 +316,8 @@ int pops_fix_stage(PopsFixContext *context, void *staged_core, size_t core_size,
     context->video_auto_disabled = 1;
     break;
   case POPS_PATCH_VIDEO_PAL:
-    if (!context->video_auto_disabled && !context->video_custom_set) {
-      write_u8(bytes, core_size, 0x0021af94, 3);
-      write_u32(bytes, core_size, 0x00502770, 0x000a6300);
-      write_u8(bytes, core_size, 0x0023b018, 0x6b);
-      write_u16(bytes, core_size, 0x0023b01c, 0x02cb);
+    if (!context->video_auto_disabled) {
+      fix_pal_write(bytes);
       context->video_auto_disabled = 1;
       context->video_custom_set = 1;
     }
@@ -256,6 +328,8 @@ int pops_fix_stage(PopsFixContext *context, void *staged_core, size_t core_size,
   }
   for (unsigned i = 0; i < POPS_COMPAT_SITE_COUNT; ++i)
     context->expected[i] = compat_read(bytes, &compat_patches[i]);
+  for (unsigned i = 0; i < POPS_PATCH_PAL_SITE_COUNT; ++i)
+    context->video_expected[i] = fix_pal_read(bytes, i);
   return 0;
 }
 
@@ -424,7 +498,7 @@ int pops_apply_region(void *staged_core, size_t core_size, int region,
   static const uint8_t pops_letter[] = {'T', 'E', 'A', 'J'};
   static const uint8_t cd_letter[] = {0, 'E', 'A', 'I'};
   static const uint32_t bios_li[] = {0, 0x34040045, 0x34040041, 0x34040049};
-  int force_pal = video_mode == POPS_VMODE_NTSC2PAL;
+  int force_pal = video_mode == POPS_VMODE_NTSC2PAL && !auto_video_disabled;
   int result;
   if (!staged_core)
     return -EINVAL;
@@ -432,8 +506,8 @@ int pops_apply_region(void *staged_core, size_t core_size, int region,
     return -EINVAL;
   if (core_size < (size_t)(0x002cbb72 - POPS_CORE_BASE_ADDR + 1))
     return -ERANGE;
-  if (!force_pal && region == POPS_REGION_EUROPE && !auto_video_disabled &&
-      video_mode != POPS_VMODE_NOPAL && video_mode != POPS_VMODE_480P) {
+  if (force_pal || (region == POPS_REGION_EUROPE && !auto_video_disabled &&
+                   video_mode != POPS_VMODE_NOPAL && video_mode != POPS_VMODE_480P)) {
     result = apply_pal_patch(staged_core, core_size);
     if (result)
       return result;
@@ -928,9 +1002,9 @@ int pops_apply_all_config_patches(void *staged_core, size_t core_size, const Pop
   if (!staged_core || !cfg)
     return -EINVAL;
 
-  /* $NOPAL and the European auto-PAL pass run from pops_apply_region after
-   * the fix files; here only $FORCEPAL and $HDTVFIX touch the core. */
-  video_requested = cfg->video_mode == POPS_VMODE_NTSC2PAL || cfg->hdtv_fix;
+  /* The original defers $FORCEPAL until after fix files, where PATCH's
+   * disable-auto state can suppress it. Only $HDTVFIX runs at this stage. */
+  video_requested = cfg->hdtv_fix;
 
   /* These are mutually dependent writes to the staged executable. Fail
    * before applying an otherwise valid compatibility mode when any selected
@@ -959,8 +1033,7 @@ int pops_apply_all_config_patches(void *staged_core, size_t core_size, const Pop
   }
   if (video_requested) {
     result = pops_apply_video_overrides(staged_core, core_size,
-                                        cfg->video_mode == POPS_VMODE_NTSC2PAL
-                                            ? POPS_VMODE_NTSC2PAL : POPS_VMODE_DEFAULT,
+                                        POPS_VMODE_DEFAULT,
                                         cfg->hdtv_fix, 0, 0);
     if (result) return result;
   }

@@ -177,6 +177,40 @@ class OriginalDisplay:
             raise ValueError('command outside supported windows')
         return _Window(self.image, *WINDOWS[prefix], command, x_set, y_set).run()
 
+    def region(self, licence, force_pal=False, auto_disabled=False, auto_selector=True):
+        """Original region control flow; PAL helper/pokes modeled explicitly.
+
+        User BIOS/OSD and preserve-standard flags are zero (launcHER has no
+        implementation of those inputs). PATCH PAL/disable-auto clears the
+        selector as well as setting auto_disabled before this window runs.
+        """
+        if len(licence) != 4:
+            raise ValueError('licence must contain four ASCII bytes')
+        machine = _RegionWindow(self.image, 0x879034, 0x8795f0, '')
+        for offset in (0x38a0, 0x3864, 0x4fa0, 0x3cb0, 0x3b98, 0x38a4, 0x344c, 0x3430):
+            machine.memory.update((machine.GP + offset + i, 0) for i in range(4))
+        machine.store(machine.GP + 0x38a0, int(force_pal), 4)
+        machine.store(machine.GP + 0x3864, int(auto_disabled), 4)
+        machine.store(machine.GP + 0x4fa0, int(auto_selector), 4)
+        machine.store_bytes(machine.GP + 0x3cb0, licence.encode('ascii'))
+        return machine.run()['writes']
+
+
+class _RegionWindow(_Window):
+    def service(self, target):
+        if target == 0x8dc218:
+            # FUN_008dc218, with preserve-standard=0 and logging modeled.
+            self.writes.extend([[0x21af94, 3, 1], [0x502770, 0xa6300, 4],
+                                [0x23b018, 0x6b, 1], [0x23b01c, 0x2cb, 2]])
+        elif target in (0x87c298, 0x87c300):
+            width = 1 if target == 0x87c298 else 4
+            value, address = self.reg[4], self.reg[5]
+            if not 0x200000 <= address <= 0x502e60 - width:
+                raise ValueError('region poke outside core')
+            self.writes.append([address, value & ((1 << (width * 8)) - 1), width])
+        else:
+            raise ValueError(f'unmodeled region service {target:#x}')
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)

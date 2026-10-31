@@ -17,13 +17,26 @@ int pops_apply_compat_modes(void *staged_core, size_t core_size, uint8_t modes_m
  * external payload writes. No executable is entered and no live RAM is used.
  * Discard the staged core on any failure in a sequence of fix files. */
 #define POPS_COMPAT_SITE_COUNT 39
+#define POPS_PATCH_PAL_SITE_COUNT 4
 typedef struct {
   uint32_t expected[POPS_COMPAT_SITE_COUNT];
+  uint32_t video_expected[POPS_PATCH_PAL_SITE_COUNT];
   uint8_t video_auto_disabled;
   uint8_t video_custom_set;
 } PopsFixContext;
 int pops_fix_context_init(PopsFixContext *context, const void *staged_core,
                            size_t core_size, uint8_t initial_modes);
+/* Production text configuration has already been staged; $FORCEPAL is still
+ * deferred. Preserve $480p's original disable-PAL state. $NOPAL suppresses
+ * the later automatic region pass, not an explicit PATCH PAL action. */
+int pops_fix_context_init_video(PopsFixContext *context, const void *staged_core,
+                                 size_t core_size, uint8_t initial_modes,
+                                 uint8_t initial_video_mode);
+/* Final video pass after ordered fix files. Validate tracked sites, then
+ * apply forced/European PAL as allowed by the original state. An unread
+ * licence can use UNKNOWN here: this function never changes region letters. */
+int pops_fix_finalize_video(PopsFixContext *context, void *staged_core,
+                             size_t core_size, int region, uint8_t video_mode);
 /* expected_trojan selects TROJAN versus PATCH; slot must match the filename.
  * PATCH data precedes its four mode bytes, in recorded order. Video actions
  * (PAL, disable-auto) and mode 6 are supported. Video actions 6/7 require

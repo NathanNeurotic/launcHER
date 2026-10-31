@@ -4,44 +4,80 @@ Continue [draft launcHER PR #23](https://github.com/NathanNeurotic/launcHER/pull
 
 ## Current continuation (supersedes historical build/oracle blockers below)
 
-- Synced the checkout from `33c33fc` to current PR head `ae86f3d` before editing.
-- Preserved the three older uncommitted PATCH-video files in the local stash
-  `preserved pre-sync PATCH video WIP 2026-10-30`. This old experiment allows
-  the absent-resident action 6 jump and must not be reapplied wholesale.
-- PATCH video actions 6/7 now return `-ENOTSUP` before any payload, mode or
-  context mutation. The jump targets `0x2394f0`, inside POPStarter's copied
-  resident block, which launcHER does not supply. The previous success tests
-  only demonstrated writing that jump, not a working video mode.
-- `POPS_TEST_ELF=EXTERNAL/POPS.ELF python3 tools/test_pops_fix_files.py`:
-  18 tests pass including the identified external-core case.
-- Fresh REPOP `feat/psxcore-validation` head is `ee87b55e`. Its newer divergence
-  register R13–R18 supersedes the old incomplete-FP and build-failure notes
-  below: the remote records a completed FP differential and repaired EE archive.
-  Those newer results have not been independently rerun in this continuation.
-  Remaining original-contract work includes `FUN_00917f80`,
-  `FUN_0091acb0`, `FUN_009a1458`, and the lower SIF transport implementation.
-  Use a separate current checkout; `../REPOP/checkout` is an older dirty
-  branch (`feat/popstarter-iop-recovery`) and was preserved.
-- No new console run. The ae86f3d region changes still need US/European disc,
-  `$FORCEPAL` and `$NOPAL` hardware checks. Runtime, dedicated-new-card
-  save/reload/cold-power-cycle and device acceptance remain open.
+This continuation published `5dc8076` (PATCH 6/7 guard), `4ac9d30` (six direct
+display commands), and the current PATCH-state/region-ordering change. The
+concurrent `8f40793` resident-engine commit was fetched and integrated before
+that last change. Continue from current HEAD, fetching again before editing.
 
-Six direct display commands are now implemented with guarded production staging:
-`$SMOOTH`, `$LEFTADJ_`, `$XPOS_`, `$YPOS_`, `$DWSTRETCH_`, `$DWCROP_`.
-[Display contracts and reproduction](POPS_DISPLAY_CONTRACTS.md) record 11 passing
-tests, including 1,596 original-command inputs and two one-shot states, with
-both external inputs. All 16 non-argv host test entry points pass. No console
-result is implied. The local PS2SDK v2.0.0 lacked mcman-2000.irx; target checks
-use a temporary SDK overlay with that module compiled from official PS2SDK
-`2a18d15da1332665451a9bcf9a0d4df9029c9490`. Do not replace it with stock mcman.
-Both normal and `LAUNCHER_BOOT_TRACE=ON,DEBUG=ON` builds pass locally.
-Existing transport/path-format warnings remain; no new warnings in the
-changed common display/configuration sources.
+- PATCH 6/7 still reject before any payload/mode/context writes. The resident
+  cheat image at `0x0143a000` does not supply their `0x2394f0` video target.
+- `$SMOOTH`, `$LEFTADJ_`, `$XPOS_`, `$YPOS_`, `$DWSTRETCH_`, `$DWCROP_` have
+  guarded production staging. [Display contracts](POPS_DISPLAY_CONTRACTS.md)
+  record the exact values, original windows, hashes and 1,596 original-command
+  input comparisons plus two first-position-state checks.
+- PATCH sessions now guard all four PAL sites across ordered payloads. Text
+  `$480p` state suppresses explicit PATCH PAL; `$NOPAL` still permits explicit
+  PATCH PAL. FORCEPAL now waits until after fix files, so PATCH PAL/disable-auto
+  suppresses its final branch as in the original. Intentional payload changes
+  are tracked through final video. [State contracts](POPS_PATCH_VIDEO_STATE.md)
+  document the 60-combination original region-control-flow comparison.
+- The integrated external test entry point passes **104 tests**, with both
+  external inputs. All **18 host entry points** (including argv and resident)
+  pass. Normal and `LAUNCHER_BOOT_TRACE=ON,DEBUG=ON` PS2 builds pass. The built
+  2,672-byte resident image passes its Unicorn entry/chaining check. These are
+  host/target-build/emulated results; no new physical console run occurred.
+- REPOP `feat/psxcore-validation` was updated to `529579dd`. Its FP oracle was
+  independently rerun here: **16,393 patterns / 32,786 original calls pass**.
+  Its metadata-only report and current continuation are committed there. This
+  supersedes historical incomplete-FP notes below. No full REPOP EE archive
+  build was independently repeated in this continuation, and no coverage/size
+  baseline was promoted. Remaining contracts include `FUN_00917f80`,
+  `FUN_0091acb0`, `FUN_009a1458` and lower SIF transport.
 
-Next source slice: seed PATCH video state from text configuration and guard
-PAL writes across ordered external payloads; continue the independent resident
-implementation and built-in per-game DB recovery. Do not infer behavioral completion from source
-coverage or an archive build. Keep incremental commits and PR comments current.
+## Reproduction and preserved local work
+
+```sh
+POPS_TEST_ELF=/external/POPS.ELF \
+POPSTARTER_TEST_ELF=/external/MAIN/POPSTARTER.ELF \
+python3 tools/test_pops_external.py
+python3 tools/test_pops_resident.py
+python3 tools/test_launch_args.py
+```
+
+The local PS2SDK v2.0.0 lacked mcman-2000.irx. The successful target builds use
+`/tmp/pr23-sdk-overlay` with that module compiled from official PS2SDK
+`2a18d15da1332665451a9bcf9a0d4df9029c9490`, leaving the installed SDK unchanged.
+The base toolchain is under `../POPSLoader/artifacts/local/ps2dev`; CMake and
+Unicorn are in `/tmp/launcher-parity-venv`. These temporary paths are local
+conveniences, not cloud prerequisites. Use the normal repository CI/current
+PS2SDK for reproducible targets. Existing transport/path-format warnings remain;
+there are no new warnings in the changed common display/configuration code.
+
+The older uncommitted PATCH-video experiment is preserved in local stash
+`preserved pre-sync PATCH video WIP 2026-10-30`; it permits the absent-resident
+jump and must not be applied wholesale. `../REPOP/checkout` is an older dirty
+`feat/popstarter-iop-recovery` checkout and was preserved. The current clean
+REPOP continuation was cloned separately to `/tmp/repop-pr23-continuation` and
+pushed; use its branch, not the older checkout. Original Sony/game/save bytes
+stay external. No merge or release was performed.
+
+## Next work and physical gates
+
+1. Validate the resident cheat hook with a known code and safe-mode case;
+   compare US/European video, FORCEPAL, NOPAL and PATCH PAL/disable-auto on
+   hardware. Host/emulated checks do not establish picture or gameplay results.
+2. Extend independently implemented resident services for progressive output,
+   pads, timings, widescreen and the remaining cheat commands. The three
+   `$RECOMPILER_ADDON_0/1/2` helpers also copy original code into `0x143xxxx`
+   (helpers at `0x8d6f64/0x8d6fa4/0x8d6fe4`); they are not direct fixed patches.
+3. Recover the built-in per-game DB and remaining BIOS/OSD/IGR-skin/module and
+   physical-disc behavior from original contracts. Do not infer completion
+   from annotation coverage or an archive build.
+4. Prove in-game save/reload/cold-power-cycle persistence on a fresh dedicated
+   VMC, preserving existing cards. Device/network runtime, CDDA, controllers,
+   representative games and Ember forwarding remain separate acceptance gates.
+5. Keep this draft PR and REPOP evidence synchronized after each verified
+   increment; fetch before publishing to preserve concurrent continuation.
 
 ## Historical October 28 audit
 

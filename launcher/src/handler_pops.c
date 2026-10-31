@@ -279,10 +279,11 @@ static int readPopsDependency(const char *path, void *buffer, size_t max_size,
  * The staged executable is discarded by the caller on any failure. */
 static int pops_stage_fix_files(void *stagedCore, size_t coreSize,
                                  const char *vcdDir, const char *titleDir,
-                                 uint8_t initialModes, int *autoVideoDisabled) {
+                                 uint8_t initialModes, uint8_t initialVideo,
+                                 PopsFixContext *finalContext) {
   PopsFixContext context;
-  int result = pops_fix_context_init(&context, stagedCore, coreSize, initialModes);
-  *autoVideoDisabled = 0;
+  int result = pops_fix_context_init_video(&context, stagedCore, coreSize,
+                                            initialModes, initialVideo);
   if (result)
     return result;
   const char *dirs[] = {vcdDir, titleDir};
@@ -310,7 +311,7 @@ static int pops_stage_fix_files(void *stagedCore, size_t coreSize,
       }
     }
   }
-  *autoVideoDisabled = context.video_auto_disabled;
+  *finalContext = context;
   return 0;
 }
 
@@ -1151,16 +1152,27 @@ int launchPOPS(int argc, char *argv[]) {
   }
 
   /* Preserve original root/title and TROJAN/PATCH ordering. */
-  int autoVideoDisabled = 0;
+  PopsFixContext fixContext;
   res = pops_stage_fix_files((void *)stagedCore, plan.core_size, vcdDir,
-                              gameConfigDir, cfg.compat_modes, &autoVideoDisabled);
+                              gameConfigDir, cfg.compat_modes, cfg.video_mode,
+                              &fixContext);
   if (res)
     return res;
+
+  /* Forced video is deliberately deferred: PATCH PAL/disable-auto wins as
+   * in the original. Tracked payload writes remain valid inputs to this pass.
+   * A missing licence can still honor FORCEPAL without inventing BIOS letters. */
+  res = pops_fix_finalize_video(&fixContext, (void *)stagedCore, plan.core_size,
+                                 cfg.disc_region, cfg.video_mode);
+  if (res) {
+    msg("POPS: Final video patch failed: %d\n", res);
+    return res;
+  }
 
   /* POPStarter's region pass: European auto PAL and region letters. An
    * unreadable licence leaves POPS as shipped rather than "unknown". */
   res = regionRead ? pops_apply_region((void *)stagedCore, plan.core_size, cfg.disc_region,
-                                       cfg.video_mode, autoVideoDisabled)
+                                       cfg.video_mode, fixContext.video_auto_disabled)
                    : 0;
   if (res) {
     msg("POPS: Region patch failed: %d\n", res);

@@ -20,6 +20,8 @@ static void reset_core(void) {
   word(core+0x10318,0x8f828228);word(core+0x1032c,0x1443fffa);
   word(core+0x83c,0x0441000a);word(core+0x85c,0x1000fffa);
   word(core+0xde9c,0x0c0836ee);core[0x1af70]=0x64;word(core+0x525b0,0x1bfc);
+  core[0x1af94]=2;word(core+0x302770,0x8a3a2);
+  core[0x3b018]=0x48;word(core+0x3b01c,0x290);
 }
 static uint32_t checksum(const void *memory, size_t size) {
   const uint8_t *bytes=memory;uint32_t value=2166136261u;

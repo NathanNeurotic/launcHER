@@ -59,7 +59,7 @@ below need their behaviour worked out and added to it.
 | `$MUTE_VAB` | five SPU sites | **PRESENT** |
 | `$MUTE_ALL` | `0x213ff4=0` | **PRESENT** |
 | `$CODECACHE_ADDON_0/1/2` | `0x202734` | **PRESENT** |
-| `$RECOMPILER_ADDON_0/1/2` | calls into the original | **MISSING** |
+| `$RECOMPILER_ADDON_0/1/2` | helpers at `0x8d6f64/0x8d6fa4/0x8d6fe4` copy original code into `0x143xxxx` | **BLOCKED**: independent resident implementation needed |
 | `$RECOMPILER_ADDON_3/4` | jumps into resident code | **BLOCKED** |
 | `$ORIGINAL_OPCODES` | flag | **MISSING** |
 | `$UNDO_COMPATIBILITY_CODES`, `$UNDO_GAME_FIXES`, `$UNDO_LIBCRYPT_FIX` | restore sites the built-in DB patched | **MISSING** (no built-in DB to undo) |
@@ -108,7 +108,9 @@ loaded.
 launcHER before this change auto-applied the PAL values to every US/Japanese
 disc on an NTSC console (labelled "PAL2NTSC"), wrote no region letters, and
 had no European auto PAL. `pops_apply_region` now follows the original, after
-the fix files so a PATCH file's disable-auto still wins. **NOT TESTED.**
+the fix files so a PATCH file's disable-auto still wins. FORCEPAL is now
+deferred to that pass as well. [Ordered PATCH state contracts](POPS_PATCH_VIDEO_STATE.md)
+record 60 original region-control-flow combinations. **No console test.**
 
 ## Launcher, file and device features
 

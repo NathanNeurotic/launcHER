@@ -1324,9 +1324,16 @@ class FeatureTests(unittest.TestCase):
         buf, ptr = core()
         buf[0xf6cc] = 0x55
         self.assertEqual(LIB.pops_apply_region(ptr, len(buf), 2, 2, 0), 0)
+        self.assertTrue(pal(buf))
         self.assertEqual(buf[0xcbb72], ord('E'))
         self.assertEqual(buf[0xf6cc], 0x55)
         self.assertEqual(struct.unpack_from("<I", buf, 0x649a0)[0], 0x34040041)
+
+        # PATCH disable-auto suppresses the original FORCEPAL branch too.
+        buf, ptr = core()
+        self.assertEqual(LIB.pops_apply_region(ptr, len(buf), 2, 2, 1), 0)
+        self.assertFalse(pal(buf))
+        self.assertEqual((buf[0xcbb72], buf[0xf6cc]), (ord('A'), ord('A')))
 
         # Unknown licence: 'T' and the four region checks zeroed.
         buf, ptr = core()
