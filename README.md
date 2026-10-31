@@ -115,7 +115,7 @@ The storage device changes. The Ember folder structure does not.
 
 ### Game argument
 
-Ember expects the **bare folder name** underneath `EMBER/games/`.
+Pass the **game folder name** underneath `EMBER/games/` for a normal folder launch.
 
 If the game is stored at:
 
@@ -129,15 +129,41 @@ then the game argument is:
 Soul Blade
 ```
 
-Do not pass:
+To choose a specific CUE with an Ember build supporting explicit file selection,
+append its filename to that folder in the **same argument**:
+
+```ini
+arg=Final Fantasy VII/Final Fantasy VII (Disc 2).cue
+```
+
+This selects `EMBER/games/Final Fantasy VII/Final Fantasy VII (Disc 2).cue`.
+Use the actual folder and filename, including spaces, without quotes in the CNF.
+Replace the folder-only game argument with this value; do not add the CUE on a
+second `arg=` line. launcHER forwards the value unchanged and does not interpret
+disc numbers or select discs itself. Settings and saves remain in the game folder.
+See [Ember's argument interface](https://github.com/Gageformer/Ember#launching-ember-from-homebrew).
+
+The same replacement works in every storage profile. For APA/PFS:
+
+```ini
+path=hdd0:__.EMBER:pfs:/EMBER/ember.elf
+arg=pfs0:/EMBER/ember.elf
+arg=Final Fantasy VII/Final Fantasy VII (Disc 2).cue
+arg=-skip_argv0
+arg=-dev9=NICHDD
+```
+
+Keep the existing ELF-path argument and launcher flags. Only the game argument changes.
+
+Do not include the `games/` prefix, an absolute device path, or a CUE without its folder:
 
 ```text
 games/Soul Blade
-Soul Blade/Soul Blade.cue
+Soul Blade.cue
 mass0:/EMBER/games/Soul Blade/
 ```
 
-For the example above, Ember should ultimately receive:
+For the folder-only Soul Blade example, Ember should ultimately receive:
 
 ```text
 argv[1] = Soul Blade
@@ -768,12 +794,12 @@ The project no longer builds or packages unrelated:
 
 ## Credits
 
-- **[nuno6573](https://github.com/nuno6573)**: solution, concept, and selection of the approach used for Ember's external launcher.
-- **[pcm720](https://github.com/pcm720)**: creator of [OSDMenu](https://github.com/pcm720/OSDMenu) and the standalone OSDMenu Launcher from which launcHER is derived. The device handlers, loader architecture, and foundation of this project come from that work.
-- **Eliminator / eliminator1403**: PS2 hardware testing, validation, regression checking, device-side feedback, and the filename-independent `launcHER.CNF` quickboot refinement used for renamed OPL APPS entries.
-- **[Gageformer](https://github.com/Gageformer)**: creator of [Ember](https://github.com/Gageformer/Ember).
-- **[NathanNeurotic / Ripto](https://github.com/NathanNeurotic)**: launcHER fork, Ember handoff integration, POPStarter replacement, APA/PFS persistence changes, standalone build, configuration, documentation, and release packaging.
+- **[nuno6573](https://github.com/nuno6573)** — solution, concept, and selection of the approach used for [Ember](https://github.com/Gageformer/Ember)'s external launcher. Thanks to nuno for the information and idea.
+- **[pcm720](https://github.com/pcm720)** — creator of [OSDMenu](https://github.com/pcm720/OSDMenu) and the standalone OSDMenu Launcher from which launcHER is derived. The device handlers, loader architecture, and foundation of this project come from that work.
+- **Eliminator / eliminator1403** — PS2 hardware testing, validation, regression checking, device-side feedback, and the filename-independent `launcHER.CNF` quickboot refinement used for renamed OPL APPS entries.
+- **[Gageformer](https://github.com/Gageformer)** — creator of [Ember](https://github.com/Gageformer/Ember), the project launcHER exists to launch.
+- **[NathanNeurotic / Ripto](https://github.com/NathanNeurotic)** — launcHER fork, [Ember](https://github.com/Gageformer/Ember) handoff integration, POPStarter replacement, APA/PFS persistence changes, standalone build, configuration, documentation, and release packaging.
 - The **PS2SDK / ps2dev** contributors and broader PS2 homebrew community whose drivers and libraries make the supported storage stack possible.
 
-launcHER keeps its upstream lineage visible intentionally. It would not exist without pcm720's launcher work, Ember would not exist without Gageformer, and its hardware behavior would not be trustworthy without real-console testing.
+launcHER keeps its upstream lineage visible intentionally. It would not exist without [pcm720](https://github.com/pcm720)'s launcher work, [Ember](https://github.com/Gageformer/Ember) would not exist without [Gageformer](https://github.com/Gageformer), and its hardware behavior would not be trustworthy without real-console testing.
 <img width="873" height="348" alt="launcherbanner" src="https://github.com/user-attachments/assets/e54f9ad4-c40b-483a-acaa-2accb5aa55cc" />

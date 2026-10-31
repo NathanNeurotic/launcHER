@@ -14,7 +14,7 @@
   {
     "title": "Why Ember Needs a Specialized Forwarder",
     "cat": "overview",
-    "text": "Ember expects a bare game folder argument, DEV9 hardware power preservation, active PFS mount preservation for pfs0:/ access, and clean storage drivers.",
+    "text": "Ember accepts a game folder or folder/file.cue argument with a compatible build, with DEV9 power preservation, active PFS mount preservation for pfs0:/ access, and clean storage drivers.",
     "url": "index.html#why-launcher"
   },
   {
@@ -26,7 +26,7 @@
   {
     "title": "The Game Argument Rule",
     "cat": "start",
-    "text": "Critical rule: pass bare folder name only such as arg=Soul Blade. Do NOT pass games/Soul Blade, nor cue filenames, nor absolute paths.",
+    "text": "Pass arg=Soul Blade for a folder launch, or arg=Soul Blade/Soul Blade.cue for explicit file selection with a compatible Ember build. Keep folder and CUE in one argument; omit games/ and absolute paths.",
     "url": "getting-started.html#step-2-game-argument"
   },
   {
@@ -200,7 +200,7 @@
   {
     "title": "Black Screen After Launch Checklist",
     "cat": "errors",
-    "text": "Resolve black screens: verify bare game folder argument, ensure bios.bin is in EMBER/, and check for arg=-dev9=NICHDD on internal drives.",
+    "text": "Resolve black screens: verify the game folder or combined folder/file.cue argument, ensure bios.bin is in EMBER/, and check for arg=-dev9=NICHDD on internal drives.",
     "url": "troubleshooting.html#black-screen-checklist"
   },
   {

@@ -144,7 +144,7 @@
   Ember is not an ordinary standalone ELF that can simply be loaded into memory without preparation. It relies on its caller to provide:
 </p>
 <ul class="checklist">
-  <li><b>Bare Game Folder Argument</b> — Ember expects the clean subfolder name under <code>EMBER/games/</code> (e.g. <code>Soul Blade</code>), not a full path, nor a <code>.cue</code> filename.</li>
+  <li><b>Game Argument</b> — Pass the subfolder under <code>EMBER/games/</code> (e.g. <code>Soul Blade</code>), or <code>Soul Blade/Soul Blade.cue</code> to select a file with a compatible Ember build. See <a href="configuration.html#exact-cue">exact CUE selection</a>.</li>
   <li><b>DEV9 Hardware Power Preservation</b> — For ATA, APA/PFS, and network devices, turning off DEV9 on exit destroys the storage interface. launcHER keeps DEV9 powered through <code>-dev9=NICHDD</code> or <code>-dev9=NIC</code>.</li>
   <li><b>Active PFS Mount Preservation</b> — In APA/PFS mode, Ember expects to continue accessing files through <code>pfs0:/</code>. launcHER mounts the partition and hands control over with <code>argv[0] = pfs0:/EMBER/ember.elf</code> while skipping the raw loader-facing <code>hdd0:</code> token.</li>
   <li><b>Clean IOP Storage Drivers</b> — launcHER initializes clean, conflict-free drivers for ATA, USB, MMCE, MX4SIO, i.Link, UDPBD, and UDPFS.</li>

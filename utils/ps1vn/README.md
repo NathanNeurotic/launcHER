@@ -1,6 +1,6 @@
 # PS1VModeNeg v1.10
 
-[Original code](https://sites.google.com/view/ysai187/home/projects/ps1vmodeneg) by [Liu Woon Yung (sp193)](https://github.com/sp193), modified for OSDMenu Launcher and updated to work on the latest PS2SDK.
+[Original code](https://sites.google.com/view/ysai187/home/projects/ps1vmodeneg) by [Liu Woon Yung (sp193)](https://github.com/sp193), modified for [OSDMenu](https://github.com/pcm720/OSDMenu) Launcher and updated to work on the latest PS2SDK.
 
 Expects the following arguments:
 ```
