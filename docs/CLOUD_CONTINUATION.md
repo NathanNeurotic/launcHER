@@ -26,13 +26,21 @@ that last change. Continue from current HEAD, fetching again before editing.
   pass. Normal and `LAUNCHER_BOOT_TRACE=ON,DEBUG=ON` PS2 builds pass. The built
   2,672-byte resident image passes its Unicorn entry/chaining check. These are
   host/target-build/emulated results; no new physical console run occurred.
-- REPOP `feat/psxcore-validation` was updated to `529579dd`. Its FP oracle was
-  independently rerun here: **16,393 patterns / 32,786 original calls pass**.
-  Its metadata-only report and current continuation are committed there. This
-  supersedes historical incomplete-FP notes below. No full REPOP EE archive
-  build was independently repeated in this continuation, and no coverage/size
-  baseline was promoted. Remaining contracts include `FUN_00917f80`,
-  `FUN_0091acb0`, `FUN_009a1458` and lower SIF transport.
+- REPOP `feat/psxcore-validation` is now `5f41e074` (earlier synchronized
+  evidence `529579dd`). The FP oracle was independently rerun here: **16,393
+  patterns / 32,786 original calls pass**. R19 also repairs the CDVD query
+  candidate's return/RPC/semaphore/result contract: six focused tests include
+  60 original query combinations with modeled callees. Full REPOP Python suite:
+  **233 tests, 13 skipped, zero failures/errors**. A fresh EE archive of all
+  11 POPStarter translation units builds with GCC 15.2.0 and existing warnings.
+  **The gate `FUN_00918270` remains a zero stub**, so GCC folds the query to
+  eight bytes; its former parity annotation was removed. Read REPOP's
+  `POPSTARTER_CD_QUERY_CONTRACT.md` before treating this as usable runtime.
+  No full EE link, compiled-query execution or size/coverage baseline promotion
+  is claimed. Next dependencies: `FUN_00918270` and its semaphore/init helpers,
+  the four-argument `FUN_00917f80` read contract, `FUN_0091acb0`,
+  `FUN_009a1458` and lower SIF transport. Existing `FUN_0091a604` bounds warning
+  also remains open.
 
 ## Reproduction and preserved local work
 
