@@ -30,23 +30,23 @@ that last change. Continue from current HEAD, fetching again before editing.
   `f0e5948` (explicit CUE forwarding coverage/docs and newer credit links).
   Its build/host/argv CI passes. REPOP **`feeb3346`** integrates main through
   `b07b135a` (credit updates); older dirty checkouts were preserved.
-- REPOP `feat/psxcore-validation` is now **`c420ba47`**. R20/R21 recover the
-  gate/syscalls, four-argument CD read, and two-argument cache span. **95
-  original-vs-compiled-EE component cases pass**; full Python suite **240 tests,
-  13 skipped, zero failures/errors**. All 11 EE units compile with existing
-  warnings. Read `POPSTARTER_CD_READ_CONTRACT.md` and registers R20/R21.
-  The initial R21 exception was Unicorn's unsupported R5900 multiply in a
-  branch delay slot; explicit instruction modeling with private NOP translation
-  slots resolves it. Cache/SYNC are ordered modeled events, not hardware cache
-  coherence; the void cache helper's unspecified v0 is excluded. Original
-  uninitialized semaphore fields remain excluded from strict equivalence.
-  No baseline or real kernel/SIF/device acceptance was promoted.
-  **Next:** asynchronous callback `FUN_00918710` and completion `FUN_00918798`.
-  Original instruction inspection now shows the existing candidate uses the
-  wrong head-copy length, skips tail copy after a head copy, and uses normal
-  SignalSema instead of original iSignalSema. Fix and compare these contracts
-  before claiming completed reads; lower SIF/init/global ownership remains
-  open. Existing `FUN_0091a604` bounds warning is also open.
+- REPOP `feat/psxcore-validation` is now **`15b8727f`**, through R22.
+  Gate/syscalls, read/cache submission and completion now pass **169
+  original-vs-compiled-EE component cases**. Three native callback regressions
+  cover independent lengths, valid tail after missing head destination and
+  zero-copy completion. Full suite **243 tests, 13 skipped, zero failures/errors**;
+  all eleven EE units compile. Read `POPSTARTER_CD_COMPLETION_CONTRACT.md`
+  and registers R20–R22 for hashes, reproduction and modeled boundaries.
+  The R21 Unicorn failure was diagnosed and resolved with explicit R5900
+  multiply/delay-slot modeling; the unspecified void return register is not
+  equated. R22 repairs head length, both-copy behavior, explicit packet ABI
+  and iSignalSema completion. Lower memcpy/kernel/SIF/cache hardware, original
+  uninitialized descriptor fields, callback relocation/global ownership and
+  complete runtime/device acceptance remain open. No baseline was promoted.
+  **Next for the capability goal:** independently implement the remaining
+  launcHER resident display/pad/cheat features and built-in per-game data,
+  using measured original contracts and guarded production integration.
+  Existing REPOP `FUN_0091a604` bounds warning remains separate open work.
 - The user explicitly requested sustained work until 100% verified parity.
   The thread goal is active. Continue making validated increments; do not
   treat a checkpoint or green CI as completion of the full objective.
