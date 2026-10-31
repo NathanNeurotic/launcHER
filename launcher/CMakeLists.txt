@@ -371,6 +371,8 @@ endif()
 # launcHER's own POPS resident code (common/include/pops_resident.h): a flat
 # image linked at its fixed EE address, embedded raw and installed at handoff.
 set(POPS_RESIDENT_SRC "${CMAKE_SOURCE_DIR}/common/src/pops_resident_engine.c")
+set(POPS_PROGRESSIVE_SRC "${CMAKE_SOURCE_DIR}/common/src/pops_progressive.c")
+set(POPS_PROGRESSIVE_BRIDGE "${CMAKE_SOURCE_DIR}/common/src/pops_progressive_bridge.S")
 set(POPS_RESIDENT_LD "${CMAKE_SOURCE_DIR}/common/src/pops_resident.ld")
 set(POPS_RESIDENT_ELF "${CMAKE_CURRENT_BINARY_DIR}/pops_resident.elf")
 set(POPS_RESIDENT_BIN "${CMAKE_CURRENT_BINARY_DIR}/pops_resident.bin")
@@ -380,9 +382,12 @@ add_custom_command(
           -nostdlib -nostartfiles -Wall -Wextra -Werror -DPOPS_RESIDENT_IMAGE
           "-I${CMAKE_SOURCE_DIR}/common/include"
           "-Wl,-T,${POPS_RESIDENT_LD}" -Wl,--build-id=none
-          -o "${POPS_RESIDENT_ELF}" "${POPS_RESIDENT_SRC}"
+          -o "${POPS_RESIDENT_ELF}" "${POPS_RESIDENT_SRC}" "${POPS_PROGRESSIVE_SRC}"
+          "${POPS_PROGRESSIVE_BRIDGE}"
   COMMAND mips64r5900el-ps2-elf-objcopy -O binary "${POPS_RESIDENT_ELF}" "${POPS_RESIDENT_BIN}"
   DEPENDS "${POPS_RESIDENT_SRC}" "${POPS_RESIDENT_LD}"
+          "${POPS_PROGRESSIVE_SRC}" "${POPS_PROGRESSIVE_BRIDGE}"
+          "${CMAKE_SOURCE_DIR}/common/include/pops_progressive.h"
           "${CMAKE_SOURCE_DIR}/common/include/pops_resident.h"
           "${CMAKE_SOURCE_DIR}/common/include/pops_config.h"
   COMMENT "Building POPS resident image"

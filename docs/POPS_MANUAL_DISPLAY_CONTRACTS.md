@@ -47,8 +47,10 @@ reset their acceptance mask. A completed set stores the computed 64-bit
 value separately, so incomplete later files preserve it. `pops_config_parse_line`
 can also be used as a stream after `pops_config_init`.
 
-The resident image format is version 2, with a 28-byte header carrying a
-separate display entry and an 8-byte-aligned configuration. Its first config
+The current resident image format is version 3, with a 32-byte header carrying
+separate VBLANK, manual display and progressive entries, and an 8-byte-aligned
+configuration. The progressive entry is not selected yet. The earlier manual
+checkpoint used version 2 and a 28-byte header. Its first config
 field is the DISPLAY value; a static offset assertion binds the assembly ABI.
 The independent four-instruction bridge loads that value using `v0`, restores
 `v0=0x12000000`, and jumps to the stock continuation at `0x21a098`. It needs
@@ -87,7 +89,8 @@ image is still copied as the last write before the trampoline.
   writes, bounds, idempotence and display-only/combined resident config.
 - The hook guards pass on the pinned external Sony core.
 - Normal and trace/debug PS2 builds pass; the resident image uses `-Werror`.
-  Both images are 2,704 resident bytes including configuration.
+  The original manual checkpoint was 2,704 resident bytes including configuration;
+  the current image with the unselected progressive bridge is 3,936 bytes.
 - Built-image Unicorn checks retain VBLANK chaining/cheat tests. The actual
   display jump, its delay slot and all 31 nonzero GPRs are checked at the
   continuation for four DISPLAY values. An optional original comparison

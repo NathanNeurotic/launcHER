@@ -70,6 +70,7 @@ typedef int (*PopsIntcHandler)(int cause);
 
 int pops_resident_vblank(int cause);
 void pops_resident_display(void);
+void pops_resident_progressive(void);
 extern char _pops_resident_file_end[];
 extern char _pops_resident_end[];
 
@@ -97,6 +98,7 @@ const PopsResidentHeader pops_resident_header = {
   (uint32_t)pops_resident_vblank,
   (uint32_t)&pops_resident_config,
   (uint32_t)pops_resident_display,
+  (uint32_t)pops_resident_progressive,
 };
 
 int pops_resident_vblank(int cause) {

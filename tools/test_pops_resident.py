@@ -45,6 +45,7 @@ class Header(c.Structure):
         ("file_size", c.c_uint32), ("image_size", c.c_uint32),
         ("vblank_entry", c.c_uint32), ("config_addr", c.c_uint32),
         ("display_entry", c.c_uint32),
+        ("progressive_entry", c.c_uint32),
     ]
 
 
@@ -254,7 +255,7 @@ class HookCore(unittest.TestCase):
 
 def image(file_size=0x60, image_size=0x900, entry=BASE + 0x40, config=BASE + 0x60, magic=0x5352484C):
     img = bytearray(file_size)
-    struct.pack_into("<IHHIIIII", img, 0, magic, 2, 28, file_size, image_size, entry, config, BASE + 0x44)
+    struct.pack_into("<IHHIIIIII", img, 0, magic, 3, 32, file_size, image_size, entry, config, BASE + 0x44, BASE + 0x48)
     img[0x40:0x44] = b"\x08\x00\xe0\x03"
     return img
 
@@ -279,9 +280,10 @@ class Install(unittest.TestCase):
         self.assertEqual(self.check(image(entry=BASE + 0x10))[0], -errno.ERANGE)
         self.assertEqual(self.check(image(config=BASE + 0x900 - 8))[0], -errno.ERANGE)
         self.assertEqual(self.check(image(config=BASE + 0x64))[0], -errno.ERANGE)
-        img = image()
-        struct.pack_into('<I', img, 24, BASE + len(img))
-        self.assertEqual(self.check(img)[0], -errno.ERANGE)
+        for offset in (24, 28):
+            img = image()
+            struct.pack_into('<I', img, offset, BASE + len(img))
+            self.assertEqual(self.check(img)[0], -errno.ERANGE)
         img = image()
         buf = (c.c_uint8 * len(img)).from_buffer(img)
         self.assertEqual(L.pops_resident_check_image(buf, len(img) - 4, None), -errno.ERANGE)
@@ -316,7 +318,7 @@ class Install(unittest.TestCase):
 
 class Layout(unittest.TestCase):
     def test_config_fits_in_the_reserved_range(self):
-        self.assertEqual(c.sizeof(Header), 28)
+        self.assertEqual(c.sizeof(Header), 32)
         self.assertLess(c.sizeof(ResidentConfig) + 0x1000, LIMIT - BASE)
 
     def test_launcher_installs_after_the_last_staging_read(self):

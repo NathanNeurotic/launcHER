@@ -14,6 +14,7 @@ import struct
 import subprocess
 import tempfile
 import unittest
+import sys
 
 from trace_original_pops_display import OriginalDisplay
 
@@ -238,6 +239,29 @@ class ProgressiveTests(unittest.TestCase):
             self.assertEqual(actual[stack:], expected[stack:])
             self.assertEqual(bytes(mu.mem_read(0x70000000, 0x4000)), expected_scratch)
         print(f'Original progressive live final memory vs compiled EE PASS: {len(inputs)} cases')
+
+    @unittest.skipUnless(CC and os.environ.get('POPSTARTER_TEST_ELF'), 'optional EE compiler and original MAIN')
+    def test_built_progressive_bridge(self):
+        try:
+            import unicorn  # noqa: F401
+        except ImportError:
+            self.skipTest('optional Unicorn')
+        objcopy = Path(CC).with_name('mips64r5900el-ps2-elf-objcopy')
+        if not objcopy.exists():
+            self.skipTest('optional EE objcopy')
+        elf = Path(self.tmp.name) / 'resident.elf'
+        image = Path(self.tmp.name) / 'resident.bin'
+        subprocess.run([CC, '-Os', '-G0', '-fno-pic', '-mno-abicalls', '-ffreestanding',
+                        '-fno-builtin', '-nostdlib', '-nostartfiles', '-Wall', '-Wextra', '-Werror',
+                        '-DPOPS_RESIDENT_IMAGE', '-I', str(ROOT / 'common/include'),
+                        '-Wl,-T,' + str(ROOT / 'common/src/pops_resident.ld'), '-Wl,--build-id=none',
+                        str(ROOT / 'common/src/pops_resident_engine.c'),
+                        str(ROOT / 'common/src/pops_progressive.c'),
+                        str(ROOT / 'common/src/pops_progressive_bridge.S'), '-o', str(elf)],
+                       check=True, capture_output=True)
+        subprocess.run([str(objcopy), '-O', 'binary', str(elf), str(image)], check=True)
+        subprocess.run([sys.executable, str(ROOT / 'tools/check_pops_progressive_image.py'),
+                        str(image)], check=True)
 
     @unittest.skipUnless(os.environ.get('POPSTARTER_TEST_ELF'), 'optional external POPStarter MAIN')
     def test_original_progressive_state(self):

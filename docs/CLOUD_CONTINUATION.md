@@ -52,8 +52,18 @@ that last change. Continue from current HEAD, fetching again before editing.
   stack. It preserves blocked no-write and unknown-width stale-field paths.
   Aggregate suite: 118 tests; default skips 10 optional cases. Read the live
   checkpoint in [progressive contracts](POPS_PROGRESSIVE_CONTRACTS.md).
-  Still not installed: next verify the stackless-caller bridge's complete
+  Still not installed: next verify the mid-function bridge's complete
   GPR/HI/LO preservation, static guards and sticky mode/file/PATCH sequencing.
+- The built progressive bridge now passes 428 owned-image cases, including
+  adversarial GPR/opaque upper lane/HI-LO clobbering on C entry, original final
+  fields, stock resume contract and a damaged-GP negative check. Image v3:
+  32-byte header, 3,936 resident bytes. LQ/SQ and secondary accumulator moves
+  use explicit private translation adapters; ordinary C executes in Unicorn.
+  Both target builds, resident host tests and old VBLANK/manual image checks
+  pass. Aggregate 119 tests; default skips 11 optional cases. Read the latest
+  [bridge checkpoint](POPS_PROGRESSIVE_CONTRACTS.md). The entry is embedded
+  but NOT selected. Next add guarded static mode/hook writes and original
+  sticky progressive/manual-file/HDTV precedence before enabling text mode.
 - Latest catch-up merges: launcHER **`b34affc`** integrates EMBER through
   `f0e5948` (explicit CUE forwarding coverage/docs and newer credit links).
   Its build/host/argv CI passes. REPOP **`feeb3346`** integrates main through

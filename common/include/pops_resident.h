@@ -27,7 +27,7 @@ extern "C" {
 #define POPS_RESIDENT_BASE        UINT32_C(0x0143a000)
 #define POPS_RESIDENT_LIMIT       UINT32_C(0x01460000)
 #define POPS_RESIDENT_MAGIC       UINT32_C(0x5352484c) /* "LHRS" */
-#define POPS_RESIDENT_VERSION     2
+#define POPS_RESIDENT_VERSION     3
 
 /* POPS's VBLANK_START registration and handler (verified on the pinned core) */
 #define POPS_VBLANK_LUI_ADDR      UINT32_C(0x0021b184)
@@ -52,6 +52,7 @@ typedef struct {
   uint32_t vblank_entry; /* address of pops_resident_vblank */
   uint32_t config_addr;  /* address of the PopsResidentConfig */
   uint32_t display_entry; /* mid-function GS DISPLAY hook; no C call ABI */
+  uint32_t progressive_entry; /* context-preserving bridge; not selected yet */
 } PopsResidentHeader;
 
 #define POPS_RES_F_CHEATS         (1u << 0)

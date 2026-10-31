@@ -30,6 +30,7 @@ int pops_resident_check_image(const void *image, size_t image_len, PopsResidentH
   h.vblank_entry = get_u32(b + 16);
   h.config_addr = get_u32(b + 20);
   h.display_entry = get_u32(b + 24);
+  h.progressive_entry = get_u32(b + 28);
 
   if (h.magic != POPS_RESIDENT_MAGIC || h.version != POPS_RESIDENT_VERSION ||
       h.header_size != sizeof(PopsResidentHeader))
@@ -43,6 +44,9 @@ int pops_resident_check_image(const void *image, size_t image_len, PopsResidentH
     return -ERANGE;
   if ((h.display_entry & 3) || h.display_entry < POPS_RESIDENT_BASE + h.header_size ||
       h.display_entry >= POPS_RESIDENT_BASE + h.file_size)
+    return -ERANGE;
+  if ((h.progressive_entry & 3) || h.progressive_entry < POPS_RESIDENT_BASE + h.header_size ||
+      h.progressive_entry >= POPS_RESIDENT_BASE + h.file_size)
     return -ERANGE;
   /* The configuration must fit inside the image, in its zeroed part or not. */
   if ((h.config_addr & 7) || h.config_addr < POPS_RESIDENT_BASE + h.header_size ||

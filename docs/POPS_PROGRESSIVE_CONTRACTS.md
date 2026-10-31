@@ -110,3 +110,48 @@ does not claim equivalence under concurrent modification of the source fields.
 
 Aggregate external suite: 118 tests with original/core/compiler/Unicorn;
 default CI skips 10 optional cases. The native adapter runs in default CI.
+
+
+## Built context bridge checkpoint — 2026-10-31
+
+`common/src/pops_progressive_bridge.S` now calls the real compiled adapter
+from a mid-function entry. The owned image is **version 3**, with a 32-byte
+header and a separate progressive entry. It is built and embedded, but the
+launcher **does not select that entry yet**. Text/PATCH enablement and static
+mode guards remain the next integration step.
+
+The bridge allocates its 544-byte frame before any save, avoiding a write
+below the unadjusted stack pointer. It saves/restores all GPRs with quadword
+moves, including opaque upper lanes, and both HI/LO banks. It calls the
+adapter, preserves its 64-bit result, restores context, puts DISPLAY in a1,
+sets v0=0x12000000 and rejoins 0x21a098. Stock code uses a1 only in two SDs
+before the callee at 0x21a4f8 overwrites it; a0 is set from s1 at 0x21a0a8
+and a2 is overwritten at 0x21a504. No original code block is copied.
+
+`tools/check_pops_progressive_image.py` runs the actual owned image for all
+428 state cases. On C entry it poisons GPR values/opaque upper lanes and all
+four accumulator halves, preserving only the low SP and return address needed
+to execute C. It verifies restoration, stack boundary guards, unchanged owned
+image/config, original-address final fields and the stock resume contract.
+A deliberately damaged GP restore is rejected. The actual linked C and its
+ordinary instructions run in Unicorn. Only owned-bridge LQ/SQ and secondary
+HI1/LO1 transfer slots are replaced in private CPU memory by NOP translations
+and modeled explicitly outside hooks. The source/image files are unchanged.
+These adapters model preservation of opaque upper lanes, **not a complete
+R5900/MMI implementation or independent upper-lane hardware execution**.
+
+[Bridge metadata](evidence/pops_progressive_bridge_2026-10-31.json) records
+source/image hashes, the 344-byte entry, and 3,936 resident bytes including
+configuration. Normal/trace target builds pass, and both existing VBLANK and
+manual DISPLAY image checks still pass. The aggregate external suite passes
+119 tests with all prerequisites; default CI skips 11 optional cases. The
+bridge build/comparison is included in that aggregate optional entry point.
+
+```sh
+POPSTARTER_TEST_ELF=/external/MAIN/POPSTARTER.ELF \
+python3 tools/check_pops_progressive_image.py build/launcher/pops_resident.bin
+```
+
+No live progressive hook, GS scanout, console run or parity completion is
+claimed at this checkpoint. Preserve PATCH 6/7 rejection until its remaining
+loader-state dependencies are handled separately.

@@ -17,9 +17,9 @@ from unicorn.mips_const import *
 
 img = open(sys.argv[1], 'rb').read()
 BASE = 0x0143A000
-magic, ver, hs, fsz, isz, entry, cfga, display_entry = struct.unpack_from('<IHHIIIII', img, 0)
+magic, ver, hs, fsz, isz, entry, cfga, display_entry, progressive_entry = struct.unpack_from('<IHHIIIIII', img, 0)
 assert magic == 0x5352484C and fsz == len(img), (hex(magic), fsz, len(img))
-assert ver == 2 and hs == 28
+assert ver == 3 and hs == 32
 
 mu = Uc(UC_ARCH_MIPS, UC_MODE_MIPS64 + UC_MODE_LITTLE_ENDIAN)
 mu.mem_map(0x00000000, 0x02000000)      # EE RAM
