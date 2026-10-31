@@ -9,23 +9,24 @@
 
 # launcHER
 
-**launcHER is a standalone PlayStation 2 forwarder built specifically to launch [Ember](https://github.com/Gageformer/Ember) from supported storage devices while preserving the environment Ember needs after handoff.**
+**launcHER is a standalone PlayStation 2 forwarder built to launch [Ember](https://github.com/Gageformer/Ember) and Sony POPS (PlayStation 1) games from supported storage devices while preserving the environment each runtime needs after handoff.**
 
 It is not an OSD replacement, HDD Browser, game manager, KELF installer, or menu system.
 
-It does one job:
+It handles two primary boot roles:
 
-> **Find Ember wherever you keep it, prepare that storage device correctly, pass Ember the game it should launch, and get out of the way.**
+1. **Ember Launching:** Finds Ember wherever you keep it, prepares storage drivers, passes Ember the game folder to boot, preserves DEV9 power, and steps aside.
+2. **Sony POPS Launching (POPStarter Replacement):** Finds user-supplied Sony POPS packages, mounts the storage device, extracts game serials from ISO9660 volume descriptors, stages runtime compatibility modes and LibCrypt bypasses, and executes `.VCD` disc images directly.
 
-launcHER is derived from the standalone launcher in [pcm720/OSDMenu](https://github.com/pcm720/OSDMenu), stripped down and adapted specifically for Ember.
+launcHER is derived from the standalone launcher in [pcm720/OSDMenu](https://github.com/pcm720/OSDMenu), adapted for Ember and Sony POPS.
 
 ---
 
-## HDD users — read this first
+## HDD users: read this first
 
 **launcHER does not require a dedicated HDD partition.**
 
-The `__.EMBER` APA partition used in some examples is only an example. It was suggested as a convenient way to give Ember and its games their own space — **not because launcHER requires it.**
+The `__.EMBER` APA partition used in some examples is only an example. It was suggested as a convenient way to give Ember and its games their own space, not because launcHER requires it.
 
 You do **not** need to create `__.EMBER` just to use launcHER.
 
@@ -410,6 +411,62 @@ Network configuration for UDPBD/UDPFS follows the inherited OSDMenu Launcher imp
 mc?:/SYS-CONF/IPCONFIG.DAT
 ```
 
+### SMBv1
+
+```ini
+path=smb0:/EMBER/ember.elf
+arg=<GAME_FOLDER>
+arg=-dev9=NIC
+```
+
+The SMB share root contains `EMBER/ember.elf`, `EMBER/bios.bin` and
+`EMBER/games/<GAME_FOLDER>/`. The share name belongs in `SMBCONFIG.DAT`,
+not in the `smb0:` path. `smb:/` also addresses the same share.
+
+launcHER embeds DEV9, NetMan, the SDK SMAP/TCP-IP stack and an SDK-derived
+SMBv1 client. It establishes the session and opens the share itself. It does
+not depend on a connection inherited from OPL or loose network IRX files.
+Ember receives the mounted filesystem with DEV9 kept powered.
+
+Put `IPCONFIG.DAT` and `SMBCONFIG.DAT` in `mc0:/POPSTARTER/` or
+`mc1:/POPSTARTER/`. The fallback directories, in order, are `mc0:/POPS/`,
+`mc1:/POPS/`, `mc0:/SYS-CONF/`, and `mc1:/SYS-CONF/`. Each file is searched
+independently. Existing RiptOPL POPStarter network settings use this format.
+
+`IPCONFIG.DAT` contains the console's static IP, netmask and gateway:
+
+```text
+192.168.1.10 255.255.255.0 192.168.1.1
+```
+
+`SMBCONFIG.DAT` contains the server IP and share on its first line, then the
+username and password on separate lines. The server port defaults to 445;
+an explicit port uses `192.168.1.100:1445`. For a guest share, leave both
+credential lines empty. The following values are examples:
+
+```text
+192.168.1.100 PS2SMB
+example-user
+example-password
+```
+
+This implementation requires static addressing and a server offering SMBv1.
+SMBv2/v3-only servers cannot negotiate with it. Select one network profile
+per launch; SMB's TCP/IP stack cannot run alongside the UDP ministack on
+the same adapter. UDPFS exposes server files directly; UDPBD exposes a
+server block image through the launcher's FatFs driver. They are different
+server modes, with different roots.
+
+The transport code has host regression coverage and builds for PS2. Full
+Ember playback, network interruption recovery during a game, and save
+persistence on physical hardware still need acceptance testing for each
+transport. Sony POPS over these backends also depends on the ongoing POPS
+runtime work; SMB POPS currently retains the `POPS_IOX.PAK` requirement.
+
+The SMB client includes software developed by Eric Young
+(`eay@mincom.oz.au`). Its source, changes and original license notices are
+in `launcher/iop/smbman/`; distributed binaries include `SMB-NOTICES.txt`.
+
 ---
 
 ## OPL APPS layout
@@ -527,14 +584,148 @@ Global launcHER flags belong at the end of the argument list.
 
 ---
 
+## Sony POPS (PlayStation 1) setup
+
+launcHER serves as a standalone replacement for POPStarter. When pointed at a `.VCD` disc image, launcHER loads Sony's official PlayStation 1 emulator (POPS), mounts the storage device, applies compatibility patches and LibCrypt bypasses, and starts the game.
+
+### External dependencies
+
+launcHER does not distribute Sony's proprietary emulator binaries or PlayStation 1 BIOS images. You must provide clean copies from your own PlayStation 2 installations.
+
+launcHER accepts three dependency formats:
+
+| Format | Required Files | Notes |
+|---|---|---|
+| **Packed IOX (Recommended)** | `POPS_IOX.PAK` | Compressed POPS core bundled with updated `ioprp2305a`. Best compatibility on modern storage. |
+| **Packed Legacy** | `POPS.PAK` | Compressed POPS core bundled with `ioprp252`. Standard POPStarter format. |
+| **Loose Files** | `POPS.ELF` + `IOPRP252.IMG` | Uncompressed executable paired with a standalone IOP reboot image. |
+
+### Dependency search locations
+
+When booting a `.VCD` game, launcHER searches for your POPS dependency files in this priority order:
+
+1. The folder holding the active `.VCD` disc (e.g. `mass0:/POPS/`).
+2. `<device>:/POPS/` on the storage volume containing the game (e.g. `ata:/POPS/`).
+3. Memory Card slot 1: `mc0:/POPS/`.
+4. Memory Card slot 2: `mc1:/POPS/`.
+5. Internal APA partition: `hdd0:__.POPS:pfs:/`.
+
+Placing `POPS_IOX.PAK` in `mc0:/POPS/` or your main `POPS/` folder allows all games to share one package.
+
+### Game disc preparation
+
+Convert original PlayStation 1 disc dumps (BIN/CUE) to Virtual CD (`.VCD`) format using tools such as **CUE2POPS**. POPS expects raw Mode 2 Form 1 sectors (2,352 bytes per sector).
+
+Keep `.VCD` images directly in `POPS/`. Per-game subfolders are for TROJAN fixes, cheats and virtual memory cards; VCD lookup does not scan those subfolders. Name each per-game folder after its VCD filename without the `.VCD` extension.
+
+Example directory structure:
+
+```text
+POPS/
+├── POPS_IOX.PAK
+├── Crash Bandicoot.VCD
+├── Spyro the Dragon.VCD
+├── Metal Gear Solid (Disc 1).VCD
+├── Metal Gear Solid (Disc 2).VCD
+└── Crash Bandicoot/
+    ├── TROJAN_0.BIN
+    ├── CHEATS.TXT
+    ├── SLOT0.VMC
+    └── SLOT1.VMC
+```
+
+### launcHER.CNF configuration for POPS
+
+Point the `path=` directive directly to your `.VCD` file:
+
+```ini
+# USB storage
+path=mass?:/POPS/Crash Bandicoot.VCD
+
+# Internal exFAT HDD (ATA BDM)
+path=ata:/POPS/Crash Bandicoot.VCD
+arg=-dev9=NICHDD
+
+# Internal APA/PFS partition
+path=hdd0:__.POPS:pfs:/Crash Bandicoot.VCD
+arg=-dev9=NICHDD
+
+# MMCE (Memory Card SD adapter)
+path=mmce?:/POPS/Crash Bandicoot.VCD
+
+# MX4SIO
+path=mx4sio:/POPS/Crash Bandicoot.VCD
+
+# i.Link (FireWire)
+path=ilink:/POPS/Crash Bandicoot.VCD
+
+# UDPBD / UDPFS network streaming
+path=udpbd:/POPS/Crash Bandicoot.VCD
+arg=-dev9=NIC
+```
+
+### Quickboot via POPStarter naming (OPL APPS)
+
+If you launch without a `launcHER.CNF` file, launcHER identifies adjacent game images based on its own filename:
+
+- **Renamed ELF:** Renaming the binary to `Crash Bandicoot.ELF` boots `Crash Bandicoot.VCD` in the same directory.
+- **Prefix stripping:** POPStarter prefixes such as `XX.` or `SB.` are stripped automatically. `XX.Crash Bandicoot.ELF` boots `Crash Bandicoot.VCD`.
+- **Default name:** If the filename does not match, launcHER checks for `IMAGE.VCD` in the same directory.
+
+### Per-game configuration directives
+
+Place optional configuration files alongside your `.VCD` image or inside its per-game subfolder (for example, `POPS/Crash Bandicoot/` for `POPS/Crash Bandicoot.VCD`). `VMCDIR.TXT` redirects save files only; cheats and TROJAN fixes remain in the original per-game folder. Multiple directives can share a line (e.g. `$NOPAL $HDTVFIX`). The full list of original POPStarter commands and what launcHER does with each is in [docs/POPSTARTER_R13_INVENTORY.md](docs/POPSTARTER_R13_INVENTORY.md):
+
+- **`PATCHES.TXT` / `MODES.TXT`:** Directives and compatibility modes.
+  - Video: European discs switch to PAL automatically, as in POPStarter. `$NOPAL` (aliases `$PAL2NTSC`, `$FORCENTSC`) keeps them at 60 Hz; `$FORCEPAL` (alias `$NTSC2PAL`) runs any disc in PAL. `$HDTVFIX` / `$NOHDTVFIX`. `$480p` only turns off the automatic PAL switch for now.
+  - Sound and core: `$SCANLINES`, `$SUBCDSTATUS`, `$MUTE_CDDA`, `$UNDO_MUTE_CDDA`, `$MUTE_VAB`, `$MUTE_ALL`, `$CODECACHE_ADDON_0`..`2`, `$ROLLBACK`, `$CACHE1`.
+  - IGR: `$IGR0`..`$IGR5` (POPStarter's combo choices; 3 to 5 exit straight away) and `$NOIGR`. Without one, launcHER's direct exit is used.
+  - Widescreen (not yet tested on a console): `$WIDESCREEN` (16:9), `$ULTRA_WIDESCREEN` (about 21:9), `$EYEFINITY` (three 16:9 screens). They squeeze 3D geometry horizontally, as in POPStarter; set the TV to stretch. The last one listed wins.
+  - Timing adjust (not yet tested on a console): `$SET_TIMINGS`. While the game runs, controller 1 alone holding L1/L2 or R1/R2 nudges two of POPS's timing values, and controller 2 alone holding L1/L2 (small steps) or R1/R2 (big steps) nudges a third. Like POPStarter, it keeps the values on the slot 0 memory card (a small entry in the card's header area) and loads them next time.
+  - Picture: `$SMOOTH`, `$XPOS_`/`$YPOS_`, `$DWSTRETCH_`, `$DWCROP_`, `$LEFTADJ_` and the manual `$DX_`..`$DH_` set make POPStarter's changes (not yet tested on a console). Not POPStarter commands, ignored: `$480i`, `$576p`, `$576i`, `$240p`, `$VMODE_n`, `$DITHER_OFF`, `$FASTMIPS`, `$SLOWMIPS`. `$NOBOOT` / `$BIOS` keeps the PS1 boot logo.
+  - Controllers (not yet tested on a console): `$NOPAD0` / `$NOPAD1` make the game see no controller in that port; `$PAD0ID_0Xhh` / `$PAD1ID_0Xhh` make the port report controller ID `hh` (for example `0X41` digital, `0X73` analog); `$D2LS` swaps the D-pad and the left stick and presents both ports as digital pads; `$D2LS_ALT` swaps them and keeps the real controller type.
+  - Delays and stability: `$SAFEMODE` (cheats start about 3 seconds after boot), `$USBDELAY_<seconds>`.
+  - Compatibility modes: `$COMPATIBILITY_0x01` through `0x07`, or bare digits `1`..`7` in `MODES.TXT` (Mode 8 has no branch in the original and is refused).
+- **`DISCS.TXT`:** Multi-disc paths (up to 4 discs). Press **SELECT + L1 + R1** in-game to cycle discs.
+- **`CHEATS.TXT`:** GameShark / Action Replay codes written POPStarter style, `$` then the code (`$8009A120 0004`). A code without the `$` is switched off, as in POPStarter. Supports 16-bit writes (`80`, `10`), 8-bit writes (`30`, `20`), 16-bit conditionals (`D0`..`D3`), and 8-bit conditionals (`E0`..`E1`). launcHER's own resident code applies them once per frame while the game runs (not yet tested on a console).
+- **`VMCDIR.TXT`:** Redirects Virtual Memory Card save files to a custom folder path.
+
+### Custom IRX driver replacement and peripherals
+
+launcHER loads user-supplied IOP driver modules and peripheral replacements right after storage initialization:
+
+- **Numbered modules:** `MODULE_0.IRX` through `MODULE_9.IRX` load sequentially in numerical order.
+- **Named peripherals:** Specialty drivers load when present: `USBMOUSE.IRX` / `USB_MOUSE.IRX`, `USBKBD.IRX`, `USBGUN.IRX` / `GUNCON.IRX`, `MULTITAP.IRX`, `DS3.IRX` / `DS4.IRX`, `PADMAN.IRX`, `SIO2MAN.IRX`.
+- **Manifest lists:** `MODULES.TXT` and `IRX.TXT` specify arbitrary module file paths to load.
+- **Search locations:** Searches `vmcDir`, `vcdDir`, `vcdDir/IRX/`, `mc0:/POPSTARTER/`, `mc1:/POPSTARTER/`, `mc0:/POPS/`, and `mc1:/POPS/`.
+
+### Built-in compatibility database and LibCrypt
+
+launcHER contains an internal catalogue of 568 verified game profiles and 229 validated 16-bit LibCrypt keys. When launching a `.VCD`, launcHER extracts the title serial from `SYSTEM.CNF` inside the ISO9660 volume descriptor, sets required compatibility modes, and programs hardware Subchannel Q emulation into the driver. Protected European games boot without manual patching.
+
+### Virtual Memory Cards (VMC)
+
+launcHER looks for card saves using `<SERIAL>.VMC0` and `<SERIAL>.VMC1` (or `<GAME_BASE>.VMC0` and `SLOT0.VMC`). If the files do not exist, launcHER creates both formatted 128 KiB card images automatically.
+
+### In-Game Reset and controller hotkeys
+
+- **In-Game Reset (IGR):** `L1 + L2 + R1 + R2 + SELECT + START` (returns to OSDSYS, OPL, or wLaunchELF).
+- **Disc Swap:** `SELECT + L1 + R1` (cycles to the next disc listed in `DISCS.TXT`).
+- **Custom UI graphics:** Place `IGR_BG.TM2`, `IGR_YES.TM2`, or `IGR_NO.TM2` beside the game.
+- **Custom patches:** Place `TROJAN_0.BIN` through `TROJAN_9.BIN` beside the game.
+
+For full technical documentation, see the [POPS & PS1 Setup Guide](file:///docs/pops-setup.html).
+
+---
+
 ## Release files
 
 Each release provides:
 
-- **`launcHER.elf`** — the standalone launcher;
-- **`launcHER.CNF`** — an editable quickboot template with device examples;
-- **`version.txt`** — a one-line build identifier (`version=<12-character Git commit>` for rolling builds, or `version=vX.Y.Z` for tagged releases);
-- **`launcHER.zip`** — ready-to-copy package containing the ELF, CNF and version file;
+- **`launcHER.elf`**: the standalone launcher;
+- **`launcHER.CNF`**: an editable quickboot template with device examples;
+- **`version.txt`**: a one-line build identifier (`version=<12-character Git commit>` for rolling builds, or `version=vX.Y.Z` for tagged releases);
+- **`launcHER.zip`**: ready-to-copy package containing the ELF, CNF and version file;
 - GitHub's automatic **Source code (zip)** and **Source code (tar.gz)** archives.
 
 No KELF is required for normal launcHER use.
@@ -590,7 +781,7 @@ The exact storage layout and configuration matter. "HDD does not work" does not 
 
 launcHER deliberately does one job:
 
-> **Get Ember launched from wherever it lives, then get out of the way without destroying the environment Ember still needs.**
+> **Launch Ember or Sony POPS games from supported storage, then step aside without destroying the environment each runtime needs.**
 
 Keeping the project focused means unrelated OSDMenu features are not part of the standalone launcHER release target.
 
@@ -610,7 +801,7 @@ The project no longer builds or packages unrelated:
 - **[pcm720](https://github.com/pcm720)** — creator of [OSDMenu](https://github.com/pcm720/OSDMenu) and the standalone OSDMenu Launcher from which launcHER is derived. The device handlers, loader architecture, and foundation of this project come from that work.
 - **Eliminator / eliminator1403** — PS2 hardware testing, validation, regression checking, device-side feedback, and the filename-independent `launcHER.CNF` quickboot refinement used for renamed OPL APPS entries.
 - **[Gageformer](https://github.com/Gageformer)** — creator of [Ember](https://github.com/Gageformer/Ember), the project launcHER exists to launch.
-- **[NathanNeurotic / Ripto](https://github.com/NathanNeurotic)** — launcHER fork, [Ember](https://github.com/Gageformer/Ember) handoff integration, APA/PFS persistence changes, standalone build, configuration, documentation, and release packaging.
+- **[NathanNeurotic / Ripto](https://github.com/NathanNeurotic)** — launcHER fork, [Ember](https://github.com/Gageformer/Ember) handoff integration, POPStarter replacement, APA/PFS persistence changes, standalone build, configuration, documentation, and release packaging.
 - The **PS2SDK / ps2dev** contributors and broader PS2 homebrew community whose drivers and libraries make the supported storage stack possible.
 
 launcHER keeps its upstream lineage visible intentionally. It would not exist without [pcm720](https://github.com/pcm720)'s launcher work, [Ember](https://github.com/Gageformer/Ember) would not exist without [Gageformer](https://github.com/Gageformer), and its hardware behavior would not be trustworthy without real-console testing.

@@ -4,6 +4,11 @@ I_smap_transmit
 I_smap_register_rx_callback
 smap_IMPORTS_end
 
+intrman_IMPORTS_start
+I_CpuSuspendIntr
+I_CpuResumeIntr
+intrman_IMPORTS_end
+
 ioman_IMPORTS_start
 I_open
 I_close

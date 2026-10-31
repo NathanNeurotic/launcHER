@@ -1,0 +1,24 @@
+{
+  "run_id": "20261014T055003-0024",
+  "outcome": "pass",
+  "exit_code": 0,
+  "elf_sha256": "a4910fddd17fc9d00b92d3a7ff218095da6ddb62bc5ea5535bb1532ec7682351",
+  "stdout_truncated": true,
+  "artifacts": [
+    "program.elf",
+    "stdout.txt"
+  ],
+  "timings": {
+    "queue_ms": 0,
+    "upload_ms": 51,
+    "run_ms": 45857
+  },
+  "started": "2026-10-14T05:50:03.6784809Z",
+  "observations": [
+    "Both USB volumes contained POPS dependencies but no VCD was found by the bounded earlier scan.",
+    "ATA and MX4SIO production drivers loaded; ATA exFAT partition ata0p3 and MX4SIO sdc1p1 mounted.",
+    "Selected mass2:/POPS/007 - Tomorrow Never Dies.VCD, 574642576 bytes.",
+    "431 directories, 4867 entries, 116 unavailable/error results, 655 depth/queue limits. This was a bounded search, not an exhaustive absence claim."
+  ],
+  "writes": false
+}

@@ -1,0 +1,28 @@
+{
+  "date": "2026-10-20",
+  "run_id": "20261020T134413-0102",
+  "source_commit": "52253e501d8f7ee2c9bfb6ba8c9972d865013762",
+  "ci_run_id": 39432517337,
+  "elf_sha256": "8864f6946d457338a17afd26a11b8096d5ca0dbaed07280943541d3682cc247f",
+  "screenshot_sha256": "9e170d4d3802f35d11f66fcbdcf2dffca1828f6f9ab90714bd16d5b8338f56df",
+  "observation_source": "User-supplied console screenshot; rig output did not capture EE screen/SIO diagnostics.",
+  "target": "ata0:/LAUNCHER-TEST-20261013-A/TEST.VCD",
+  "dependency": "ata0:/LAUNCHER-TEST-20261013-A/POPS.ELF",
+  "posix": {
+    "size": 3166988,
+    "capacity": 8388608,
+    "failure_stage": "close",
+    "result": -5,
+    "bytes_read": 3166988
+  },
+  "filexio": {
+    "size": 3166988,
+    "bytes_read": 3166988,
+    "sha256": "59df3389c4df88a572daa720b05507c52c34eddfa0031a6fbeec55e0c2d0fcb1",
+    "complete": true
+  },
+  "original_error_retained": true,
+  "sony_entry_executed": false,
+  "interpretation": "Complete dependency reads through both routes; failure is at the POSIX close check. Raw close return was not logged, so a positive-success close is a source-backed explanation requiring a corrected rerun, not a captured return value.",
+  "next_gate": "Reject only negative POSIX close returns, log the raw return, rerun controlled diagnostics before declaring the dependency gate repaired. No game or save acceptance."
+}

@@ -2,12 +2,17 @@
 #include "errno.h"
 #include "init.h"
 #include "loader.h"
+#include "dprintf.h"
 #include <fcntl.h>
 #include <ps2sdkapi.h>
 #include <stdio.h>
 #include <string.h>
+#ifdef LAUNCHER_BOOT_TRACE
+#define NEWLIB_PORT_AWARE
+#include <fileXio_rpc.h>
+#endif
 
-#define BDM_MAX_DEVICES 2
+#define BDM_MAX_DEVICES 6
 
 // Launches ELF from BDM device
 int handleBDM(DeviceType device, int argc, char *argv[]) {
@@ -24,8 +29,15 @@ int handleBDM(DeviceType device, int argc, char *argv[]) {
 
   // Initialize device modules
   int res = initModules(device);
+  DPRINTF("BDM: initModules device=%d path=%s result=%d\n", device, elfPath, res);
   if (res)
     return res;
+#ifdef LAUNCHER_BOOT_TRACE
+  iox_stat_t traceStat;
+  int traceResult = fileXioGetStat(elfPath, &traceStat);
+  DPRINTF("BDM: fileXio stat path=%s result=%d size=%u\n", elfPath, traceResult,
+          traceResult < 0 ? 0 : (unsigned)traceStat.size);
+#endif
 
   // Extract mountpoint for probing
   char *mountpoint = strchr(elfPath, ':');
@@ -51,12 +63,27 @@ int handleBDM(DeviceType device, int argc, char *argv[]) {
     while (delayAttempts != 0) {
       // Try to open the file to make sure it exists
       res = open(probeMountpoint, O_DIRECTORY | O_RDONLY);
+      DPRINTF("BDM: root=%s open=%d errno=%d attempts=%d\n", probeMountpoint, res, errno, delayAttempts);
+      if (res < 0 && delayAttempts % 5 == 0) {
+        /* hardware-trace: scan every mass node so a remote run can see which
+         * BDM devices actually registered */
+        for (int m = 0; m < 6; ++m) {
+          char mp[8];
+          sprintf(mp, "mass%d:", m);
+          int mf = open(mp, O_DIRECTORY | O_RDONLY);
+          DPRINTF("BDM: scan %s -> %d\n", mp, mf);
+          if (mf >= 0)
+            close(mf);
+        }
+      }
       if (res >= 0) {
         // If mountpoint is available
         close(res);
 
         // Jump to launch if file exists
-        if (!(res = tryFile(elfPath)))
+        res = tryFile(elfPath);
+        DPRINTF("BDM: file=%s probe=%d errno=%d\n", elfPath, res, errno);
+        if (!res)
           goto found;
         // Else, try next device
         break;
@@ -68,6 +95,30 @@ int handleBDM(DeviceType device, int argc, char *argv[]) {
     // No more mountpoints available
     if (res < 0)
       break;
+  }
+  /* hardware-trace: bottom-of-screen summary so a post-failure screenshot
+   * shows which BDM devices actually registered after the IOP reset. */
+  for (int m = 0; m < 6; ++m) {
+    char mp[8];
+    sprintf(mp, "mass%d:", m);
+    int mf = open(mp, O_DIRECTORY | O_RDONLY);
+    DPRINTF("BDM: summary %s -> %d\n", mp, mf);
+    if (mf >= 0) {
+      char altPath[300];
+      snprintf(altPath, sizeof(altPath), "%s%s", mp, elfPath + mountpointLen);
+      /* tryFile uses the POSIX layer, so this fallback works in normal
+       * builds too; fileXio is only linked by the trace build. */
+      int altRes = tryFile(altPath);
+      DPRINTF("BDM: altfile %s probe=%d\n", altPath, altRes);
+      if (altRes >= 0) {
+        close(mf);
+        /* the drives renumbered after the IOP reset; follow the file */
+        strcpy(elfPath, altPath);
+        res = 0;
+        goto found;
+      }
+      close(mf);
+    }
   }
   return -ENODEV;
 

@@ -1,0 +1,28 @@
+{
+  "date": "2026-10-27",
+  "run_id": "20261027T153100-0111",
+  "source_commit": "5adcf88a18357f8841da3c148eebf99589dbe096",
+  "ci_run_id": 40531133971,
+  "elf_sha256": "b82ca15eb4371c1664a2f0bb75bf0656ed27fcf4ed9dae59edf7bdef0599b7e6",
+  "screenshot_sha256": "ea81249c55436db43f68e43aaea6965e5226d59cdc54473d33a1fbe1be2f7e4a",
+  "observation_source": "User-supplied console screenshot; confirmed IOP module reloads and POPS_PREFLIGHT_PASS Sony_entry_not_executed=1.",
+  "target": "ata0:/LAUNCHER-TEST-20261013-A/TEST.VCD",
+  "staged_core": {
+    "size": 3166988,
+    "core_patches": "POPS_CORE_ALL applied and verified",
+    "slbb_bypass": "applied after fix-file staging",
+    "trampoline_addr": "0x00084000"
+  },
+  "post_reboot_iop": {
+    "ioprp_bytes": 265233,
+    "modules_loaded": [
+      {"name": "ps2dev9", "id": 31, "start": 0},
+      {"name": "bdm", "id": 32, "start": 0},
+      {"name": "bdmfs_fatfs", "id": 33, "start": 0},
+      {"name": "ata_bd", "id": 34, "start": 0}
+    ]
+  },
+  "marker": "POPS_PREFLIGHT_PASS Sony_entry_not_executed=1",
+  "interpretation": "Memory staging, core patches, VMC initialization, IOP reboot with IOPRP252.IMG, post-reboot driver reloads (ps2dev9, bdm, bdmfs_fatfs, ata_bd), APA remount, live storage inspection, and low-memory trampoline installation succeeded on real console hardware. The preflight and staging gate is cleared.",
+  "next_gate": "Bootstrap gate: execute trampoline at 0x00084000 to enter Sony POPS entry point (FUN_002004f0) and begin PS1 emulation."
+}

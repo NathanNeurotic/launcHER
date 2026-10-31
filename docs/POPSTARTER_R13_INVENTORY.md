@@ -1,0 +1,155 @@
+# POPStarter r13 feature inventory (2026-10-31)
+
+What "100% POPStarter" means, measured against the original binary rather than
+against wikis or memory. Ground truth is POPSLoader's
+`bin/POPSLDR/PROFILES/MAIN/POPSTARTER.ELF` (sha256 `734c813e…`), unpacked by
+`tools/trace_original_pops_io.py:decode_main` to a 1,350,828-byte image at EE
+`0x870000`. `tools/popstarter_r13_commands.py` reproduces the command table
+below from that file (metadata only; needs capstone).
+
+**Nothing in this document has been run on a console. Every row marked
+PRESENT is NOT TESTED unless the Evidence column says otherwise.**
+
+Status key: **PRESENT** (launcHER does what the original does), **PARTIAL**
+(some of it, or an equivalent), **MISSING**, **BLOCKED** (needs POPStarter's
+own resident code, see below).
+
+## Why some commands are BLOCKED, and launcHER's resident code
+
+At launch the original copies two blocks of its own code into the POPS image
+(`0x738` bytes to `0x232790`, `0xd60` bytes to `0x238a90`) and keeps more
+resident at `0x143xxxx`. Several commands only set flags or install jumps into
+that code: `$480p` (jump to `0x2394f0`), `$SET_TIMINGS`, `$D2LS(_ALT)`,
+`$NOPAD0/1`, `$PAD0ID_0Xhh`/`$PAD1ID_0Xhh`, the `0x232c90` flag of `$NOVMC0`, `$WIDESCREEN`,
+`$ULTRA_WIDESCREEN`, `$EYEFINITY`, `$RECOMPILER_ADDON_3/4` and `$FAKELC`
+(copies 0x15 bytes from the original's image). Copying that code would ship
+POPStarter itself, so these need an independent resident implementation.
+
+**launcHER now has one** (`common/include/pops_resident.h`,
+`common/src/pops_resident_engine.c`). It is built as a small flat image linked
+at `0x0143a000`, inside the range the original also keeps for itself, and
+copied there as the launcher's last write before handoff. One hook reaches
+it: POPS registers its VBLANK_START handler `0x0021cd68` at `0x0021b190`, and
+the `lui`/`addiu` pair at `0x0021b184`/`0x0021b18c` that loads that address
+is pointed at launcHER's entry instead, which does its work and then calls
+POPS's handler. The PS1 RAM base comes from the word POPS itself stores at
+`0x70003364` (`0x0021af98`), so nothing assumes how POPS maps that RAM. The
+design is launcHER's own: the original hooks other places (its code at
+`0x01450000`, reached from POPS's `ExecOSD` tail call at `0x002362fc`, is its
+exit program, not a cheat engine).
+
+The resident code runs the cheat engine, an independent manual GS DISPLAY
+bridge, the text `$480p` progressive bridge, the pad commands, the
+widescreen family and `$SET_TIMINGS` (below). [Manual DISPLAY contracts](POPS_MANUAL_DISPLAY_CONTRACTS.md) record
+all-six, per-file acceptance and the guarded bridge. Commands still BLOCKED
+below need their behavior worked out and added to it.
+
+## CHEATS.TXT commands
+
+| Command | Original effect | launcHER |
+|---|---|---|
+| `$8/3/1/2/D0..D3/E0/E1` codes | resident cheat engine | **PRESENT**: launcHER's resident code, every VBLANK_START; host tests plus the built image run under emulation, **NOT TESTED** on a console |
+| `$Cxxxxxxx`, `$S…`, `$T…` | resident cheat engine | **MISSING** (not parsed) |
+| `$SMOOTH` | `0x21af88=0xa21a22a0341a0001` (64-bit) | **PRESENT**: guarded, original-command differential; no console run |
+| `$DX_n $DY_n $MAGH_n $MAGV_n $DW_n $DH_n` | all-six, first-valid per file; fixed GS DISPLAY override | **PRESENT**: independent guarded resident bridge; 228 original file cases plus built-image comparison; no console run |
+| `$480p` | static mode/arguments plus resident DISPLAY updates | **PRESENT**: guarded owned context bridge; 31 original text/file sequences and 428 component/bridge cases; no console run; conflicting payloads reject |
+| `$LEFTADJ_` | `1..255`: `0x21a0a4=0x64a50f00 + ((4096-n)&255)`, `0x21a0a8=0xfc450000` | **PRESENT**: guarded, original-command differential; no console run |
+| `$SCANLINES` | `0x21e454=0x22b50006` | **PRESENT** |
+| `$VCDID_n` | selects a built-in per-game DB entry | **MISSING** |
+| `$SUBCDSTATUS` | `0x20e850/0x20e86c/0x20e87c` | **PRESENT** |
+| `$RESET_WARMBOOT` | flag in the original's own exit path | **MISSING** |
+| `$MUTE_CDDA` / `$UNDO_MUTE_CDDA` | `0x20f0b6`, `0x20ebf2`, `0x20f0e0` | **PRESENT** |
+| `$MUTE_VAB` | five SPU sites | **PRESENT** |
+| `$MUTE_ALL` | `0x213ff4=0` | **PRESENT** |
+| `$CODECACHE_ADDON_0/1/2` | `0x202734` | **PRESENT** |
+| `$RECOMPILER_ADDON_0/1/2` | helpers at `0x8d6f64/0x8d6fa4/0x8d6fe4` copy original code into `0x143xxxx` | **BLOCKED**: independent resident implementation needed |
+| `$RECOMPILER_ADDON_3/4` | jumps into resident code | **BLOCKED** |
+| `$ORIGINAL_OPCODES` | flag | **MISSING** |
+| `$UNDO_COMPATIBILITY_CODES`, `$UNDO_GAME_FIXES`, `$UNDO_LIBCRYPT_FIX` | restore sites the built-in DB patched | **MISSING** (no built-in DB to undo) |
+| `$WIDESCREEN`, `$ULTRA_WIDESCREEN`, `$EYEFINITY` | hooks POPS's GTE perspective transform (RTPS/RTPT): the MAC1 store at `0x2089a8` becomes x·75/100 (`$WIDESCREEN`, 16:9) or x/4 (`$EYEFINITY`, 48:9); `$ULTRA_WIDESCREEN` also scales again at the IR1 store `0x208a2c` (x·0.5625 overall), writing the result to MAC1 and leaving IR1 unstored. Each handler rewrites all sites, so the last command wins | **PRESENT**: own guarded stubs, same arithmetic (32-bit product, truncating division) and the same ULTRA register effect; handler writes checked against the original, built stubs run under emulation on 414 values per mode; **NOT TESTED** on a console |
+| `$ROLLBACK` | restores 10 breakpoint sites | **PRESENT** |
+| `$SET_TIMINGS` | enables a pass in its copied code (`0x238a90` = `b 0x238c50`, then `0x238cfc` NOPs that branch after the first pass). First pass, once POPS has loaded the slot 0 VMC image (word `0x507930` nonzero): if offset `0x800` of that image (`0x508130`) holds `"01"`, restore the timing words `0x502770`, `0x700033e0`, `0x700033e4` from `+4/+8/+12`; otherwise write `"01->"` and the current values there. Later passes: pad 1 alone holding L1/L2 adds ±1 to `0x700033e0`, R1/R2 ±1 to `0x700033e4`; otherwise pad 2 alone holding L1/L2 adds ±1 and R1/R2 ±0x10 to `0x502770`; each new value is also copied into the VMC image | **PRESENT**: resident code, once per VBLANK_START. Restores a saved copy and, like the original, writes the `"01->"` copy and every new value into the slot 0 VMC image (user decision 2026-10-31; `POPS_RES_F_TIMINGS_SAVE`). Handler writes checked against the original; 240 random 40-frame runs match the original's own block (timings and the card copy); the built image is run under emulation. The original's pass rate follows POPS's event posts and was not measured, so the adjust speed may differ; **NOT TESTED** on a console |
+| `$BREAKPOINT0/1` | exception hook | **MISSING** |
+| `$NOVMC0` | flag at `0x232c90` | **PARTIAL**: launcHER uses the original's other VMC-off helper (FUN_008dc12c slot 1, `0x2007b4=0`) |
+| `$NOVMC1` | flag + `0x20d0e0=li a0,0` | **PRESENT** (the core write) |
+| `$NOPAD0/1`, `$PAD0ID_0Xhh`, `$PAD1ID_0Xhh` | enable a store in its copied code that forces the controller ID POPS reports for that port (`0x507034`/`0x5070c4`): 1 for `$NOPADn`, `hh` (two hex digits) for `$PADnID` | **PRESENT**: resident code writes the same ID every VBLANK_START; 310 command sequences match the original's own handlers; **NOT TESTED** on a console |
+| `$D2LS`, `$D2LS_ALT` | `$D2LS`: both ports report 0x41 (digital) and POPS's pad read (`0x237798`) swaps the D-pad and the left stick. `$D2LS_ALT`: the swap only; it switches the ID override back off when the swap was already on, and otherwise makes an earlier override report 0x41 | **PRESENT**: own hooks at the pad read's entry and return (guarded); the built image matches the original's swap on 604 readings under emulation; digital-mode readings are left alone (the original would cancel the real D-pad there); **NOT TESTED** on a console |
+| `$IGR0..$IGR5` | combo masks `0x404f/0x900/0x90f` at `0x228a20/0x228a50`; 3..5 jump to `0x20c08c` | **PRESENT** (was: `$IGR0` meant "IGR off") |
+| `$NOIGR` | `0x228a56=0x1000` + pristine `0x228a5c/60` | **PRESENT** |
+| no IGR command | POPS default | **PARTIAL**: launcHER's own direct exit stays the default; the user confirmed it on Tekken |
+| `$NOPAL` | stops European auto PAL | **PRESENT**; `$PAL2NTSC`/`$FORCENTSC` are now aliases |
+| `$FORCEPAL` | PAL patch + region letter `E` | **PRESENT**; was invented values |
+| `$XPOS_n`, `$YPOS_n`, `$DWSTRETCH_n`, `$DWCROP_n` | unsigned decimal immediate fields plus store suppression; X/Y first valid command wins | **PRESENT**: guarded, original-command differential; X/Y 0..65535 (up to 5 digits), width commands 0..9999 (up to 4 digits); no console run |
+| `$CACHE1` | `0x20fff4`, `0x210120`, `0x2101ac` | **PRESENT** |
+| `$FAKELC` | copies LibCrypt code from the original | **BLOCKED** |
+| `$SAFEMODE` | cheat-engine timing | **PARTIAL**: cheats start after 180 frames; the original's exact timing is not recovered |
+| `$SAFEMODE2`, `$NOSAFEMODE` | cheat-engine timing | **MISSING** |
+| `$HDTVFIX` / `$NOHDTVFIX` | `0x23acb0/0x23ad0c` = `li a0,1` / pristine | **PRESENT**; `$HDTVFIX` was writing an invented site |
+| `$LOAD_PADMAN`, `$KILL_PADMAN` | IOP module choice | **MISSING** |
+| `$USBDELAY_n` | config byte `0x100017` | **PARTIAL** (parsed) |
+| `$COMPATIBILITY_0x01..0x07` | FUN_008dc2c4 modes | **PRESENT** (Mode 8 has no branch in the original either) |
+
+Removed because the original has no such command and the patches were
+invented: `$480i $576p $576i $240p $VMODE_n` (core writes at `0x2061A0/0x2061E0`),
+`$DITHER_OFF/$NODITHER` (NOP at `0x205D58`), `$FASTMIPS/$SLOWMIPS` (NOP at
+`0x2010A0`) and the `$NOBOOT` "BIOS shell" byte at `0x210cf8`, which is inside
+the LibCrypt routine (the original's `$UNDO_LIBCRYPT_FIX` restores
+`0x2442ffff` there). They still parse, so old files load, but they write
+nothing. `$NOBOOT` keeps only the real `0x2525b0=0x1bfc` OSD write.
+
+## Region and video (0x879034..0x8795f0)
+
+The original reads 4 bytes at VCD offset `0x102514`: the licence text in
+sector 4 (`Euro`, `Amer`, `of A`, `Inc.`). POPS itself runs NTSC; the "to PAL"
+patch (FUN_008dc218: `0x21af94=3`, `0x502770=0xa6300`, `0x23b018=0x6b`,
+`0x23b01c=0x2cb`, the same values a PATCH file's PAL action writes) is applied
+to European discs unless `$NOPAL`/`$480p`, and for `$FORCEPAL`. It also writes
+region letters at `0x2cbb72` (E/A/J/T), `0x20f6cc` (E/A/I) and the PS1 BIOS
+region check at `0x2649a0` (`li a0,'E'/'A'/'I'`, or four zeroed checks for an
+unknown disc). The BIOS write is skipped only when a user BIOS/OSD file was
+loaded.
+
+launcHER before this change auto-applied the PAL values to every US/Japanese
+disc on an NTSC console (labelled "PAL2NTSC"), wrote no region letters, and
+had no European auto PAL. `pops_apply_region` now follows the original, after
+the fix files so a PATCH file's disable-auto still wins. FORCEPAL is now
+deferred to that pass as well. [Ordered PATCH state contracts](POPS_PATCH_VIDEO_STATE.md)
+record 60 original region-control-flow combinations. **No console test.**
+
+## Launcher, file and device features
+
+| Original feature (from its banners and paths) | launcHER |
+|---|---|
+| POPS_IOX.PAK / POPS.PAK / POPS.ELF + IOPRP252.IMG / IOPRP.IMG | **PRESENT** (hash-pinned core) |
+| Partition launch (`PP.`/`__.`, PATINFO, `pfs:`), USB, SMB, old/new launchers | **PARTIAL**: per device, see `POPS_PARITY_AUDIT_2026-10-28.md` |
+| SMB config from `mc?:/POPSTARTER/` (SMBCONFIG.DAT, IPCONFIG.DAT, IRX set) | **PARTIAL**: launcHER's own network config |
+| LAUNCHER.ELF / EXECUTE.ELF must be renamed (messages) | **MISSING** (cosmetic) |
+| VMC directory relinker (VMCDIR.TXT), SLOT0/1.VMC | **PRESENT** |
+| DISCS.TXT disc swap, D-pad assignment, lid emulation | **PARTIAL**: discs map; no resident swap during play |
+| CHEATS.TXT / PATCHES.TXT / per-title config locations | **PRESENT** (parsing) |
+| TROJAN_n.BIN / PATCH_n.BIN, all games and per game | **PARTIAL**: payload/modes/PAL/disable-auto stage; video actions 6/7 reject atomically until independent resident code exists |
+| IGR menu skin (IGR_BG/NO/YES.TM2) | **MISSING** |
+| Replacement OSD image | **MISSING** |
+| User BIOS.BIN with integrity check | **MISSING** |
+| MODULE_0..9.IRX resident modules | **PARTIAL** (see audit) |
+| Physical PS1 disc boot | **MISSING** |
+| Built-in per-game DB (LibCrypt list, breakpoint killer, compat modes, VMC1-off for some titles) | **PARTIAL**: launcHER's own compat DB, not the original's table |
+| padman_hsync | **MISSING** |
+
+## Remaining work, in order
+
+1. Hardware check of this change: a US disc and a European disc on an NTSC
+   console, plus `$FORCEPAL` and `$NOPAL` (picture rate and colour).
+2. Grow the resident code (cheats, manual/progressive display and pad
+   commands, widescreen and `$SET_TIMINGS` exist, NOT TESTED on a console). Complete PATCH video
+   actions 6/7 session/owned-entry dispatch separately; text `$480p` now works
+   at the component/staging level. [Progressive contracts](POPS_PROGRESSIVE_CONTRACTS.md).
+3. Recover the built-in per-game DB at `0x8e00d0`. (The pad commands are
+   done; the original also sets `+0x28` of both pad blocks to 1 on every pass
+   of its always-on block, a field POPS uses for actuator setup; launcHER
+   does not, pending a reason to.)
+   The six manual DISPLAY commands now have an independent resident bridge
+   and 228 original file cases; see [manual contracts](POPS_MANUAL_DISPLAY_CONTRACTS.md).
+   The six direct display commands now have a bounded original differential;
+   see [display contracts](POPS_DISPLAY_CONTRACTS.md).
+4. IGR skin, OSD replacement, BIOS.BIN and physical disc boot.

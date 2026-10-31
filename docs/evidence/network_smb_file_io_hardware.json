@@ -1,0 +1,54 @@
+{
+  "scope": "Production EE SMB session controller and SDK-derived SMB client on the physical PS2, inheriting ps2link's TCP/IP stack. Owned 8 KiB fixture only; no game/save or fresh TCP/IP stack acceptance.",
+  "launcher_checkpoint": "801f23067df820c83e19b9eb257c432a3cda290c",
+  "read_only": {
+    "run_id": "20261016T021127-0060",
+    "outcome": "pass",
+    "exit_code": 0,
+    "elf_sha256": "de11b78a42842abbf2de36ee7e4fb42ff3b53fc10a3b2acf86b2880459fdfbaf",
+    "args": [
+      "--smb-read-only"
+    ],
+    "stdout": "unmounting\r\nunmounted\r\nloadelf: fname host:program.elf secname all\r\nInput ELF format filename = host:program.elf\r\n1 00100000 00073304 ........\r\nLoaded, host:program.elf\r\nstart address 0x122ef8\r\ngp address 00000000\r\nread/write allocate memory 4000\r\nPOPS_INVENTORY module=ioptrap_driver id=31\nPOPS_INVENTORY module=Poweroff_Handler id=25\nPOPS_INVENTORY module=SMAP_driver id=28\nPOPS_INVENTORY module=dev9 id=26\nPOPS_INVENTORY module=Network_Manager id=27\nPOPS_INVENTORY module=udptty id=30\nPOPS_INVENTORY module=ps2link id=32\nPOPS_INVENTORY module=TCP/IP Stack id=29\nPOPS_INVENTORY load=iomanX\nPOPS_INVENTORY loaded=iomanX id=33 start=0\nPOPS_INVENTORY load=fileXio\nfileXio: fileXio: fileXio RPC Server v1.00\r\nCopyright (c) 2003 adresd\r\nPOPS_INVENTORY loaded=fileXio id=34 start=0\nPOPS_INVENTORY load=sio2man\nPOPS_INVENTORY loaded=sio2man id=35 start=0\nPOPS_INVENTORY load=mcman\nPOPS_INVENTORY loaded=mcman id=36 start=0\nPOPS_INVENTORY load=mcserv\nPOPS_INVENTORY loaded=mcserv id=37 start=0\nPOPS_INVENTORY load=launcher_smbman\nsmbman version 0x202 start!\r\nPOPS_INVENTORY loaded=launcher_smbman id=38 start=0\nPOPS_SMB_READ_ONLY session=0 inherited_tcpip=1\nPOPS_SMB_READ_ONLY root=3\nPOPS_SMB_READ_ONLY result=0 no_files_written=1\n[ps2rig] exit=0\n",
+    "artifacts": [
+      "program.elf",
+      "stdout.txt"
+    ],
+    "timings": {
+      "queue_ms": 0,
+      "upload_ms": 4,
+      "run_ms": 5692
+    },
+    "started": "2026-10-16T02:11:27.1600315Z"
+  },
+  "file_io": {
+    "run_id": "20261016T021534-0061",
+    "outcome": "pass",
+    "exit_code": 0,
+    "elf_sha256": "51a96d2601c5d89884111075987d587548a7e8b214b646ae2d1fb8439e0d03cf",
+    "args": [
+      "--smb-files",
+      "smb0:/LAUNCHER-NET-20261016T021451/"
+    ],
+    "stdout": "unmounting\r\nunmounted\r\nloadelf: fname host:program.elf secname all\r\nInput ELF format filename = host:program.elf\r\n1 00100000 00073804 ........\r\nLoaded, host:program.elf\r\nstart address 0x123328\r\ngp address 00000000\r\nread/write allocate memory 4000\r\nPOPS_INVENTORY module=ioptrap_driver id=31\nPOPS_INVENTORY module=Poweroff_Handler id=25\nPOPS_INVENTORY module=SMAP_driver id=28\nPOPS_INVENTORY module=dev9 id=26\nPOPS_INVENTORY module=Network_Manager id=27\nPOPS_INVENTORY module=udptty id=30\nPOPS_INVENTORY module=ps2link id=32\nPOPS_INVENTORY module=TCP/IP Stack id=29\nPOPS_INVENTORY load=iomanX\nPOPS_INVENTORY loaded=iomanX id=33 start=0\nPOPS_INVENTORY load=fileXio\nfileXio: fileXio: fileXio RPC Server v1.00\r\nCopyright (c) 2003 adresd\r\nPOPS_INVENTORY loaded=fileXio id=34 start=0\nPOPS_INVENTORY load=sio2man\nPOPS_INVENTORY loaded=sio2man id=35 start=0\nPOPS_INVENTORY load=mcman\nPOPS_INVENTORY loaded=mcman id=36 start=0\nPOPS_INVENTORY load=mcserv\nPOPS_INVENTORY loaded=mcserv id=37 start=0\nPOPS_INVENTORY load=launcher_smbman\nsmbman version 0x202 start!\r\nPOPS_INVENTORY loaded=launcher_smbman id=38 start=0\nPOPS_SMB_READ_ONLY session=0 inherited_tcpip=1\nPOPS_NETWORK_FILES exclusive_collision=-17\nPOPS_NETWORK_FILES written=8192 close=3\nPOPS_NETWORK_FILES_PASS bytes=8192 exclusive_create=1 close_reopen=1 seek=1\nPOPS_SMB_RESULT result=0 read_only=0 inherited_tcpip=1\n[ps2rig] exit=0\n",
+    "artifacts": [
+      "program.elf",
+      "stdout.txt"
+    ],
+    "timings": {
+      "queue_ms": 0,
+      "upload_ms": 5,
+      "run_ms": 5644
+    },
+    "started": "2026-10-16T02:15:34.0699341Z"
+  },
+  "host_readback": {
+    "passed": true,
+    "sha256": {
+      "FIXTURE.BIN": "e288869385adf926d312de23836e1900f32d35e8291a06db064fd0331e0020b4",
+      "EXISTING.BIN": "fe3d676bb8ea6225a7dee7fbb926ccc6c650d6071e3f80d1ca76e58d9989b1df",
+      "NEW.BIN": "821f440db1fa1d7f4e4de5ddec2ff0506a7d410a812231064c99abfa053c97f7"
+    }
+  },
+  "interpretation": "Login/share setup, directory enumeration, reading, seeking, atomic exclusive collision, write/close/reopen/readback pass with PS2 Servers v0.8.1. The host confirms both initial files unchanged and the new file's exact expected pattern."
+}

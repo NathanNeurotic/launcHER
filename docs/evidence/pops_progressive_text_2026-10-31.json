@@ -1,0 +1,40 @@
+{
+  "date": "2026-10-31",
+  "status": "text $480p selected through guarded independent resident bridge; no console acceptance",
+  "source_sha256": {
+    "common/src/pops_config.c": "8fb8417d555546cb4b166ec50e7ce9fd43681053426ff8f66233860da3384027",
+    "common/src/pops_resident.c": "31105d249a3ff85727774d4f33a1808ca2485a45f7baa3549e154a32f9510b64",
+    "launcher/src/handler_pops.c": "0dbda19aa72a4cc351d735163779a5efe2b22bdc277e2c174fe189dec576b3a4",
+    "common/include/pops_config.h": "07a88fa96b01148480c0152315893b918f3f7900f99340ea5bab6c3d5751ec19",
+    "common/include/pops_resident.h": "377adc269ecff8fbd8ef303ba43726102ed31abe6ccd042f25c853991feb2a0d",
+    "tools/test_pops_display.py": "3ef6054a110f78981560312166a0082678f9d7ed7789eb3826f600efad0b1f70"
+  },
+  "original_text_file_sequences": 31,
+  "original_native_ordered_adapter_cases": 428,
+  "original_compiled_ee_memory_cases": 428,
+  "owned_bridge_context_cases": 428,
+  "staging_guards": {
+    "0x21a094": "pristine LD or owned jump",
+    "0x21a098": "pristine LUI delay slot",
+    "0x21af94": "pristine 2 or owned 0x50",
+    "0x23acb0": "configured interlace argument or owned value",
+    "0x23ad0c": "configured interlace argument or owned value"
+  },
+  "ordering": [
+    "Sticky progressive state survives NOPAL/FORCEPAL.",
+    "Fix session receives progressive disable-PAL state before ordered PATCH files.",
+    "All-six manual DISPLAY wins at file end; later progressive command can supersede it.",
+    "HDTVFIX/NOHDTVFIX order controls final arguments, with same-file manual restoration.",
+    "Guarded static writes occur after fix/region passes; conflicting payloads reject before hook writes."
+  ],
+  "aggregate_tests": 121,
+  "default_optional_skips": 12,
+  "host_entry_points": 19,
+  "limits": [
+    "PATCH actions 6/7 still reject atomically pending their own session/dispatch integration.",
+    "Payloads that conflict with guarded static sites reject rather than being overwritten.",
+    "Upper-lane context preservation uses explicit EE transfer modeling in owned-image checks.",
+    "No physical console, GS picture/timing, save durability or full POPStarter parity claim."
+  ],
+  "image_sha256": "675fbd149defe7470f8d11d21fad1f89aef8fbd09fb92a74045439af97a8faf2"
+}

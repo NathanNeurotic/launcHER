@@ -2,6 +2,7 @@
 #include "smap.h"
 
 #include <stdio.h>
+#include <intrman.h>
 
 
 void udp_packet_init(udp_packet_t *pkt, uint32_t ip_dst, uint16_t port_dst)
@@ -32,6 +33,21 @@ udp_socket_t *udp_bind(uint16_t port_src, udp_port_handler handler, void *handle
     return NULL;
 }
 
+void udp_unbind(udp_socket_t *socket)
+{
+    int state;
+    CpuSuspendIntr(&state);
+    for (int i = 0; i < UDP_MAX_PORTS; ++i) {
+        if (socket == &udp_ports[i]) {
+            udp_ports[i].port_src = 0;
+            udp_ports[i].handler = NULL;
+            udp_ports[i].handler_arg = NULL;
+            break;
+        }
+    }
+    CpuResumeIntr(state);
+}
+
 int udp_packet_send_ll(udp_socket_t *socket, udp_packet_t *pkt, uint16_t pktdatasize, const void *data, uint16_t datasize)
 {
     pkt->udp.port_src = htons(socket->port_src);
@@ -50,7 +66,7 @@ int handle_rx_udp(const uint8_t *hdr, uint16_t hdr_len)
     dport = ntohs(pkt->udp.port_dst);
 
     for (i=0; i<UDP_MAX_PORTS; i++) {
-        if (dport == udp_ports[i].port_src)
+        if (dport == udp_ports[i].port_src && udp_ports[i].handler != NULL)
             return udp_ports[i].handler(&udp_ports[i], udp_ports[i].handler_arg, hdr, hdr_len);
     }
 

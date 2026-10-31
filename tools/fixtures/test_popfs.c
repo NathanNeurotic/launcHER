@@ -1,0 +1,534 @@
+/* Compile the production driver with API mocks; these are contract tests,
+ * not a substitute for Sony IOPCD/IOMANX or console execution. */
+#include "popfs_host_sdk.h"
+#include <assert.h>
+#include <errno.h>
+#include <stdio.h>
+#include <stdarg.h>
+#define _start popfs_start
+#include "../../launcher/iop/popfs/src/popfs.c"
+#include "../../launcher/iop/popfs/src/pops_pad_swap.c"
+#include "../../launcher/iop/popfs/src/pops_trace.c"
+
+static int calls, next_open, close_result, io_result = 7;
+static int io_fd, io_size, open_flags, open_mode, operation, critical;
+static int sync_calls;
+static s64 seek_offset;
+static int seek_whence;
+static char observed[256], destination[256];
+static iomanX_iop_device_t *registered;
+static iomanX_iop_device_t *registered_drivers[32];
+static int fail_alias_add;
+
+int CpuSuspendIntr(int *state) { *state = critical; critical = 1; return 0; }
+int CpuResumeIntr(int state) { critical = state; return 0; }
+iomanX_iop_device_t **iomanX_GetDeviceList(void) { return registered_drivers; }
+int iomanX_AddDrv(iomanX_iop_device_t *driver) {
+  if (fail_alias_add && !strcmp(driver->name, "pfs")) return -1;
+  for (int i = 0; i < 32; ++i)
+    if (!registered_drivers[i]) {
+      registered_drivers[i] = driver;
+      registered = driver;
+      return 0;
+    }
+  return -1;
+}
+int iomanX_DelDrv(const char *name) {
+  for (int i = 0; i < 32; ++i)
+    if (registered_drivers[i] && !strcmp(registered_drivers[i]->name, name)) {
+      registered_drivers[i] = NULL;
+      return 0;
+    }
+  return -1;
+}
+int iomanX_open(const char *path, int flags, ...) {
+  va_list args;
+  assert(!critical);
+  va_start(args, flags); open_mode = va_arg(args, int); va_end(args);
+  strcpy(observed, path); open_flags = flags; ++calls;
+  return next_open;
+}
+int iomanX_close(int fd) { io_fd = fd; return close_result; }
+int iomanX_read(int fd, void *buffer, int size) {
+  io_fd = fd; io_size = size; operation = 1;
+  if (io_result > 0 && size >= io_result) memset(buffer, 0x5a, io_result);
+  return io_result;
+}
+static char last_write[512];
+int iomanX_write(int fd, void *buffer, int size) {
+  io_fd = fd; io_size = size; operation = 2;
+  if (buffer && size > 0) {
+    int n = size < (int)sizeof(last_write) - 1 ? size : (int)sizeof(last_write) - 1;
+    memcpy(last_write, buffer, n);
+    last_write[n] = 0;
+  }
+  return io_result;
+}
+int iomanX_lseek(int fd, int offset, int whence) {
+  io_fd = fd; seek_offset = offset; seek_whence = whence; return offset;
+}
+s64 iomanX_lseek64(int fd, s64 offset, int whence) {
+  io_fd = fd; seek_offset = offset; seek_whence = whence; return offset;
+}
+int iomanX_ioctl(int fd, int cmd, void *arg) { (void)cmd; (void)arg; io_fd = fd; return io_result; }
+int iomanX_ioctl2(int fd, int cmd, void *arg, unsigned len, void *out, unsigned outlen) {
+  (void)cmd; (void)arg; (void)len; (void)out; (void)outlen; io_fd = fd; return io_result;
+}
+int iomanX_getstat(const char *name, iox_stat_t *stat) {
+  strcpy(observed, name); stat->size = 0x20000; return io_result < 0 ? io_result : 0;
+}
+int iomanX_remove(const char *name) { strcpy(observed, name); return io_result; }
+int iomanX_rename(const char *old, const char *name) {
+  strcpy(observed, old); strcpy(destination, name); return io_result;
+}
+int iomanX_sync(const char *name, int flag) {
+  (void)flag;
+  assert(!strcmp(name, "udpfs:") || !strcmp(name, "mmce1:"));
+  ++sync_calls;
+  return io_result;
+}
+
+/* Model the actual MODLOAD argv contract, including its synthesized filename. */
+static int start_payload(int argc, char **argv) {
+  char *loaded[9] = {"LBbyEE"};
+  assert(argc >= 0 && argc <= 7);
+  for (int i = 0; i < argc; ++i) loaded[i + 1] = argv[i];
+  return popfs_start(argc + 1, loaded);
+}
+
+static int pad_fire_count, pad_fire_result;
+static int pad_fire_cb(void *ctx) { (void)ctx; ++pad_fire_count; return pad_fire_result; }
+
+/* Pad-swap detector contract: the state machine must debounce the
+ * SELECT+L1+R1 combo, fire exactly once per press, tolerate invalid polls,
+ * and stay silent while disarmed. This models the resident IOP path; the
+ * sio2 interposition glue itself is IOP-only and needs console validation. */
+static void test_pad_swap(void) {
+  pops_pad_swap sw;
+  const uint16_t NO_PRESS = 0xFFFFu;
+  const uint16_t PARTIAL = (uint16_t)~(POPS_PAD_BTN_SELECT | POPS_PAD_BTN_L1);
+  const uint16_t FULL = (uint16_t)~POPS_PAD_SWAP_COMBO;
+  pad_fire_count = 0; pad_fire_result = 0;
+
+  pops_pad_swap_init(&sw, pad_fire_cb, NULL, 25, 1);
+  for (int i = 0; i < 100; ++i) assert(pops_pad_swap_feed(&sw, NO_PRESS, 1) == 0);
+  assert(pad_fire_count == 0);
+  for (int i = 0; i < 60; ++i) assert(pops_pad_swap_feed(&sw, PARTIAL, 1) == 0);
+  assert(pad_fire_count == 0);
+  for (int i = 0; i < 24; ++i) assert(pops_pad_swap_feed(&sw, FULL, 1) == 0);
+  assert(pad_fire_count == 0);
+  assert(pops_pad_swap_feed(&sw, FULL, 1) == 1);
+  assert(pad_fire_count == 1);
+  /* Held combo must not refire. */
+  for (int i = 0; i < 200; ++i) assert(pops_pad_swap_feed(&sw, FULL, 1) == 0);
+  assert(pad_fire_count == 1);
+  /* An invalid poll is a release: the full debounce restarts after it. */
+  assert(pops_pad_swap_feed(&sw, 0, 0) == 0);
+  for (int i = 0; i < 24; ++i) assert(pops_pad_swap_feed(&sw, FULL, 1) == 0);
+  assert(pad_fire_count == 1);
+  assert(pops_pad_swap_feed(&sw, FULL, 1) == 1);
+  assert(pad_fire_count == 2);
+  /* A busy/failed swap reports the failure and requires a fresh press. */
+  pad_fire_result = -16;
+  assert(pops_pad_swap_feed(&sw, NO_PRESS, 1) == 0);
+  for (int i = 0; i < 25; ++i)
+    assert(pops_pad_swap_feed(&sw, FULL, 1) == (i == 24 ? -16 : 0));
+  assert(pad_fire_count == 3);
+  for (int i = 0; i < 40; ++i) assert(pops_pad_swap_feed(&sw, FULL, 1) == 0);
+  assert(pad_fire_count == 3);
+  pad_fire_result = 0;
+  assert(pops_pad_swap_feed(&sw, NO_PRESS, 1) == 0);
+  for (int i = 0; i < 24; ++i) assert(pops_pad_swap_feed(&sw, FULL, 1) == 0);
+  assert(pops_pad_swap_feed(&sw, FULL, 1) == 1);
+  assert(pad_fire_count == 4);
+  /* Disarmed detector never fires, and disarm mid-stream stays silent. */
+  pops_pad_swap_init(&sw, pad_fire_cb, NULL, 2, 0);
+  for (int i = 0; i < 10; ++i) assert(pops_pad_swap_feed(&sw, FULL, 1) == 0);
+  assert(pad_fire_count == 4);
+  pops_pad_swap_init(&sw, pad_fire_cb, NULL, 2, 1);
+  assert(pops_pad_swap_feed(&sw, FULL, 1) == 0);
+  pops_pad_swap_disarm(&sw);
+  assert(pops_pad_swap_feed(&sw, FULL, 1) == 0);
+  assert(pad_fire_count == 4);
+}
+
+/* Resident-path integration: firing the detector advances the active disc
+ * through the internal lid/next/close sequence on the real popfs state. */
+static void test_pad_swap_popfs_integration(void) {
+  pops_pad_swap sw;
+  iomanX_iop_file_t file = {0};
+  iomanX_iop_device_ops_t *ops = registered->ops;
+  int disc = -1;
+  pops_pad_swap_init(&sw, pops_pad_swap_fire_internal, NULL, 2, 1);
+  assert(pops_pad_swap_feed(&sw, (uint16_t)~POPS_PAD_SWAP_COMBO, 1) == 0);
+  assert(pops_pad_swap_feed(&sw, (uint16_t)~POPS_PAD_SWAP_COMBO, 1) == 1);
+  assert(!ops->devctl(&file, "pops:", 0x02, NULL, 0, &disc, sizeof(disc)) && disc == 1);
+  /* One swap per press: the combo must lift before the next fire. */
+  assert(pops_pad_swap_feed(&sw, 0xFFFFu, 1) == 0);
+  assert(pops_pad_swap_feed(&sw, (uint16_t)~POPS_PAD_SWAP_COMBO, 1) == 0);
+  assert(pops_pad_swap_feed(&sw, (uint16_t)~POPS_PAD_SWAP_COMBO, 1) == 1);
+  assert(!ops->devctl(&file, "pops:", 0x02, NULL, 0, &disc, sizeof(disc)) && disc == 0);
+}
+
+/* Sony-phase event trace contract: popfs records SubQ requests, disc
+ * swaps, and EE-driven disc switches to a log file on the backing device so
+ * behavior during Sony execution is observable after the console resets. */
+static void test_event_trace(void) {
+  pops_pad_swap sw;
+  iomanX_iop_file_t file = {0};
+  iomanX_iop_device_ops_t *ops = registered->ops;
+  int saved_next_open = next_open, saved_io = io_result;
+  uint8_t q[12];
+  uint32_t lba = 16;
+
+  /* re-establish the two-disc config (the earlier restart left pops registered) */
+  char *args[] = {"popfs", "mass7:/POPS/Game.VCD", "udpfs:/saves/Card0.VMC",
+                   "mmce1:/POPS/Game/Card1.VMC", "pfs0:/disc/Second.VCD"};
+  assert(!iomanX_DelDrv("pops"));
+  assert(start_payload(5, args) == MODULE_RESIDENT_END);
+  ops = registered->ops;
+
+  /* no log until the first event; the trace path derives from disc0's device */
+  next_open = 60;
+  assert(!ops->devctl(&file, "pops:", 0x06, &lba, sizeof(lba), q, sizeof(q)));
+  assert(!strcmp(observed, "mass7:popfs_trace.log"));
+  assert(operation == 2 && strstr(last_write, "event=subq"));
+  assert(strstr(last_write, "a=16"));
+
+  /* a swap event is recorded with both disc slots and the result */
+  pops_pad_swap_init(&sw, pops_pad_swap_fire_internal, NULL, 2, 1);
+  assert(pops_pad_swap_feed(&sw, (uint16_t)~POPS_PAD_SWAP_COMBO, 1) == 0);
+  assert(pops_pad_swap_feed(&sw, (uint16_t)~POPS_PAD_SWAP_COMBO, 1) == 1);
+  assert(strstr(last_write, "event=swap"));
+  assert(strstr(last_write, "a=0"));
+  assert(strstr(last_write, "b=1"));
+
+  /* a failed trace open disables logging without breaking devctl */
+  next_open = -5;
+  pops_trace_reset();
+  memset(last_write, 0, sizeof(last_write));
+  assert(!ops->devctl(&file, "pops:", 0x06, &lba, sizeof(lba), q, sizeof(q)));
+  assert(last_write[0] == 0);
+
+  next_open = saved_next_open; io_result = saved_io;
+  pops_trace_reset();
+}
+
+int main(void) {
+  char *arguments[] = {"popfs", "mass7:/POPS/Game.VCD", "udpfs:/saves/Card0.VMC",
+                        "mmce1:/POPS/Game/Card1.VMC", "pfs0:/disc/Second.VCD"};
+  iomanX_iop_file_t file = {0};
+  iomanX_iop_device_ops_t *ops;
+  char data[32], too_long[300];
+  iox_stat_t stat;
+  int saved;
+
+  assert(popfs_start(4, arguments) == MODULE_NO_RESIDENT_END); /* missing loader argv */
+  assert(start_payload(3, arguments) == MODULE_NO_RESIDENT_END);
+  saved = 1; arguments[1] = "pops1:/recursive";
+  assert(start_payload(4, arguments) == MODULE_NO_RESIDENT_END);
+  arguments[1] = "POPS0:/recursive";
+  assert(start_payload(4, arguments) == MODULE_NO_RESIDENT_END);
+  arguments[1] = "PoPs:/recursive";
+  assert(start_payload(4, arguments) == MODULE_NO_RESIDENT_END);
+  arguments[1] = "hdd0:PART:pops0:/recursive";
+  assert(start_payload(4, arguments) == MODULE_NO_RESIDENT_END);
+  arguments[1] = "hdd0:PART:POPS:/recursive";
+  assert(start_payload(4, arguments) == MODULE_NO_RESIDENT_END);
+  arguments[saved] = "mass7:/POPS/Game.VCD";
+  arguments[2] = arguments[1];
+  assert(start_payload(5, arguments) == MODULE_NO_RESIDENT_END);
+  arguments[2] = "udpfs:/saves/Card0.VMC";
+  arguments[1] = "udpfs:/saves/Card0.VMC.bak";
+  assert(start_payload(5, arguments) == MODULE_NO_RESIDENT_END);
+  arguments[1] = "mass7:/POPS/Game.VCD";
+  assert(start_payload(5, arguments) == MODULE_RESIDENT_END);
+  assert(registered && !strcmp(registered->name, "pops"));
+  ops = registered->ops;
+
+  /* With no alternative media, NEXT_DISC must report ENOENT and keep disc0
+   * selected rather than returning a false success for a no-op. */
+  char saved_second_disc[PATH_LIMIT];
+  memcpy(saved_second_disc, paths[1], sizeof(saved_second_disc));
+  paths[1][0] = 0;
+  int unchanged_disc = -1;
+  assert(ops->devctl(&file, "pops:", 0x07, NULL, 0, NULL, 0) == -ENOENT);
+  assert(!ops->devctl(&file, "pops:", 0x02, NULL, 0, &unchanged_disc,
+                      sizeof(unchanged_disc)) && unchanged_disc == 0);
+  memcpy(paths[1], saved_second_disc, sizeof(saved_second_disc));
+
+  next_open = 0; /* Descriptor zero must be represented and closed correctly. */
+  file.privdata = (void *)(uintptr_t)0xdeadbeef; /* recycled IOMANX slot, not an active POPFS handle */
+  assert(!ops->open(&file, "/disc/disc0", 1, 0644));
+  assert(!strcmp(observed, arguments[1]) && open_flags == 1 && open_mode == 0644);
+  assert(ops->deinit(registered) == -EBUSY);
+  /* A still-open disc handle cannot be retargeted by swapping the alias.
+   * Card descriptors may remain open during a disc change. */
+  int requested = 1, selected = -1;
+  assert(ops->devctl(&file, "pops:", 0x01, &requested, sizeof(requested), NULL, 0) == -EBUSY);
+  assert(ops->devctl(&file, "pops:", 0x07, NULL, 0, NULL, 0) == -EBUSY);
+  assert(!ops->devctl(&file, "pops:", 0x02, NULL, 0, &selected, sizeof(selected)));
+  assert(selected == 0);
+  assert(ops->read(&file, data, 32) == 7 && io_fd == 0 && io_size == 32 && data[6] == 0x5a);
+  operation = 0;
+  assert(ops->write(&file, data, 32) == -EROFS && operation == 0);
+  /* VCD raw offsets must be forwarded byte-for-byte. The 1 MiB TOC,
+   * 2352-byte sectors, and ISO9660 payload offset are accounted for by
+   * the producer/caller; translating them here would double-offset discs.
+   * This asserts the proxy's behavior, not Sony IOPCD's live request ABI. */
+  const int raw_vcd_offsets[] = {0x400, 0x100000, 0x100000 + 16 * 2352 + 24};
+  for (size_t i = 0; i < sizeof(raw_vcd_offsets) / sizeof(raw_vcd_offsets[0]); ++i) {
+    int requested_offset = raw_vcd_offsets[i];
+    assert(ops->lseek(&file, requested_offset, SEEK_SET) == requested_offset);
+    assert(seek_offset == requested_offset && seek_whence == SEEK_SET && io_fd == 0);
+  }
+  /* Recorded original IOPCD -> embedded wrapper transactions, reproduced by
+   * trace_original_pops_io.py. The forwarder must preserve these actual IOP
+   * callback arguments, including 512-byte alignment and an extra read block.
+   * Controlled stimuli are not a trace of the EE caller or physical console. */
+  static const struct { int offset, length; } original_reads[] = {
+    {0, 2560}, {0x400, 2560}, {0x100000, 2560}, {0x109200, 3072},
+    {0x123400, 37888}, {0x100000, 37888}, {0x100000, 38400}, {0x100000, 5120}
+  };
+  /* The small mock buffer is sufficient: this backend deliberately returns
+   * only seven bytes. Pin forwarding and positive short-read propagation. */
+  assert(ops->read(&file, data, 1024) == 7 && io_size == 1024);
+  for (size_t i = 0; i < sizeof(original_reads) / sizeof(original_reads[0]); ++i) {
+    assert(ops->lseek(&file, original_reads[i].offset, SEEK_SET) == original_reads[i].offset);
+    assert(seek_offset == original_reads[i].offset && seek_whence == SEEK_SET && io_fd == 0);
+    assert(ops->read(&file, data, original_reads[i].length) == 7);
+    assert(io_size == original_reads[i].length && io_fd == 0);
+  }
+  assert(ops->lseek64(&file, INT64_C(0x100000123), SEEK_SET) == INT64_C(0x100000123));
+  assert(seek_offset == INT64_C(0x100000123) && seek_whence == SEEK_SET);
+  close_result = -EIO;
+  assert(ops->close(&file) == -EIO && io_fd == 0);
+  assert(!ops->deinit(registered) && ops->close(&file) == -EBADF);
+  close_result = 0;
+
+  const int forbidden_flags[] = {FIO_O_WRONLY, FIO_O_RDWR,
+      FIO_O_RDONLY | FIO_O_CREAT, FIO_O_RDONLY | FIO_O_TRUNC,
+      FIO_O_RDONLY | FIO_O_APPEND, FIO_O_RDONLY | FIO_O_EXCL,
+      FIO_O_RDONLY | FIO_O_NBLOCK | FIO_O_TRUNC, 0};
+  /* A legitimate Sony IOPCD read-only request can carry nonblocking
+   * qualifiers; never allow write, create, truncate or append flags. */
+  next_open = 52;
+  assert(!ops->open(&file, "IMAGE.VCD", FIO_O_RDONLY | FIO_O_NBLOCK, 0));
+  assert(open_flags == (FIO_O_RDONLY | FIO_O_NBLOCK));
+  assert(!ops->close(&file));
+  next_open = 53;
+  assert(!ops->open(&file, "IMAGE0.VCD", FIO_O_RDONLY | FIO_O_NOWAIT, 0));
+  assert(open_flags == (FIO_O_RDONLY | FIO_O_NOWAIT));
+  assert(!ops->close(&file));
+  calls = 0;
+  for (size_t i = 0; i < sizeof(forbidden_flags)/sizeof(forbidden_flags[0]); ++i)
+    assert(ops->open(&file, "IMAGE.VCD", forbidden_flags[i], 0) == -EROFS);
+  assert(calls == 0);
+  assert(!ops->getstat(&file, "IMAGE.VCD", &stat));
+  assert((stat.mode & (FIO_S_IWUSR | FIO_S_IWGRP | FIO_S_IWOTH)) == 0);
+
+  /* The EE trampoline passes pops0:IMAGE.VCD, not /disc/disc0.
+   * Legacy partition files use IMAGE0.VCD. Both share the same immutable
+   * backend and obey the same active-disc switch semantics. */
+  next_open = 17;
+  assert(!ops->open(&file, "IMAGE.VCD", 1, 0));
+  assert(!strcmp(observed, arguments[1]));
+  assert(ops->write(&file, data, 1) == -EROFS);
+  assert(!ops->close(&file));
+  next_open = 18;
+  assert(!ops->open(&file, "/IMAGE0.VCD", 1, 0));
+  assert(!strcmp(observed, arguments[1]));
+  assert(!ops->close(&file));
+  /* Direct secondary image names from partition-installed multi-disc
+   * layouts must map only to the configured backing slot, not active disc.
+   * The legacy IMAGE0.VCD active-disc alias remains unchanged. */
+  next_open = 81;
+  assert(!ops->open(&file, "IMAGE1.VCD", FIO_O_RDONLY, 0));
+  assert(!strcmp(observed, arguments[4]));
+  assert(!ops->close(&file));
+  assert(!ops->getstat(&file, "/IMAGE1.VCD", &stat));
+  assert(!strcmp(observed, arguments[4]));
+  assert(ops->open(&file, "IMAGE1.VCD", FIO_O_RDWR, 0) == -EROFS);
+  assert(ops->remove(&file, "IMAGE1.VCD") == -EROFS);
+  assert(ops->open(&file, "IMAGE2.VCD", FIO_O_RDONLY, 0) == -ENOENT);
+  assert(ops->open(&file, "IMAGE1.VCD.bak", FIO_O_RDONLY, 0) == -ENOENT);
+  assert(!ops->getstat(&file, "IMAGE.VCD", &stat));
+  assert(!strcmp(observed, arguments[1]));
+  assert(ops->remove(&file, "IMAGE.VCD") == -EROFS);
+  assert(ops->open(&file, "IMAGE.VCD.bak", 1, 0) == -ENOENT);
+
+  calls = 0;
+  assert(ops->open(&file, "/disc/disc0", 3, 0) == -EROFS);
+  assert(ops->open(&file, "/disc/disc2", 1, 0) == -ENOENT);
+  assert(ops->open(&file, "/ps1emu/../disc/disc0", 1, 0) == -ENOENT);
+  assert(ops->open(&file, "/disc/disc01", 1, 0) == -ENOENT);
+  assert(ops->open(&file, "/ps1emu", 1, 0) == -EISDIR);
+  memset(too_long, 'x', sizeof(too_long)); too_long[299] = 0;
+  assert(ops->open(&file, too_long, 1, 0) == -ENAMETOOLONG && calls == 0);
+  file.unit = 2;
+  assert(ops->open(&file, "/disc/disc0", 1, 0) == -ENODEV && calls == 0);
+  assert(ops->getstat(&file, "/ps1emu", &stat) == -ENODEV);
+  file.unit = 1;
+  next_open = -ENODEV;
+  assert(ops->open(&file, "/ps1emu/card0", 3, 0644) == -ENODEV);
+  assert(calls == 1 && !ops->deinit(registered)); /* No retry on another device. */
+
+  next_open = 42;
+  assert(!ops->open(&file, "\\ps1emu\\card1.bak", 0x203, 0644));
+  assert(!strcmp(observed, "mmce1:/POPS/Game/Card1.VMC.bak"));
+  assert(ops->write(&file, data, 32) == 7 && io_fd == 42 && operation == 2);
+  io_result = -EIO;
+  assert(ops->sync(&file, "pops1:", 0) == -EIO && sync_calls == 2);
+  assert(ops->read(&file, data, 32) == -EIO && ops->write(&file, data, 32) == -EIO);
+  assert(ops->ioctl(&file, 123, NULL) == -EIO);
+  assert(ops->ioctl2(&file, 123, NULL, 0, NULL, 0) == -EIO);
+  assert(ops->read(&file, data, -1) == -EINVAL && ops->write(&file, NULL, 1) == -EINVAL);
+  assert(!ops->close(&file));
+  io_result = 7;
+  /* Card handles do not prohibit switching; only disc descriptors do. */
+  assert(!ops->devctl(&file, "pops:", 0x01, &requested, sizeof(requested), NULL, 0));
+  assert(!ops->devctl(&file, "pops:", 0x02, NULL, 0, &selected, sizeof(selected)));
+  assert(selected == 1);
+  next_open = 19;
+  assert(!ops->open(&file, "IMAGE.VCD", 1, 0));
+  assert(!strcmp(observed, arguments[4]));
+  assert(!ops->close(&file));
+  next_open = 20;
+  assert(!ops->open(&file, "IMAGE0.VCD", 1, 0));
+  assert(!strcmp(observed, arguments[4])); /* existing dynamic alias */
+  assert(!ops->close(&file));
+  requested = 0;
+  assert(!ops->devctl(&file, "pops:", 0x01, &requested, sizeof(requested), NULL, 0));
+  assert(!ops->sync(&file, "pops1:", 0) && sync_calls == 4);
+
+  assert(!ops->getstat(&file, "/ps1emu", &stat) && (stat.mode & FIO_S_IFDIR));
+  assert(!ops->mkdir(&file, "/ps1emu", 0755));
+  assert(!ops->getstat(&file, "/ps1emu/card0", &stat));
+  assert(stat.size == 0x20000 && !strcmp(observed, arguments[2]));
+  assert(ops->remove(&file, "/disc/disc0") == -EROFS);
+  assert(ops->rename(&file, "/ps1emu/card0", "/ps1emu/card1") == -EXDEV);
+  assert(ops->rename(&file, "/ps1emu/card0", "/ps1emu/card0.bak") == 7);
+  assert(!ops->open(&file, "/disc/disc1", 1, 0) && !strcmp(observed, arguments[4]));
+  assert(!ops->close(&file));
+
+  /* Standard POPStarter memory card names resolve to the existing save pair. */
+  next_open = 63;
+  assert(!ops->open(&file, "SLOT0.VMC", 3, 0));
+  assert(!strcmp(observed, arguments[2]));
+  assert(!ops->close(&file));
+  next_open = 64;
+  assert(!ops->open(&file, "/SLOT1.VMC.bak", 3, 0));
+  assert(!strcmp(observed, "mmce1:/POPS/Game/Card1.VMC.bak"));
+  assert(!ops->close(&file));
+  assert(ops->open(&file, "SLOT2.VMC", 1, 0) == -ENOENT);
+
+  /* Devctl tray and disc commands */
+  int disc = 1, query_disc = -1, query_lid = -1;
+  assert(!ops->devctl(&file, "pops:", 0x03 /* OPEN_LID */, NULL, 0, NULL, 0));
+  assert(!ops->devctl(&file, "pops:", 0x08 /* GET_LID */, NULL, 0, &query_lid, sizeof(query_lid)) && query_lid == 1);
+  assert(ops->devctl(&file, "pops:", 0x01 /* SWAP_DISC */, &disc, 0, NULL, 0) == -EINVAL);
+  assert(!ops->devctl(&file, "pops:", 0x01 /* SWAP_DISC */, &disc, sizeof(disc), NULL, 0));
+  assert(!ops->devctl(&file, "pops:", 0x02 /* GET_DISC */, NULL, 0, &query_disc, sizeof(query_disc)) && query_disc == 1);
+  assert(!ops->devctl(&file, "pops:", 0x04 /* CLOSE_LID */, NULL, 0, NULL, 0));
+  assert(!ops->devctl(&file, "pops:", 0x08 /* GET_LID */, NULL, 0, &query_lid, sizeof(query_lid)) && query_lid == 0);
+  /* MIPS must not dereference potentially unaligned devctl argument/output
+   * pointers as uint32_t or int pointers. Check both routes explicitly. */
+  unsigned char unaligned_disc[sizeof(int) + 2] = {0};
+  unsigned char unaligned_result[sizeof(int) + 2] = {0};
+  memcpy(unaligned_disc + 1, &disc, sizeof(disc));
+  assert(!ops->devctl(&file, "pops:", 0x01, unaligned_disc + 1,
+                      sizeof(disc), NULL, 0));
+  assert(!ops->devctl(&file, "pops:", 0x02, NULL, 0,
+                      unaligned_result + 1, sizeof(int)));
+  memcpy(&query_disc, unaligned_result + 1, sizeof(query_disc));
+  assert(query_disc == disc);
+  assert(!ops->devctl(&file, "pops:", 0x08, NULL, 0,
+                      unaligned_result + 1, sizeof(int)));
+  memcpy(&query_lid, unaligned_result + 1, sizeof(query_lid));
+  assert(query_lid == 0);
+
+  /* Devctl LibCrypt and Subchannel Q */
+  uint16_t key = 0x7C23; /* Resident Evil 3 key */
+  unsigned char unaligned_key[sizeof(key) + 2] = {0};
+  memcpy(unaligned_key + 1, &key, sizeof(key));
+  assert(!ops->devctl(&file, "pops:", 0x05 /* SET_LIBCRYPT */,
+                      unaligned_key + 1, sizeof(key), NULL, 0));
+  uint32_t lba = 15;
+  uint8_t subq[12] = {0};
+  assert(ops->devctl(&file, "pops:", 0x06 /* GET_SUBQ */, &lba, 1, subq, sizeof(subq)) == -EINVAL);
+  assert(!ops->devctl(&file, "pops:", 0x06 /* GET_SUBQ */, &lba, sizeof(lba), subq, sizeof(subq)));
+  assert(subq[0] == 0x41 && subq[1] == 0x01 && subq[2] == 0x01);
+  assert(subq[10] == 0x7C && subq[11] == 0x23);
+  /* Standard data-sector Q: relative LBA 0, absolute 00:02:00 and
+   * CRC16-CCITT = 0x2832 (known psx-spx reference frame). */
+  key = 0;
+  assert(!ops->devctl(&file, "pops:", 0x05, &key, sizeof(key), NULL, 0));
+  lba = 0;
+  assert(!ops->devctl(&file, "pops:", 0x06, &lba, sizeof(lba), subq, sizeof(subq)));
+  const uint8_t expected_q[12] = {
+      0x41, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x28, 0x32
+  };
+  assert(!memcmp(subq, expected_q, sizeof(subq)));
+  unsigned char unaligned_lba[sizeof(lba) + 2] = {0};
+  lba = 75;
+  memcpy(unaligned_lba + 1, &lba, sizeof(lba));
+  assert(!ops->devctl(&file, "pops:", 0x06, unaligned_lba + 1,
+                      sizeof(lba), subq, sizeof(subq)));
+  assert(subq[3] == 0 && subq[4] == 1 && subq[5] == 0);
+  assert(subq[7] == 0 && subq[8] == 3 && subq[9] == 0);
+  /* Highest representable Q absolute time: 99:59:74. Invalid LBA must
+   * neither overflow the lead-in addition nor mutate caller output. */
+  lba = 449849;
+  memcpy(unaligned_lba + 1, &lba, sizeof(lba));
+  assert(!ops->devctl(&file, "pops:", 0x06, unaligned_lba + 1,
+                      sizeof(lba), subq, sizeof(subq)));
+  assert(subq[7] == 0x99 && subq[8] == 0x59 && subq[9] == 0x74);
+  lba = UINT32_MAX;
+  memcpy(unaligned_lba + 1, &lba, sizeof(lba));
+  memset(subq, 0xa5, sizeof(subq));
+  assert(ops->devctl(&file, "pops:", 0x06, unaligned_lba + 1,
+                     sizeof(lba), subq, sizeof(subq)) == -ERANGE);
+  for (size_t i = 0; i < sizeof(subq); ++i)
+    assert(subq[i] == 0xa5);
+
+  assert(!ops->deinit(&device));
+
+  /* A real PFS driver can sit past the first 16 legacy IOMAN slots.
+   * The optional alias must not overwrite it. */
+  char *alias_args[] = {"popfs+pfs", "mass7:/POPS/Game.VCD",
+                         "udpfs:/saves/Card0.VMC", "mmce1:/POPS/Game/Card1.VMC"};
+  assert(!iomanX_DelDrv("pops"));
+  iomanX_iop_device_t real_pfs = {"pfs", IOP_DT_FS, 1, "genuine PFS", &operations};
+  registered_drivers[24] = &real_pfs;
+  assert(start_payload(4, alias_args) == MODULE_NO_RESIDENT_END);
+  assert(registered_drivers[24] == &real_pfs);
+  registered_drivers[24] = NULL;
+
+  /* Recursive PFS-backed paths are never accepted in virtual mode. */
+  alias_args[1] = "hdd0:__common:pfs:/Game.VCD";
+  assert(start_payload(4, alias_args) == MODULE_NO_RESIDENT_END);
+  alias_args[1] = "PFS0:/Game.VCD";
+  assert(start_payload(4, alias_args) == MODULE_NO_RESIDENT_END);
+  alias_args[1] = "mass7:/POPS/Game.VCD";
+
+  fail_alias_add = 1;
+  assert(start_payload(4, alias_args) == MODULE_NO_RESIDENT_END);
+  assert(!registered_drivers[0]); /* rolls back our pops registration */
+  fail_alias_add = 0;
+  assert(start_payload(4, alias_args) == MODULE_RESIDENT_END);
+  assert(registered_drivers[0] == &device);
+  assert(registered_drivers[1] == &virtual_pfs);
+  assert(!virtual_pfs.ops->open(&file, "IMAGE.VCD", FIO_O_RDONLY, 0));
+  assert(!virtual_pfs.ops->close(&file));
+  assert(!iomanX_DelDrv("pfs"));
+  assert(!iomanX_DelDrv("pops"));
+  /* Re-establish the two-disc configuration for the resident-path test. */
+  assert(start_payload(5, arguments) == MODULE_RESIDENT_END);
+  assert(registered == &device);
+  test_pad_swap();
+  test_pad_swap_popfs_integration();
+  test_event_trace();
+  puts("POPFS production-driver contract PASS: paths, multi-disc, save backups, descriptor zero,");
+  puts("short I/O, device errors, readonly discs, 64-bit seeks, devctl tray/disc, LibCrypt SubQ, and active-handle lifetime");
+  return 0;
+}

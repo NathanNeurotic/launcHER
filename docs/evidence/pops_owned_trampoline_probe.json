@@ -1,0 +1,37 @@
+{
+  "hardware": {
+    "run_id": "20261014T135833-0041",
+    "outcome": "pass",
+    "exit_code": 0,
+    "elf_sha256": "5dce510ca03c51c1c0a4fc7ffae14c94641d047a74539d3c70885a18c6c87261",
+    "stdout": "loadelf: fname host:program.elf secname all\r\nInput ELF format filename = host:program.elf\r\n1 00100000 0005fc84 ......\r\nLoaded, host:program.elf\r\nstart address 0x11bbb0\r\ngp address 00000000\r\nread/write allocate memory 4000\r\nPOPS_TRAMPOLINE parent entry=0021b920 code=248 disable_interrupts=0\nPOPS_TRAMPOLINE child argc=1 arg=pops0:IMAGE.VCD\nPOPS_TRAMPOLINE_PASS owned child entered\n[ps2rig] exit=0\n",
+    "artifacts": [
+      "program.elf",
+      "stdout.txt"
+    ],
+    "timings": {
+      "queue_ms": 0,
+      "upload_ms": 6,
+      "run_ms": 390
+    },
+    "started": "2026-10-14T13:58:33.7543356Z"
+  },
+  "screen_observation": "POPS_TRAMPOLINE_PASS owned child entered argc=1",
+  "emulator": {
+    "passed": true,
+    "elf_sha256": "5dce510ca03c51c1c0a4fc7ffae14c94641d047a74539d3c70885a18c6c87261",
+    "pcsx2_version": "2.9.52.0",
+    "bios_sha256": "f4c948e61a291d4b3f92a141e550cf8357204287a31ff784caccbedaef910c9d",
+    "observations": [
+      "POPS_TRAMPOLINE parent entry=0021b920 code=248 disable_interrupts=0",
+      "POPS_TRAMPOLINE child argc=1 arg=pops0:IMAGE.VCD",
+      "POPS_TRAMPOLINE_PASS owned child entered"
+    ]
+  },
+  "scope": "Actual unchanged production trampoline with real kernel ExecPS2 and owned child; no Sony core, foreign IOP reset, game or save data.",
+  "limits": [
+    "The child uses SDK startup, not Sony startup.",
+    "The parent's inherited ps2link environment differs from the post-Sony-reset production preflight.",
+    "This does not establish full game boot or exclude every interrupt/lifetime interaction."
+  ]
+}

@@ -371,10 +371,13 @@ int udpfs_core_close(int32_t handle)
     req->reserved[2] = 0;
     req->handle = handle;
 
-    _request(req, sizeof(udpfs_msg_close_req_t),
-             reply, sizeof(udpfs_msg_close_reply_t));
+    int received = _request(req, sizeof(udpfs_msg_close_req_t),
+                            reply, sizeof(udpfs_msg_close_reply_t));
+    if (received < 0) return received;
+    if (received != sizeof(*reply) || reply->msg_type != UDPFS_MSG_CLOSE_REPLY)
+        return -EIO;
 
-    return 0;
+    return reply->result;
 }
 
 /*
