@@ -606,12 +606,12 @@ The project no longer builds or packages unrelated:
 
 ## Credits
 
-- **[nuno6573](https://github.com/nuno6573)** — solution, concept, and selection of the approach used for Ember's external launcher. Thanks to nuno for the information and idea.
+- **[nuno6573](https://github.com/nuno6573)** — solution, concept, and selection of the approach used for [Ember](https://github.com/Gageformer/Ember)'s external launcher. Thanks to nuno for the information and idea.
 - **[pcm720](https://github.com/pcm720)** — creator of [OSDMenu](https://github.com/pcm720/OSDMenu) and the standalone OSDMenu Launcher from which launcHER is derived. The device handlers, loader architecture, and foundation of this project come from that work.
 - **Eliminator / eliminator1403** — PS2 hardware testing, validation, regression checking, device-side feedback, and the filename-independent `launcHER.CNF` quickboot refinement used for renamed OPL APPS entries.
 - **[Gageformer](https://github.com/Gageformer)** — creator of [Ember](https://github.com/Gageformer/Ember), the project launcHER exists to launch.
-- **[NathanNeurotic / Ripto](https://github.com/NathanNeurotic)** — launcHER fork, Ember handoff integration, APA/PFS persistence changes, standalone build, configuration, documentation, and release packaging.
+- **[NathanNeurotic / Ripto](https://github.com/NathanNeurotic)** — launcHER fork, [Ember](https://github.com/Gageformer/Ember) handoff integration, APA/PFS persistence changes, standalone build, configuration, documentation, and release packaging.
 - The **PS2SDK / ps2dev** contributors and broader PS2 homebrew community whose drivers and libraries make the supported storage stack possible.
 
-launcHER keeps its upstream lineage visible intentionally. It would not exist without pcm720's launcher work, Ember would not exist without Gageformer, and its hardware behavior would not be trustworthy without real-console testing.
+launcHER keeps its upstream lineage visible intentionally. It would not exist without [pcm720](https://github.com/pcm720)'s launcher work, [Ember](https://github.com/Gageformer/Ember) would not exist without [Gageformer](https://github.com/Gageformer), and its hardware behavior would not be trustworthy without real-console testing.
 <img width="873" height="348" alt="launcherbanner" src="https://github.com/user-attachments/assets/e54f9ad4-c40b-483a-acaa-2accb5aa55cc" />
