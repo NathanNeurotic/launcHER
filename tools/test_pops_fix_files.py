@@ -279,11 +279,11 @@ void test_io_failures(int reads, int closes) { fail_reads=reads; fail_closes=clo
         self.assertEqual(self.memory, pristine())
 
     def test_video_action_control6(self):
-        self.assertEqual(self.stage(patch(control=6)), 0)
-        self.assertEqual(self.memory[0x21af94 - BASE], 0x50)
-        self.assertEqual(struct.unpack_from('<I', self.memory, 0x21a094 - BASE)[0], 0x0808e53c)
-        self.assertEqual(struct.unpack_from('<I', self.memory, 0x23acb0 - BASE)[0], 0x24040000)
-        self.assertEqual(struct.unpack_from('<I', self.memory, 0x23ad0c - BASE)[0], 0x24040000)
+        for control in (6, 7):
+            blob = patch(control=control, modes=(1,) if control == 7 else (),
+                         payload=b'DATA', address=0x220000)
+            self.assertEqual(self.stage(blob), -errno.ENOTSUP)
+            self.assert_rejected_without_writes(blob)
 
     def test_video_action_with_modes(self):
         self.assertEqual(self.stage(patch(control=3, modes=(6, 1))), 0)
@@ -301,14 +301,13 @@ void test_io_failures(int reads, int closes) { fail_reads=reads; fail_closes=clo
     def test_video_action_pal_prevents_subsequent_control6(self):
         self.assertEqual(self.stage(patch(control=2, slot=0), slot=0), 0)
         self.assertEqual(self.memory[0x21af94 - BASE], 3)
-        self.assertEqual(self.stage(patch(control=6, slot=1), slot=1), 0)
+        self.assert_rejected_without_writes(patch(control=6, slot=1))
         self.assertEqual(self.memory[0x21af94 - BASE], 3)
 
-    def test_video_action_control6_prevents_subsequent_pal(self):
-        self.assertEqual(self.stage(patch(control=6, slot=0), slot=0), 0)
-        self.assertEqual(self.memory[0x21af94 - BASE], 0x50)
+    def test_rejected_control6_does_not_disable_subsequent_pal(self):
+        self.assert_rejected_without_writes(patch(control=6, slot=0), slot=0)
         self.assertEqual(self.stage(patch(control=2, slot=1), slot=1), 0)
-        self.assertEqual(self.memory[0x21af94 - BASE], 0x50)
+        self.assertEqual(self.memory[0x21af94 - BASE], 3)
 
 if __name__ == '__main__':
     unittest.main()

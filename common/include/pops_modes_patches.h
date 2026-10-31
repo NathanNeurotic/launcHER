@@ -26,8 +26,8 @@ int pops_fix_context_init(PopsFixContext *context, const void *staged_core,
                            size_t core_size, uint8_t initial_modes);
 /* expected_trojan selects TROJAN versus PATCH; slot must match the filename.
  * PATCH data precedes its four mode bytes, in recorded order. Video actions
- * (PAL, disable-auto, custom registers) and mode 6 are supported. Mode 8 remains
- * unsupported and fails before writes.
+ * (PAL, disable-auto) and mode 6 are supported. Video actions 6/7 require
+ * absent resident code; they and mode 8 fail before any payload/mode writes.
  * Context, input container and staged core must be disjoint. */
 int pops_fix_stage(PopsFixContext *context, void *staged_core, size_t core_size,
                     const void *file, size_t file_size, unsigned slot,

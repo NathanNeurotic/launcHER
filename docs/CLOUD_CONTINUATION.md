@@ -1,8 +1,37 @@
-# Continuation checkpoint — 2026-10-28
+# Continuation checkpoint — 2026-10-30
 
 Continue [draft launcHER PR #23](https://github.com/NathanNeurotic/launcHER/pull/23) on `codex/popstarter-replacement`. Fetch before editing, preserve newer work, publish validated incremental commits on this same PR, and include `Co-authored-by: ChatGPT <chatgpt@openai.com>`. Keep the PR draft and unmerged.
 
-## Read first
+## Current continuation (supersedes historical build/oracle blockers below)
+
+- Synced the checkout from `33c33fc` to current PR head `ae86f3d` before editing.
+- Preserved the three older uncommitted PATCH-video files in the local stash
+  `preserved pre-sync PATCH video WIP 2026-10-30`. This old experiment allows
+  the absent-resident action 6 jump and must not be reapplied wholesale.
+- PATCH video actions 6/7 now return `-ENOTSUP` before any payload, mode or
+  context mutation. The jump targets `0x2394f0`, inside POPStarter's copied
+  resident block, which launcHER does not supply. The previous success tests
+  only demonstrated writing that jump, not a working video mode.
+- `POPS_TEST_ELF=EXTERNAL/POPS.ELF python3 tools/test_pops_fix_files.py`:
+  18 tests pass including the identified external-core case.
+- Fresh REPOP `feat/psxcore-validation` head is `ee87b55e`. Its newer divergence
+  register R13–R18 supersedes the old incomplete-FP and build-failure notes
+  below: the remote records a completed FP differential and repaired EE archive.
+  Those newer results have not been independently rerun in this continuation.
+  Remaining original-contract work includes `FUN_00917f80`,
+  `FUN_0091acb0`, `FUN_009a1458`, and the lower SIF transport implementation.
+  Use a separate current checkout; `../REPOP/checkout` is an older dirty
+  branch (`feat/popstarter-iop-recovery`) and was preserved.
+- No new console run. The ae86f3d region changes still need US/European disc,
+  `$FORCEPAL` and `$NOPAL` hardware checks. Runtime, dedicated-new-card
+  save/reload/cold-power-cycle and device acceptance remain open.
+
+Next source slice: recover the computed video commands from the hash-pinned
+original, compare original execution against production staging, and retain
+explicit resident dependencies. Do not infer behavioral completion from source
+coverage or an archive build. Keep incremental commits and PR comments current.
+
+## Historical October 28 audit
 
 [The verified October 28 audit](POPS_PARITY_AUDIT_2026-10-28.md) supersedes earlier contradictory claims. Full POPStarter drop-in parity is incomplete. The old accumulated diary is preserved as [unverified history](history/CLOUD_CONTINUATION_2026-10-28_UNVERIFIED.md); its claims of complete resident engines, save durability and repeated exact size parity are withdrawn.
 

@@ -194,13 +194,13 @@ int pops_fix_stage(PopsFixContext *context, void *staged_core, size_t core_size,
     result = pops_patch_options(&plan.container, &options);
     if (result)
       return result;
-    if (options.video > POPS_PATCH_VIDEO_CONTROL6)
+    /* Actions 6/7 install a jump to 0x2394f0, inside POPStarter's copied
+     * resident block. launcHER does not install an independent replacement
+     * there yet. Reject before staging even the payload or mode bytes. */
+    if (options.video >= POPS_PATCH_VIDEO_CONTROL6)
       return -ENOTSUP;
     if (options.video == POPS_PATCH_VIDEO_PAL &&
         core_size < (size_t)(0x00502770 - POPS_CORE_BASE_ADDR + 4))
-      return -ERANGE;
-    if (options.video == POPS_PATCH_VIDEO_CONTROL6 &&
-        core_size < (size_t)(0x0023ad0c - POPS_CORE_BASE_ADDR + 4))
       return -ERANGE;
     for (unsigned i = 0; i < 4; ++i)
       if (options.modes[i] > 7)
@@ -250,14 +250,7 @@ int pops_fix_stage(PopsFixContext *context, void *staged_core, size_t core_size,
     }
     break;
   case POPS_PATCH_VIDEO_CONTROL6:
-    if (!context->video_custom_set) {
-      write_u8(bytes, core_size, 0x0021af94, 0x50);
-      write_u32(bytes, core_size, 0x0021a094, 0x0808e53c);
-      write_u32(bytes, core_size, 0x0023acb0, 0x24040000);
-      write_u32(bytes, core_size, 0x0023ad0c, 0x24040000);
-      context->video_auto_disabled = 1;
-      context->video_custom_set = 1;
-    }
+    /* Rejected above until an independent resident implementation exists. */
     break;
   }
   for (unsigned i = 0; i < POPS_COMPAT_SITE_COUNT; ++i)

@@ -104,7 +104,7 @@ the fix files so a PATCH file's disable-auto still wins. **NOT TESTED.**
 | VMC directory relinker (VMCDIR.TXT), SLOT0/1.VMC | **PRESENT** |
 | DISCS.TXT disc swap, D-pad assignment, lid emulation | **PARTIAL**: discs map; no resident swap during play |
 | CHEATS.TXT / PATCHES.TXT / per-title config locations | **PRESENT** (parsing) |
-| TROJAN_n.BIN / PATCH_n.BIN, all games and per game | **PRESENT** |
+| TROJAN_n.BIN / PATCH_n.BIN, all games and per game | **PARTIAL**: payload/modes/PAL/disable-auto stage; video actions 6/7 reject atomically until independent resident code exists |
 | IGR menu skin (IGR_BG/NO/YES.TM2) | **MISSING** |
 | Replacement OSD image | **MISSING** |
 | User BIOS.BIN with integrity check | **MISSING** |
