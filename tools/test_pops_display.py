@@ -357,6 +357,28 @@ class InterpreterTests(unittest.TestCase):
         m.run()
         self.assertEqual(m.reg[2], 7)
 
+    def test_branch_likely_annuls_only_the_untaken_delay(self):
+        # beql v0,zero,+1; addiu v1,zero,7; nop
+        for value, expected in ((0, 7), (1, 0)):
+            m = self.machine([0x50400001, 0x24030007, 0])
+            m.reg[2] = value
+            m.run()
+            self.assertEqual(m.reg[3], expected)
+
+    def test_progressive_shift_and_lq_low64_semantics(self):
+        m = self.machine([(2 << 16) | (3 << 11) | 0x3f]) # dsra32 v1,v0,0
+        m.reg[2] = 0x80000000ffffffff
+        m.instruction(ORIGINAL_BASE)
+        self.assertEqual(m.reg[3], 0xffffffff80000000)
+        m = self.machine([(0x1e << 26) | (4 << 21) | (5 << 16)]) # lq a1,0(a0)
+        m.reg[4] = m.FRAME
+        m.store_bytes(m.FRAME, bytes(range(16)))
+        m.instruction(ORIGINAL_BASE)
+        self.assertEqual(m.reg[5], 0x0706050403020100)
+        m.reg[4] += 1
+        with self.assertRaises(ValueError):
+            m.instruction(ORIGINAL_BASE)
+
     def test_unmodeled_instruction_and_memory_fail_closed(self):
         m = self.machine([0xffffffff])
         with self.assertRaises(ValueError):

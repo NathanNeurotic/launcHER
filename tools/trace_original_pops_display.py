@@ -95,6 +95,10 @@ class _Window:
         if op == 0:
             if fn == 0 and word == 0:
                 pass
+            elif fn == 0:
+                self.put(rd, signed(b << shift, 32))
+            elif fn == 2:
+                self.put(rd, signed((b & 0xffffffff) >> shift, 32))
             elif fn == 0x21:  # addu (32-bit sign-extended result)
                 self.put(rd, signed(a + b, 32))
             elif fn == 0x23:
@@ -113,27 +117,40 @@ class _Window:
                 self.put(rd, b << (shift + 32))
             elif fn == 0x3e:
                 self.put(rd, b >> (shift + 32))
+            elif fn == 0x3f:
+                self.put(rd, signed(b, 64) >> (shift + 32))
+            elif fn == 0x3a:
+                self.put(rd, b >> shift)
             else:
                 raise ValueError(f'unsupported SPECIAL {word:#x} at {pc:#x}')
         elif op == 0x09:
             self.put(rt, signed(a + imm, 32))
         elif op == 0x0d:
             self.put(rt, a | (word & 0xffff))
+        elif op == 0x0c:
+            self.put(rt, a & (word & 0xffff))
         elif op == 0x0f:
             self.put(rt, signed((word & 0xffff) << 16, 32))
         elif op == 0x0a:
             self.put(rt, int(signed(a, 64) < imm))
         elif op == 0x0b:
             self.put(rt, int(a < (imm & MASK64)))
-        elif op in (0x23, 0x24, 0x37):
-            width = {0x23: 4, 0x24: 1, 0x37: 8}[op]
+        elif op in (0x23, 0x24, 0x37, 0x1e):
+            width = {0x23: 4, 0x24: 1, 0x37: 8, 0x1e: 16}[op]
+            if op == 0x1e and (a + imm) & 15:
+                raise ValueError('unaligned LQ outside modeled progressive entry')
             value = self.load((a + imm) & 0xffffffff, width)
             self.put(rt, signed(value, 32) if width == 4 else value)
         elif op in (0x28, 0x2b, 0x3f):
             self.store((a + imm) & 0xffffffff, b, {0x28: 1, 0x2b: 4, 0x3f: 8}[op])
-        elif op in (4, 5, 6):
-            taken = a == b if op == 4 else a != b if op == 5 else signed(a, 64) <= 0
-            transfer = ('branch', pc + 4 + (imm << 2) if taken else pc + 8)
+        elif op in (4, 5, 6, 0x14):
+            taken = a == b if op in (4, 0x14) else a != b if op == 5 else signed(a, 64) <= 0
+            if op == 0x14 and not taken:
+                transfer = ('annul', pc + 8)
+            else:
+                transfer = ('branch', pc + 4 + (imm << 2) if taken else pc + 8)
+        elif op == 2:
+            transfer = ('branch', ((pc + 4) & 0xf0000000) | ((word & 0x3ffffff) << 2))
         elif op == 3:
             self.put(31, pc + 8)
             transfer = ('call', ((pc + 4) & 0xf0000000) | ((word & 0x3ffffff) << 2))
@@ -162,7 +179,7 @@ class _Window:
     def run(self):
         pc = self.lo
         for _ in range(20000):
-            if pc in (LOOP, self.hi):
+            if pc in (LOOP, self.hi, *getattr(self, 'stops', ())):
                 return {'writes': self.writes,
                         'x_set': bool(self.load(self.GP + 0x34f0, 4)),
                         'y_set': bool(self.load(self.GP + 0x3974, 4))}
@@ -170,8 +187,9 @@ class _Window:
             if transfer is None:
                 pc += 4
                 continue
-            self.instruction(pc + 4, delay=True)
             kind, target = transfer
+            if kind != 'annul':
+                self.instruction(pc + 4, delay=True)
             if kind == 'call':
                 self.service(target)
                 pc += 8
@@ -213,6 +231,44 @@ class OriginalDisplay:
         m.lo, m.hi = 0x89e75c, 0x89e884
         m.run()
         return {'values': values, 'flags': flags, 'writes': m.writes}
+
+    def progressive(self, state):
+        """Original 0x2394f0 entry at its source location, 64-bit GPR view.
+
+        The original loader copies the block from 0x983890 to 0x238a90.
+        Relative branches work at either location; the final J is absolute.
+        LQ's low 64 bits are observed; no upper-lane equivalence is claimed.
+        """
+        class ProgressiveWindow(_Window):
+            GP = 0x50a670  # pinned Sony ELF REGINFO
+        m = ProgressiveWindow(self.image, 0x9842f0, 0x984558, '')
+        m.stops = (0x21a098,)
+        fields = {
+            'fallback_display': (0x70003290, 8),
+            'source_32a8': (0x700032a8, 4), 'source_32ac': (0x700032ac, 4),
+            'source_32b0': (0x700032b0, 4), 'source_32bc': (0x700032bc, 4),
+            'blocked': (0x85a9ac, 4), 'region': (0x127ff52, 1),
+            'scratch': (0x502680, 8), 'magh': (0x502688, 4), 'dx': (0x50268c, 4),
+            'dy': (0x502690, 4), 'dh': (0x502694, 4), 'dw': (0x502698, 4),
+            'magv': (0x50269c, 4), 'timing_502770': (0x502770, 4),
+            'timing_23ac08': (0x23ac08, 4), 'mode_21af94': (0x21af94, 1),
+            'mode_70003300': (0x70003300, 1),
+        }
+        m.memory.update((a, 0xa5) for a in range(0x70003290, 0x70003310))
+        for name, (address, width) in fields.items():
+            m.memory.update((address + i, 0) for i in range(width))
+            m.store(address, state[name], width)
+        before = dict(m.memory)
+        m.run()
+        result = dict(state)
+        result.update((name, m.load(address, width)) for name, (address, width) in fields.items())
+        result['display'] = m.reg[5]
+        outputs = ('scratch', 'magh', 'dx', 'dy', 'dh', 'dw', 'magv',
+                   'timing_502770', 'timing_23ac08', 'mode_21af94', 'mode_70003300')
+        allowed = {fields[name][0] + i for name in outputs for i in range(fields[name][1])}
+        if any(before[a] != value and a not in allowed for a, value in m.memory.items()):
+            raise ValueError('unexpected progressive memory change')
+        return result
 
     def region(self, licence, force_pal=False, auto_disabled=False, auto_selector=True):
         """Original region control flow; PAL helper/pokes modeled explicitly.

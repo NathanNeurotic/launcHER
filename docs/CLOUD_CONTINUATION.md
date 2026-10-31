@@ -36,11 +36,22 @@ that last change. Continue from current HEAD, fetching again before editing.
   display-entry checks; four display values also match original-entry GPR
   results in Unicorn's 64-bit view. No console run. Progressive `$480p` and
   PATCH actions 6/7 remain separate open work; the latter still reject.
+- Progressive arithmetic/state candidate is now recovered separately from
+  the production manual hook: [contracts](POPS_PROGRESSIVE_CONTRACTS.md).
+  Native C and compiled EE each match 428 bounded original instruction cases;
+  the aggregate external suite passes 115 tests with EE compiler/Unicorn.
+  The helper is intentionally not linked into the live resident yet. Next:
+  preserve the live bridge register contract and original ordered writes,
+  guard core sites and honor text/PATCH sequencing before enabling 6/7.
+  Unicorn memory-write hooks caused a separately reproduced SD-delay fault;
+  the compiled runner audits every mapped byte after execution instead.
+  No live progressive or hardware acceptance is claimed.
 - Latest catch-up merges: launcHER **`b34affc`** integrates EMBER through
   `f0e5948` (explicit CUE forwarding coverage/docs and newer credit links).
   Its build/host/argv CI passes. REPOP **`feeb3346`** integrates main through
   `b07b135a` (credit updates); older dirty checkouts were preserved.
-- REPOP `feat/psxcore-validation` is now **`15b8727f`**, through R22.
+- REPOP source recovery is **`15b8727f`**, through R22; its synchronized
+  R23 documentation checkpoint is **`b2126979`** on `feat/psxcore-validation`.
   Gate/syscalls, read/cache submission and completion now pass **169
   original-vs-compiled-EE component cases**. Three native callback regressions
   cover independent lengths, valid tail after missing head destination and
