@@ -129,6 +129,9 @@ typedef struct {
   uint8_t pad_override;
   uint8_t pad_id[2];
   uint8_t pad_d2ls;
+
+  /* $SET_TIMINGS: live timing adjust in the resident code (pops_resident.h). */
+  uint8_t set_timings;
 } PopsConfig;
 
 /* $WIDESCREEN, $ULTRA_WIDESCREEN, $EYEFINITY: the last one in the files wins,

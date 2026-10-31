@@ -282,6 +282,10 @@ static int parse_single_directive(PopsConfig *cfg, const char *token) {
     }
     return 1;
   }
+  if (!strcasecmp(token, "$SET_TIMINGS")) {
+    cfg->set_timings = 1;
+    return 1;
+  }
   if (!strcasecmp(token, "$NOVMC0")) {
     cfg->no_vmc0 = 1;
     return 1;

@@ -40,6 +40,7 @@ class ResidentConfig(c.Structure):
         ("pad_id", c.c_uint8 * 2),
         ("gte_divisor", c.c_uint8),
         ("cheats", CheatEntry * MAX_CHEATS),
+        ("timings_ready", c.c_uint8),
     ]
 
 
@@ -88,6 +89,8 @@ L.pops_resident_d2ls.argtypes = [c.c_void_p, c.c_uint32]
 L.pops_resident_d2ls.restype = None
 L.pops_resident_hook_pads.argtypes = [c.c_void_p, c.c_size_t, c.c_uint32, c.c_uint32, c.c_uint32]
 L.pops_resident_hook_widescreen.argtypes = [c.c_void_p, c.c_size_t, c.c_uint8, c.POINTER(Header)]
+L.pops_resident_timings.argtypes = [c.POINTER(ResidentConfig), c.c_size_t, c.c_size_t]
+L.pops_resident_timings.restype = None
 L.pops_resident_build_config.argtypes = [c.POINTER(ResidentConfig), c.c_void_p]
 L.pops_config_init.argtypes = [c.c_void_p]
 L.pops_config_parse_line.argtypes = [c.c_void_p, c.c_char_p]
@@ -274,7 +277,7 @@ class HookCore(unittest.TestCase):
 
 def image(file_size=0x60, image_size=0x900, entry=BASE + 0x40, config=BASE + 0x60, magic=0x5352484C):
     img = bytearray(file_size)
-    struct.pack_into("<IHHIIIIIIIIIII", img, 0, magic, 5, 52, file_size, image_size, entry, config,
+    struct.pack_into("<IHHIIIIIIIIIII", img, 0, magic, 6, 52, file_size, image_size, entry, config,
                      BASE + 0x44, BASE + 0x48, BASE + 0x4C, BASE + 0x50, BASE + 0x54, BASE + 0x58,
                      BASE + 0x5C)
     img[0x40:0x44] = b"\x08\x00\xe0\x03"
@@ -660,6 +663,225 @@ class Widescreen(unittest.TestCase):
             got = {a: v for a, v, _ in w.writes}
             self.assertEqual((got[0x2089A8], got[0x208A2C], got[0x143A6C0]), expect[command], command)
             self.assertEqual(set(got), {0x2089A8, 0x208A2C, 0x143A6C0}, command)
+
+
+F_TIMINGS, F_TIMINGS_SAVE = 1 << 6, 1 << 7
+VMC0, SAVE, TIMING_A, SPR_B, SPR_C = 0x507930, 0x508130, 0x502770, 0x33E0, 0x33E4
+PAD0, PAD1 = 0x507002, 0x507092
+L1, L2, R1, R2 = 0xFBFF, 0xFEFF, 0xF7FF, 0xFDFF
+TIMING_BLOCK = (0x983890, 0x238A90, 0x270)  # original source VA, core address, size
+
+
+class _TimingMachine:
+    """Fake EE RAM (address 0 up) and scratchpad for pops_resident_timings."""
+
+    def __init__(self):
+        self.ee = (c.c_uint8 * 0x509000)()
+        self.spr = (c.c_uint8 * 0x4000)()
+
+    def ee32(self, a, v=None):
+        if v is not None:
+            struct.pack_into("<I", self.ee, a, v & 0xFFFFFFFF)
+        return struct.unpack_from("<I", self.ee, a)[0]
+
+    def spr32(self, a, v=None):
+        if v is not None:
+            struct.pack_into("<I", self.spr, a, v & 0xFFFFFFFF)
+        return struct.unpack_from("<I", self.spr, a)[0]
+
+    def pads(self, p0, p1):
+        struct.pack_into("<H", self.ee, PAD0, p0)
+        struct.pack_into("<H", self.ee, PAD1, p1)
+
+    def timings(self):
+        return self.ee32(TIMING_A), self.spr32(SPR_B), self.spr32(SPR_C)
+
+    def copy(self):
+        return tuple(self.ee32(SAVE + 4 * i) for i in range(4))
+
+    def run(self, cfg):
+        L.pops_resident_timings(c.byref(cfg), c.addressof(self.ee), c.addressof(self.spr))
+
+
+class _OriginalTimingBlock:
+    """Interprets the original's copied $SET_TIMINGS block (k0/k1 only) from
+    the external MAIN, with the two words its command handler writes."""
+
+    def __init__(self, image, machine):
+        src, self.base, size = TIMING_BLOCK
+        off = src - 0x870000
+        self.code = {self.base + i: struct.unpack_from("<I", image, off + i)[0] for i in range(0, size, 4)}
+        self.code[0x238A90] = 0x1000006F
+        self.code[0x238CFC] = 0xAF408A90
+        self.m = machine
+
+    def load(self, a, width):
+        if a in self.code:
+            return self.code[a]
+        if a >= 0x70000000:
+            buf, a = self.m.spr, a - 0x70000000
+        else:
+            buf = self.m.ee
+        v = struct.unpack_from("<I" if width == 4 else "<H", buf, a)[0]
+        return v - 0x10000 if width == 2 and v & 0x8000 else v
+
+    def store(self, a, v):
+        v &= 0xFFFFFFFF
+        if a in self.code:
+            self.code[a] = v
+        elif a >= 0x70000000:
+            self.m.spr32(a - 0x70000000, v)
+        else:
+            self.m.ee32(a, v)
+
+    def run(self):
+        r = {0: 0, 26: 0, 27: 0}
+        pc, steps = self.base, 0
+        while pc != 0x238D00:
+            steps += 1
+            assert steps < 1000 and pc in self.code, hex(pc)
+            w = self.code[pc]
+            op, rs, rt = w >> 26, w >> 21 & 31, w >> 16 & 31
+            imm = w & 0xFFFF
+            simm = imm - 0x10000 if imm & 0x8000 else imm
+            nxt = pc + 4
+            if w == 0:
+                pass
+            elif op == 0x0F:
+                r[rt] = imm << 16
+            elif op == 0x09:
+                r[rt] = (r[rs] + simm) & 0xFFFFFFFF
+            elif op == 0x0D:
+                r[rt] = r[rs] | imm
+            elif op in (0x21, 0x23):
+                r[rt] = self.load((r[rs] + simm) & 0xFFFFFFFF, 2 if op == 0x21 else 4) & 0xFFFFFFFF
+            elif op == 0x2B:
+                self.store((r[rs] + simm) & 0xFFFFFFFF, r[rt])
+            elif op in (4, 5):
+                taken = (r[rs] == r[rt]) == (op == 4)
+                assert self.code[pc + 4] == 0, "delay slot"
+                nxt = pc + 4 + (simm << 2) if taken else pc + 8
+            else:
+                raise AssertionError("unhandled %08x at %x" % (w, pc))
+            r[0] = 0
+            pc = nxt
+
+
+class SetTimings(unittest.TestCase):
+    def config(self, flags=F_TIMINGS):
+        cfg = ResidentConfig()
+        cfg.flags = flags
+        return cfg
+
+    def test_parse_and_flag(self):
+        out = ResidentConfig()
+        cfg = BuildConfig.parsed(self, "$SET_TIMINGS")
+        self.assertEqual(L.pops_resident_build_config(c.byref(out), c.addressof(cfg)), 1)
+        self.assertEqual(out.flags, F_TIMINGS)  # never the card-writing flag
+        cfg = BuildConfig.parsed(self, "$set_timings")
+        L.pops_resident_build_config(c.byref(out), c.addressof(cfg))
+        self.assertEqual(out.flags, F_TIMINGS)
+        for line in ("$SET_TIMINGS1", "$SET_TIMING"):
+            cfg = BuildConfig.parsed(self, line)
+            self.assertEqual(L.pops_resident_build_config(c.byref(out), c.addressof(cfg)), 0, line)
+
+    def test_waits_for_the_vmc_image_then_restores(self):
+        m, cfg = _TimingMachine(), self.config()
+        m.ee32(TIMING_A, 7); m.spr32(SPR_B, 8); m.spr32(SPR_C, 9)
+        m.ee32(SAVE, 0x3E2D3130); m.ee32(SAVE + 4, 0x100); m.ee32(SAVE + 8, 0x200); m.ee32(SAVE + 12, 0x300)
+        m.pads(L1, L1)
+        m.run(cfg)  # no VMC image yet: nothing, not even the adjust
+        self.assertEqual((m.timings(), cfg.timings_ready), ((7, 8, 9), 0))
+        m.ee32(VMC0, 0x6F53)
+        m.run(cfg)  # restore pass, no adjust on it
+        self.assertEqual((m.timings(), cfg.timings_ready), ((0x100, 0x200, 0x300), 1))
+        m.run(cfg)  # pad 1 wins over pad 2
+        self.assertEqual(m.timings(), (0x100, 0x201, 0x300))
+        self.assertEqual(m.copy(), (0x3E2D3130, 0x100, 0x200, 0x300))  # card untouched
+
+    def test_never_writes_the_card_by_default(self):
+        m, cfg = _TimingMachine(), self.config()
+        m.ee32(VMC0, 1)
+        m.ee32(TIMING_A, 5)
+        for pads in [(0xFFFF, 0xFFFF)] + [(p, 0xFFFF) for p in (L1, L2, R1, R2)] + \
+                    [(0xFFFF, p) for p in (L1, L2, R1, R2)]:
+            m.pads(*pads)
+            m.run(cfg)
+        self.assertEqual(m.copy(), (0, 0, 0, 0))
+        self.assertEqual(m.timings(), (5, 0, 0))  # +1 -1 +0x10 -0x10 on A, +1-1 on B and C
+
+    def test_adjust_needs_exactly_one_button(self):
+        m, cfg = _TimingMachine(), self.config()
+        m.ee32(VMC0, 1)
+        m.run(cfg)
+        for p0, p1, want in ((L1 & R1, 0xFFFF, (0, 0, 0)), (0xFFFF, R1, (0x10, 0, 0)),
+                             (0xFFFF, R2, (0, 0, 0)), (R1, 0xFFFF, (0, 0, 1)),
+                             (L2, 0xFFFF, (0, 0xFFFFFFFF, 1)), (R2, 0xFFFF, (0, 0xFFFFFFFF, 0)),
+                             (0xFFFF, L2, (0xFFFFFFFF, 0xFFFFFFFF, 0))):
+            m.pads(p0, p1)
+            m.run(cfg)
+            self.assertEqual(m.timings(), want, (hex(p0), hex(p1)))
+
+    def test_disabled_does_nothing(self):
+        m, cfg = _TimingMachine(), self.config(0)
+        m.ee32(VMC0, 1); m.ee32(SAVE, 0x3E2D3130); m.ee32(SAVE + 4, 9)
+        m.pads(L1, L1)
+        m.run(cfg); m.run(cfg)
+        self.assertEqual((m.timings(), cfg.timings_ready), ((0, 0, 0), 0))
+
+    def test_launcher_hooks_vblank_for_timings(self):
+        src = (ROOT / "launcher/src/handler_pops.c").read_text()
+        self.assertIn("POPS_RES_F_CHEATS | POPS_RES_F_PAD_ID | POPS_RES_F_TIMINGS", src)
+
+    @unittest.skipUnless(os.environ.get("POPSTARTER_TEST_ELF"), "optional external POPStarter MAIN")
+    def test_original_handler_writes(self):
+        from trace_original_pops_display import _Window
+        from trace_original_pops_io import decode_main
+        image = decode_main(Path(os.environ["POPSTARTER_TEST_ELF"]).read_bytes())
+        w = _Window(image, 0x895E68, 0x8960D0, "$SET_TIMINGS")
+        w.run()
+        got = {a: v for a, v, _ in w.writes}
+        self.assertEqual(got, {0x238A90: 0x1000006F, 0x238CFC: 0xAF408A90})
+
+    @unittest.skipUnless(os.environ.get("POPSTARTER_TEST_ELF"), "optional external POPStarter MAIN")
+    def test_matches_the_original_block(self):
+        """Random frames through the original's own block and launcHER's,
+        with and without the card-writing flag. The card copy is compared
+        only for the flag that writes it."""
+        from trace_original_pops_io import decode_main
+        image = decode_main(Path(os.environ["POPSTARTER_TEST_ELF"]).read_bytes())
+        rng = random.Random(0x5354)
+        buttons = [0xFFFF, L1, L2, R1, R2, L1 & R1, 0xFFFE, 0x0000]
+        cases = 0
+        for case in range(120):
+            for flags in (F_TIMINGS | F_TIMINGS_SAVE, F_TIMINGS):
+                ours, theirs = _TimingMachine(), _TimingMachine()
+                orig = _OriginalTimingBlock(image, theirs)
+                cfg = self.config(flags)
+                start = [rng.getrandbits(32) for _ in range(3)]
+                signed = case % 3 == 0
+                for m in (ours, theirs):
+                    m.ee32(TIMING_A, start[0]); m.spr32(SPR_B, start[1]); m.spr32(SPR_C, start[2])
+                    if signed:
+                        m.ee32(SAVE, 0x3E2D3130 if case % 2 else 0x00003130)
+                        for i in range(3):
+                            m.ee32(SAVE + 4 + 4 * i, start[i] ^ 0x5A5A5A5A)
+                ready_at = rng.randrange(0, 4)
+                for frame in range(40):
+                    pads = (rng.choice(buttons), rng.choice(buttons))
+                    for m in (ours, theirs):
+                        if frame == ready_at:
+                            m.ee32(VMC0, 0x434D)
+                        m.pads(*pads)
+                    ours.run(cfg)
+                    orig.run()
+                    self.assertEqual(ours.timings(), theirs.timings(), (case, flags, frame))
+                    if flags & F_TIMINGS_SAVE:
+                        self.assertEqual(ours.copy(), theirs.copy(), (case, frame))
+                    elif not signed:
+                        self.assertEqual(ours.copy(), (0, 0, 0, 0))
+                cases += 1
+        print("Original $SET_TIMINGS block PASS: %d runs x 40 frames" % cases)
 
 
 class Layout(unittest.TestCase):

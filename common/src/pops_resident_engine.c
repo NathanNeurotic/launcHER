@@ -122,6 +122,62 @@ void pops_resident_d2ls(uint8_t *pad, uint32_t bytes) {
   pad[7] = d2ls_axis(up, down);
 }
 
+#define TIMING_WORD(addr) (*(volatile uint32_t *)(addr))
+
+static void timing_set(volatile uint32_t *word, uint32_t value, uintptr_t copy, int save) {
+  *word = value;
+  if (save)
+    TIMING_WORD(copy) = value;
+}
+
+void pops_resident_timings(PopsResidentConfig *cfg, uintptr_t ee, uintptr_t spr) {
+  if (!(cfg->flags & POPS_RES_F_TIMINGS))
+    return;
+  int save = (cfg->flags & POPS_RES_F_TIMINGS_SAVE) != 0;
+  volatile uint32_t *a = &TIMING_WORD(ee + POPS_TIMING_A_ADDR);
+  volatile uint32_t *b = &TIMING_WORD(spr + POPS_TIMING_B_OFFSET);
+  volatile uint32_t *t = &TIMING_WORD(spr + POPS_TIMING_C_OFFSET);
+  uintptr_t copy = ee + POPS_TIMING_SAVE_ADDR;
+
+  if (!cfg->timings_ready) {
+    if (!TIMING_WORD(ee + POPS_VMC0_IMAGE_ADDR))
+      return;
+    if (*(volatile uint16_t *)copy == (uint16_t)POPS_TIMING_SIGNATURE) {
+      *a = TIMING_WORD(copy + 4);
+      *b = TIMING_WORD(copy + 8);
+      *t = TIMING_WORD(copy + 12);
+    } else if (save) {
+      TIMING_WORD(copy) = POPS_TIMING_SIGNATURE;
+      TIMING_WORD(copy + 4) = *a;
+      TIMING_WORD(copy + 8) = *b;
+      TIMING_WORD(copy + 12) = *t;
+    }
+    cfg->timings_ready = 1;
+    return;
+  }
+
+  uint16_t pad = *(volatile uint16_t *)(ee + POPS_PAD_STATE_ADDR + 2);
+  if (pad == POPS_TIMING_PAD_L1)
+    timing_set(b, *b + 1, copy + 8, save);
+  else if (pad == POPS_TIMING_PAD_L2)
+    timing_set(b, *b - 1, copy + 8, save);
+  else if (pad == POPS_TIMING_PAD_R1)
+    timing_set(t, *t + 1, copy + 12, save);
+  else if (pad == POPS_TIMING_PAD_R2)
+    timing_set(t, *t - 1, copy + 12, save);
+  else {
+    pad = *(volatile uint16_t *)(ee + POPS_PAD_STATE_ADDR + POPS_PAD_STATE_STRIDE + 2);
+    if (pad == POPS_TIMING_PAD_L1)
+      timing_set(a, *a + 1, copy + 4, save);
+    else if (pad == POPS_TIMING_PAD_L2)
+      timing_set(a, *a - 1, copy + 4, save);
+    else if (pad == POPS_TIMING_PAD_R1)
+      timing_set(a, *a + 0x10, copy + 4, save);
+    else if (pad == POPS_TIMING_PAD_R2)
+      timing_set(a, *a - 0x10, copy + 4, save);
+  }
+}
+
 #ifdef POPS_RESIDENT_IMAGE
 
 typedef int (*PopsIntcHandler)(int cause);
@@ -255,6 +311,7 @@ int pops_resident_vblank(int cause) {
   uint32_t base = *(volatile uint32_t *)cfg->ram_base_ptr;
   if (cfg->flags & POPS_RES_F_PAD_ID)
     pops_resident_pad_ids(cfg, (uint8_t *)POPS_PAD_STATE_ADDR);
+  pops_resident_timings(cfg, 0, POPS_SCRATCHPAD_ADDR);
   pops_resident_frame(cfg, (uint8_t *)base);
   return ((PopsIntcHandler)cfg->pops_vblank)(cause);
 }

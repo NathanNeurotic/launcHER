@@ -39,8 +39,8 @@ design is launcHER's own: the original hooks other places (its code at
 exit program, not a cheat engine).
 
 The resident code runs the cheat engine, an independent manual GS DISPLAY
-bridge, the text `$480p` progressive bridge, the pad commands and the
-widescreen family (below). [Manual DISPLAY contracts](POPS_MANUAL_DISPLAY_CONTRACTS.md) record
+bridge, the text `$480p` progressive bridge, the pad commands, the
+widescreen family and `$SET_TIMINGS` (below). [Manual DISPLAY contracts](POPS_MANUAL_DISPLAY_CONTRACTS.md) record
 all-six, per-file acceptance and the guarded bridge. Commands still BLOCKED
 below need their behavior worked out and added to it.
 
@@ -68,7 +68,7 @@ below need their behavior worked out and added to it.
 | `$UNDO_COMPATIBILITY_CODES`, `$UNDO_GAME_FIXES`, `$UNDO_LIBCRYPT_FIX` | restore sites the built-in DB patched | **MISSING** (no built-in DB to undo) |
 | `$WIDESCREEN`, `$ULTRA_WIDESCREEN`, `$EYEFINITY` | hooks POPS's GTE perspective transform (RTPS/RTPT): the MAC1 store at `0x2089a8` becomes x·75/100 (`$WIDESCREEN`, 16:9) or x/4 (`$EYEFINITY`, 48:9); `$ULTRA_WIDESCREEN` also scales again at the IR1 store `0x208a2c` (x·0.5625 overall), writing the result to MAC1 and leaving IR1 unstored. Each handler rewrites all sites, so the last command wins | **PRESENT**: own guarded stubs, same arithmetic (32-bit product, truncating division) and the same ULTRA register effect; handler writes checked against the original, built stubs run under emulation on 414 values per mode; **NOT TESTED** on a console |
 | `$ROLLBACK` | restores 10 breakpoint sites | **PRESENT** |
-| `$SET_TIMINGS` | writes inside the copied code | **BLOCKED** |
+| `$SET_TIMINGS` | enables a pass in its copied code (`0x238a90` = `b 0x238c50`, then `0x238cfc` NOPs that branch after the first pass). First pass, once POPS has loaded the slot 0 VMC image (word `0x507930` nonzero): if offset `0x800` of that image (`0x508130`) holds `"01"`, restore the timing words `0x502770`, `0x700033e0`, `0x700033e4` from `+4/+8/+12`; otherwise write `"01->"` and the current values there. Later passes: pad 1 alone holding L1/L2 adds ±1 to `0x700033e0`, R1/R2 ±1 to `0x700033e4`; otherwise pad 2 alone holding L1/L2 adds ±1 and R1/R2 ±0x10 to `0x502770`; each new value is also copied into the VMC image | **PRESENT**: resident code, once per VBLANK_START. Restores a copy that is already on the card but, by default, **never writes the memory card** (a build flag, `POPS_RES_F_TIMINGS_SAVE`, adds the original's writes; the launcher does not set it). Handler writes checked against the original; 240 random 40-frame runs match the original's own block (timings, and the card copy with the save flag); the built image is run under emulation. The original's pass rate follows POPS's event posts and was not measured, so the adjust speed may differ; **NOT TESTED** on a console |
 | `$BREAKPOINT0/1` | exception hook | **MISSING** |
 | `$NOVMC0` | flag at `0x232c90` | **PARTIAL**: launcHER uses the original's other VMC-off helper (FUN_008dc12c slot 1, `0x2007b4=0`) |
 | `$NOVMC1` | flag + `0x20d0e0=li a0,0` | **PRESENT** (the core write) |
@@ -141,7 +141,7 @@ record 60 original region-control-flow combinations. **No console test.**
 1. Hardware check of this change: a US disc and a European disc on an NTSC
    console, plus `$FORCEPAL` and `$NOPAL` (picture rate and colour).
 2. Grow the resident code (cheats, manual/progressive display and pad
-   commands and widescreen exist, NOT TESTED on a console) for `$SET_TIMINGS`. Complete PATCH video
+   commands, widescreen and `$SET_TIMINGS` exist, NOT TESTED on a console). Complete PATCH video
    actions 6/7 session/owned-entry dispatch separately; text `$480p` now works
    at the component/staging level. [Progressive contracts](POPS_PROGRESSIVE_CONTRACTS.md).
 3. Recover the built-in per-game DB at `0x8e00d0`. (The pad commands are

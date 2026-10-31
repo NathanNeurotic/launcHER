@@ -1197,7 +1197,7 @@ int launchPOPS(int argc, char *argv[]) {
     }
   }
 
-  /* launcHER's resident cheat/display/pad/widescreen code runs inside POPS. Validate and
+  /* launcHER's resident cheat/display/pad/widescreen/timing code runs inside POPS. Validate and
    * hook now, while failing is still
    * harmless; the image itself is copied just before handoff. */
   int residentNeeded = pops_resident_build_config(&residentCfg, &cfg);
@@ -1210,7 +1210,7 @@ int launchPOPS(int argc, char *argv[]) {
     res = pops_resident_check_image(pops_resident_bin, size_pops_resident_bin, &residentHdr);
     if (!res && (uint32_t)(uintptr_t)stagedCore + plan.core_size > POPS_RESIDENT_BASE)
       res = -ERANGE; /* the trampoline still reads the staged core from there */
-    if (!res && (residentCfg.flags & (POPS_RES_F_CHEATS | POPS_RES_F_PAD_ID)))
+    if (!res && (residentCfg.flags & (POPS_RES_F_CHEATS | POPS_RES_F_PAD_ID | POPS_RES_F_TIMINGS)))
       res = pops_resident_hook_core((void *)stagedCore, plan.core_size, residentHdr.vblank_entry);
     if (!res)
       res = pops_resident_hook_pads((void *)stagedCore, plan.core_size, residentCfg.flags,

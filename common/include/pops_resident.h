@@ -28,7 +28,7 @@ extern "C" {
 #define POPS_RESIDENT_BASE        UINT32_C(0x0143a000)
 #define POPS_RESIDENT_LIMIT       UINT32_C(0x01460000)
 #define POPS_RESIDENT_MAGIC       UINT32_C(0x5352484c) /* "LHRS" */
-#define POPS_RESIDENT_VERSION     5
+#define POPS_RESIDENT_VERSION     6
 
 /* POPS's VBLANK_START registration and handler (verified on the pinned core) */
 #define POPS_VBLANK_LUI_ADDR      UINT32_C(0x0021b184)
@@ -67,6 +67,27 @@ typedef struct {
 #define POPS_RES_F_PAD_ID         (1u << 3)
 #define POPS_RES_F_D2LS           (1u << 4)
 #define POPS_RES_F_WIDESCREEN     (1u << 5)
+#define POPS_RES_F_TIMINGS        (1u << 6)
+#define POPS_RES_F_TIMINGS_SAVE   (1u << 7)
+
+/* $SET_TIMINGS: three POPS timing words, adjusted live with L1/L2/R1/R2.
+ * The original keeps a copy of them at offset 0x800 of the slot 0 VMC
+ * image POPS holds in RAM (signature "01->" then the three words) and
+ * restores it once that image is loaded (its first word turns nonzero).
+ * launcHER restores a copy that is already there; it writes one only with
+ * POPS_RES_F_TIMINGS_SAVE, which the launcher does not set. */
+#define POPS_TIMING_A_ADDR        UINT32_C(0x00502770) /* pad 2: +-1, R +-0x10 */
+#define POPS_TIMING_B_OFFSET      0x33e0u /* scratchpad; pad 1 L1/L2 */
+#define POPS_TIMING_C_OFFSET      0x33e4u /* scratchpad; pad 1 R1/R2 */
+#define POPS_SCRATCHPAD_ADDR      UINT32_C(0x70000000)
+#define POPS_VMC0_IMAGE_ADDR      UINT32_C(0x00507930)
+#define POPS_TIMING_SAVE_ADDR     (POPS_VMC0_IMAGE_ADDR + 0x800u)
+#define POPS_TIMING_SIGNATURE     UINT32_C(0x3e2d3130) /* "01->" */
+/* Pad halfwords (active low) that adjust: exactly one button held. */
+#define POPS_TIMING_PAD_L1        0xfbffu
+#define POPS_TIMING_PAD_L2        0xfeffu
+#define POPS_TIMING_PAD_R1        0xf7ffu
+#define POPS_TIMING_PAD_R2        0xfdffu
 
 /* Widescreen: POPS's GTE perspective transform (RTPS/RTPT, loop at
  * 0x00208900) stores MAC1 at 0x002089a8 (sw $t0,0x64($a0)) and IR1 at
@@ -107,6 +128,7 @@ typedef struct {
   uint8_t pad_id[2];
   uint8_t gte_divisor;   /* widescreen: 100, or 4 for $EYEFINITY */
   PopsCheatEntry cheats[POPS_MAX_CHEATS];
+  uint8_t timings_ready; /* $SET_TIMINGS: VMC image seen, adjusting */
 } PopsResidentConfig;
 
 /* One pass over the codes against PS1 RAM (ram = base of 2 MiB).
@@ -129,6 +151,16 @@ void pops_resident_pad_ids(const PopsResidentConfig *cfg, uint8_t *state);
  * drive the stick. Readings without stick data (digital mode) are left
  * alone, and without pressure data the stick reads centred. */
 void pops_resident_d2ls(uint8_t *pad, uint32_t bytes);
+
+/* $SET_TIMINGS, once per frame. ee is where EE address 0 is mapped and spr
+ * where the scratchpad is (0 and POPS_SCRATCHPAD_ADDR on the console).
+ * Until the slot 0 VMC image is loaded it waits; on the frame it appears,
+ * a saved copy is restored (or, with POPS_RES_F_TIMINGS_SAVE, a new one is
+ * written). On later frames pad 1 alone holding L1/L2 adds 1/-1 to timing
+ * B and R1/R2 to timing C; otherwise pad 2 alone holding L1/L2 adds 1/-1
+ * and R1/R2 0x10/-0x10 to timing A. With POPS_RES_F_TIMINGS_SAVE each new
+ * value is also copied to the VMC image. */
+void pops_resident_timings(PopsResidentConfig *cfg, uintptr_t ee, uintptr_t spr);
 
 /* Launcher side (pops_resident.c) */
 

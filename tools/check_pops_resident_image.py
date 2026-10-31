@@ -20,7 +20,7 @@ BASE = 0x0143A000
 (magic, ver, hs, fsz, isz, entry, cfga, display_entry, progressive_entry,
  pad_read_entry, pad_read_exit, gte_scale, gte_divide, gte_ultra) = struct.unpack_from('<IHHIIIIIIIIIII', img, 0)
 assert magic == 0x5352484C and fsz == len(img), (hex(magic), fsz, len(img))
-assert ver == 5 and hs == 52
+assert ver == 6 and hs == 52
 
 mu = Uc(UC_ARCH_MIPS, UC_MODE_MIPS64 + UC_MODE_LITTLE_ENDIAN)
 # The R5900 has MIPS IV's movz/movn, which unicorn's default R4000 model
@@ -303,3 +303,46 @@ config([], flags=1 << 5, divisor=0)
 gte_words(0x08000000 | (gte_divide >> 2), 0xAC880024)
 assert gte_store(0x2089A8, 0x2089B0, 12345, 0)[0] == 12345
 print('resident widescreen GTE stubs: PASS (%d values x 3 modes, both sites, 28 registers kept)' % len(xs))
+
+
+# $SET_TIMINGS through the built VBLANK entry: waits for the slot 0 VMC
+# image, restores a saved copy once, then adjusts from the pads every frame.
+# Without the save flag (never set by the launcher) the card copy is not
+# written; with it, new values are mirrored there.
+TREADY = cfga + 32 + 256 * 8
+u32 = lambda a: struct.unpack('<I', mu.mem_read(a, 4))[0]
+w32 = lambda a, v: mu.mem_write(a, struct.pack('<I', v & 0xffffffff))
+timings = lambda: (u32(0x502770), u32(0x700033e0), u32(0x700033e4))
+card = lambda: tuple(u32(0x508130 + 4 * i) for i in range(4))
+def pads(p0, p1):
+    mu.mem_write(0x507002, struct.pack('<H', p0))
+    mu.mem_write(0x507092, struct.pack('<H', p1))
+for save in (0, 1):
+    mu.mem_write(0x507930, bytes(0x1000))
+    mu.mem_write(TREADY, b'\x00')
+    w32(0x502770, 0x100); w32(0x700033e0, 0x200); w32(0x700033e4, 0x300)
+    if not save:
+        for i, v in enumerate((0x3e2d3130, 0x111, 0x222, 0x333)):
+            w32(0x508130 + 4 * i, v)
+    config([], flags=(1 << 6) | (save << 7))
+    pads(0xfbff, 0xfbff)
+    n = calls()
+    vblank()
+    assert timings() == (0x100, 0x200, 0x300) and calls() == n + 1, 'waits for the VMC image'
+    w32(0x507930, 0x434d)
+    vblank()
+    want = (0x111, 0x222, 0x333) if not save else (0x100, 0x200, 0x300)
+    assert timings() == want, [hex(v) for v in timings()]
+    base = list(want)
+    for p0, p1, idx, step in ((0xfbff, 0xffff, 1, 1), (0xfeff, 0xffff, 1, -1), (0xf7ff, 0xffff, 2, 1),
+                              (0xfdff, 0xffff, 2, -1), (0xffff, 0xfbff, 0, 1), (0xffff, 0xfeff, 0, -1),
+                              (0xffff, 0xf7ff, 0, 0x10), (0xffff, 0xfdff, 0, -0x10), (0xfbff, 0xf7ff, 1, 1),
+                              (0xfaff, 0xffff, None, 0), (0xffff, 0xffff, None, 0)):
+        pads(p0, p1)
+        vblank()
+        if idx is not None:
+            base[idx] = (base[idx] + step) & 0xffffffff
+        assert timings() == tuple(base), (hex(p0), hex(p1), [hex(v) for v in timings()])
+    expect_card = (0x3e2d3130, 0x111, 0x222, 0x333) if not save else (0x3e2d3130, *base)
+    assert card() == expect_card, [hex(v) for v in card()]
+print('resident $SET_TIMINGS: PASS (VMC wait, restore, 11 pad cases, card untouched unless save flag)')

@@ -101,6 +101,8 @@ int pops_resident_build_config(PopsResidentConfig *out, const PopsConfig *cfg) {
   }
   if (cfg->pad_d2ls)
     out->flags |= POPS_RES_F_D2LS;
+  if (cfg->set_timings)
+    out->flags |= POPS_RES_F_TIMINGS;
   if (cfg->widescreen > POPS_WIDESCREEN_EYEFINITY)
     return -EINVAL;
   if (cfg->widescreen) {
