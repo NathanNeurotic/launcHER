@@ -26,21 +26,27 @@ that last change. Continue from current HEAD, fetching again before editing.
   pass. Normal and `LAUNCHER_BOOT_TRACE=ON,DEBUG=ON` PS2 builds pass. The built
   2,672-byte resident image passes its Unicorn entry/chaining check. These are
   host/target-build/emulated results; no new physical console run occurred.
-- REPOP `feat/psxcore-validation` is now **`8d2714d5`**. R20 replaces the
-  zero CDVD gate, invented semaphore/pending state, and eight return-zero
-  kernel wrappers. **49 original-vs-compiled-EE component cases pass** with
-  modeled kernel/SIF callees and final RAM auditing. Full Python suite:
-  **237 tests, 13 skipped, zero failures/errors**. All 11 EE units compile
-  with existing warnings. The full-archive query is now 124 bytes and the gate
-  428 bytes; the old eight-byte-query blocker is superseded. Read REPOP's
-  `POPSTARTER_CD_GATE_CONTRACT.md` and R20 before making runtime claims.
-  Original-uninitialized semaphore fields are zeroed and excluded from strict
-  byte equivalence. Lower SIF/init behavior, global-state ownership, complete
-  runtime link and physical acceptance remain open; no baseline was promoted.
-  The independent FP run remains **16,393 patterns / 32,786 calls pass**.
-  **Next work:** the original four-argument `FUN_00917f80` mode/packet/cache
-  contract, then lower SIF/init dependencies and launcHER resident features.
-  Existing `FUN_0091a604` bounds warning is still open.
+- Latest catch-up merges: launcHER **`b34affc`** integrates EMBER through
+  `f0e5948` (explicit CUE forwarding coverage/docs and newer credit links).
+  Its build/host/argv CI passes. REPOP **`feeb3346`** integrates main through
+  `b07b135a` (credit updates); older dirty checkouts were preserved.
+- REPOP `feat/psxcore-validation` is now **`c420ba47`**. R20/R21 recover the
+  gate/syscalls, four-argument CD read, and two-argument cache span. **95
+  original-vs-compiled-EE component cases pass**; full Python suite **240 tests,
+  13 skipped, zero failures/errors**. All 11 EE units compile with existing
+  warnings. Read `POPSTARTER_CD_READ_CONTRACT.md` and registers R20/R21.
+  The initial R21 exception was Unicorn's unsupported R5900 multiply in a
+  branch delay slot; explicit instruction modeling with private NOP translation
+  slots resolves it. Cache/SYNC are ordered modeled events, not hardware cache
+  coherence; the void cache helper's unspecified v0 is excluded. Original
+  uninitialized semaphore fields remain excluded from strict equivalence.
+  No baseline or real kernel/SIF/device acceptance was promoted.
+  **Next:** asynchronous callback `FUN_00918710` and completion `FUN_00918798`.
+  Original instruction inspection now shows the existing candidate uses the
+  wrong head-copy length, skips tail copy after a head copy, and uses normal
+  SignalSema instead of original iSignalSema. Fix and compare these contracts
+  before claiming completed reads; lower SIF/init/global ownership remains
+  open. Existing `FUN_0091a604` bounds warning is also open.
 - The user explicitly requested sustained work until 100% verified parity.
   The thread goal is active. Continue making validated increments; do not
   treat a checkpoint or green CI as completion of the full objective.
