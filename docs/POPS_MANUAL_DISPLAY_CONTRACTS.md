@@ -37,8 +37,9 @@ not erase an earlier completed override. The original installs its fixed
 DISPLAY entry at `0x239768`, writes its value at `0x239778`, jumps there from
 `0x21a094`, and restores `andi a0,s1,1` at `0x23acb0/0x23ad0c`.
 
-This is distinct from the progressive helper at `0x2394f0`. `$480p` and
-PATCH actions 6/7 remain unimplemented; the latter still reject atomically.
+This is distinct from the original progressive helper at `0x2394f0`.
+Text `$480p` now selects the independent owned progressive bridge; PATCH
+actions 6/7 still reject pending their separate dispatch integration.
 
 ## Independent production implementation
 
@@ -49,7 +50,8 @@ can also be used as a stream after `pops_config_init`.
 
 The current resident image format is version 3, with a 32-byte header carrying
 separate VBLANK, manual display and progressive entries, and an 8-byte-aligned
-configuration. The progressive entry is not selected yet. The earlier manual
+configuration. Text `$480p` now selects the progressive entry; see the
+[progressive contract](POPS_PROGRESSIVE_CONTRACTS.md). The earlier manual
 checkpoint used version 2 and a 28-byte header. Its first config
 field is the DISPLAY value; a static offset assertion binds the assembly ABI.
 The independent four-instruction bridge loads that value using `v0`, restores
@@ -63,8 +65,8 @@ A completed manual file clears HDTVFIX at its end, regardless of command
 order within that file; a later file can set HDTVFIX again. The parser tracks
 that state and config staging restores the interlace arguments. A later
 `$480p` supersedes an earlier fixed DISPLAY override. A complete manual set
-in a file containing `$480p` is recognized but rejected before handoff until
-the progressive core state is implemented.
+in a file containing `$480p` now selects the manual entry with guarded progressive
+static mode state; the dedicated text-sequencing comparison covers this case.
 
 The installer checks the load at `0x21a094`, its delay slot at `0x21a098`,
 and both interlace argument sites before any write. It permits the current
@@ -90,7 +92,7 @@ image is still copied as the last write before the trampoline.
 - The hook guards pass on the pinned external Sony core.
 - Normal and trace/debug PS2 builds pass; the resident image uses `-Werror`.
   The original manual checkpoint was 2,704 resident bytes including configuration;
-  the current image with the unselected progressive bridge is 3,936 bytes.
+  the current image with the progressive bridge is 3,936 bytes.
 - Built-image Unicorn checks retain VBLANK chaining/cheat tests. The actual
   display jump, its delay slot and all 31 nonzero GPRs are checked at the
   continuation for four DISPLAY values. An optional original comparison

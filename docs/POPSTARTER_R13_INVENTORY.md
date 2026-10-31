@@ -38,8 +38,8 @@ design is launcHER's own: the original hooks other places (its code at
 `0x01450000`, reached from POPS's `ExecOSD` tail call at `0x002362fc`, is its
 exit program, not a cheat engine).
 
-The resident code runs the cheat engine and an independent manual GS DISPLAY
-bridge. [Manual DISPLAY contracts](POPS_MANUAL_DISPLAY_CONTRACTS.md) record
+The resident code runs the cheat engine, an independent manual GS DISPLAY
+bridge and the text `$480p` progressive bridge. [Manual DISPLAY contracts](POPS_MANUAL_DISPLAY_CONTRACTS.md) record
 all-six, per-file acceptance and the guarded bridge. Commands still BLOCKED
 below need their behavior worked out and added to it.
 
@@ -51,7 +51,7 @@ below need their behavior worked out and added to it.
 | `$Cxxxxxxx`, `$S…`, `$T…` | resident cheat engine | **MISSING** (not parsed) |
 | `$SMOOTH` | `0x21af88=0xa21a22a0341a0001` (64-bit) | **PRESENT**: guarded, original-command differential; no console run |
 | `$DX_n $DY_n $MAGH_n $MAGV_n $DW_n $DH_n` | all-six, first-valid per file; fixed GS DISPLAY override | **PRESENT**: independent guarded resident bridge; 228 original file cases plus built-image comparison; no console run |
-| `$480p` | flags + `0x21af94=0x50`, `0x23acb0/0x23ad0c=li a0,0`, jump into resident code | **BLOCKED**; parsed, disables European auto PAL as in the original, no core writes |
+| `$480p` | static mode/arguments plus resident DISPLAY updates | **PRESENT**: guarded owned context bridge; 31 original text/file sequences and 428 component/bridge cases; no console run; conflicting payloads reject |
 | `$LEFTADJ_` | `1..255`: `0x21a0a4=0x64a50f00 + ((4096-n)&255)`, `0x21a0a8=0xfc450000` | **PRESENT**: guarded, original-command differential; no console run |
 | `$SCANLINES` | `0x21e454=0x22b50006` | **PRESENT** |
 | `$VCDID_n` | selects a built-in per-game DB entry | **MISSING** |
@@ -138,9 +138,10 @@ record 60 original region-control-flow combinations. **No console test.**
 
 1. Hardware check of this change: a US disc and a European disc on an NTSC
    console, plus `$FORCEPAL` and `$NOPAL` (picture rate and colour).
-2. Grow the resident code (it exists and runs the cheat engine, NOT TESTED)
-   to cover the BLOCKED commands: pads, `$480p`, widescreen, timings, and
-   PATCH video actions 6/7.
+2. Grow the resident code (cheats and manual/progressive display exist, NOT
+   TESTED on a console) for pads, widescreen and timings. Complete PATCH video
+   actions 6/7 session/owned-entry dispatch separately; text `$480p` now works
+   at the component/staging level. [Progressive contracts](POPS_PROGRESSIVE_CONTRACTS.md).
 3. Recover `$PAD01ID` and the built-in per-game DB at `0x8e00d0`.
    The six manual DISPLAY commands now have an independent resident bridge
    and 228 original file cases; see [manual contracts](POPS_MANUAL_DISPLAY_CONTRACTS.md).

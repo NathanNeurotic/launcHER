@@ -2,93 +2,48 @@
 
 Continue [draft launcHER PR #23](https://github.com/NathanNeurotic/launcHER/pull/23) on `codex/popstarter-replacement`. Fetch before editing, preserve newer work, publish validated incremental commits on this same PR, and include `Co-authored-by: ChatGPT <chatgpt@openai.com>`. Keep the PR draft and unmerged.
 
-## Current continuation (supersedes historical build/oracle blockers below)
+## Current continuation — R27, 2026-10-31
 
-This continuation published `5dc8076` (PATCH 6/7 guard), `4ac9d30` (six direct
-display commands), and the current PATCH-state/region-ordering change. The
-concurrent `8f40793` resident-engine commit was fetched and integrated before
-that last change. Continue from current HEAD, fetching again before editing.
-
-- PATCH 6/7 still reject before any payload/mode/context writes. The resident
-  cheat image at `0x0143a000` does not supply their `0x2394f0` video target.
-- `$SMOOTH`, `$LEFTADJ_`, `$XPOS_`, `$YPOS_`, `$DWSTRETCH_`, `$DWCROP_` have
-  guarded production staging. [Display contracts](POPS_DISPLAY_CONTRACTS.md)
-  record the exact values, original windows, hashes and 1,596 original-command
-  input comparisons plus two first-position-state checks.
-- PATCH sessions now guard all four PAL sites across ordered payloads. Text
-  `$480p` state suppresses explicit PATCH PAL; `$NOPAL` still permits explicit
-  PATCH PAL. FORCEPAL now waits until after fix files, so PATCH PAL/disable-auto
-  suppresses its final branch as in the original. Intentional payload changes
-  are tracked through final video. [State contracts](POPS_PATCH_VIDEO_STATE.md)
-  document the 60-combination original region-control-flow comparison.
-- The integrated external test entry point passes **104 tests**, with both
-  external inputs. All **18 host entry points** (including argv and resident)
-  pass. Normal and `LAUNCHER_BOOT_TRACE=ON,DEBUG=ON` PS2 builds pass. The built
-  2,672-byte resident image passes its Unicorn entry/chaining check. These are
-  host/target-build/emulated results; no new physical console run occurred.
-- New manual GS DISPLAY increment: `$DX/$DY/$MAGH/$MAGV/$DW/$DH` now
-  follow all-six, first-valid, file-local acceptance (0..99999, 1..5 digits).
-  Independent stackless resident bridge at the guarded `0x21a094` hook;
-  image format v2 has a display entry and 8-byte-aligned config. Read
-  [manual DISPLAY contracts](POPS_MANUAL_DISPLAY_CONTRACTS.md). **228 original
-  file cases** plus 18 option-order sequences, 109 aggregate external tests, all 18 host entry points and
-  both PS2 builds pass. The 2,704-byte built resident image passes VBLANK and
-  display-entry checks; four display values also match original-entry GPR
-  results in Unicorn's 64-bit view. No console run. Progressive `$480p` and
-  PATCH actions 6/7 remain separate open work; the latter still reject.
-- Progressive arithmetic/state candidate is now recovered separately from
-  the production manual hook: [contracts](POPS_PROGRESSIVE_CONTRACTS.md).
-  Native C and compiled EE each match 428 bounded original instruction cases;
-  the aggregate external suite passes 115 tests with EE compiler/Unicorn.
-  The helper is intentionally not linked into the live resident yet. Next:
-  preserve the live bridge register contract and original ordered writes,
-  guard core sites and honor text/PATCH sequencing before enabling 6/7.
-  Unicorn memory-write hooks caused a separately reproduced SD-delay fault;
-  the compiled runner audits every mapped byte after execution instead.
-  No live progressive or hardware acceptance is claimed.
-- The original-address progressive adapter now also matches all 428 native
-  ordered-write traces and 428 actual compiled EE final-memory cases. The
-  target audit covers 32 MiB plus scratchpad, except a 0x400-byte C working
-  stack. It preserves blocked no-write and unknown-width stale-field paths.
-  Aggregate suite: 118 tests; default skips 10 optional cases. Read the live
-  checkpoint in [progressive contracts](POPS_PROGRESSIVE_CONTRACTS.md).
-  Still not installed: next verify the mid-function bridge's complete
-  GPR/HI/LO preservation, static guards and sticky mode/file/PATCH sequencing.
-- The built progressive bridge now passes 428 owned-image cases, including
-  adversarial GPR/opaque upper lane/HI-LO clobbering on C entry, original final
-  fields, stock resume contract and a damaged-GP negative check. Image v3:
-  32-byte header, 3,936 resident bytes. LQ/SQ and secondary accumulator moves
-  use explicit private translation adapters; ordinary C executes in Unicorn.
-  Both target builds, resident host tests and old VBLANK/manual image checks
-  pass. Aggregate 119 tests; default skips 11 optional cases. Read the latest
-  [bridge checkpoint](POPS_PROGRESSIVE_CONTRACTS.md). The entry is embedded
-  but NOT selected. Next add guarded static mode/hook writes and original
-  sticky progressive/manual-file/HDTV precedence before enabling text mode.
-- Latest catch-up merges: launcHER **`b34affc`** integrates EMBER through
-  `f0e5948` (explicit CUE forwarding coverage/docs and newer credit links).
-  Its build/host/argv CI passes. REPOP **`feeb3346`** integrates main through
-  `b07b135a` (credit updates); older dirty checkouts were preserved.
-- REPOP source recovery is **`15b8727f`**, through R22; its synchronized
-  R23 documentation checkpoint is **`b2126979`** on `feat/psxcore-validation`.
-  Gate/syscalls, read/cache submission and completion now pass **169
-  original-vs-compiled-EE component cases**. Three native callback regressions
-  cover independent lengths, valid tail after missing head destination and
-  zero-copy completion. Full suite **243 tests, 13 skipped, zero failures/errors**;
-  all eleven EE units compile. Read `POPSTARTER_CD_COMPLETION_CONTRACT.md`
-  and registers R20–R22 for hashes, reproduction and modeled boundaries.
-  The R21 Unicorn failure was diagnosed and resolved with explicit R5900
-  multiply/delay-slot modeling; the unspecified void return register is not
-  equated. R22 repairs head length, both-copy behavior, explicit packet ABI
-  and iSignalSema completion. Lower memcpy/kernel/SIF/cache hardware, original
-  uninitialized descriptor fields, callback relocation/global ownership and
-  complete runtime/device acceptance remain open. No baseline was promoted.
-  **Next for the capability goal:** independently implement the remaining
-  launcHER progressive display/pad/cheat features and built-in per-game data,
-  using measured original contracts and guarded production integration.
-  Existing REPOP `FUN_0091a604` bounds warning remains separate open work.
-- The user explicitly requested sustained work until 100% verified parity.
-  The thread goal is active. Continue making validated increments; do not
-  treat a checkpoint or green CI as completion of the full objective.
+- **Text `$480p` is now selected through the guarded owned resident bridge.**
+  [Progressive contracts](POPS_PROGRESSIVE_CONTRACTS.md) and metadata record
+  428 original/native ordered-write cases, 428 compiled EE final-memory cases,
+  428 built context-bridge cases, and 31 original text/file sequences. The
+  image is v3, 32-byte header, 3,936 resident bytes. Context checks model
+  EE-only quad/secondary accumulator transfers explicitly; no full hardware
+  or independent full EE/MMI execution is claimed.
+- Progressive intent is sticky across NOPAL/FORCEPAL. The production fix
+  session retains disable-PAL state, then region processing finishes before
+  guarded static setup. Manual all-six file priority and HDTVFIX/NOHDTVFIX
+  order match original sequences. All five static sites are checked before
+  any hook write. Conflicting payload changes reject and discard that launch.
+- **PATCH actions 6/7 still reject before payload/mode/context writes.** Their
+  separate session/mode/owned-entry dispatch is the next implementation task;
+  do not simply remove the old guard now that a text bridge exists.
+- Manual `$DX/$DY/$MAGH/$MAGV/$DW/$DH`: 228 original file cases, 18 option-order
+  sequences, first valid 0..99999 in each file, all six required per file.
+  Six direct display commands retain 1,596 original inputs plus two one-shot
+  states. Ordered PAL/region retains 60 original combinations. Read the linked
+  contracts; these are component proofs, not gameplay or picture acceptance.
+- Current validation: **121 aggregate external tests**, default 12 optional
+  skips; **19 host entry points**; normal and trace/debug target builds.
+  Existing VBLANK/manual image checks and the built progressive bridge pass.
+  No new console run occurred. Latest published bridge checkpoint `9bf4fc6`
+  has green build/host/argv CI; check current-head CI after publishing R27.
+- Catch-up base merge `b34affc` includes EMBER through `f0e5948` (CUE argument
+  coverage/docs and credit links). Older uncommitted video work remains in
+  its preserved stash. Current REPOP checkout is separate from the older
+  dirty checkout; do not overwrite either.
+- REPOP source recovery remains `15b8727f` (R22): 169 original-vs-compiled-EE
+  CD component cases, 243 tests / 13 skips, all 11 EE units compile. Lower
+  memcpy/kernel/SIF/cache hardware, callback relocation/global ownership and
+  full runtime remain open. R23–R26 docs through `727460f2` synchronize manual
+  and progressive recovery. Update that handoff after this R27 increment.
+  No baseline promotion; existing `FUN_0091a604` bounds warning remains open.
+- The user explicitly requested sustained work until **100% verified parity**.
+  This goal remains incomplete. Keep publishing validated increments and both
+  handoffs. Remaining pad/cheat forms, built-in per-game data, BIOS/OSD/IGR skin,
+  modules, physical disc, transports/game/controller/CDDA and fresh-VMC save /
+  reload / cold-power-cycle evidence are separate acceptance gates.
 
 ## Reproduction and preserved local work
 

@@ -39,15 +39,16 @@ int pops_fix_finalize_video(PopsFixContext *context, void *staged_core,
                              size_t core_size, int region, uint8_t video_mode);
 /* expected_trojan selects TROJAN versus PATCH; slot must match the filename.
  * PATCH data precedes its four mode bytes, in recorded order. Video actions
- * (PAL, disable-auto) and mode 6 are supported. Video actions 6/7 require
- * absent resident code; they and mode 8 fail before any payload/mode writes.
+ * (PAL, disable-auto) and mode 6 are supported. Video actions 6/7 still need
+ * verified resident/session dispatch; they and mode 8 fail before writes.
  * Context, input container and staged core must be disjoint. */
 int pops_fix_stage(PopsFixContext *context, void *staged_core, size_t core_size,
                     const void *file, size_t file_size, unsigned slot,
                     int expected_trojan);
 
-/* $FORCEPAL (POPS_VMODE_NTSC2PAL) PAL patch and $HDTVFIX. Every other
- * mode and nonzero offsets return -ENOTSUP: they have no grounded writes. */
+/* Direct $FORCEPAL (POPS_VMODE_NTSC2PAL) and $HDTVFIX writes. $480p uses the
+ * separate resident installer; progressive/unsupported modes and nonzero
+ * offsets return -ENOTSUP here. NOPAL requests leave video unchanged here. */
 int pops_apply_video_overrides(void *staged_core, size_t core_size,
                                uint8_t video_mode, uint8_t hdtv_fix,
                                int16_t x_offset, int16_t y_offset);

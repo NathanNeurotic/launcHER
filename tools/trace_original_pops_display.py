@@ -31,7 +31,8 @@ MANUAL_WINDOWS = {
 MANUAL_GLOBALS = (0x4fb4, 0x4fb8, 0x4fb0, 0x4fc8, 0x4fc4, 0x4fc0)
 MANUAL_OPTIONS = {'$HDTVFIX': (0x89d354, 0x89d53c),
                   '$NOHDTVFIX': (0x89d53c, 0x89d764),
-                  '$480p': (0x890118, 0x890308)}
+                  '$480p': (0x890118, 0x890308),
+                  '$NOPAL': (0x8984ac, 0x898630), '$FORCEPAL': (0x898630, 0x898840)}
 LOOP = 0x885a04
 MASK64 = (1 << 64) - 1
 

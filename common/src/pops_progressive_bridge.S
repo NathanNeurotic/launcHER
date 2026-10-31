@@ -2,7 +2,7 @@
  * No register argument is borrowed from the interrupted Sony function.
  * All GPRs including opaque upper lanes and both HI/LO banks are saved.
  * a1 low 64 bits receives DISPLAY; stock continuation consumes it with SD.
- * The loader does not select this entry until integration is verified. */
+ * Entered only after guarded static setup of the identified Sony core. */
 .set push
 .set noreorder
 .set noat

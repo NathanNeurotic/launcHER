@@ -54,6 +54,7 @@ class PopsConfig(c.Structure):
         ("gs_values", c.c_uint32 * 6),
         ("gs_mask", c.c_uint8),
         ("gs_display_valid", c.c_uint8),
+        ("progressive_requested", c.c_uint8),
     ]
 
 class PopsCompatEntry(c.Structure):

@@ -14,7 +14,8 @@
  * lui $a1,0x22 / addiu $a1,$a1,-0x3298 at 0x0021b184 and 0x0021b18c. Those
  * two words are pointed at pops_resident_vblank instead, which does its work
  * and then calls POPS's handler, so POPS behaves as before. The separate
- * display hook replaces the load at 0x21a094 and rejoins at 0x21a098. */
+ * display hook replaces the load at 0x21a094 and rejoins at 0x21a098.
+ * Progressive mode selects a context-preserving bridge at the same site. */
 
 #include <stddef.h>
 #include <stdint.h>
@@ -52,11 +53,12 @@ typedef struct {
   uint32_t vblank_entry; /* address of pops_resident_vblank */
   uint32_t config_addr;  /* address of the PopsResidentConfig */
   uint32_t display_entry; /* mid-function GS DISPLAY hook; no C call ABI */
-  uint32_t progressive_entry; /* context-preserving bridge; not selected yet */
+  uint32_t progressive_entry; /* context-preserving progressive DISPLAY bridge */
 } PopsResidentHeader;
 
 #define POPS_RES_F_CHEATS         (1u << 0)
 #define POPS_RES_F_DISPLAY        (1u << 1)
+#define POPS_RES_F_PROGRESSIVE    (1u << 2)
 
 typedef struct {
   uint64_t gs_display;   /* offset zero, read by the stackless display entry */
@@ -96,6 +98,13 @@ int pops_resident_hook_core(void *staged_core, size_t core_size, uint32_t entry)
  * and both interlace argument sites before writing the hook. The image
  * entry sets a1 to gs_display, restores v0=0x12000000, then jumps to 0x21a098. */
 int pops_resident_hook_display(void *staged_core, size_t core_size, uint32_t entry);
+
+/* $480p static setup after region/fix staging. All five sites are checked
+ * before writes. interlace is li a0,0/1 or andi a0,s1,1. Unknown or conflicting
+ * payload changes reject; the caller must discard that staged launch. */
+int pops_resident_hook_progressive(void *staged_core, size_t core_size,
+                                    uint32_t entry, uint32_t interlace);
+uint32_t pops_resident_progressive_interlace(const PopsConfig *cfg);
 
 /* Copy the image to dest (the resident base on the console), zero its data,
  * and write the configuration. dest_addr is the address dest stands for. */

@@ -58,6 +58,12 @@ class DisplayTests(unittest.TestCase):
         cls.lib.pops_config_parse_line.argtypes = [c.POINTER(PopsConfig), c.c_char_p]
         cls.lib.pops_config_load_file.argtypes = [c.POINTER(PopsConfig), c.c_char_p]
         cls.lib.pops_resident_hook_display.argtypes = [c.c_void_p, c.c_size_t, c.c_uint32]
+        cls.lib.pops_resident_hook_progressive.argtypes = [c.c_void_p, c.c_size_t, c.c_uint32, c.c_uint32]
+        cls.lib.pops_resident_progressive_interlace.argtypes = [c.POINTER(PopsConfig)]
+        cls.lib.pops_resident_progressive_interlace.restype = c.c_uint32
+        cls.lib.pops_fix_context_init_video.argtypes = [c.c_void_p, c.c_void_p, c.c_size_t, c.c_uint8, c.c_uint8]
+        cls.lib.pops_fix_finalize_video.argtypes = [c.c_void_p, c.c_void_p, c.c_size_t, c.c_int, c.c_uint8]
+        cls.lib.pops_apply_region.argtypes = [c.c_void_p, c.c_size_t, c.c_int, c.c_uint8, c.c_int]
         for name in ('pops_apply_display_config', 'pops_apply_all_config_patches'):
             getattr(cls.lib, name).argtypes = [c.c_void_p, c.c_size_t, c.POINTER(PopsConfig)]
 
@@ -285,6 +291,96 @@ class DisplayTests(unittest.TestCase):
                     self.assertEqual(cfg.hdtv_fix, writes[0x23acb0] == 0x24040001, files)
         print(f'Original manual DISPLAY option-order PASS: {len(cases)} file sequences')
 
+    def test_progressive_hook_guards_are_atomic(self):
+        sites = {0x21a094: (0xde050010, 4), 0x21a098: (0x3c031200, 4),
+                 0x21af94: (2, 1), 0x23acb0: (0x32240001, 4), 0x23ad0c: (0x32240001, 4)}
+        def data():
+            b = bytearray(b'\xa5') * SIZE
+            for a, (v, w) in sites.items():
+                patch(b, a, v, w)
+            return b
+        def apply(b, size=SIZE, entry=0x143a040, arg=0x24040000):
+            return self.lib.pops_resident_hook_progressive((c.c_uint8 * SIZE).from_buffer(b), size, entry, arg)
+        b, expected = data(), data()
+        for a, v, w in ((0x21a094, 0x08000000 | (0x143a040 >> 2), 4), (0x21af94, 0x50, 1),
+                        (0x23acb0, 0x24040000, 4), (0x23ad0c, 0x24040000, 4)):
+            patch(expected, a, v, w)
+        for _ in range(2):
+            self.assertEqual(apply(b), 0)
+            self.assertEqual(b, expected)
+        for a in sites:
+            b = data()
+            b[a - BASE] ^= 1
+            before = bytes(b)
+            self.assertEqual(apply(b), -errno.EILSEQ)
+            self.assertEqual(b, before)
+        for a, v, w in ((0x21af94, 3, 1), (0x23acb0, 0x24040001, 4)):
+            b = data()
+            patch(b, a, v, w)
+            before = bytes(b)
+            self.assertEqual(apply(b), -errno.EILSEQ)
+            self.assertEqual(b, before)
+        b = data()
+        self.assertEqual(apply(b, size=0x3ad0f), -errno.ERANGE)
+        self.assertEqual(apply(b, entry=0x143a041), -errno.EINVAL)
+        self.assertEqual(apply(b, arg=0x24040002), -errno.EINVAL)
+        self.assertEqual(b, data())
+
+    @unittest.skipUnless(os.environ.get('POPSTARTER_TEST_ELF'), 'optional external POPStarter MAIN')
+    def test_original_progressive_text_staging(self):
+        from test_pops_fix_files import Context, pristine as fix_pristine
+        original = OriginalDisplay(Path(os.environ['POPSTARTER_TEST_ELF']).read_bytes())
+        full = [p + '1' for p in MANUAL_WINDOWS]
+        options = ('$HDTVFIX', '$NOHDTVFIX', '$NOPAL', '$FORCEPAL')
+        cases = [[['$480p']], [['$480p'], full], [full, ['$480p']],
+                 [['$480p'] + full + ['$HDTVFIX']], [full + ['$480p']],
+                 [['$480p'] + full, ['$HDTVFIX']], [full, ['$HDTVFIX', '$480p']]]
+        for option in options:
+            cases += [[['$480p', option]], [[option, '$480p']],
+                      [['$480p'], [option]], [['$480p'] + full, [option]],
+                      [[option] + full, ['$480p']], [['$480p', option] + full]]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'CHEATS.TXT'
+            for files in cases:
+                cfg = self.config()
+                expected = {0x21a094: 0xde050010, 0x21af94: 2,
+                            0x23acb0: 0x32240001, 0x23ad0c: 0x32240001}
+                for commands in files:
+                    path.write_text('\n'.join(commands) + '\n')
+                    self.assertEqual(self.lib.pops_config_load_file(c.byref(cfg), os.fsencode(path)), 0)
+                    for a, v, _ in original.manual(commands)['writes']:
+                        if a in expected:
+                            expected[a] = v
+                self.assertEqual(cfg.progressive_requested, 1, files)
+                self.assertEqual(bool(cfg.gs_display_valid), expected[0x21a094] == 0x0808e5da, files)
+                b = fix_pristine()
+                for a, v, w in ((0x21a094, 0xde050010, 4), (0x21a098, 0x3c031200, 4),
+                                (0x21af94, 2, 1), (0x23acb0, 0x32240001, 4), (0x23ad0c, 0x32240001, 4)):
+                    patch(b, a, v, w)
+                pointer = (c.c_uint8 * SIZE).from_buffer(b)
+                self.assertEqual(self.lib.pops_apply_all_config_patches(pointer, SIZE, c.byref(cfg)), 0, files)
+                context = Context()
+                # Production passes sticky progressive state to the fix-file
+                # session, even if a later command selected FORCEPAL/NOPAL.
+                initial_mode = 4 if cfg.progressive_requested else cfg.video_mode  # POPS_VMODE_480P
+                self.assertEqual(self.lib.pops_fix_context_init_video(c.byref(context), pointer,
+                                                                     SIZE, cfg.compat_modes, initial_mode), 0, files)
+                self.assertEqual(context.video_auto_disabled, 1, files)
+                self.assertEqual(self.lib.pops_fix_finalize_video(c.byref(context), pointer, SIZE,
+                                                                 1, cfg.video_mode), 0, files)
+                self.assertEqual(self.lib.pops_apply_region(pointer, SIZE, 1, cfg.video_mode,
+                                                           context.video_auto_disabled), 0, files)
+                # A European licence must not silently reapply PAL here.
+                self.assertEqual(b[0x21af94 - BASE], 2, files)
+                entry = 0x143a020 if cfg.gs_display_valid else 0x143a040
+                arg = self.lib.pops_resident_progressive_interlace(c.byref(cfg))
+                self.assertEqual(self.lib.pops_resident_hook_progressive(pointer, SIZE, entry, arg), 0, files)
+                for a in (0x21af94, 0x23acb0, 0x23ad0c):
+                    width = 1 if a == 0x21af94 else 4
+                    self.assertEqual(int.from_bytes(b[a - BASE:a - BASE + width], 'little'), expected[a], files)
+                self.assertEqual(struct.unpack_from('<I', b, 0x21a094 - BASE)[0], 0x08000000 | (entry >> 2))
+        print(f'Original progressive text/file staging PASS: {len(cases)} sequences')
+
     @unittest.skipUnless(os.environ.get('POPS_TEST_ELF'), 'optional external Sony core')
     def test_identified_external_core_guards(self):
         elf = Path(os.environ['POPS_TEST_ELF']).read_bytes()
@@ -312,6 +408,13 @@ class DisplayTests(unittest.TestCase):
             self.assertEqual(self.lib.pops_resident_hook_display(pointer, SIZE, 0x143a020), 0)
             for address in (0x23acb0, 0x23ad0c):
                 self.assertEqual(struct.unpack_from('<I', staged, address - BASE)[0], 0x32240001)
+        for command in ('$480p', '$480p $HDTVFIX', '$NOHDTVFIX $480p', '$480p ' + full):
+            staged, cfg = bytearray(data), self.config(command)
+            pointer = (c.c_ubyte * SIZE).from_buffer(staged)
+            self.assertEqual(self.lib.pops_apply_all_config_patches(pointer, SIZE, c.byref(cfg)), 0)
+            arg = self.lib.pops_resident_progressive_interlace(c.byref(cfg))
+            self.assertEqual(self.lib.pops_resident_hook_progressive(pointer, SIZE, 0x143a040, arg), 0)
+            self.assertEqual(staged[0x21af94 - BASE], 0x50)
         cfg = self.config('$SMOOTH $LEFTADJ_255 $XPOS_0 $YPOS_65535 $DWSTRETCH_9999 $DWCROP_0')
         self.assertEqual(self.apply(data, cfg), 0)
 

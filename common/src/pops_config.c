@@ -118,8 +118,12 @@ static int parse_single_directive(PopsConfig *cfg, const char *token) {
 
   if (!strcasecmp(token, "$480p")) {
     cfg->video_mode = POPS_VMODE_480P;
-    if (cfg->gs_mask != 0x3f)
+    cfg->progressive_requested = 1;
+    if (cfg->gs_mask != 0x3f) {
       cfg->gs_display_valid = 0;
+      cfg->hdtv_fix = 0;
+      cfg->original_tokens &= ~POPS_TOK_NOHDTVFIX;
+    }
     return 1;
   }
   /* Not POPStarter commands; no grounded POPS writes exist for them. */
@@ -647,6 +651,7 @@ int pops_config_load_table(PopsConfig *cfg, const uint8_t table[32]) {
   cfg->igr_type = table[20];
   if (table[26] == 0x02) {
     cfg->video_mode = POPS_VMODE_480P;
+    cfg->progressive_requested = 1;
   } else if (table[26] == 0x00) {
     cfg->video_mode = POPS_VMODE_NOPAL;
   }
@@ -679,7 +684,7 @@ void pops_config_export_table(const PopsConfig *cfg, uint8_t table[32]) {
     table[18] = 0x00;
   }
   table[20] = cfg->igr_type ? cfg->igr_type : 0x01;
-  if (cfg->video_mode == POPS_VMODE_480P) {
+  if (cfg->progressive_requested || cfg->video_mode == POPS_VMODE_480P) {
     table[26] = 0x02;
   } else if (cfg->video_mode == POPS_VMODE_NOPAL) {
     table[26] = 0x00;

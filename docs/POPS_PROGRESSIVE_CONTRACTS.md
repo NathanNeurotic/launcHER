@@ -1,8 +1,10 @@
 # Progressive DISPLAY component — 2026-10-31
 
-This is a measured arithmetic/state candidate, **not a production progressive
-hook**. `$480p` and PATCH actions 6/7 remain unfinished. The earlier independent
-[manual DISPLAY hook](POPS_MANUAL_DISPLAY_CONTRACTS.md) is separate.
+**Current state:** text `$480p` now selects the guarded independent resident
+bridge. Its component and staging proofs are recorded below; no console/GS
+acceptance is claimed. PATCH actions 6/7 still reject pending their separate
+dispatch sequencing. The [manual DISPLAY hook](POPS_MANUAL_DISPLAY_CONTRACTS.md)
+is a separate entry. Earlier candidate checkpoints below are historical.
 
 The original loader copies `0xd60` bytes from `0x983890` to `0x238a90`.
 The progressive entry is at source `0x9842f0` / runtime `0x2394f0`, and rejoins
@@ -155,3 +157,42 @@ python3 tools/check_pops_progressive_image.py build/launcher/pops_resident.bin
 No live progressive hook, GS scanout, console run or parity completion is
 claimed at this checkpoint. Preserve PATCH 6/7 rejection until its remaining
 loader-state dependencies are handled separately.
+
+
+## Guarded text selection — 2026-10-31 (current)
+
+The launcher now selects the owned progressive entry for text `$480p`.
+A separate `progressive_requested` bit remains set across `$NOPAL` and
+`$FORCEPAL`; those region choices cannot silently remove the earlier video
+hook or its disable-PAL state. The production fix-file session receives that
+sticky state, and final PAL/region processing runs before static progressive
+setup. A complete manual DISPLAY file selects the fixed entry instead, while
+retaining progressive static mode state. A later `$480p` can select the dynamic
+entry again. All setup remains before IOP reboot and save creation.
+
+The resident installer validates all five sites before any selected write:
+load `0x21a094`, its `0x21a098` delay slot, mode byte `0x21af94`, and argument
+words `0x23acb0/0x23ad0c`. It writes the owned jump and mode byte `0x50`, plus
+`li a0,0` by default. A later HDTVFIX selects `li a0,1`; NOHDTVFIX or same-file
+completed manual DISPLAY restores `andi a0,s1,1`. Repeated installation is
+idempotent. Unknown or conflicting payload changes reject atomically at this
+step; the caller discards that staged launch. This preserves explicit conflicts
+rather than replacing them under an unproven payload-ordering assumption.
+
+31 original text/file sequences compare the configured mode, argument writes
+and fixed/dynamic entry choice. The native pipeline additionally initializes
+the fix session, finalizes video and processes a European licence, verifying
+PAL suppression even when the final region directive is FORCEPAL/NOPAL.
+All five guard corruptions, conflicting known values, bounds and idempotence
+are covered. Guards and representative full-config staging also pass on the
+pinned external Sony ELF. [Current metadata](evidence/pops_progressive_text_2026-10-31.json)
+records source hashes and exact limits.
+
+Aggregate external suite: **121 tests** with all inputs/compiler/Unicorn;
+default CI skips 12 optional cases. All **19 host entry points**, normal and
+trace target builds pass. Existing VBLANK/manual checks and the 428-case built
+progressive context check remain passing. The owned image remains v3, 3,936
+resident bytes. No console run, GS picture/rate/timing, broad game acceptance,
+save durability or 100% parity is established. **PATCH 6/7 remain rejected**:
+their mode/session sequencing and owned-entry dispatch must be implemented
+and compared separately before those actions can be accepted.

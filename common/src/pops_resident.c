@@ -65,13 +65,11 @@ int pops_resident_build_config(PopsResidentConfig *out, const PopsConfig *cfg) {
   out->pops_vblank = POPS_VBLANK_HANDLER;
   out->ram_base_ptr = POPS_PS1_RAM_BASE_PTR;
 
-  if (cfg->gs_mask & ~0x3f || cfg->gs_display_valid > 1)
+  if (cfg->gs_mask & ~0x3f || cfg->gs_display_valid > 1 || cfg->progressive_requested > 1)
     return -EINVAL;
+  if (cfg->progressive_requested || cfg->video_mode == POPS_VMODE_480P)
+    out->flags |= POPS_RES_F_PROGRESSIVE;
   if (cfg->gs_display_valid) {
-    /* The progressive request also changes core video state. Do not present
-     * a fixed DISPLAY bridge as its still-unimplemented resident service. */
-    if (cfg->video_mode == POPS_VMODE_480P)
-      return -ENOTSUP;
     out->gs_display = cfg->gs_display;
     out->flags |= POPS_RES_F_DISPLAY;
   }
@@ -152,5 +150,37 @@ int pops_resident_hook_display(void *staged_core, size_t core_size, uint32_t ent
   put_u32(core + sites[0] - POPS_CORE_BASE, jump);
   /* Config staging already restores these for a complete manual file.
    * Preserve a later file's explicit HDTVFIX instead of undoing it here. */
+  return 0;
+}
+
+uint32_t pops_resident_progressive_interlace(const PopsConfig *cfg) {
+  if (!cfg)
+    return 0;
+  return cfg->hdtv_fix ? 0x24040001 :
+           (cfg->original_tokens & POPS_TOK_NOHDTVFIX) ? 0x32240001 : 0x24040000;
+}
+
+int pops_resident_hook_progressive(void *staged_core, size_t core_size,
+                                    uint32_t entry, uint32_t interlace) {
+  uint8_t *core = staged_core;
+  static const uint32_t sites[] = {0x21a094, 0x21a098, 0x21af94, 0x23acb0, 0x23ad0c};
+  if (!core || (entry & 3) || entry < POPS_RESIDENT_BASE || entry >= POPS_RESIDENT_LIMIT ||
+      (interlace != 0x24040000 && interlace != 0x24040001 && interlace != 0x32240001))
+    return -EINVAL;
+  if (core_size < sites[4] - POPS_CORE_BASE + 4)
+    return -ERANGE;
+  uint32_t jump = 0x08000000u | (entry >> 2);
+  uint32_t expected_arg = interlace == 0x24040000 ? 0x32240001 : interlace;
+  for (unsigned i = 0; i < 5; ++i) {
+    uint32_t cur = i == 2 ? core[sites[i] - POPS_CORE_BASE] : get_u32(core + sites[i] - POPS_CORE_BASE);
+    if (i == 0 ? (cur != 0xde050010 && cur != jump) :
+        i == 1 ? cur != 0x3c031200 : i == 2 ? (cur != 2 && cur != 0x50) :
+        (cur != expected_arg && cur != interlace))
+      return -EILSEQ;
+  }
+  put_u32(core + sites[0] - POPS_CORE_BASE, jump);
+  core[sites[2] - POPS_CORE_BASE] = 0x50;
+  put_u32(core + sites[3] - POPS_CORE_BASE, interlace);
+  put_u32(core + sites[4] - POPS_CORE_BASE, interlace);
   return 0;
 }

@@ -119,6 +119,7 @@ typedef struct {
   uint32_t gs_values[6]; /* DX, DY, MAGH, MAGV, DW, DH */
   uint8_t gs_mask;
   uint8_t gs_display_valid;
+  uint8_t progressive_requested; /* $480p remains active across region commands */
 } PopsConfig;
 
 /* Initialize configuration with factory defaults */

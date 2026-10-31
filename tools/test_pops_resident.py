@@ -211,7 +211,11 @@ class BuildConfig(unittest.TestCase):
         self.assertEqual(L.pops_resident_build_config(c.byref(out), c.addressof(cfg)), 1)
         self.assertEqual((out.flags, out.cheat_count), (3, 1))
         cfg = self.parsed('$480p', manual)
-        self.assertEqual(L.pops_resident_build_config(c.byref(out), c.addressof(cfg)), -errno.ENOTSUP)
+        self.assertEqual(L.pops_resident_build_config(c.byref(out), c.addressof(cfg)), 1)
+        self.assertEqual(out.flags, 6)
+        cfg = self.parsed('$480p $NOPAL $FORCEPAL')
+        self.assertEqual(L.pops_resident_build_config(c.byref(out), c.addressof(cfg)), 1)
+        self.assertEqual(out.flags, 4)
 
 
 def core_with(lui=LUI_PRISTINE, addiu=ADDIU_PRISTINE, size=0x1C000):

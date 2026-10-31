@@ -1,5 +1,10 @@
 # Ordered PATCH video and final region pass — 2026-10-30
 
+Current continuation: text `$480p` now has an independent guarded resident
+bridge ([progressive contracts](POPS_PROGRESSIVE_CONTRACTS.md)). PATCH 6/7
+still reject pending their own session/mode/owned-entry dispatch. The results
+below record the earlier PAL-ordering checkpoint, not progressive acceptance.
+
 The four PAL sites are now part of the fix-file session's expected state.
 Initialization requires the identified core's pristine bytes, including after
 text configuration, because `$FORCEPAL` is deferred until the final pass.

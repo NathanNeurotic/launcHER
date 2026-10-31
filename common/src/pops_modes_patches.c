@@ -270,9 +270,9 @@ int pops_fix_stage(PopsFixContext *context, void *staged_core, size_t core_size,
     result = pops_patch_options(&plan.container, &options);
     if (result)
       return result;
-    /* Actions 6/7 install a jump to 0x2394f0, inside POPStarter's copied
-     * resident block. launcHER does not install an independent replacement
-     * there yet. Reject before staging even the payload or mode bytes. */
+    /* The text $480p path has an owned bridge, but PATCH 6/7 still need
+     * verified session-state and owned-entry dispatch. Never retain their
+     * original jump to 0x2394f0. Reject before payload or mode writes. */
     if (options.video >= POPS_PATCH_VIDEO_CONTROL6)
       return -ENOTSUP;
     if (options.video == POPS_PATCH_VIDEO_PAL &&
@@ -453,8 +453,9 @@ int pops_apply_video_overrides(void *staged_core, size_t core_size,
     return -EINVAL;
   if (video_mode > POPS_VMODE_240P)
     return -ENOTSUP;
-  /* $480p needs POPStarter's resident code at 0x2394f0; the other modes
-   * and the position offsets have no grounded writes. */
+  /* $480p is installed later through the validated resident image/header.
+   * This helper cannot install that dependency. Other modes and offsets
+   * still have no grounded writes. */
   if (video_mode >= POPS_VMODE_480P || x_offset || y_offset)
     return -ENOTSUP;
   if (hdtv_fix && core_size < (size_t)(0x0023ad0c - POPS_CORE_BASE_ADDR + 4))

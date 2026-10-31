@@ -1154,7 +1154,8 @@ int launchPOPS(int argc, char *argv[]) {
   /* Preserve original root/title and TROJAN/PATCH ordering. */
   PopsFixContext fixContext;
   res = pops_stage_fix_files((void *)stagedCore, plan.core_size, vcdDir,
-                              gameConfigDir, cfg.compat_modes, cfg.video_mode,
+                              gameConfigDir, cfg.compat_modes,
+                              cfg.progressive_requested ? POPS_VMODE_480P : cfg.video_mode,
                               &fixContext);
   if (res)
     return res;
@@ -1211,7 +1212,12 @@ int launchPOPS(int argc, char *argv[]) {
       res = -ERANGE; /* the trampoline still reads the staged core from there */
     if (!res && (residentCfg.flags & POPS_RES_F_CHEATS))
       res = pops_resident_hook_core((void *)stagedCore, plan.core_size, residentHdr.vblank_entry);
-    if (!res && (residentCfg.flags & POPS_RES_F_DISPLAY))
+    if (!res && (residentCfg.flags & POPS_RES_F_PROGRESSIVE)) {
+      uint32_t entry = (residentCfg.flags & POPS_RES_F_DISPLAY)
+                         ? residentHdr.display_entry : residentHdr.progressive_entry;
+      uint32_t interlace = pops_resident_progressive_interlace(&cfg);
+      res = pops_resident_hook_progressive((void *)stagedCore, plan.core_size, entry, interlace);
+    } else if (!res && (residentCfg.flags & POPS_RES_F_DISPLAY))
       res = pops_resident_hook_display((void *)stagedCore, plan.core_size, residentHdr.display_entry);
     if (res) {
       msg("POPS: Resident code setup failed: %d\n", res);
