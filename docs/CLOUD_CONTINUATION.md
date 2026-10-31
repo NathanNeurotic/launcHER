@@ -111,6 +111,22 @@ Recovered remote heads: launcHER `8c27b0c72091708103f820c2edda97ba764b3b90`; REP
 
 ## Next implementation steps
 
+## R28 PATCH progressive dispatch checkpoint (2026-10-31)
+
+PATCH action 6 is now implemented as a guarded, resident-bound progressive
+dispatch: it preserves the original custom-video gate, writes the owned jump
+and `li a0, 0` arguments only when that gate permits it, and refuses payload
+ordering or later-drift cases that would invalidate the bridge. The original
+bounded interpreter covers 128 control/flag states; host differential coverage
+also exercises 100 ordered PATCH-action sequences. Both normal and trace PS2
+builds succeeded and the external aggregate suite passed with the supplied
+Sony and MAIN POPSTARTER inputs. This is not hardware/video validation and
+does not establish full PATCH/TROJAN or POPStarter parity.
+
+The next agent should begin from this committed checkpoint, re-run the external
+suite, inspect current PR CI, then pursue the remaining physical and resident
+runtime gates below. Do not claim 100% completion.
+
 **Latest redo checkpoint:** REPOP's two FP helper candidates now compile in isolation for EE and pass four focused host tests. Final REPOP suite: 225 tests, ten skipped, zero failures/errors. The original-code differential run remains incomplete after a Unicorn exception beyond the 6,144-pattern progress marker; no semantic-parity pass is claimed. Start with [the exact FP handoff](https://github.com/NathanNeurotic/REPOP/blob/feat/psxcore-validation/docs/POPSTARTER_FP_CONTRACTS.md), diagnose the failing original input/PC, then resume the build/signature repair below. The entire reconstruction still has build blockers.
 
 1. Repair REPOP's EE build using original function/callsite contracts; audit existing candidates before adding batches. Replace constant-input demonstrations and invented state. Measure fresh artifacts and compare original/reconstruction behavior; source annotations and similar code size do not establish semantic parity.

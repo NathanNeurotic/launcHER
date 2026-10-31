@@ -482,6 +482,33 @@ class InterpreterTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             m.instruction(ORIGINAL_BASE)
 
+    @unittest.skipUnless(os.environ.get('POPSTARTER_TEST_ELF'), 'optional external POPStarter MAIN')
+    def test_original_patch_video_gates(self):
+        original = OriginalDisplay(Path(os.environ['POPSTARTER_TEST_ELF']).read_bytes())
+        count = 0
+        for control in range(8):
+            for mask in range(16):
+                disabled, custom, forced, selector = [bool(mask & (1 << i)) for i in range(4)]
+                measured = original.patch_video(control, auto_disabled=disabled, custom_set=custom,
+                                                 force_pal=forced, auto_selector=selector)
+                expected = {'auto_disabled': disabled, 'custom_set': custom,
+                            'force_pal': forced, 'auto_selector': selector, 'writes': []}
+                action = control & 6
+                if action == 2 and not disabled:
+                    expected.update(auto_disabled=True, custom_set=True, auto_selector=False,
+                                    writes=[[0x21af94, 3, 1], [0x502770, 0xa6300, 4],
+                                            [0x23b018, 0x6b, 1], [0x23b01c, 0x2cb, 2]])
+                elif action == 4:
+                    expected.update(auto_disabled=True, auto_selector=False)
+                elif action == 6 and not custom:
+                    expected.update(auto_disabled=True, custom_set=True, force_pal=False,
+                                    auto_selector=False,
+                                    writes=[[0x21af94, 0x50, 1], [0x21a094, 0x0808e53c, 4],
+                                            [0x23acb0, 0x24040000, 4], [0x23ad0c, 0x24040000, 4]])
+                self.assertEqual(measured, expected, (control, mask))
+                count += 1
+        print(f'Original post-payload PATCH video gate matrix PASS: {count} states')
+
     def test_unmodeled_instruction_and_memory_fail_closed(self):
         m = self.machine([0xffffffff])
         with self.assertRaises(ValueError):

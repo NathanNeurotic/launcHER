@@ -18,11 +18,15 @@ int pops_apply_compat_modes(void *staged_core, size_t core_size, uint8_t modes_m
  * Discard the staged core on any failure in a sequence of fix files. */
 #define POPS_COMPAT_SITE_COUNT 39
 #define POPS_PATCH_PAL_SITE_COUNT 4
+#define POPS_PATCH_RESIDENT_SITE_COUNT 4
 typedef struct {
   uint32_t expected[POPS_COMPAT_SITE_COUNT];
   uint32_t video_expected[POPS_PATCH_PAL_SITE_COUNT];
   uint8_t video_auto_disabled;
   uint8_t video_custom_set;
+  uint32_t resident_entry;
+  uint32_t resident_expected[POPS_PATCH_RESIDENT_SITE_COUNT];
+  uint8_t progressive_set;
 } PopsFixContext;
 int pops_fix_context_init(PopsFixContext *context, const void *staged_core,
                            size_t core_size, uint8_t initial_modes);
@@ -32,6 +36,15 @@ int pops_fix_context_init(PopsFixContext *context, const void *staged_core,
 int pops_fix_context_init_video(PopsFixContext *context, const void *staged_core,
                                  size_t core_size, uint8_t initial_modes,
                                  uint8_t initial_video_mode);
+/* Bind an entry from a validated owned image before processing any files.
+ * Unbound sessions continue to reject actions 6/7. initial_interlace is the
+ * already-staged text argument (pristine ANDI or HDTVFIX's LI a0,1). */
+int pops_fix_bind_progressive(PopsFixContext *context, const void *staged_core,
+                              size_t core_size, uint32_t entry, uint32_t initial_interlace);
+/* After a PATCH installed progressive output, reject a later conflicting
+ * payload instead of silently replacing its static hook/mode/argument writes. */
+int pops_fix_require_progressive(const PopsFixContext *context, const void *staged_core,
+                                 size_t core_size);
 /* Final video pass after ordered fix files. Validate tracked sites, then
  * apply forced/European PAL as allowed by the original state. An unread
  * licence can use UNKNOWN here: this function never changes region letters. */

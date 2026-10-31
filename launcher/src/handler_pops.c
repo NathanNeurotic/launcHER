@@ -280,12 +280,19 @@ static int readPopsDependency(const char *path, void *buffer, size_t max_size,
 static int pops_stage_fix_files(void *stagedCore, size_t coreSize,
                                  const char *vcdDir, const char *titleDir,
                                  uint8_t initialModes, uint8_t initialVideo,
+                                 uint32_t progressiveEntry, uint32_t initialInterlace,
                                  PopsFixContext *finalContext) {
   PopsFixContext context;
   int result = pops_fix_context_init_video(&context, stagedCore, coreSize,
                                             initialModes, initialVideo);
   if (result)
     return result;
+  if (progressiveEntry) {
+    result = pops_fix_bind_progressive(&context, stagedCore, coreSize,
+                                       progressiveEntry, initialInterlace);
+    if (result)
+      return result;
+  }
   const char *dirs[] = {vcdDir, titleDir};
   for (unsigned scope = 0; scope < 2; ++scope) {
     for (unsigned kind = 0; kind < 2; ++kind) {
@@ -1152,13 +1159,32 @@ int launchPOPS(int argc, char *argv[]) {
   }
 
   /* Preserve original root/title and TROJAN/PATCH ordering. */
+  PopsResidentHeader residentHdr;
+  res = pops_resident_check_image(pops_resident_bin, size_pops_resident_bin, &residentHdr);
+  if (res) {
+    msg("POPS: Resident image validation failed: %d\n", res);
+    return res;
+  }
   PopsFixContext fixContext;
   res = pops_stage_fix_files((void *)stagedCore, plan.core_size, vcdDir,
                               gameConfigDir, cfg.compat_modes,
                               cfg.progressive_requested ? POPS_VMODE_480P : cfg.video_mode,
+                              residentHdr.progressive_entry,
+                              cfg.hdtv_fix ? 0x24040001 : 0x32240001,
                               &fixContext);
   if (res)
     return res;
+  res = pops_fix_require_progressive(&fixContext, (void *)stagedCore, plan.core_size);
+  if (res) {
+    msg("POPS: Conflicting final progressive patch: %d\n", res);
+    return res;
+  }
+  if (fixContext.progressive_set) {
+    cfg.progressive_requested = 1;
+    cfg.gs_display_valid = 0;
+    cfg.hdtv_fix = 0;
+    cfg.original_tokens &= ~POPS_TOK_NOHDTVFIX;
+  }
 
   /* Forced video is deliberately deferred: PATCH PAL/disable-auto wins as
    * in the original. Tracked payload writes remain valid inputs to this pass.
@@ -1206,9 +1232,8 @@ int launchPOPS(int argc, char *argv[]) {
     return residentNeeded;
   }
   if (residentNeeded) {
-    PopsResidentHeader residentHdr;
-    res = pops_resident_check_image(pops_resident_bin, size_pops_resident_bin, &residentHdr);
-    if (!res && (uint32_t)(uintptr_t)stagedCore + plan.core_size > POPS_RESIDENT_BASE)
+    res = 0;
+    if ((uint32_t)(uintptr_t)stagedCore + plan.core_size > POPS_RESIDENT_BASE)
       res = -ERANGE; /* the trampoline still reads the staged core from there */
     if (!res && (residentCfg.flags & (POPS_RES_F_CHEATS | POPS_RES_F_PAD_ID | POPS_RES_F_TIMINGS)))
       res = pops_resident_hook_core((void *)stagedCore, plan.core_size, residentHdr.vblank_entry);

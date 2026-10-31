@@ -274,6 +274,32 @@ class OriginalDisplay:
             raise ValueError('unexpected progressive memory change')
         return {'state': result, 'writes': m.write_events} if with_writes else result
 
+    def patch_video(self, control, *, auto_disabled=False, custom_set=False,
+                    force_pal=False, auto_selector=True):
+        """Original post-payload video dispatch at 0x882f9c..0x883188.
+
+        Payload and ordered compatibility modes have completed before this
+        window. Logging and the previously verified PAL helper are modeled;
+        primitive poke calls record exact original static writes.
+        """
+        if control not in range(8):
+            raise ValueError('unsupported PATCH control')
+        m = _PatchVideoWindow(self.image, 0x882f9c, 0x883188, '')
+        m.memory.update((m.GP + i, 0) for i in range(0x3400, 0x4fcc))
+        m.store(m.FRAME + 0x28, control, 1)
+        m.store(m.FRAME + 0x18, 0x40, 4)
+        m.store(m.GP + 0x38b0, 1, 4)  # quiet logging
+        for offset, value in ((0x3864, auto_disabled), (0x3898, custom_set),
+                              (0x38d0, custom_set), (0x38a0, force_pal),
+                              (0x4fa0, auto_selector)):
+            m.store(m.GP + offset, int(value), 4)
+        m.run()
+        return {'writes': m.writes,
+                'auto_disabled': bool(m.load(m.GP + 0x3864, 4)),
+                'custom_set': bool(m.load(m.GP + 0x3898, 4)),
+                'force_pal': bool(m.load(m.GP + 0x38a0, 4)),
+                'auto_selector': bool(m.load(m.GP + 0x4fa0, 4))}
+
     def region(self, licence, force_pal=False, auto_disabled=False, auto_selector=True):
         """Original region control flow; PAL helper/pokes modeled explicitly.
 
@@ -307,6 +333,17 @@ class _RegionWindow(_Window):
             self.writes.append([address, value & ((1 << (width * 8)) - 1), width])
         else:
             raise ValueError(f'unmodeled region service {target:#x}')
+
+
+class _PatchVideoWindow(_Window):
+    def service(self, target):
+        if target == 0x8dc218:
+            self.writes.extend([[0x21af94, 3, 1], [0x502770, 0xa6300, 4],
+                                [0x23b018, 0x6b, 1], [0x23b01c, 0x2cb, 2]])
+        elif target == 0x915708:
+            pass  # logging has no modeled state effect
+        else:
+            super().service(target)
 
 
 def main():

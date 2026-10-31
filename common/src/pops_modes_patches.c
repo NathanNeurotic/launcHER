@@ -155,6 +155,33 @@ static int fix_pal_context_check(const PopsFixContext *context,
   return 0;
 }
 
+static const uint32_t fix_resident_sites[POPS_PATCH_RESIDENT_SITE_COUNT] = {
+  0x21a094, 0x21a098, 0x23acb0, 0x23ad0c
+};
+
+static uint32_t fix_resident_read(const uint8_t *bytes, unsigned i) {
+  size_t at = fix_resident_sites[i] - POPS_CORE_BASE_ADDR;
+  return (uint32_t)bytes[at] | (uint32_t)bytes[at + 1] << 8 |
+         (uint32_t)bytes[at + 2] << 16 | (uint32_t)bytes[at + 3] << 24;
+}
+
+static int fix_resident_context_check(const PopsFixContext *context,
+                                       const uint8_t *bytes, size_t size) {
+  if (!context->resident_entry)
+    return context->progressive_set ? -EINVAL : 0;
+  if ((context->resident_entry & 3) || context->resident_entry < POPS_RESIDENT_BASE ||
+      context->resident_entry >= POPS_RESIDENT_LIMIT || context->progressive_set > 1)
+    return -EINVAL;
+  for (unsigned i = 0; i < POPS_PATCH_RESIDENT_SITE_COUNT; ++i) {
+    size_t at = fix_resident_sites[i] - POPS_CORE_BASE_ADDR;
+    if (at > size || 4 > size - at)
+      return -ERANGE;
+    if (fix_resident_read(bytes, i) != context->resident_expected[i])
+      return -EINVAL;
+  }
+  return 0;
+}
+
 static int compat_context_check(const PopsFixContext *context,
                                  const uint8_t *bytes, size_t size) {
   for (unsigned i = 0; i < POPS_COMPAT_SITE_COUNT; ++i) {
@@ -165,7 +192,8 @@ static int compat_context_check(const PopsFixContext *context,
     if (compat_read(bytes, patch) != context->expected[i])
       return -EINVAL;
   }
-  return fix_pal_context_check(context, bytes, size);
+  int result = fix_pal_context_check(context, bytes, size);
+  return result ? result : fix_resident_context_check(context, bytes, size);
 }
 
 static void fix_pal_write(uint8_t *bytes) {
@@ -230,7 +258,7 @@ int pops_fix_finalize_video(PopsFixContext *context, void *staged_core,
     return -EINVAL;
   if (video_mode > POPS_VMODE_240P)
     return -ENOTSUP;
-  int result = fix_pal_context_check(context, staged_core, core_size);
+  int result = compat_context_check(context, staged_core, core_size);
   if (result)
     return result;
   if (!context->video_auto_disabled &&
@@ -241,6 +269,44 @@ int pops_fix_finalize_video(PopsFixContext *context, void *staged_core,
     for (unsigned i = 0; i < POPS_PATCH_PAL_SITE_COUNT; ++i)
       context->video_expected[i] = fix_pal_sites[i].pal;
   }
+  return 0;
+}
+
+int pops_fix_bind_progressive(PopsFixContext *context, const void *staged_core,
+                              size_t core_size, uint32_t entry, uint32_t initial_interlace) {
+  if (!context || !staged_core || context->resident_entry || (entry & 3) ||
+      entry < POPS_RESIDENT_BASE || entry >= POPS_RESIDENT_LIMIT ||
+      (initial_interlace != 0x32240001 && initial_interlace != 0x24040001) ||
+      fix_alias(context, sizeof(*context), staged_core, core_size))
+    return -EINVAL;
+  int result = compat_context_check(context, staged_core, core_size);
+  if (result)
+    return result;
+  PopsFixContext candidate = *context;
+  candidate.resident_entry = entry;
+  candidate.resident_expected[0] = 0xde050010;
+  candidate.resident_expected[1] = 0x3c031200;
+  candidate.resident_expected[2] = candidate.resident_expected[3] = initial_interlace;
+  result = fix_resident_context_check(&candidate, staged_core, core_size);
+  if (!result)
+    *context = candidate;
+  return result;
+}
+
+int pops_fix_require_progressive(const PopsFixContext *context, const void *staged_core,
+                                 size_t core_size) {
+  if (!context || !staged_core || fix_alias(context, sizeof(*context), staged_core, core_size))
+    return -EINVAL;
+  int result = compat_context_check(context, staged_core, core_size);
+  if (result || !context->progressive_set)
+    return result;
+  uint32_t want[] = {0x08000000u | (context->resident_entry >> 2), 0x3c031200,
+                      0x24040000, 0x24040000};
+  if (context->video_expected[0] != 0x50)
+    return -EINVAL;
+  for (unsigned i = 0; i < POPS_PATCH_RESIDENT_SITE_COUNT; ++i)
+    if (context->resident_expected[i] != want[i])
+      return -EINVAL;
   return 0;
 }
 
@@ -270,10 +336,8 @@ int pops_fix_stage(PopsFixContext *context, void *staged_core, size_t core_size,
     result = pops_patch_options(&plan.container, &options);
     if (result)
       return result;
-    /* The text $480p path has an owned bridge, but PATCH 6/7 still need
-     * verified session-state and owned-entry dispatch. Never retain their
-     * original jump to 0x2394f0. Reject before payload or mode writes. */
-    if (options.video >= POPS_PATCH_VIDEO_CONTROL6)
+    /* Actions 6/7 require an explicitly bound owned image entry. */
+    if (options.video == POPS_PATCH_VIDEO_CONTROL6 && !context->resident_entry)
       return -ENOTSUP;
     if (options.video == POPS_PATCH_VIDEO_PAL &&
         core_size < (size_t)(0x00502770 - POPS_CORE_BASE_ADDR + 4))
@@ -285,6 +349,21 @@ int pops_fix_stage(PopsFixContext *context, void *staged_core, size_t core_size,
   result = compat_context_check(context, bytes, core_size);
   if (result)
     return result;
+  if (options.video == POPS_PATCH_VIDEO_CONTROL6 && !context->video_custom_set) {
+    /* A payload may replace the original delay slot. Predict this field
+     * before the first write; the owned bridge requires its known LUI. */
+    uint32_t delay = 0;
+    for (unsigned j = 0; j < 4; ++j) {
+      uint32_t address = 0x21a098 + j;
+      uint8_t byte = bytes[address - POPS_CORE_BASE_ADDR];
+      if (address >= plan.container.load &&
+          address - plan.container.load < plan.container.payload_size)
+        byte = ((const uint8_t *)file)[plan.payload_offset + address - plan.container.load];
+      delay |= (uint32_t)byte << (8 * j);
+    }
+    if (delay != 0x3c031200)
+      return -EILSEQ;
+  }
   /* All bounds/options/guards precede the first payload write. Trojan hooks
    * retain the existing snapshot guards; they are not independent pristine
    * profiles. Explicit payload changes become the next session's expectation. */
@@ -323,13 +402,24 @@ int pops_fix_stage(PopsFixContext *context, void *staged_core, size_t core_size,
     }
     break;
   case POPS_PATCH_VIDEO_CONTROL6:
-    /* Rejected above until an independent resident implementation exists. */
+    if (!context->video_custom_set) {
+      write_u8(bytes, core_size, 0x21af94, 0x50);
+      write_u32(bytes, core_size, 0x21a094, 0x08000000u | (context->resident_entry >> 2));
+      write_u32(bytes, core_size, 0x23acb0, 0x24040000);
+      write_u32(bytes, core_size, 0x23ad0c, 0x24040000);
+      context->progressive_set = 1;
+      context->video_auto_disabled = 1;
+      context->video_custom_set = 1;
+    }
     break;
   }
   for (unsigned i = 0; i < POPS_COMPAT_SITE_COUNT; ++i)
     context->expected[i] = compat_read(bytes, &compat_patches[i]);
   for (unsigned i = 0; i < POPS_PATCH_PAL_SITE_COUNT; ++i)
     context->video_expected[i] = fix_pal_read(bytes, i);
+  if (context->resident_entry)
+    for (unsigned i = 0; i < POPS_PATCH_RESIDENT_SITE_COUNT; ++i)
+      context->resident_expected[i] = fix_resident_read(bytes, i);
   return 0;
 }
 

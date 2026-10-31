@@ -22,7 +22,10 @@ class Context(c.Structure):
     _fields_ = [('expected', c.c_uint32 * 39),
                 ('video_expected', c.c_uint32 * 4),
                 ('video_auto_disabled', c.c_uint8),
-                ('video_custom_set', c.c_uint8)]
+                ('video_custom_set', c.c_uint8),
+                ('resident_entry', c.c_uint32),
+                ('resident_expected', c.c_uint32 * 4),
+                ('progressive_set', c.c_uint8)]
 
 
 def pristine():
@@ -100,14 +103,22 @@ static int test_close(int fd) {
 ''' + functions + '''
 int test_directory(void *core, size_t size, const char *root, const char *title) {
   PopsFixContext state;
-  int result = pops_stage_fix_files(core, size, root, title, 0, 0, &state);
+  int result = pops_stage_fix_files(core, size, root, title, 0, 0, 0, 0, &state);
   return !result && state.video_auto_disabled > 1 ? -1000 : result;
 }
 int test_directory_video(void *core, size_t size, const char *root, const char *title,
                            unsigned video_mode) {
   PopsFixContext state;
-  int result = pops_stage_fix_files(core, size, root, title, 0, video_mode, &state);
+  int result = pops_stage_fix_files(core, size, root, title, 0, video_mode, 0, 0, &state);
   return result ? result : state.video_auto_disabled;
+}
+int test_directory_resident(void *core, size_t size, const char *root, const char *title,
+                              unsigned video_mode) {
+  PopsFixContext state;
+  int result = pops_stage_fix_files(core, size, root, title, 0, video_mode,
+                                    0x143a5d8, 0x32240001, &state);
+  if (!result) result = pops_fix_require_progressive(&state, core, size);
+  return result ? result : state.progressive_set;
 }
 int test_dependency(const char *path, void *buffer, size_t size, size_t *read_size) {
   return readPopsDependency(path, buffer, size, read_size);
@@ -124,6 +135,9 @@ void test_io_failures(int reads, int closes) { fail_reads=reads; fail_closes=clo
         cls.lib.pops_fix_context_init.argtypes = [c.POINTER(Context), c.c_void_p, c.c_size_t, c.c_uint8]
         cls.lib.pops_fix_context_init_video.argtypes = [c.POINTER(Context), c.c_void_p,
                                                         c.c_size_t, c.c_uint8, c.c_uint8]
+        cls.lib.pops_fix_bind_progressive.argtypes = [c.POINTER(Context), c.c_void_p,
+                                                      c.c_size_t, c.c_uint32, c.c_uint32]
+        cls.lib.pops_fix_require_progressive.argtypes = [c.POINTER(Context), c.c_void_p, c.c_size_t]
         cls.lib.pops_fix_stage.argtypes = [c.POINTER(Context), c.c_void_p, c.c_size_t,
                                           c.c_void_p, c.c_size_t, c.c_uint, c.c_int]
         cls.lib.pops_fix_finalize_video.argtypes = [c.POINTER(Context), c.c_void_p,
@@ -133,6 +147,7 @@ void test_io_failures(int reads, int closes) { fail_reads=reads; fail_closes=clo
         cls.lib.test_directory.argtypes = [c.c_void_p, c.c_size_t, c.c_char_p, c.c_char_p]
         cls.lib.test_directory_video.argtypes = [c.c_void_p, c.c_size_t, c.c_char_p,
                                                  c.c_char_p, c.c_uint]
+        cls.lib.test_directory_resident.argtypes = cls.lib.test_directory_video.argtypes
         cls.lib.test_io_failures.argtypes = [c.c_int, c.c_int]
 
     @classmethod
@@ -152,6 +167,13 @@ void test_io_failures(int reads, int closes) { fail_reads=reads; fail_closes=clo
     def stage(self, blob, slot=1, is_trojan=0):
         return self.lib.pops_fix_stage(c.byref(self.context), self.pointer, SIZE,
                                        blob, len(blob), slot, is_trojan)
+
+    def bind(self, initial_arg=0x32240001):
+        for address, value in ((0x21a094, 0xde050010), (0x21a098, 0x3c031200),
+                                (0x23acb0, initial_arg), (0x23ad0c, initial_arg)):
+            struct.pack_into('<I', self.memory, address - BASE, value)
+        self.assertEqual(self.lib.pops_fix_bind_progressive(c.byref(self.context), self.pointer,
+                                                            SIZE, 0x143a5d8, initial_arg), 0)
 
     def assert_rejected_without_writes(self, blob, slot=1, is_trojan=0):
         before = bytes(self.memory), bytes(self.context)
@@ -302,6 +324,94 @@ void test_io_failures(int reads, int closes) { fail_reads=reads; fail_closes=clo
                          payload=b'DATA', address=0x220000)
             self.assertEqual(self.stage(blob), -errno.ENOTSUP)
             self.assert_rejected_without_writes(blob)
+
+    def test_bound_progressive_controls_and_custom_gate(self):
+        for mode, prior, applied in ((0, 0, True), (0, 4, True), (0, 2, False),
+                                      (2, 0, False), (3, 0, True), (4, 0, False)):
+            self.setUp()
+            self.assertEqual(self.lib.pops_fix_context_init_video(c.byref(self.context),
+                              self.pointer, SIZE, 0, mode), 0)
+            self.bind()
+            if prior:
+                self.assertEqual(self.stage(patch(control=prior)), 0)
+            before = bytes(self.memory)
+            self.assertEqual(self.stage(patch(control=6)), 0)
+            self.assertEqual(self.context.progressive_set, applied)
+            self.assertEqual(self.lib.pops_fix_require_progressive(c.byref(self.context),
+                                                                   self.pointer, SIZE), 0)
+            if applied:
+                self.assertEqual(self.memory[0x21af94 - BASE], 0x50)
+                self.assertEqual(struct.unpack_from('<I', self.memory, 0x21a094 - BASE)[0],
+                                 0x08000000 | (0x143a5d8 >> 2))
+                self.assertEqual(self.context.video_auto_disabled, 1)
+                self.assertEqual(self.context.video_custom_set, 1)
+            else:
+                self.assertEqual(bytes(self.memory), before)
+
+    def test_bound_progressive_guards_payload_order_and_conflicts(self):
+        self.bind()
+        for address in (0x21a094, 0x21a098, 0x23acb0, 0x23ad0c):
+            self.memory[address - BASE] ^= 1
+            self.assert_rejected_without_writes(patch(control=6, modes=(), payload=b'DATA', address=0x220000))
+            self.memory[address - BASE] ^= 1
+        self.assert_rejected_without_writes(patch(control=7, modes=(1,), payload=b'BAD!', address=0x21a098))
+        # Video dispatch follows this file's payload and mode bytes.
+        self.assertEqual(self.stage(patch(control=7, modes=(6, 1), payload=b'PAL!', address=0x21af94)), 0)
+        self.assertEqual(self.memory[0x21af94 - BASE], 0x50)
+        self.assertEqual(struct.unpack_from('<I', self.memory, 0x210314 - BASE)[0], 0x3c02005a)
+        self.assertEqual(self.lib.pops_fix_require_progressive(c.byref(self.context), self.pointer, SIZE), 0)
+        # Intentional later writes are tracked, then reported as a final
+        # static conflict rather than silently overwritten by the launcher.
+        self.assertEqual(self.stage(patch(control=0, payload=b'XXXX', address=0x23acb0)), 0)
+        before = bytes(self.memory), bytes(self.context)
+        self.assertLess(self.lib.pops_fix_require_progressive(c.byref(self.context), self.pointer, SIZE), 0)
+        self.assertEqual((bytes(self.memory), bytes(self.context)), before)
+
+    def test_bound_progressive_real_discovery_path(self):
+        self.bind()
+        with tempfile.TemporaryDirectory() as tmp:
+            root, title = Path(tmp) / 'root', Path(tmp) / 'title'
+            root.mkdir()
+            title.mkdir()
+            (root / 'PATCH_0.BIN').write_bytes(patch(slot=0, control=6, payload=b'ROOT', address=0x220000))
+            (title / 'PATCH_0.BIN').write_bytes(patch(slot=0, control=7, modes=(1,)))
+            self.assertEqual(self.lib.test_directory_resident(self.pointer, SIZE,
+                              os.fsencode(str(root)+'/'), os.fsencode(str(title)+'/'), 0), 1)
+            self.assertEqual(bytes(self.memory[0x220000 - BASE:0x220004 - BASE]), b'ROOT')
+            self.assertEqual(self.memory[0x21af94 - BASE], 0x50)
+            self.assertEqual(struct.unpack_from('<I', self.memory, 0x210314 - BASE)[0], 0x3c02005a)
+
+    @unittest.skipUnless(os.environ.get('POPSTARTER_TEST_ELF'), 'optional original PATCH video dispatch')
+    def test_bound_progressive_original_ordered_sequences(self):
+        from trace_original_pops_display import OriginalDisplay
+        original = OriginalDisplay(Path(os.environ['POPSTARTER_TEST_ELF']).read_bytes())
+        count = 0
+        for mode, sequence in itertools.product((0, 2, 3, 4), itertools.product((0, 2, 4, 6, 7), repeat=2)):
+            self.setUp()
+            self.assertEqual(self.lib.pops_fix_context_init_video(c.byref(self.context),
+                              self.pointer, SIZE, 0, mode), 0)
+            self.bind()
+            expected = bytearray(self.memory)
+            flags = dict(auto_disabled=mode == 4, custom_set=mode in (2, 4),
+                         force_pal=mode == 2, auto_selector=mode not in (3, 4))
+            for slot, control in enumerate(sequence):
+                modes = (6, 1) if control == 7 else ()
+                blob = patch(slot=slot, control=control, modes=modes, payload=b'DATA', address=0x210314)
+                expected[0x210314 - BASE:0x210318 - BASE] = b'DATA'
+                apply_modes(expected, modes)
+                measured = original.patch_video(control, **flags)
+                flags = {key: measured[key] for key in flags}
+                for address, value, width in measured['writes']:
+                    if address == 0x21a094:
+                        value = 0x08000000 | (0x143a5d8 >> 2)
+                    expected[address - BASE:address - BASE + width] = value.to_bytes(width, 'little')
+                self.assertEqual(self.stage(blob, slot=slot), 0)
+                self.assertEqual(self.memory, expected, (mode, sequence, slot))
+                self.assertEqual(bool(self.context.video_auto_disabled), flags['auto_disabled'])
+                self.assertEqual(bool(self.context.video_custom_set), flags['custom_set'])
+            self.assertEqual(self.lib.pops_fix_require_progressive(c.byref(self.context), self.pointer, SIZE), 0)
+            count += 1
+        print(f'Original PATCH video vs bound owned dispatch PASS: {count} ordered file sequences')
 
     def test_video_action_with_modes(self):
         self.assertEqual(self.stage(patch(control=3, modes=(6, 1))), 0)
