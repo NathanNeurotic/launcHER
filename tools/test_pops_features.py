@@ -44,6 +44,12 @@ class PopsConfig(c.Structure):
         ("cheats", CheatEntry * 256),
         ("original_tokens", c.c_uint32),
         ("disc_region", c.c_uint8),
+        ("display_x", c.c_uint16),
+        ("display_y", c.c_uint16),
+        ("display_stretch", c.c_uint16),
+        ("display_crop", c.c_uint16),
+        ("display_mask", c.c_uint8),
+        ("left_adjust", c.c_uint8),
     ]
 
 class PopsCompatEntry(c.Structure):

@@ -1258,10 +1258,13 @@ def main():
         getattr(LIB, name).restype = c.c_int
     from test_pops_fix_files import FixFiles
     from test_pops_read_trace import ReadTraceTests
+    from test_pops_display import DisplayTests, InterpreterTests
     suite = unittest.TestSuite([
         unittest.defaultTestLoader.loadTestsFromTestCase(InspectorTests),
         unittest.defaultTestLoader.loadTestsFromTestCase(FixFiles),
         unittest.defaultTestLoader.loadTestsFromTestCase(ReadTraceTests),
+        unittest.defaultTestLoader.loadTestsFromTestCase(DisplayTests),
+        unittest.defaultTestLoader.loadTestsFromTestCase(InterpreterTests),
     ])
     result = unittest.TextTestRunner(verbosity=2).run(suite)
     if not result.wasSuccessful():

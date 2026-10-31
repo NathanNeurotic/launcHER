@@ -26,9 +26,21 @@ Continue [draft launcHER PR #23](https://github.com/NathanNeurotic/launcHER/pull
   `$FORCEPAL` and `$NOPAL` hardware checks. Runtime, dedicated-new-card
   save/reload/cold-power-cycle and device acceptance remain open.
 
-Next source slice: recover the computed video commands from the hash-pinned
-original, compare original execution against production staging, and retain
-explicit resident dependencies. Do not infer behavioral completion from source
+Six direct display commands are now implemented with guarded production staging:
+`$SMOOTH`, `$LEFTADJ_`, `$XPOS_`, `$YPOS_`, `$DWSTRETCH_`, `$DWCROP_`.
+[Display contracts and reproduction](POPS_DISPLAY_CONTRACTS.md) record 11 passing
+tests, including 1,596 original-command inputs and two one-shot states, with
+both external inputs. All 16 non-argv host test entry points pass. No console
+result is implied. The local PS2SDK v2.0.0 lacked mcman-2000.irx; target checks
+use a temporary SDK overlay with that module compiled from official PS2SDK
+`2a18d15da1332665451a9bcf9a0d4df9029c9490`. Do not replace it with stock mcman.
+Both normal and `LAUNCHER_BOOT_TRACE=ON,DEBUG=ON` builds pass locally.
+Existing transport/path-format warnings remain; no new warnings in the
+changed common display/configuration sources.
+
+Next source slice: seed PATCH video state from text configuration and guard
+PAL writes across ordered external payloads; continue the independent resident
+implementation and built-in per-game DB recovery. Do not infer behavioral completion from source
 coverage or an archive build. Keep incremental commits and PR comments current.
 
 ## Historical October 28 audit

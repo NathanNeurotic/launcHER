@@ -51,6 +51,10 @@ int pops_apply_region(void *staged_core, size_t core_size, int region,
 /* Fixed-value POPStarter commands (POPS_TOK_* mask) */
 int pops_apply_original_tokens(void *staged_core, size_t core_size, uint32_t tokens);
 
+/* $SMOOTH, $LEFTADJ_, $XPOS_/$YPOS_, $DWSTRETCH_ and $DWCROP_. All
+ * selected sites are checked before writes; no resident code is required. */
+int pops_apply_display_config(void *staged_core, size_t core_size, const PopsConfig *cfg);
+
 /* POPStarter $IGR0..$IGR5 (igr_type 1..6) or $NOIGR writes */
 int pops_apply_igr_original(void *staged_core, size_t core_size,
                             uint8_t igr_type, uint8_t no_igr);

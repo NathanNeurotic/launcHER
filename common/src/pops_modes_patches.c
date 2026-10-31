@@ -291,6 +291,63 @@ int pops_apply_compat_modes(void *staged_core, size_t core_size, uint8_t modes_m
   return 0;
 }
 
+/* POPStarter MAIN: SMOOTH at 0x886664, LEFTADJ at 0x8909c8,
+ * X/Y at 0x89a1a8, DWSTRETCH at 0x89a2e4, DWCROP at 0x89b618.
+ * The original's decimal calculations feed these immediate fields directly.
+ * Unlike $DX/$DY/$MAG*, these commands do not call resident code. */
+static int display_config(void *core, size_t size, const PopsConfig *cfg, int apply) {
+  if (!core || !cfg)
+    return -EINVAL;
+  if ((cfg->display_mask & ~POPS_DISPLAY_ALL) ||
+      ((cfg->display_mask & POPS_DISPLAY_STRETCH) && cfg->display_stretch > 9999) ||
+      ((cfg->display_mask & POPS_DISPLAY_CROP) && cfg->display_crop > 9999))
+    return -EINVAL;
+  const struct {
+    uint32_t address, pristine, value;
+    uint8_t width, selected;
+  } sites[] = {
+    {0x21af88, 0x0c0903d8, 0x341a0001, 4, cfg->smooth},
+    {0x21af8c, 0x2484f1d8, 0xa21a22a0, 4, cfg->smooth},
+    {0x21a0a4, 0xfc450000, 0x64a50f00 | ((0x1000u - cfg->left_adjust) & 0xff), 4, cfg->left_adjust},
+    {0x21a0a8, 0x0220202d, 0xfc450000, 4, cfg->left_adjust},
+    {0x21b128, 0x0200, cfg->display_x, 2, cfg->display_mask & POPS_DISPLAY_X},
+    {0x21c114, 0x0200, cfg->display_x, 2, cfg->display_mask & POPS_DISPLAY_X},
+    {0x221958, 0xae2421b4, 0, 4, cfg->display_mask & POPS_DISPLAY_X},
+    {0x21c18c, 0x0010, cfg->display_y, 2, cfg->display_mask & POPS_DISPLAY_Y},
+    {0x2219d0, 0xae2421b8, 0, 4, cfg->display_mask & POPS_DISPLAY_Y},
+    {0x21b130, 0xae2821b8, 0, 4, cfg->display_mask & POPS_DISPLAY_Y},
+    {0x23af40, 0x09ff, cfg->display_stretch, 2, cfg->display_mask & POPS_DISPLAY_STRETCH},
+    {0x23aff4, 0x09ff, cfg->display_stretch, 2, cfg->display_mask & POPS_DISPLAY_STRETCH},
+    {0x221960, 0xae2321bc, 0, 4, cfg->display_mask & POPS_DISPLAY_CROP},
+    {0x21b12c, 0x0a00, cfg->display_crop, 2, cfg->display_mask & POPS_DISPLAY_CROP},
+    {0x21c184, 0x0a00, cfg->display_crop, 2, cfg->display_mask & POPS_DISPLAY_CROP},
+  };
+  uint8_t *bytes = core;
+  for (unsigned i = 0; i < sizeof(sites) / sizeof(sites[0]); ++i) {
+    if (!sites[i].selected)
+      continue;
+    size_t offset = sites[i].address - POPS_CORE_BASE_ADDR;
+    if (offset > size || sites[i].width > size - offset)
+      return -ERANGE;
+    uint32_t current = 0;
+    for (unsigned j = 0; j < sites[i].width; ++j)
+      current |= (uint32_t)bytes[offset + j] << (8 * j);
+    if (current != sites[i].pristine && current != sites[i].value)
+      return -EILSEQ;
+  }
+  if (apply)
+    for (unsigned i = 0; i < sizeof(sites) / sizeof(sites[0]); ++i)
+      if (sites[i].selected)
+        for (unsigned j = 0; j < sites[i].width; ++j)
+          bytes[sites[i].address - POPS_CORE_BASE_ADDR + j] =
+              (uint8_t)(sites[i].value >> (8 * j));
+  return 0;
+}
+
+int pops_apply_display_config(void *core, size_t size, const PopsConfig *cfg) {
+  return display_config(core, size, cfg, 1);
+}
+
 /* POPStarter r13 FUN_008dc218, the "to PAL" patch. The original applies it
  * to European discs (unless $NOPAL) and for $FORCEPAL; POPS is NTSC
  * otherwise. Accepted current bytes were measured on the reference core. */
@@ -951,6 +1008,10 @@ int pops_apply_all_config_patches(void *staged_core, size_t core_size, const Pop
   if (cfg->igr_type > 6)
     return -EINVAL;
 
+  result = display_config(staged_core, core_size, cfg, 0);
+  if (result)
+    return result;
+
   if (cfg->compat_modes) {
     result = pops_apply_compat_modes(staged_core, core_size, cfg->compat_modes);
     if (result)
@@ -967,6 +1028,8 @@ int pops_apply_all_config_patches(void *staged_core, size_t core_size, const Pop
     result = pops_apply_original_tokens(staged_core, core_size, cfg->original_tokens);
     if (result) return result;
   }
+  result = pops_apply_display_config(staged_core, core_size, cfg);
+  if (result) return result;
   if (cfg->no_vmc0) {
     result = pops_apply_vmc0_disable(staged_core, core_size);
     if (result) return result;

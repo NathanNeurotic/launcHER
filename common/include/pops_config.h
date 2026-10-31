@@ -45,6 +45,12 @@ enum PopsRegion {
 #define POPS_TOK_NOHDTVFIX        (1u << 11)
 #define POPS_TOK_COUNT            12
 
+#define POPS_DISPLAY_X       0x01
+#define POPS_DISPLAY_Y       0x02
+#define POPS_DISPLAY_STRETCH 0x04
+#define POPS_DISPLAY_CROP    0x08
+#define POPS_DISPLAY_ALL     0x0f
+
 #define POPS_MAX_DISCS    4
 #define POPS_MAX_CHEATS   256
 
@@ -60,8 +66,8 @@ typedef struct {
   uint8_t hdtv_fix;
   int16_t x_offset;
   int16_t y_offset;
-  /* Recorded but not applied: the original's $SMOOTH/$WIDESCREEN need
-   * POPStarter's resident code, and $DITHER_OFF is not a POPStarter command. */
+  /* $SMOOTH patches the core directly. $WIDESCREEN still needs independent
+   * resident code; $DITHER_OFF is not a POPStarter command. */
   uint8_t smooth;
   uint8_t widescreen;
   uint8_t dither_off;
@@ -100,6 +106,12 @@ typedef struct {
   uint32_t original_tokens;
   /* Disc region (POPS_REGION_*); set by the launcher from the VCD */
   uint8_t disc_region;
+
+  /* Original computed display commands. Explicit mask distinguishes zero
+   * from absent. X/Y use the first valid command, as the original does. */
+  uint16_t display_x, display_y, display_stretch, display_crop;
+  uint8_t display_mask;
+  uint8_t left_adjust; /* $LEFTADJ_1..255; zero is absent */
 } PopsConfig;
 
 /* Initialize configuration with factory defaults */

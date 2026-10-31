@@ -59,6 +59,22 @@ static int try_parse_cheat(PopsConfig *cfg, const char *tok1, const char *tok2) 
   return -EOVERFLOW;
 }
 
+/* Original commands accept decimal digits only, with bounded digit counts.
+ * Do not let strtol accept a sign, suffix or overflow as a display patch. */
+static int display_decimal(const char *text, unsigned digits, unsigned maximum,
+                             uint16_t *value) {
+  unsigned n = 0, result = 0;
+  while (*text) {
+    if (*text < '0' || *text > '9' || ++n > digits)
+      return 0;
+    result = result * 10 + (unsigned)(*text++ - '0');
+  }
+  if (!n || result > maximum)
+    return 0;
+  *value = (uint16_t)result;
+  return 1;
+}
+
 static int parse_single_directive(PopsConfig *cfg, const char *token) {
   if (!cfg || !token || !*token)
     return 0;
@@ -92,6 +108,28 @@ static int parse_single_directive(PopsConfig *cfg, const char *token) {
   }
   if (!strcasecmp(token, "$SMOOTH")) {
     cfg->smooth = 1;
+    return 1;
+  }
+  if (!strncasecmp(token, "$LEFTADJ_", 9)) {
+    uint16_t value;
+    if (display_decimal(token + 9, 3, 255, &value) && value)
+      cfg->left_adjust = (uint8_t)value;
+    return 1;
+  }
+  if (!strncasecmp(token, "$DWSTRETCH_", 11)) {
+    uint16_t value;
+    if (display_decimal(token + 11, 4, 9999, &value)) {
+      cfg->display_stretch = value;
+      cfg->display_mask |= POPS_DISPLAY_STRETCH;
+    }
+    return 1;
+  }
+  if (!strncasecmp(token, "$DWCROP_", 8)) {
+    uint16_t value;
+    if (display_decimal(token + 8, 4, 9999, &value)) {
+      cfg->display_crop = value;
+      cfg->display_mask |= POPS_DISPLAY_CROP;
+    }
     return 1;
   }
   if (!strcasecmp(token, "$WIDESCREEN")) {
@@ -173,10 +211,22 @@ static int parse_single_directive(PopsConfig *cfg, const char *token) {
     return 1;
   }
   if (!strncasecmp(token, "$XPOS_", 6)) {
+    uint16_t value;
+    if (!(cfg->display_mask & POPS_DISPLAY_X) &&
+        display_decimal(token + 6, 5, 65535, &value)) {
+      cfg->display_x = value;
+      cfg->display_mask |= POPS_DISPLAY_X;
+    }
     cfg->x_offset = (int16_t)strtol(token + 6, NULL, 10);
     return 1;
   }
   if (!strncasecmp(token, "$YPOS_", 6)) {
+    uint16_t value;
+    if (!(cfg->display_mask & POPS_DISPLAY_Y) &&
+        display_decimal(token + 6, 5, 65535, &value)) {
+      cfg->display_y = value;
+      cfg->display_mask |= POPS_DISPLAY_Y;
+    }
     cfg->y_offset = (int16_t)strtol(token + 6, NULL, 10);
     return 1;
   }

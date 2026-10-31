@@ -31,10 +31,10 @@ first (the "resident stub" item under Remaining work).
 | Command | Original effect | launcHER |
 |---|---|---|
 | `$Cxxxxxxx`, `$8/3/1/2/D0..D3/E0/E1` codes, `$S…`, `$T…` | resident cheat engine | **PARTIAL**: codes parse; no resident engine runs during POPS |
-| `$SMOOTH` | 64-bit write at `0x21af88`, value not statically resolved | **MISSING** (parsed, ignored) |
+| `$SMOOTH` | `0x21af88=0xa21a22a0341a0001` (64-bit) | **PRESENT**: guarded, original-command differential; no console run |
 | `$DX_n $DY_n $MAGH_n $MAGV_n $DW_n $DH_n` | display registers via resident code | **MISSING** |
 | `$480p` | flags + `0x21af94=0x50`, `0x23acb0/0x23ad0c=li a0,0`, jump into resident code | **BLOCKED**; parsed, disables European auto PAL as in the original, no core writes |
-| `$LEFTADJ_` | `0x21a0a4/0x21a0a8` with a computed byte | **MISSING** |
+| `$LEFTADJ_` | `1..255`: `0x21a0a4=0x64a50f00 + ((4096-n)&255)`, `0x21a0a8=0xfc450000` | **PRESENT**: guarded, original-command differential; no console run |
 | `$SCANLINES` | `0x21e454=0x22b50006` | **PRESENT** |
 | `$VCDID_n` | selects a built-in per-game DB entry | **MISSING** |
 | `$SUBCDSTATUS` | `0x20e850/0x20e86c/0x20e87c` | **PRESENT** |
@@ -59,7 +59,7 @@ first (the "resident stub" item under Remaining work).
 | no IGR command | POPS default | **PARTIAL**: launcHER's own direct exit stays the default; the user confirmed it on Tekken |
 | `$NOPAL` | stops European auto PAL | **PRESENT**; `$PAL2NTSC`/`$FORCENTSC` are now aliases |
 | `$FORCEPAL` | PAL patch + region letter `E` | **PRESENT**; was invented values |
-| `$?POS_n`, `$DWSTRETCH_n`, `$DWCROP_n` | computed 2-byte display writes | **MISSING**; `$XPOS_/$YPOS_` parse and are ignored (old invented writes removed) |
+| `$XPOS_n`, `$YPOS_n`, `$DWSTRETCH_n`, `$DWCROP_n` | unsigned decimal immediate fields plus store suppression; X/Y first valid command wins | **PRESENT**: guarded, original-command differential; X/Y 0..65535 (up to 5 digits), width commands 0..9999 (up to 4 digits); no console run |
 | `$CACHE1` | `0x20fff4`, `0x210120`, `0x2101ac` | **PRESENT** |
 | `$FAKELC` | copies LibCrypt code from the original | **BLOCKED** |
 | `$SAFEMODE`, `$SAFEMODE2`, `$NOSAFEMODE` | cheat-engine timing | **MISSING** (no resident engine) |
@@ -119,6 +119,8 @@ the fix files so a PATCH file's disable-auto still wins. **NOT TESTED.**
    console, plus `$FORCEPAL` and `$NOPAL` (picture rate and colour).
 2. An independent resident stub in free POPS memory, so the BLOCKED commands
    (pads, `$480p`, widescreen, timings) and the cheat engine can run.
-3. Recover the remaining computed commands (`$SMOOTH` value, `$POS/$DW*`,
-   `$LEFTADJ`, `$PAD01ID`) and the built-in per-game DB at `0x8e00d0`.
+3. Recover the remaining resident display-register commands (`$DX/$DY`,
+   `$MAGH/$MAGV`, `$DW/$DH`), `$PAD01ID` and built-in per-game DB at `0x8e00d0`.
+   The six direct display commands now have a bounded original differential;
+   see [display contracts](POPS_DISPLAY_CONTRACTS.md).
 4. IGR skin, OSD replacement, BIOS.BIN and physical disc boot.

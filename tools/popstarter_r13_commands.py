@@ -85,16 +85,26 @@ def handler_events(image, start, end):
             if value is None:
                 regs.pop(reg, None)
             else:
-                regs[reg] = value & 0xffffffff
+                regs[reg] = value & 0xffffffffffffffff
         try:
             if m == 'lui':
-                put(o[0].reg, o[1].imm << 16)
+                value = o[1].imm << 16
+                put(o[0].reg, value - 0x100000000 if value & 0x80000000 else value)
             elif m == 'ori':
                 src = 0 if o[1].reg == MIPS_REG_ZERO else regs.get(o[1].reg)
                 put(o[0].reg, None if src is None else src | (o[2].imm & 0xffff))
             elif m in ('addiu', 'daddiu'):
                 src = 0 if o[1].reg == MIPS_REG_ZERO else regs.get(o[1].reg)
-                put(o[0].reg, None if src is None else src + o[2].imm)
+                value = None if src is None else src + o[2].imm
+                if value is not None and m == 'addiu':
+                    value &= 0xffffffff
+                    if value & 0x80000000:
+                        value -= 0x100000000
+                put(o[0].reg, value)
+            elif m in ('dsll', 'dsll32'):
+                src = regs.get(o[1].reg)
+                shift = o[2].imm + (32 if m == 'dsll32' else 0)
+                put(o[0].reg, None if src is None else src << shift)
             elif m == 'move':
                 put(o[0].reg, 0 if o[1].reg == MIPS_REG_ZERO else regs.get(o[1].reg))
             elif m in ('sw', 'sb', 'sh') and o[1].type == MIPS_OP_MEM \
@@ -110,8 +120,11 @@ def handler_events(image, start, end):
             pass
         if pending is not None:
             if pending in POKE:
+                value = regs.get(MIPS_REG_A0)
+                if value is not None:
+                    value &= (1 << POKE[pending]) - 1
                 events.append({'kind': 'write', 'width': POKE[pending],
-                               'address': regs.get(MIPS_REG_A1), 'value': regs.get(MIPS_REG_A0)})
+                               'address': regs.get(MIPS_REG_A1), 'value': value})
             elif pending == MEMCPY:
                 events.append({'kind': 'copy', 'dest': regs.get(MIPS_REG_A0),
                                'source': regs.get(MIPS_REG_A1), 'size': regs.get(MIPS_REG_A2)})
