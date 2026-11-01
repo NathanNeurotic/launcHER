@@ -78,6 +78,12 @@ int pops_apply_region(void *staged_core, size_t core_size, int region,
 /* Fixed-value POPStarter commands (POPS_TOK_* mask) */
 int pops_apply_original_tokens(void *staged_core, size_t core_size, uint32_t tokens);
 
+/* $UNDO_COMPATIBILITY_CODES, $UNDO_GAME_FIXES, $UNDO_LIBCRYPT_FIX: the
+ * original handlers' core writes. Run before the compat modes. Writes the
+ * original makes inside its own resident blob are not POPS code here and
+ * are left out. */
+int pops_apply_undo_tokens(void *staged_core, size_t core_size, uint32_t tokens);
+
 /* $SMOOTH, $LEFTADJ_, $XPOS_/$YPOS_, $DWSTRETCH_ and $DWCROP_. All
  * selected sites are checked before writes; no resident code is required. */
 int pops_apply_display_config(void *staged_core, size_t core_size, const PopsConfig *cfg);

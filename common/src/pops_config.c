@@ -235,6 +235,9 @@ static int parse_single_directive(PopsConfig *cfg, const char *token) {
       {"$ROLLBACK", POPS_TOK_ROLLBACK},
       {"$CACHE1", POPS_TOK_CACHE1},
       {"$NOHDTVFIX", POPS_TOK_NOHDTVFIX},
+      {"$UNDO_COMPATIBILITY_CODES", POPS_TOK_UNDO_COMPAT},
+      {"$UNDO_GAME_FIXES", POPS_TOK_UNDO_GAME_FIXES},
+      {"$UNDO_LIBCRYPT_FIX", POPS_TOK_UNDO_LIBCRYPT},
     };
     for (size_t i = 0; i < sizeof(tokens) / sizeof(tokens[0]); ++i) {
       if (!strcasecmp(token, tokens[i].name)) {

@@ -151,6 +151,8 @@ class FeatureTests(unittest.TestCase):
         LIB.pops_apply_bios_osd_enable.restype = c.c_int
         LIB.pops_apply_original_tokens.argtypes = [c.c_void_p, c.c_size_t, c.c_uint32]
         LIB.pops_apply_original_tokens.restype = c.c_int
+        LIB.pops_apply_undo_tokens.argtypes = [c.c_void_p, c.c_size_t, c.c_uint32]
+        LIB.pops_apply_undo_tokens.restype = c.c_int
         LIB.pops_apply_igr_original.argtypes = [c.c_void_p, c.c_size_t, c.c_uint8, c.c_uint8]
         LIB.pops_apply_igr_original.restype = c.c_int
         LIB.pops_region_from_licence.argtypes = [c.c_char_p]
@@ -868,7 +870,7 @@ class FeatureTests(unittest.TestCase):
         self.assertEqual(buf[0xf0b6], 0)
         self.assertEqual(struct.unpack_from("<I", buf, 0x2734)[0], 0x14600004)
         self.assertEqual(struct.unpack_from("<I", buf, 0x3acb0)[0], 0x32240001)
-        self.assertEqual(LIB.pops_apply_original_tokens(core_ptr, core_size, 1 << 12), -errno.ENOTSUP)
+        self.assertEqual(LIB.pops_apply_original_tokens(core_ptr, core_size, 1 << 15), -errno.ENOTSUP)
         self.assertEqual(LIB.pops_apply_original_tokens(core_ptr, 0x1e456, 1), -errno.ERANGE)
 
         # Original IGR writes: $IGR4 jumps to 0x20c08c with the 0x900 mask.
@@ -1283,6 +1285,147 @@ class FeatureTests(unittest.TestCase):
         ptr_rg = (c.c_uint8 * len(buf_rg)).from_buffer(buf_rg)
         self.assertEqual(LIB.pops_apply_region(ptr_rg, len(buf_rg), 1, 0, 0), -errno.ERANGE)
         self.assertEqual(LIB.pops_apply_region(ptr_rg, len(buf_rg), 9, 0, 0), -errno.EINVAL)
+
+    UNDO_COMPAT_WRITES = [
+        (0x2525B0, 0x1BFC, 2), (0x20083C, 0x1000000A, 4), (0x200844, 0, 4),
+        (0x200848, 0, 4), (0x200850, 0, 4), (0x200854, 0, 4), (0x200858, 0, 4),
+        (0x20085C, 0, 4), (0x200860, 0, 4), (0x20BCAC, 0, 4),
+        (0x20DE9C, 0x0C0836EE, 4), (0x210314, 0, 4), (0x210318, 0x8F828228, 4),
+        (0x21031C, 0, 4), (0x210320, 0, 4), (0x210324, 0, 4), (0x210328, 0, 4),
+        (0x21032C, 0x1443FFFA, 4), (0x21AF70, 0x64, 1), (0x21E45C, 0, 1),
+        (0x20E850, 7, 1), (0x20E86C, 0, 4), (0x20E87C, 0x34420020, 4)]
+    UNDO_LIBCRYPT_WRITES = [
+        (0x2525B0, 0x1BFC, 2), (0x210CF8, 0x2442FFFF, 4), (0x210CFC, 0x7C640000, 4),
+        (0x210D00, 0, 4), (0x210D04, 0, 4), (0x210D08, 0, 4), (0x210D0C, 0xFA, 1)]
+    # Writes the original makes inside its own resident blob, not POPS code.
+    UNDO_BLOB_SITES = (0x2397D8, 0x239780, 0x239784)
+
+    def test_undo_commands(self):
+        cfg = PopsConfig()
+        LIB.pops_config_init(c.byref(cfg))
+        for line in (b"$UNDO_COMPATIBILITY_CODES", b"$UNDO_GAME_FIXES", b"$UNDO_LIBCRYPT_FIX"):
+            self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), line), 0)
+        self.assertEqual(cfg.original_tokens, (1 << 12) | (1 << 13) | (1 << 14))
+
+        size = 0x303000
+        read = lambda b, a, w: int.from_bytes(b[a - 0x200000:a - 0x200000 + w], "little")
+
+        def fill(b):
+            for i in range(len(b)):
+                b[i] = 0xA5
+
+        # Each command writes exactly the original's values and nothing else.
+        for flag, writes in ((1 << 12, self.UNDO_COMPAT_WRITES),
+                             (1 << 13, [(0x2525B0, 0x1BFC, 2)]),
+                             (1 << 14, self.UNDO_LIBCRYPT_WRITES)):
+            buf = bytearray(size)
+            fill(buf)
+            ptr = (c.c_uint8 * size).from_buffer(buf)
+            self.assertEqual(LIB.pops_apply_undo_tokens(ptr, size, flag), 0)
+            touched = set()
+            for address, value, width in writes:
+                self.assertEqual(read(buf, address, width), value, hex(address))
+                touched.update(range(address, address + width))
+            changed = {0x200000 + i for i, v in enumerate(buf) if v != 0xA5}
+            self.assertTrue(changed <= touched, sorted(hex(a) for a in changed - touched))
+            for address in self.UNDO_BLOB_SITES:
+                self.assertEqual(read(buf, address, 4), 0xA5A5A5A5)
+            del ptr
+
+        buf = bytearray(size)
+        ptr = (c.c_uint8 * size).from_buffer(buf)
+        self.assertEqual(LIB.pops_apply_undo_tokens(ptr, size, 1 << 15), -errno.ENOTSUP)
+        self.assertEqual(LIB.pops_apply_undo_tokens(ptr, 0x52000, 1 << 13), -errno.ERANGE)
+        self.assertEqual(LIB.pops_apply_undo_tokens(None, size, 1 << 12), -errno.EINVAL)
+        # Tokens without an $UNDO_ bit write nothing here.
+        self.assertEqual(LIB.pops_apply_undo_tokens(ptr, size, 0x0FFF), 0)
+        self.assertEqual(buf, bytearray(size))
+        del ptr
+
+        # $UNDO_COMPATIBILITY_CODES runs after $SUBCDSTATUS and restores its sites.
+        buf = bytearray(size)
+        ptr = (c.c_uint8 * size).from_buffer(buf)
+        self.assertEqual(LIB.pops_apply_original_tokens(ptr, size, (1 << 1) | (1 << 12)), 0)
+        self.assertEqual(buf, bytearray(size))
+        self.assertEqual(LIB.pops_apply_original_tokens(ptr, size, 1 << 1), 0)
+        self.assertEqual(buf[0xE850], 6)
+        del ptr
+
+        # Full pass: $UNDO_COMPATIBILITY_CODES with modes 2 and 5 still applies
+        # them (it runs before $COMPATIBILITY_0x in the original), and the fix
+        # context accepts the branch values it leaves without those modes.
+        def pristine():
+            b = bytearray(size)
+            for address, value, width in self.UNDO_COMPAT_WRITES:
+                b[address - 0x200000:address - 0x200000 + width] = value.to_bytes(width, "little")
+            struct.pack_into("<I", b, 0x83C, 0x0441000A)
+            struct.pack_into("<I", b, 0x85C, 0x1000FFFA)
+            # PATCH PAL sites, which the fix context also tracks.
+            b[0x1AF94] = 0x02
+            struct.pack_into("<I", b, 0x302770, 0x0008A3A2)
+            b[0x3B018] = 0x48
+            struct.pack_into("<H", b, 0x3B01C, 0x0290)
+            buf_ptr = (c.c_uint8 * size).from_buffer(b)
+            return b, buf_ptr
+
+        for modes in (0, 1 << 1, 1 << 4, (1 << 1) | (1 << 4)):
+            b, bp = pristine()
+            cfg = PopsConfig()
+            LIB.pops_config_init(c.byref(cfg))
+            cfg.original_tokens = 1 << 12
+            cfg.compat_modes = modes
+            self.assertEqual(LIB.pops_apply_all_config_patches(bp, size, c.byref(cfg)), 0, modes)
+            self.assertEqual(read(b, 0x20083C, 4), 0x1000000A)
+            self.assertEqual(read(b, 0x20085C, 4), 0)
+            if modes == 1 << 1:
+                self.assertEqual(read(b, 0x200850, 4), 0xA503C200)
+            if modes == 1 << 4:
+                self.assertEqual(read(b, 0x200860, 4), 0x10002D13)
+            ctx = (c.c_uint8 * 4096)()
+            self.assertEqual(LIB.pops_fix_context_init(ctx, bp, size, modes), 0, modes)
+            del bp
+
+    @unittest.skipUnless(os.environ.get("POPSTARTER_TEST_ELF"), "optional external POPStarter MAIN")
+    def test_undo_commands_match_the_original(self):
+        """Run the original's three $UNDO_ handlers in the bounded interpreter
+        and compare every core write with launcHER's, leaving out the writes
+        that land in the original's own resident blob."""
+        import sys
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from trace_original_pops_display import _Window
+        from trace_original_pops_io import decode_main
+        image = decode_main(Path(os.environ["POPSTARTER_TEST_ELF"]).read_bytes())
+
+        class UndoWindow(_Window):
+            def __init__(self, *args):
+                super().__init__(*args)
+                self.memory.update((self.GP + i, 0) for i in range(0x8000)
+                                   if self.GP + i not in self.memory)
+
+            def service(self, target):
+                if target == 0x8D6BD0:  # 16-bit core write
+                    self.writes.append([self.reg[5], self.reg[4] & 0xFFFF, 2])
+                    return
+                super().service(target)
+
+        size = 0x303000
+        for lo, hi, command, flag in ((0x89453C, 0x894AB8, "$UNDO_COMPATIBILITY_CODES", 1 << 12),
+                                      (0x894AB8, 0x894DB4, "$UNDO_GAME_FIXES", 1 << 13),
+                                      (0x894DB4, 0x895164, "$UNDO_LIBCRYPT_FIX", 1 << 14)):
+            w = UndoWindow(image, lo, hi, command)
+            w.run()
+            expected = bytearray(b"\xA5" * size)
+            for address, value, width in w.writes:
+                if address in self.UNDO_BLOB_SITES:
+                    continue
+                expected[address - 0x200000:address - 0x200000 + width] = value.to_bytes(width, "little")
+            blob = [a for a, _, _ in w.writes if a in self.UNDO_BLOB_SITES]
+            self.assertEqual(len(blob), {1 << 12: 0, 1 << 13: 1, 1 << 14: 2}[flag], command)
+            buf = bytearray(b"\xA5" * size)
+            ptr = (c.c_uint8 * size).from_buffer(buf)
+            self.assertEqual(LIB.pops_apply_undo_tokens(ptr, size, flag), 0)
+            self.assertEqual(buf, expected, command)
+            del ptr
 
     def test_region_pass_matches_original(self):
         self.assertEqual(LIB.pops_region_from_licence(b"Euro"), 1)

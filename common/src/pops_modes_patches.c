@@ -243,6 +243,15 @@ int pops_fix_context_init_video(PopsFixContext *context, const void *staged_core
           candidate.expected[j] = patch->replacement;
     }
   }
+  /* $UNDO_COMPATIBILITY_CODES writes 0x20083c/0x20085c with the values
+   * modes 2 and 5 use, whatever the mask. Accept exactly those values. */
+  for (unsigned i = 0; i < POPS_COMPAT_SITE_COUNT; ++i) {
+    const CompatPatch *patch = &compat_patches[i];
+    if ((patch->address == 0x0020083c || patch->address == 0x0020085c) &&
+        patch->address - POPS_CORE_BASE_ADDR + patch->width <= core_size &&
+        compat_read(staged_core, patch) == patch->replacement)
+      candidate.expected[i] = patch->replacement;
+  }
   int result = compat_context_check(&candidate, staged_core, core_size);
   if (result)
     return result;
@@ -443,7 +452,11 @@ int pops_apply_compat_modes(void *staged_core, size_t core_size, uint8_t modes_m
       return -ERANGE;
     for (j = 0; j < p->width; ++j)
       actual |= (uint32_t)bytes[offset + j] << (8 * j);
-    if (actual != p->expected)
+    /* $UNDO_COMPATIBILITY_CODES (applied first, as in the original) leaves
+     * 0x20083c/0x20085c at the very values modes 2 and 5 write. */
+    if (actual != p->expected &&
+        !(actual == p->replacement &&
+          (p->address == 0x0020083c || p->address == 0x0020085c)))
       return -EINVAL;
   }
   for (i = 0; i < sizeof(compat_patches) / sizeof(compat_patches[0]); ++i) {
@@ -691,11 +704,73 @@ int pops_apply_original_tokens(void *staged_core, size_t core_size, uint32_t tok
         token_writes[i].address + token_writes[i].width >
             POPS_CORE_BASE_ADDR + core_size)
       return -ERANGE;
+  /* $UNDO_COMPATIBILITY_CODES runs after $SUBCDSTATUS in the original and
+   * puts all of its sites back, so $SUBCDSTATUS has no effect with it. */
+  if (tokens & POPS_TOK_UNDO_COMPAT)
+    tokens &= ~POPS_TOK_SUBCDSTATUS;
   /* Table order is the original command order, so later commands win. */
   for (size_t i = 0; i < sizeof(token_writes) / sizeof(token_writes[0]); ++i)
     if (tokens & token_writes[i].flag)
       write_width(staged_core, core_size, token_writes[i].address,
                   token_writes[i].value, token_writes[i].width);
+  return 0;
+}
+
+/* The original's $UNDO_* handler writes, in handler order. Every value but
+ * 0x20083c/0x20085c (the same values compat modes 2 and 5 write) equals
+ * the shipped POPS word: they undo what the original's built-in per-game
+ * table applied before the commands ran. All three re-enable the BIOS OSD
+ * (0x2525b0 = 0x1bfc). Left out, because they land inside POPStarter's own
+ * resident blob rather than POPS code: $UNDO_GAME_FIXES 0x2397d8 =
+ * 0x10000001 and $UNDO_LIBCRYPT_FIX 0x239780 = 0x10000014, 0x239784 = 0. */
+static const TokenWrite undo_writes[] = {
+  {POPS_TOK_UNDO_COMPAT, 0x002525b0, 0x1bfc, 2},
+  {POPS_TOK_UNDO_COMPAT, 0x0020083c, 0x1000000a, 4},
+  {POPS_TOK_UNDO_COMPAT, 0x00200844, 0x00000000, 4},
+  {POPS_TOK_UNDO_COMPAT, 0x00200848, 0x00000000, 4},
+  {POPS_TOK_UNDO_COMPAT, 0x00200850, 0x00000000, 4},
+  {POPS_TOK_UNDO_COMPAT, 0x00200854, 0x00000000, 4},
+  {POPS_TOK_UNDO_COMPAT, 0x00200858, 0x00000000, 4},
+  {POPS_TOK_UNDO_COMPAT, 0x0020085c, 0x00000000, 4},
+  {POPS_TOK_UNDO_COMPAT, 0x00200860, 0x00000000, 4},
+  {POPS_TOK_UNDO_COMPAT, 0x0020bcac, 0x00000000, 4},
+  {POPS_TOK_UNDO_COMPAT, 0x0020de9c, 0x0c0836ee, 4},
+  {POPS_TOK_UNDO_COMPAT, 0x00210314, 0x00000000, 4},
+  {POPS_TOK_UNDO_COMPAT, 0x00210318, 0x8f828228, 4},
+  {POPS_TOK_UNDO_COMPAT, 0x0021031c, 0x00000000, 4},
+  {POPS_TOK_UNDO_COMPAT, 0x00210320, 0x00000000, 4},
+  {POPS_TOK_UNDO_COMPAT, 0x00210324, 0x00000000, 4},
+  {POPS_TOK_UNDO_COMPAT, 0x00210328, 0x00000000, 4},
+  {POPS_TOK_UNDO_COMPAT, 0x0021032c, 0x1443fffa, 4},
+  {POPS_TOK_UNDO_COMPAT, 0x0021af70, 0x64, 1},
+  {POPS_TOK_UNDO_COMPAT, 0x0021e45c, 0x00, 1},
+  {POPS_TOK_UNDO_COMPAT, 0x0020e850, 0x07, 1},
+  {POPS_TOK_UNDO_COMPAT, 0x0020e86c, 0x00000000, 4},
+  {POPS_TOK_UNDO_COMPAT, 0x0020e87c, 0x34420020, 4},
+  {POPS_TOK_UNDO_GAME_FIXES, 0x002525b0, 0x1bfc, 2},
+  {POPS_TOK_UNDO_LIBCRYPT, 0x002525b0, 0x1bfc, 2},
+  {POPS_TOK_UNDO_LIBCRYPT, 0x00210cf8, 0x2442ffff, 4},
+  {POPS_TOK_UNDO_LIBCRYPT, 0x00210cfc, 0x7c640000, 4},
+  {POPS_TOK_UNDO_LIBCRYPT, 0x00210d00, 0x00000000, 4},
+  {POPS_TOK_UNDO_LIBCRYPT, 0x00210d04, 0x00000000, 4},
+  {POPS_TOK_UNDO_LIBCRYPT, 0x00210d08, 0x00000000, 4},
+  {POPS_TOK_UNDO_LIBCRYPT, 0x00210d0c, 0xfa, 1},
+};
+
+int pops_apply_undo_tokens(void *staged_core, size_t core_size, uint32_t tokens) {
+  if (!staged_core)
+    return -EINVAL;
+  if (tokens >> POPS_TOK_COUNT)
+    return -ENOTSUP;
+  for (size_t i = 0; i < sizeof(undo_writes) / sizeof(undo_writes[0]); ++i)
+    if ((tokens & undo_writes[i].flag) &&
+        undo_writes[i].address + undo_writes[i].width >
+            POPS_CORE_BASE_ADDR + core_size)
+      return -ERANGE;
+  for (size_t i = 0; i < sizeof(undo_writes) / sizeof(undo_writes[0]); ++i)
+    if (tokens & undo_writes[i].flag)
+      write_width(staged_core, core_size, undo_writes[i].address,
+                  undo_writes[i].value, undo_writes[i].width);
   return 0;
 }
 
@@ -1117,6 +1192,11 @@ int pops_apply_all_config_patches(void *staged_core, size_t core_size, const Pop
   if (result)
     return result;
 
+  if (cfg->original_tokens & POPS_TOK_UNDO_MASK) {
+    result = pops_apply_undo_tokens(staged_core, core_size, cfg->original_tokens);
+    if (result)
+      return result;
+  }
   if (cfg->compat_modes) {
     result = pops_apply_compat_modes(staged_core, core_size, cfg->compat_modes);
     if (result)

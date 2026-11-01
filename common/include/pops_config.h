@@ -43,7 +43,13 @@ enum PopsRegion {
 #define POPS_TOK_ROLLBACK         (1u << 9)
 #define POPS_TOK_CACHE1           (1u << 10)
 #define POPS_TOK_NOHDTVFIX        (1u << 11)
-#define POPS_TOK_COUNT            12
+/* The $UNDO_* commands run before $COMPATIBILITY_0x in the original, so
+ * they are applied by pops_apply_undo_tokens ahead of the compat modes. */
+#define POPS_TOK_UNDO_COMPAT      (1u << 12)
+#define POPS_TOK_UNDO_GAME_FIXES  (1u << 13)
+#define POPS_TOK_UNDO_LIBCRYPT    (1u << 14)
+#define POPS_TOK_UNDO_MASK        (POPS_TOK_UNDO_COMPAT | POPS_TOK_UNDO_GAME_FIXES | POPS_TOK_UNDO_LIBCRYPT)
+#define POPS_TOK_COUNT            15
 
 #define POPS_DISPLAY_X       0x01
 #define POPS_DISPLAY_Y       0x02
