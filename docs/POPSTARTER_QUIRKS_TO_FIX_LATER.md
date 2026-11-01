@@ -32,11 +32,24 @@ needed).
 
 ## Known gaps (not copyable)
 
-- Quirk 9 also changes another CPU register in POPStarter's cheat routine
-  (gp, sp, fp, ra from `0x20000`; from `0x60000` the instruction also reads
-  another register, so the result depends on CPU state). launcHER copies
-  only the RAM effect. What the changed register does on a console is
-  unknown; files that reach `0x60000` are left out of the differential test.
+- Quirk 9 also changes another CPU register. Where that happens was traced
+  in the original: POPStarter replaces POPS's `jal` at `0x21a63c` with a
+  call to its blob at `0x239490`, which saves only `k0`/`k1` (`sq` to
+  `0x2394d0`/`0x2394e0`), runs the checks and the generated cheat code, then
+  restores `k0`/`k1`, reloads `ra` with `0x21a640` and returns. Every other
+  register is POPS's own, live at that call site. So, by running value:
+  - `0x20000`..`0x4FFFF`: the bad `ori` overwrites POPS's `gp`, `sp` or
+    `fp`, which POPS then keeps using. That almost certainly freezes or
+    crashes the game in POPStarter.
+  - `0x50000`..`0x5FFFF`: it overwrites `ra`, which is reloaded before the
+    return. No effect, and launcHER already matches exactly.
+  - `0x60000` and up: the instruction also reads `at` and can overwrite any
+    register (including `k0`, which moves the store). The result depends on
+    POPS's live registers.
+  launcHER copies the RAM effect only. Its codes run from its own VBLANK
+  hook, not at POPS's call site, so there are no POPS registers to break
+  there; a file in the first or last range breaks POPStarter anyway.
+  Files from `0x60000` up are left out of the differential test.
 
 ## Elsewhere
 
