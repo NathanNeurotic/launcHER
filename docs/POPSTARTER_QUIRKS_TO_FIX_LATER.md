@@ -46,17 +46,20 @@ needed).
   - `0x60000` and up: the instruction also reads `at` and can overwrite any
     register (including `k0`, which moves the store). The result depends on
     POPS's live registers.
-  launcHER copies the RAM effect only. Its codes run from its own VBLANK
-  hook, not at POPS's call site, so there are no POPS registers to break
-  there; a file in the first or last range breaks POPStarter anyway.
-  Files from `0x60000` up are left out of the differential test.
+  launcHER copies the RAM effect only. Its codes now run at the same call
+  site, but its entry saves and restores every register around them, so
+  POPS's registers are never changed; a file in the first or last range
+  breaks POPStarter anyway. Files from `0x60000` up are left out of the
+  differential test.
 
 ## Elsewhere
 
 - Always-on SLBB-00001 check bypass: POPStarter applies it only when its
   config byte `0x100023` is 1 (`fp+0x10e4 == 1` at `0x874c0c`). launcHER
   applies it always. This one is a parity gap still to close, not a fix.
-- Where cheats run: POPStarter runs its cheat code from POPS's call at
-  `0x21a63c` (hooked to its blob at `0x239490`); launcHER runs it from its
-  own VBLANK_START hook. How often POPS reaches `0x21a63c` was not measured,
-  so the two may apply codes at different rates. Parity gap still to check.
+
+## Copied: where the codes run
+
+| # | POPStarter behaviour (copied) | Possible fix later |
+|---|---|---|
+| 12 | Cheats, the controller ID override and `$SET_TIMINGS` run from POPS's GP1 write path (`0x21a63c`), not once per frame: once for every GPU control-port write the game makes while interrupts are enabled. A game that writes GP1 several times a frame gets several passes; one that stops writing it (or writes it only with interrupts off) gets none, so its codes, forced pad ID and timing keys stop working. How often that happens per game was not measured. | Run them once per VBLANK as well, or instead. |

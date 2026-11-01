@@ -1235,8 +1235,10 @@ int launchPOPS(int argc, char *argv[]) {
     res = 0;
     if ((uint32_t)(uintptr_t)stagedCore + plan.core_size > POPS_RESIDENT_BASE)
       res = -ERANGE; /* the trampoline still reads the staged core from there */
+    /* Controller IDs, $SET_TIMINGS and cheats run from POPS's GP1 write
+     * path, where POPStarter runs them, not from VBLANK. */
     if (!res && (residentCfg.flags & (POPS_RES_F_CHEATS | POPS_RES_F_PAD_ID | POPS_RES_F_TIMINGS)))
-      res = pops_resident_hook_core((void *)stagedCore, plan.core_size, residentHdr.vblank_entry);
+      res = pops_resident_hook_gp1((void *)stagedCore, plan.core_size, residentHdr.gp1_entry);
     if (!res)
       res = pops_resident_hook_pads((void *)stagedCore, plan.core_size, residentCfg.flags,
                                     residentHdr.pad_read_entry, residentHdr.pad_read_exit);

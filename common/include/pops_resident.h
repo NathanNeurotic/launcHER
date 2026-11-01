@@ -15,6 +15,11 @@
  * two words are pointed at pops_resident_vblank instead, which does its work
  * and then calls POPS's handler, so POPS behaves as before. The separate
  * display hook replaces the load at 0x21a094 and rejoins at 0x21a098.
+ *
+ * Controller IDs, $SET_TIMINGS and cheats run where POPStarter runs them:
+ * from the nop at 0x0021a63c in POPS's GP1 write path, which POPStarter
+ * turns into a jal to its own code (see pops_resident_hook_gp1). The
+ * launcher no longer hooks VBLANK_START; the entry and hook_core remain.
  * Progressive mode selects a context-preserving bridge at the same site. */
 
 #include <stddef.h>
@@ -28,7 +33,7 @@ extern "C" {
 #define POPS_RESIDENT_BASE        UINT32_C(0x0143a000)
 #define POPS_RESIDENT_LIMIT       UINT32_C(0x01460000)
 #define POPS_RESIDENT_MAGIC       UINT32_C(0x5352484c) /* "LHRS" */
-#define POPS_RESIDENT_VERSION     7
+#define POPS_RESIDENT_VERSION     8
 
 /* POPS's VBLANK_START registration and handler (verified on the pinned core) */
 #define POPS_VBLANK_LUI_ADDR      UINT32_C(0x0021b184)
@@ -36,6 +41,14 @@ extern "C" {
 #define POPS_VBLANK_LUI_PRISTINE  UINT32_C(0x3c050022) /* lui   $a1, 0x22 */
 #define POPS_VBLANK_ADDIU_PRISTINE UINT32_C(0x24a5cd68) /* addiu $a1, $a1, -0x3298 */
 #define POPS_VBLANK_HANDLER       UINT32_C(0x0021cd68)
+
+/* POPS's GP1 write path (0x0021a568, called by the GPU register handler at
+ * 0x0020b4d8 for writes to 0x1f801814). With interrupts enabled it reaches
+ * lui $v1,1 / nop / di; POPStarter r13 replaces that nop with
+ * "jal 0x239490" (its pad checks, $SET_TIMINGS and cheat code), and so does
+ * launcHER with a jal to its own entry. */
+#define POPS_GP1_HOOK_ADDR        UINT32_C(0x0021a63c)
+#define POPS_GP1_HOOK_PRISTINE    UINT32_C(0x00000000) /* nop */
 
 /* POPS stores its PS1 RAM base (0x40000000, TLB-mapped) at 0x0021af98:
  * sw $s2, 0x2274($s0) with $s0 = 0x700010f0. Reading it at run time keeps
@@ -59,6 +72,7 @@ typedef struct {
   uint32_t gte_scale_entry;  /* widescreen: MAC1 store at 0x2089a8, scale then divide */
   uint32_t gte_divide_entry; /* $EYEFINITY: same site, divide only */
   uint32_t gte_ultra_entry;  /* $ULTRA_WIDESCREEN: IR1 store at 0x208a2c */
+  uint32_t gp1_entry;        /* cheats/$SET_TIMINGS: jal'd from 0x21a63c */
 } PopsResidentHeader;
 
 #define POPS_RES_F_CHEATS         (1u << 0)
@@ -121,7 +135,7 @@ typedef struct {
   uint32_t flags;        /* POPS_RES_F_* */
   uint32_t pops_vblank;  /* POPS's own VBLANK_START handler, always called */
   uint32_t ram_base_ptr; /* where POPS keeps its PS1 RAM base */
-  uint32_t frame;        /* VBLANK_START count */
+  uint32_t frame;        /* times the GP1 hook ran */
   uint16_t safe_mode;    /* POPS_SAFE_MODE_* cheat gate */
   uint16_t cheat_count;
   uint8_t pad_override;  /* bit n: port n reports pad_id[n] */
@@ -151,8 +165,8 @@ uint16_t pops_cheats_compile(const PopsCheatEntry *in, uint16_t count, PopsCheat
 /* 1 when the selected gate holds, so the cheat pass is skipped this time. */
 int pops_safe_mode_blocks(const uint8_t *ps1_ram, uint8_t safe_mode);
 
-/* Per-frame work, separate from the interrupt entry so host tests can run it.
- * Returns 1 when the codes ran this frame. */
+/* The cheat work done each time the GP1 hook runs, separate from the entry
+ * so host tests can run it. Returns 1 when the codes ran this time. */
 int pops_resident_frame(PopsResidentConfig *cfg, uint8_t *ram);
 
 /* Force the controller IDs selected by pad_override. state is the first of
@@ -188,6 +202,11 @@ int pops_resident_build_config(PopsResidentConfig *out, const PopsConfig *cfg);
 /* Point POPS's VBLANK_START registration at the resident entry. All or
  * nothing: both words are checked before either is written. */
 int pops_resident_hook_core(void *staged_core, size_t core_size, uint32_t entry);
+
+/* Write "jal entry" over the nop at POPS_GP1_HOOK_ADDR, after checking the
+ * words around it (lui $v1,1 before, di / sync.p / mfc0 Status after, and
+ * the and/bnez that read $v1). Idempotent; anything else is -EILSEQ. */
+int pops_resident_hook_gp1(void *staged_core, size_t core_size, uint32_t entry);
 
 /* Manual DISPLAY override at 0x21a094. Guard the displaced load, delay slot
  * and both interlace argument sites before writing the hook. The image

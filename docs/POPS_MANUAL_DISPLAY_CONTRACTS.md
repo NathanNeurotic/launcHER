@@ -73,7 +73,7 @@ and both interlace argument sites before any write. It permits the current
 owned jump for idempotence and the known `$HDTVFIX` value at the argument
 sites, preserves their already-staged state and rejects every other value. All setup
 checks occur before IOP reboot. A display-only configuration installs only
-the display hook; cheats independently select the VBLANK hook. The resident
+the display hook; cheats, controller IDs and `$SET_TIMINGS` independently select the GP1 hook at `0x21a63c`. The resident
 image is still copied as the last write before the trampoline.
 
 ## Verification and limits
@@ -93,7 +93,7 @@ image is still copied as the last write before the trampoline.
 - Normal and trace/debug PS2 builds pass; the resident image uses `-Werror`.
   The original manual checkpoint was 2,704 resident bytes including configuration;
   the current image with the progressive bridge is 3,936 bytes.
-- Built-image Unicorn checks retain VBLANK chaining/cheat tests. The actual
+- Built-image Unicorn checks run the cheat tests through the GP1 entry (every register kept) and check that VBLANK only chains. The actual
   display jump, its delay slot and all 31 nonzero GPRs are checked at the
   continuation for four DISPLAY values. An optional original comparison
   executes the pinned original fixed entry and compares the same register

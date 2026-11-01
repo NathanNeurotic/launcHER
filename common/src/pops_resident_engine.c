@@ -245,6 +245,8 @@ void pops_resident_pad_read_exit(void);
 void pops_resident_pad_read_done(int32_t bytes);
 
 int pops_resident_vblank(int cause);
+void pops_resident_gp1(void);
+void pops_resident_gp1_work(void);
 void pops_resident_display(void);
 void pops_resident_progressive(void);
 extern char _pops_resident_file_end[];
@@ -363,16 +365,85 @@ const PopsResidentHeader pops_resident_header = {
   (uint32_t)pops_resident_gte_scale,
   (uint32_t)pops_resident_gte_divide,
   (uint32_t)pops_resident_gte_ultra,
+  (uint32_t)pops_resident_gp1,
 };
 
+/* No longer hooked by the launcher: everything it did now runs from the GP1
+ * entry below, where POPStarter does it. Kept so the header stays valid. */
 int pops_resident_vblank(int cause) {
+  return ((PopsIntcHandler)pops_resident_config.pops_vblank)(cause);
+}
+
+/* Where POPStarter runs its checks and cheat code: POPS's GP1 write path
+ * (0x21a568, reached from the GPU register handler 0x20b4d8 when the game
+ * writes 0x1f801814) posts the command and, when interrupts are enabled,
+ * reaches the nop at 0x21a63c. POPStarter puts "jal 0x239490" there;
+ * launcHER puts "jal pops_resident_gp1". The di after it runs in the delay
+ * slot, as in the original, so this code runs with interrupts disabled, on
+ * the POPS thread's own stack. POPS still needs v1 (0x10000) afterwards;
+ * every caller-saved register, HI and LO are kept so POPS sees no change.
+ * The original keeps only k0/k1, which its code alone uses. */
+__asm__(".set push\n.set noreorder\n.set noat\n.text\n.align 2\n"
+        ".globl pops_resident_gp1\npops_resident_gp1:\n"
+        "addiu $sp, $sp, -0xa0\n"
+        "sd $1, 0x00($sp)\n"
+        "sd $2, 0x08($sp)\n"
+        "sd $3, 0x10($sp)\n"
+        "sd $4, 0x18($sp)\n"
+        "sd $5, 0x20($sp)\n"
+        "sd $6, 0x28($sp)\n"
+        "sd $7, 0x30($sp)\n"
+        "sd $8, 0x38($sp)\n"
+        "sd $9, 0x40($sp)\n"
+        "sd $10, 0x48($sp)\n"
+        "sd $11, 0x50($sp)\n"
+        "sd $12, 0x58($sp)\n"
+        "sd $13, 0x60($sp)\n"
+        "sd $14, 0x68($sp)\n"
+        "sd $15, 0x70($sp)\n"
+        "sd $24, 0x78($sp)\n"
+        "sd $25, 0x80($sp)\n"
+        "sd $31, 0x88($sp)\n"
+        "mfhi $8\n"
+        "mflo $9\n"
+        "sd $8, 0x90($sp)\n"
+        "jal pops_resident_gp1_work\n"
+        "sd $9, 0x98($sp)\n"
+        "ld $8, 0x90($sp)\n"
+        "ld $9, 0x98($sp)\n"
+        "mthi $8\n"
+        "mtlo $9\n"
+        "ld $1, 0x00($sp)\n"
+        "ld $2, 0x08($sp)\n"
+        "ld $3, 0x10($sp)\n"
+        "ld $4, 0x18($sp)\n"
+        "ld $5, 0x20($sp)\n"
+        "ld $6, 0x28($sp)\n"
+        "ld $7, 0x30($sp)\n"
+        "ld $8, 0x38($sp)\n"
+        "ld $9, 0x40($sp)\n"
+        "ld $10, 0x48($sp)\n"
+        "ld $11, 0x50($sp)\n"
+        "ld $12, 0x58($sp)\n"
+        "ld $13, 0x60($sp)\n"
+        "ld $14, 0x68($sp)\n"
+        "ld $15, 0x70($sp)\n"
+        "ld $24, 0x78($sp)\n"
+        "ld $25, 0x80($sp)\n"
+        "ld $31, 0x88($sp)\n"
+        "jr $31\n"
+        "addiu $sp, $sp, 0xa0\n"
+        ".set pop\n");
+
+/* In POPStarter's chain order: the controller ID stores (0x232cb0..), then
+ * the $SET_TIMINGS check (0x238a90), then the cheat code (0x2397e8). */
+void pops_resident_gp1_work(void) {
   PopsResidentConfig *cfg = &pops_resident_config;
   uint32_t base = *(volatile uint32_t *)cfg->ram_base_ptr;
   if (cfg->flags & POPS_RES_F_PAD_ID)
     pops_resident_pad_ids(cfg, (uint8_t *)POPS_PAD_STATE_ADDR);
   pops_resident_timings(cfg, 0, POPS_SCRATCHPAD_ADDR);
   pops_resident_frame(cfg, (uint8_t *)base);
-  return ((PopsIntcHandler)cfg->pops_vblank)(cause);
 }
 
 #endif

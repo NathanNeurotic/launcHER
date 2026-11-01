@@ -493,7 +493,7 @@ $8009A200 0010</code></pre>
 </p>
 
 <p>
-  launcHER installs its own small resident program next to POPS and runs these codes against PlayStation 1 RAM (<code>0x00000000</code> to <code>0x001FFFFF</code>) once per frame, from POPS's vertical blank interrupt. It is independent code, not POPStarter's. Not yet tested on a console.
+  launcHER installs its own small resident program next to POPS and runs these codes against PlayStation 1 RAM (<code>0x00000000</code> to <code>0x001FFFFF</code>) from the same place in POPS as POPStarter: each time the game writes the GPU control port with interrupts enabled; how often that is depends on the game and was not measured. A game that stops writing it gets no codes until it writes it again, in POPStarter too. It is independent code, not POPStarter's. Not yet tested on a console.
 </p>
 
 <h2 id="step-10-igr-hotkeys">Step 10: In-Game Reset &amp; Controller Hotkeys</h2>

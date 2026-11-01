@@ -129,6 +129,7 @@ int pops_resident_check_image(const void *image, size_t image_len, PopsResidentH
   h.gte_scale_entry = get_u32(b + 40);
   h.gte_divide_entry = get_u32(b + 44);
   h.gte_ultra_entry = get_u32(b + 48);
+  h.gp1_entry = get_u32(b + 52);
 
   if (h.magic != POPS_RESIDENT_MAGIC || h.version != POPS_RESIDENT_VERSION ||
       h.header_size != sizeof(PopsResidentHeader))
@@ -152,8 +153,8 @@ int pops_resident_check_image(const void *image, size_t image_len, PopsResidentH
   if ((h.pad_read_exit & 3) || h.pad_read_exit < POPS_RESIDENT_BASE + h.header_size ||
       h.pad_read_exit >= POPS_RESIDENT_BASE + h.file_size)
     return -ERANGE;
-  const uint32_t gte[] = {h.gte_scale_entry, h.gte_divide_entry, h.gte_ultra_entry};
-  for (unsigned i = 0; i < 3; ++i) {
+  const uint32_t gte[] = {h.gte_scale_entry, h.gte_divide_entry, h.gte_ultra_entry, h.gp1_entry};
+  for (unsigned i = 0; i < 4; ++i) {
     if ((gte[i] & 3) || gte[i] < POPS_RESIDENT_BASE + h.header_size ||
         gte[i] >= POPS_RESIDENT_BASE + h.file_size)
       return -ERANGE;
@@ -239,6 +240,35 @@ int pops_resident_hook_core(void *staged_core, size_t core_size, uint32_t entry)
 
   put_u32(lui, want_lui);
   put_u32(addiu, want_addiu);
+  return 0;
+}
+
+int pops_resident_hook_gp1(void *staged_core, size_t core_size, uint32_t entry) {
+  uint8_t *core = (uint8_t *)staged_core;
+  static const uint32_t fixed[][2] = {
+    {0x0021a630, 0x5060000b}, /* beql  $v1, $zero, 0x21a660 (EIE clear) */
+    {0x0021a638, 0x3c030001}, /* lui   $v1, 1 */
+    {0x0021a640, 0x42000039}, /* di (the jal's delay slot) */
+    {0x0021a644, 0x0000040f}, /* sync.p */
+    {0x0021a648, 0x40026000}, /* mfc0  $v0, Status */
+    {0x0021a64c, 0x00431024}, /* and   $v0, $v0, $v1 */
+  };
+  if (!core)
+    return -EINVAL;
+  if ((entry & 3) || entry < POPS_RESIDENT_BASE || entry >= POPS_RESIDENT_LIMIT)
+    return -EINVAL;
+  if (core_size < 0x0021a650 - POPS_CORE_BASE)
+    return -ERANGE;
+  for (unsigned i = 0; i < sizeof(fixed) / sizeof(fixed[0]); ++i) {
+    if (get_u32(core + fixed[i][0] - POPS_CORE_BASE) != fixed[i][1])
+      return -EILSEQ;
+  }
+  uint8_t *site = core + POPS_GP1_HOOK_ADDR - POPS_CORE_BASE;
+  uint32_t jal = 0x0c000000u | ((entry >> 2) & 0x03ffffffu);
+  uint32_t cur = get_u32(site);
+  if (cur != POPS_GP1_HOOK_PRISTINE && cur != jal)
+    return -EILSEQ;
+  put_u32(site, jal);
   return 0;
 }
 

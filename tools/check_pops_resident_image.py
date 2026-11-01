@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
-"""Run the built POPS resident image under emulation, called the way POPS's
-VBLANK_START registration calls it.
+"""Run the built POPS resident image under emulation, called the way POPS
+calls it: the VBLANK_START entry through its registration, and the cheat and
+$SET_TIMINGS entry through the jal launcHER writes at 0x21a63c in POPS's GP1
+write path (where POPStarter runs them).
 
 Manual check, not run by CI: needs `pip install unicorn` and the image CMake
 builds (build/launcher/pops_resident.bin).
@@ -14,13 +16,15 @@ here is not a console test."""
 import os, struct, sys
 from unicorn import *
 from unicorn.mips_const import *
+import unicorn.mips_const as _mips
 
 img = open(sys.argv[1], 'rb').read()
 BASE = 0x0143A000
 (magic, ver, hs, fsz, isz, entry, cfga, display_entry, progressive_entry,
- pad_read_entry, pad_read_exit, gte_scale, gte_divide, gte_ultra) = struct.unpack_from('<IHHIIIIIIIIIII', img, 0)
+ pad_read_entry, pad_read_exit, gte_scale, gte_divide, gte_ultra,
+ gp1_entry) = struct.unpack_from('<IHHIIIIIIIIIIII', img, 0)
 assert magic == 0x5352484C and fsz == len(img), (hex(magic), fsz, len(img))
-assert ver == 7 and hs == 52
+assert ver == 8 and hs == 56
 
 mu = Uc(UC_ARCH_MIPS, UC_MODE_MIPS64 + UC_MODE_LITTLE_ENDIAN)
 # The R5900 has MIPS IV's movz/movn, which unicorn's default R4000 model
@@ -56,41 +60,73 @@ def vblank(cause=2):
 
 calls = lambda: struct.unpack('<I', mu.mem_read(0x1000, 4))[0]
 
+# The GP1 entry, reached by "jal entry" at 0x21a63c with di in the delay
+# slot. POPS needs $v1 (0x10000) afterwards; the entry keeps every register
+# it is given, and HI/LO, and returns to $ra (0x21a640 on the console).
+GP1_REGS = [UC_MIPS_REG_AT, UC_MIPS_REG_V0, UC_MIPS_REG_V1] + \
+    [getattr(_mips, 'UC_MIPS_REG_%d' % r) for r in range(4, 26)] + \
+    [UC_MIPS_REG_GP, UC_MIPS_REG_FP]
+def gp1():
+    SENT = 0x0021A640
+    mu.mem_write(SENT, struct.pack('<I', 0x42000039))
+    want = {}
+    for i, r in enumerate(GP1_REGS):
+        v = 0x0123456789AB0000 + (i << 8) + 0x11
+        if r == UC_MIPS_REG_V1:
+            v = 0x10000
+        mu.reg_write(r, v)
+        want[r] = v
+    mu.reg_write(UC_MIPS_REG_HI, 0x4848); mu.reg_write(UC_MIPS_REG_LO, 0x4c4c)
+    mu.reg_write(UC_MIPS_REG_SP, 0x0008FF00)
+    mu.reg_write(UC_MIPS_REG_RA, SENT)
+    mu.emu_start(gp1_entry, SENT, count=200000)
+    assert mu.reg_read(UC_MIPS_REG_PC) == SENT
+    for r, v in want.items():
+        assert mu.reg_read(r) == v, ('register %d changed' % r, hex(mu.reg_read(r)))
+    assert (mu.reg_read(UC_MIPS_REG_HI), mu.reg_read(UC_MIPS_REG_LO)) == (0x4848, 0x4c4c), 'HI/LO'
+    assert mu.reg_read(UC_MIPS_REG_SP) == 0x0008FF00, 'sp not restored'
+    assert mu.reg_read(UC_MIPS_REG_RA) == SENT
+
 # 1. Before POPS stores its RAM base: no writes, POPS handler still runs.
 config([(0x30000010, 0x5A)])
-assert vblank() == 0xffffffff and calls() == 1
+gp1(); assert calls() == 0
 assert mu.mem_read(0x40000010, 1) == b'\x00'
 # 2. With the base: codes apply, every frame.
 mu.mem_write(0x70003364, struct.pack('<I', 0x40000000))
 mu.mem_write(0x40000020, struct.pack('<H', 7))
 config([(0x30000010, 0x5A), (0x80000100, 0xBEEF), (0xD0000020, 7), (0x30000011, 1),
         (0xD0000020, 8), (0x30000012, 1)])
-assert vblank() == 0xffffffff and calls() == 2
+gp1(); assert calls() == 0
 assert bytes(mu.mem_read(0x40000010, 3)) == b'\x5a\x01\x00'
 assert bytes(mu.mem_read(0x40000100, 2)) == b'\xef\xbe'
 mu.mem_write(0x40000010, b'\x00')
-vblank()
-assert mu.mem_read(0x40000010, 1) == b'\x5a' and calls() == 3
+gp1()
+assert mu.mem_read(0x40000010, 1) == b'\x5a' and calls() == 0
+# VBLANK no longer runs the codes (POPStarter does not run them there).
+mu.mem_write(0x40000010, b'\x00')
+assert vblank() == 0xffffffff and calls() == 1
+assert mu.mem_read(0x40000010, 1) == b'\x00'
+mu.mem_write(0x1000, b'\x00' * 4)
 # 3. $SAFEMODE: the codes are skipped while PS1 RAM 0x1ffea0 reads "STEM".
 mu.mem_write(0x40000010, b'\x00')
 config([(0x30000010, 0x5A)], safe=1)
 mu.mem_write(0x401FFEA0, struct.pack('<I', 0x4D455453))
 for _ in range(3):
-    vblank()
+    gp1()
 assert mu.mem_read(0x40000010, 1) == b'\x00'
 mu.mem_write(0x401FFEA0, b'\x00' * 4)
-vblank()
-assert mu.mem_read(0x40000010, 1) == b'\x5a' and calls() == 7
+gp1()
+assert mu.mem_read(0x40000010, 1) == b'\x5a' and calls() == 0
 # $SAFEMODE2: skipped while 0x1ffdf4 is 2.
 mu.mem_write(0x40000010, b'\x00')
 config([(0x30000010, 0x5A)], safe=2)
 mu.mem_write(0x401FFDF4, struct.pack('<I', 2))
-vblank()
+gp1()
 assert mu.mem_read(0x40000010, 1) == b'\x00'
 mu.mem_write(0x401FFDF4, struct.pack('<I', 3))
-vblank()
-assert mu.mem_read(0x40000010, 1) == b'\x5a' and calls() == 9
-print('resident image under emulation: PASS (entry %#x, config %#x, %d bytes resident)' % (entry, cfga, isz))
+gp1()
+assert mu.mem_read(0x40000010, 1) == b'\x5a' and calls() == 0
+print('resident image under emulation: PASS (VBLANK entry %#x, GP1 entry %#x, config %#x, %d bytes resident; registers kept)' % (entry, gp1_entry, cfga, isz))
 
 # Mid-function display entry: no call/return ABI and no stack/gp dependency.
 # Exercise the real jump and delay slot from the Sony hook location, then
@@ -147,19 +183,22 @@ if len(entries) == 2:
     print('original fixed DISPLAY entry vs built bridge: PASS (4 values; 64-bit GPR view)')
 
 
-# Pad commands. ID override: written every VBLANK_START into the two
-# per-port state blocks, nothing else touched, POPS's handler still runs.
+# Pad commands. ID override: written through the GP1 entry (where POPStarter
+# writes it) into the two per-port state blocks, nothing else touched;
+# VBLANK_START no longer writes it.
 PAD = 0x00507000
 mu.mem_write(PAD, bytes(range(256)) * 2)
 before = bytes(mu.mem_read(PAD, 0x120))
 config([], flags=1 << 3, pads=(2, 0x41, 0x73))
-n = calls()
 vblank()
+assert bytes(mu.mem_read(PAD, 0x120)) == before, 'VBLANK must not write the ID'
+n = calls()
+gp1()
 after = bytes(mu.mem_read(PAD, 0x120))
 assert after[0x90 + 0x34] == 0x73 and after[0x34] == before[0x34], 'port selection'
-assert sum(a != b for a, b in zip(before, after)) == 1 and calls() == n + 1
+assert sum(a != b for a, b in zip(before, after)) == 1 and calls() == n
 config([], flags=(1 << 3) | 1, pads=(3, 0x01, 0x41))
-vblank()
+gp1()
 assert mu.mem_read(PAD + 0x34, 1) == b'\x01' and mu.mem_read(PAD + 0xC4, 1) == b'\x41'
 print('resident pad ID override: PASS')
 
@@ -316,7 +355,7 @@ assert gte_store(0x2089A8, 0x2089B0, 12345, 0)[0] == 12345
 print('resident widescreen GTE stubs: PASS (%d values x 3 modes, both sites, 28 registers kept)' % len(xs))
 
 
-# $SET_TIMINGS through the built VBLANK entry: waits for the slot 0 VMC
+# $SET_TIMINGS through the built GP1 entry: waits for the slot 0 VMC
 # image, restores a saved copy once, then adjusts from the pads every frame.
 # Without the save flag the card copy is not written; with it (the launcher
 # sets it for $SET_TIMINGS) new values are mirrored there, as in POPStarter.
@@ -338,10 +377,10 @@ for save in (0, 1):
     config([], flags=(1 << 6) | (save << 7))
     pads(0xfbff, 0xfbff)
     n = calls()
-    vblank()
-    assert timings() == (0x100, 0x200, 0x300) and calls() == n + 1, 'waits for the VMC image'
+    gp1()
+    assert timings() == (0x100, 0x200, 0x300) and calls() == n, 'waits for the VMC image'
     w32(0x507930, 0x434d)
-    vblank()
+    gp1()
     want = (0x111, 0x222, 0x333) if not save else (0x100, 0x200, 0x300)
     assert timings() == want, [hex(v) for v in timings()]
     base = list(want)
@@ -350,7 +389,7 @@ for save in (0, 1):
                               (0xffff, 0xf7ff, 0, 0x10), (0xffff, 0xfdff, 0, -0x10), (0xfbff, 0xf7ff, 1, 1),
                               (0xfaff, 0xffff, None, 0), (0xffff, 0xffff, None, 0)):
         pads(p0, p1)
-        vblank()
+        gp1()
         if idx is not None:
             base[idx] = (base[idx] + step) & 0xffffffff
         assert timings() == tuple(base), (hex(p0), hex(p1), [hex(v) for v in timings()])

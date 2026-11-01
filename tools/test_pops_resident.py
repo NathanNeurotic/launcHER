@@ -57,6 +57,7 @@ class Header(c.Structure):
         ("gte_scale_entry", c.c_uint32),
         ("gte_divide_entry", c.c_uint32),
         ("gte_ultra_entry", c.c_uint32),
+        ("gp1_entry", c.c_uint32),
     ]
 
 
@@ -81,6 +82,7 @@ L.pops_resident_cheat_pass.restype = None
 L.pops_resident_frame.argtypes = [c.POINTER(ResidentConfig), c.c_void_p]
 L.pops_resident_check_image.argtypes = [c.c_void_p, c.c_size_t, c.POINTER(Header)]
 L.pops_resident_hook_core.argtypes = [c.c_void_p, c.c_size_t, c.c_uint32]
+L.pops_resident_hook_gp1.argtypes = [c.c_void_p, c.c_size_t, c.c_uint32]
 L.pops_resident_hook_display.argtypes = [c.c_void_p, c.c_size_t, c.c_uint32]
 L.pops_resident_install.argtypes = [c.c_void_p, c.c_size_t, c.c_uint32, c.c_void_p, c.c_size_t,
                                     c.POINTER(ResidentConfig)]
@@ -546,11 +548,70 @@ class HookCore(unittest.TestCase):
         self.assertEqual(self.hook(core, 0x00200000), -errno.EINVAL)
 
 
+# POPS's GP1 write path around the hook (0x21a630..0x21a64c, pinned core).
+GP1_SITES = {0x21A630: 0x5060000B, 0x21A638: 0x3C030001, 0x21A63C: 0,
+             0x21A640: 0x42000039, 0x21A644: 0x0000040F, 0x21A648: 0x40026000,
+             0x21A64C: 0x00431024}
+
+
+def gp1_core(**changes):
+    core = bytearray(0x1C000)
+    words = dict(GP1_SITES)
+    words.update({int(k[1:], 16): v for k, v in changes.items()})
+    for addr, word in words.items():
+        struct.pack_into("<I", core, addr - CORE, word)
+    return core
+
+
+class HookGp1(unittest.TestCase):
+    def hook(self, core, entry, size=None):
+        buf = (c.c_uint8 * len(core)).from_buffer(core)
+        return L.pops_resident_hook_gp1(buf, len(core) if size is None else size, entry)
+
+    def site(self, core):
+        return struct.unpack_from("<I", core, 0x21A63C - CORE)[0]
+
+    def test_writes_a_jal_over_the_nop(self):
+        core = gp1_core()
+        self.assertEqual(self.hook(core, 0x0143A208), 0)
+        self.assertEqual(self.site(core), 0x0C000000 | (0x0143A208 >> 2))
+        self.assertEqual(self.hook(core, 0x0143A208), 0)  # idempotent
+        # Same encoding as POPStarter's own hook word, jal 0x239490.
+        core = gp1_core()
+        self.assertEqual(self.hook(core, 0x0143A000), 0)
+        self.assertEqual(0x0C000000 | (0x239490 >> 2), 0x0C08E524)
+
+    def test_refuses_anything_else_untouched(self):
+        for addr in GP1_SITES:
+            core = gp1_core(**{"x%X" % addr: GP1_SITES[addr] ^ 0x10})
+            before = bytes(core)
+            self.assertEqual(self.hook(core, 0x0143A208), -errno.EILSEQ, hex(addr))
+            self.assertEqual(bytes(core), before)
+        # Another jal there already (POPStarter's, say) is not ours to replace.
+        core = gp1_core(x21A63C=0x0C08E524)
+        self.assertEqual(self.hook(core, 0x0143A208), -errno.EILSEQ)
+
+    def test_bounds(self):
+        core = gp1_core()
+        self.assertEqual(self.hook(core, 0x0143A208, size=0x21A64C - CORE), -errno.ERANGE)
+        self.assertEqual(self.hook(core, 0x0143A20A), -errno.EINVAL)
+        self.assertEqual(self.hook(core, LIMIT), -errno.EINVAL)
+        self.assertEqual(self.hook(core, 0x00200000), -errno.EINVAL)
+
+    def test_real_core_has_the_pristine_site(self):
+        path = os.environ.get("POPS_TEST_ELF")
+        if not path or not Path(path).is_file():
+            self.skipTest("POPS_TEST_ELF not set")
+        data = Path(path).read_bytes()
+        for addr, word in GP1_SITES.items():
+            self.assertEqual(struct.unpack_from("<I", data, 0x1000 + addr - 0x200000)[0], word, hex(addr))
+
+
 def image(file_size=0x60, image_size=0x900, entry=BASE + 0x40, config=BASE + 0x60, magic=0x5352484C):
     img = bytearray(file_size)
-    struct.pack_into("<IHHIIIIIIIIIII", img, 0, magic, 7, 52, file_size, image_size, entry, config,
+    struct.pack_into("<IHHIIIIIIIIIIII", img, 0, magic, 8, 56, file_size, image_size, entry, config,
                      BASE + 0x44, BASE + 0x48, BASE + 0x4C, BASE + 0x50, BASE + 0x54, BASE + 0x58,
-                     BASE + 0x5C)
+                     BASE + 0x5C, BASE + 0x40)
     img[0x40:0x44] = b"\x08\x00\xe0\x03"
     return img
 
@@ -575,7 +636,7 @@ class Install(unittest.TestCase):
         self.assertEqual(self.check(image(entry=BASE + 0x10))[0], -errno.ERANGE)
         self.assertEqual(self.check(image(config=BASE + 0x900 - 8))[0], -errno.ERANGE)
         self.assertEqual(self.check(image(config=BASE + 0x64))[0], -errno.ERANGE)
-        for offset in (24, 28, 32, 36, 40, 44, 48):
+        for offset in (24, 28, 32, 36, 40, 44, 48, 52):
             img = image()
             struct.pack_into('<I', img, offset, BASE + len(img))
             self.assertEqual(self.check(img)[0], -errno.ERANGE)
@@ -756,9 +817,11 @@ class PadCommands(unittest.TestCase):
             self.assertEqual(struct.unpack_from("<I", core, a - CORE)[0], v, hex(a))
         self.assertEqual(self.hook(core, F_PAD_ID | F_D2LS), 0)
 
-    def test_launcher_hooks_vblank_for_pad_ids(self):
+    def test_launcher_hooks_gp1_for_pad_ids(self):
         src = (ROOT / "launcher/src/handler_pops.c").read_text()
-        self.assertIn("POPS_RES_F_CHEATS | POPS_RES_F_PAD_ID", src)
+        self.assertIn("(POPS_RES_F_CHEATS | POPS_RES_F_PAD_ID | POPS_RES_F_TIMINGS)))\n"
+                      "      res = pops_resident_hook_gp1(", src)
+        self.assertNotIn("pops_resident_hook_core(", src)
         self.assertLess(src.index("pops_resident_hook_pads("), src.index("SifIopRebootBuffer("))
 
 
@@ -1100,9 +1163,18 @@ class SetTimings(unittest.TestCase):
         m.run(cfg); m.run(cfg)
         self.assertEqual((m.timings(), cfg.timings_ready), ((0, 0, 0), 0))
 
-    def test_launcher_hooks_vblank_for_timings(self):
+    def test_launcher_hooks_gp1_for_cheats_and_timings(self):
+        # POPStarter runs $SET_TIMINGS and its cheat code from POPS's GP1
+        # write path (0x21a63c), not from VBLANK; launcHER does the same.
         src = (ROOT / "launcher/src/handler_pops.c").read_text()
-        self.assertIn("POPS_RES_F_CHEATS | POPS_RES_F_PAD_ID | POPS_RES_F_TIMINGS", src)
+        self.assertIn("(POPS_RES_F_CHEATS | POPS_RES_F_PAD_ID | POPS_RES_F_TIMINGS)))\n"
+                      "      res = pops_resident_hook_gp1(", src)
+        engine = (ROOT / "common/src/pops_resident_engine.c").read_text()
+        vblank = engine[engine.index("int pops_resident_vblank(int cause) {"):]
+        vblank = vblank[:vblank.index("\n}\n")]
+        self.assertNotIn("pops_resident_timings", vblank)
+        self.assertNotIn("pops_resident_frame", vblank)
+        self.assertNotIn("pops_resident_pad_ids", vblank)
 
     @unittest.skipUnless(os.environ.get("POPSTARTER_TEST_ELF"), "optional external POPStarter MAIN")
     def test_original_handler_writes(self):
@@ -1157,13 +1229,13 @@ class SetTimings(unittest.TestCase):
 
 class Layout(unittest.TestCase):
     def test_config_fits_in_the_reserved_range(self):
-        self.assertEqual(c.sizeof(Header), 52)
+        self.assertEqual(c.sizeof(Header), 56)
         self.assertEqual(ResidentConfig.cheats.offset, 32)
         self.assertLess(c.sizeof(ResidentConfig) + 0x1000, LIMIT - BASE)
 
     def test_launcher_installs_after_the_last_staging_read(self):
         src = (ROOT / "launcher/src/handler_pops.c").read_text()
-        hook = src.index("pops_resident_hook_core(")
+        hook = src.index("pops_resident_hook_gp1(")
         reboot = src.index("SifIopRebootBuffer(")
         install = src.index("pops_resident_install(")
         trampoline = src.index("memcpy((void *)POPS_TRAMPOLINE_ADDR")
