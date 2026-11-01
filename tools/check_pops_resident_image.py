@@ -20,7 +20,7 @@ BASE = 0x0143A000
 (magic, ver, hs, fsz, isz, entry, cfga, display_entry, progressive_entry,
  pad_read_entry, pad_read_exit, gte_scale, gte_divide, gte_ultra) = struct.unpack_from('<IHHIIIIIIIIIII', img, 0)
 assert magic == 0x5352484C and fsz == len(img), (hex(magic), fsz, len(img))
-assert ver == 6 and hs == 52
+assert ver == 7 and hs == 52
 
 mu = Uc(UC_ARCH_MIPS, UC_MODE_MIPS64 + UC_MODE_LITTLE_ENDIAN)
 # The R5900 has MIPS IV's movz/movn, which unicorn's default R4000 model
@@ -71,14 +71,25 @@ assert bytes(mu.mem_read(0x40000100, 2)) == b'\xef\xbe'
 mu.mem_write(0x40000010, b'\x00')
 vblank()
 assert mu.mem_read(0x40000010, 1) == b'\x5a' and calls() == 3
-# 3. $SAFEMODE: 3-frame delay here.
+# 3. $SAFEMODE: the codes are skipped while PS1 RAM 0x1ffea0 reads "STEM".
 mu.mem_write(0x40000010, b'\x00')
-config([(0x30000010, 0x5A)], safe=3)
+config([(0x30000010, 0x5A)], safe=1)
+mu.mem_write(0x401FFEA0, struct.pack('<I', 0x4D455453))
 for _ in range(3):
     vblank()
 assert mu.mem_read(0x40000010, 1) == b'\x00'
+mu.mem_write(0x401FFEA0, b'\x00' * 4)
 vblank()
 assert mu.mem_read(0x40000010, 1) == b'\x5a' and calls() == 7
+# $SAFEMODE2: skipped while 0x1ffdf4 is 2.
+mu.mem_write(0x40000010, b'\x00')
+config([(0x30000010, 0x5A)], safe=2)
+mu.mem_write(0x401FFDF4, struct.pack('<I', 2))
+vblank()
+assert mu.mem_read(0x40000010, 1) == b'\x00'
+mu.mem_write(0x401FFDF4, struct.pack('<I', 3))
+vblank()
+assert mu.mem_read(0x40000010, 1) == b'\x5a' and calls() == 9
 print('resident image under emulation: PASS (entry %#x, config %#x, %d bytes resident)' % (entry, cfga, isz))
 
 # Mid-function display entry: no call/return ABI and no stack/gp dependency.

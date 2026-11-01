@@ -28,7 +28,7 @@ extern "C" {
 #define POPS_RESIDENT_BASE        UINT32_C(0x0143a000)
 #define POPS_RESIDENT_LIMIT       UINT32_C(0x01460000)
 #define POPS_RESIDENT_MAGIC       UINT32_C(0x5352484c) /* "LHRS" */
-#define POPS_RESIDENT_VERSION     6
+#define POPS_RESIDENT_VERSION     7
 
 /* POPS's VBLANK_START registration and handler (verified on the pinned core) */
 #define POPS_VBLANK_LUI_ADDR      UINT32_C(0x0021b184)
@@ -122,7 +122,7 @@ typedef struct {
   uint32_t pops_vblank;  /* POPS's own VBLANK_START handler, always called */
   uint32_t ram_base_ptr; /* where POPS keeps its PS1 RAM base */
   uint32_t frame;        /* VBLANK_START count */
-  uint16_t safe_delay;   /* $SAFEMODE: frames before cheats start */
+  uint16_t safe_mode;    /* POPS_SAFE_MODE_* cheat gate */
   uint16_t cheat_count;
   uint8_t pad_override;  /* bit n: port n reports pad_id[n] */
   uint8_t pad_id[2];
@@ -136,6 +136,9 @@ typedef struct {
  * $D0..$D3 16-bit and $E0/$E1 8-bit conditionals that run the next code
  * only when true. Codes outside PS1 RAM are skipped. */
 void pops_resident_cheat_pass(uint8_t *ram, const PopsCheatEntry *cheats, uint16_t count);
+
+/* 1 when the selected gate holds, so the cheat pass is skipped this time. */
+int pops_safe_mode_blocks(const uint8_t *ps1_ram, uint8_t safe_mode);
 
 /* Per-frame work, separate from the interrupt entry so host tests can run it.
  * Returns 1 when the codes ran this frame. */

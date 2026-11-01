@@ -245,8 +245,18 @@ static int parse_single_directive(PopsConfig *cfg, const char *token) {
       }
     }
   }
+  /* Cheat gates (pops_modes_patches.h). The original keeps one flag per
+   * command; $NOSAFEMODE clears both. */
   if (!strcasecmp(token, "$SAFEMODE")) {
-    cfg->safe_mode = 1;
+    cfg->safe_mode |= POPS_SAFE_MODE_BOOT;
+    return 1;
+  }
+  if (!strcasecmp(token, "$SAFEMODE2")) {
+    cfg->safe_mode |= POPS_SAFE_MODE_2;
+    return 1;
+  }
+  if (!strcasecmp(token, "$NOSAFEMODE")) {
+    cfg->safe_mode = 0;
     return 1;
   }
   /* Pad commands. The original's handlers write the same two per-port

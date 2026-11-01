@@ -117,7 +117,7 @@ int pops_resident_build_config(PopsResidentConfig *out, const PopsConfig *cfg) {
     out->flags |= POPS_RES_F_CHEATS;
     out->cheat_count = count;
     memcpy(out->cheats, cfg->cheats, count * sizeof(PopsCheatEntry));
-    out->safe_delay = cfg->safe_mode ? POPS_SAFE_MODE_FRAME_DELAY : 0;
+    out->safe_mode = cfg->safe_mode & (POPS_SAFE_MODE_BOOT | POPS_SAFE_MODE_2);
   }
   return out->flags ? 1 : 0;
 }

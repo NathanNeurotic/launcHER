@@ -34,7 +34,7 @@ class ResidentConfig(c.Structure):
         ("pops_vblank", c.c_uint32),
         ("ram_base_ptr", c.c_uint32),
         ("frame", c.c_uint32),
-        ("safe_delay", c.c_uint16),
+        ("safe_mode", c.c_uint16),
         ("cheat_count", c.c_uint16),
         ("pad_override", c.c_uint8),
         ("pad_id", c.c_uint8 * 2),
@@ -154,7 +154,7 @@ class Frame(unittest.TestCase):
     def config(self, *codes, safe=0):
         cfg = ResidentConfig()
         cfg.flags = 1
-        cfg.safe_delay = safe
+        cfg.safe_mode = safe
         cfg.cheat_count = len(codes)
         for i, e in enumerate(cheats(*codes)):
             cfg.cheats[i] = e
@@ -169,14 +169,65 @@ class Frame(unittest.TestCase):
         self.assertEqual(ram[0], 5)
         self.assertEqual(cfg.frame, 2)
 
-    def test_safe_mode_waits(self):
+    def test_safe_mode_gates(self):
+        """$SAFEMODE skips the codes while PS1 RAM 0x1ffea0 reads "STEM",
+        $SAFEMODE2 while 0x1ffdf4 is 2; $SAFEMODE wins when both are set."""
+        for safe, word, value, other in ((1, 0x1FFEA0, 0x4D455453, 0x1FFDF4),
+                                         (2, 0x1FFDF4, 2, 0x1FFEA0),
+                                         (3, 0x1FFEA0, 0x4D455453, 0x1FFDF4)):
+            ram = (c.c_uint8 * 0x200000)()
+            cfg = self.config((0x30000000, 5), safe=safe)
+            struct.pack_into("<I", ram, word, value)
+            struct.pack_into("<I", ram, other, 2 if other == 0x1FFDF4 else 0x4D455453)
+            for _ in range(3):
+                self.assertEqual(L.pops_resident_frame(c.byref(cfg), c.addressof(ram)), 0, safe)
+            self.assertEqual(ram[0], 0)
+            struct.pack_into("<I", ram, word, value ^ 1)
+            self.assertEqual(L.pops_resident_frame(c.byref(cfg), c.addressof(ram)), 1, safe)
+            self.assertEqual(ram[0], 5)
+        # No gate: the gate words do not matter.
         ram = (c.c_uint8 * 0x200000)()
-        cfg = self.config((0x30000000, 5), safe=180)
-        for _ in range(180):
-            self.assertEqual(L.pops_resident_frame(c.byref(cfg), c.addressof(ram)), 0)
-        self.assertEqual(ram[0], 0)
+        struct.pack_into("<I", ram, 0x1FFEA0, 0x4D455453)
+        struct.pack_into("<I", ram, 0x1FFDF4, 2)
+        cfg = self.config((0x30000000, 5))
         self.assertEqual(L.pops_resident_frame(c.byref(cfg), c.addressof(ram)), 1)
-        self.assertEqual(ram[0], 5)
+
+    @unittest.skipUnless(os.environ.get("POPSTARTER_TEST_ELF"), "optional external POPStarter MAIN")
+    def test_gates_match_the_original(self):
+        """The original emits a four-word test in front of its codes:
+        lui k0,0x0120; lw k0,off(k0); lui k1,hi; ori k1,k1,lo, then
+        bne k0,k1 over a jump to its exit. Rebuild those words from the
+        constants it assembles and compare with launcHER's gates."""
+        from trace_original_pops_io import decode_main
+        image = decode_main(Path(os.environ["POPSTARTER_TEST_ELF"]).read_bytes())
+        word = lambda va: struct.unpack_from("<I", image, va - 0x870000)[0]
+        imm = lambda va: word(va) & 0xFFFF
+
+        def gate(hi_at, lo_at):
+            # hi64 = (lui<<48 | ori<<32 | ori<<16 | [ori]) ; lo64 likewise
+            hi = [imm(a) for a in hi_at]
+            lo = [imm(a) for a in lo_at]
+            w2, w3 = (hi[2] << 16) | (hi[3] if len(hi) > 3 else 0), (hi[0] << 16) | hi[1]
+            w0, w1 = (lo[2] << 16) | lo[3], (lo[0] << 16) | lo[1]
+            return w0, w1, w2, w3
+
+        safe = gate((0x89E964, 0x89E968, 0x89E970, 0x89E978), (0x89E980, 0x89E984, 0x89E98C, 0x89E994))
+        safe2 = gate((0x89E9EC, 0x89E9F0, 0x89E9F8), (0x89EA04, 0x89EA08, 0x89EA10, 0x89EA18))
+        def decoded(w):
+            lui_k0, lw_k0, lui_k1, ori_k1 = w
+            self.assertEqual((lui_k0 >> 16, lw_k0 >> 16, lui_k1 >> 16, ori_k1 >> 16),
+                             (0x3C1A, 0x8F5A, 0x3C1B, 0x377B))
+            off = lw_k0 & 0xFFFF
+            addr = ((lui_k0 & 0xFFFF) << 16) + (off - 0x10000 if off & 0x8000 else off)
+            return addr - 0x01000000, ((lui_k1 & 0xFFFF) << 16) | (ori_k1 & 0xFFFF)
+        self.assertEqual(decoded(safe), (0x1FFEA0, 0x4D455453))
+        self.assertEqual(decoded(safe2), (0x1FFDF4, 2))
+        # The second block: nop; bne k0,k1,+2; nop; j <exit> (skip the codes).
+        tail_hi = (imm(0x89E9A8) << 16 | imm(0x89E9AC))
+        tail_lo = imm(0x89E9B8) << 16 | imm(0x89E9BC)
+        self.assertEqual((tail_lo, tail_hi), (0x175B0002, 0x0808E52C))
+        # $SAFEMODE is tested first, then $SAFEMODE2 (0xec, then 0xf0).
+        self.assertEqual((word(0x89E954), word(0x89E9DC)), (0x8FC300EC, 0x8FC300F0))
 
     def test_no_ram_base_yet_or_disabled(self):
         cfg = self.config((0x30000000, 5))
@@ -213,9 +264,18 @@ class BuildConfig(unittest.TestCase):
         self.assertEqual(out.cheat_count, 3)
         self.assertEqual((out.cheats[0].type, out.cheats[0].address, out.cheats[0].value),
                          (0x80, 0x012345, 0xFF))
-        self.assertEqual(out.safe_delay, 180)
+        self.assertEqual(out.safe_mode, 1)
         self.assertEqual(out.pops_vblank, 0x0021CD68)
         self.assertEqual(out.ram_base_ptr, 0x70003364)
+
+    def test_safe_mode_commands(self):
+        for lines, want in ((["$SAFEMODE2"], 2), (["$SAFEMODE $SAFEMODE2"], 3),
+                            (["$SAFEMODE", "$NOSAFEMODE"], 0), (["$NOSAFEMODE $SAFEMODE2"], 2),
+                            (["$SAFEMODE2X", "$XSAFEMODE"], 0)):
+            out = ResidentConfig()
+            cfg = self.parsed("$30001001 0002", *lines)
+            L.pops_resident_build_config(c.byref(out), c.addressof(cfg))
+            self.assertEqual(out.safe_mode, want, lines)
 
     def test_display_without_cheats_and_combined(self):
         out = ResidentConfig()
@@ -277,7 +337,7 @@ class HookCore(unittest.TestCase):
 
 def image(file_size=0x60, image_size=0x900, entry=BASE + 0x40, config=BASE + 0x60, magic=0x5352484C):
     img = bytearray(file_size)
-    struct.pack_into("<IHHIIIIIIIIIII", img, 0, magic, 6, 52, file_size, image_size, entry, config,
+    struct.pack_into("<IHHIIIIIIIIIII", img, 0, magic, 7, 52, file_size, image_size, entry, config,
                      BASE + 0x44, BASE + 0x48, BASE + 0x4C, BASE + 0x50, BASE + 0x54, BASE + 0x58,
                      BASE + 0x5C)
     img[0x40:0x44] = b"\x08\x00\xe0\x03"

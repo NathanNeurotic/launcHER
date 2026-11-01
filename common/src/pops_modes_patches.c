@@ -874,9 +874,9 @@ int pops_cheat_engine_tick_ex(void *ps1_ram_base, const PopsCheatEntry *cheats,
   if (!ps1_ram_base || !cheats || cheat_count == 0)
     return 0;
 
-  if (safe_mode && frame_count < POPS_SAFE_MODE_FRAME_DELAY) {
-    return 0; /* Defer cheat application until post-boot */
-  }
+  (void)frame_count;
+  if (pops_safe_mode_blocks((const uint8_t *)ps1_ram_base, safe_mode))
+    return 0;
 
   return pops_cheat_engine_tick(ps1_ram_base, cheats, cheat_count);
 }

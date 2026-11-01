@@ -978,13 +978,15 @@ class FeatureTests(unittest.TestCase):
         safe_ptr = (c.c_uint8 * ram_size).from_buffer(safe_ram)
         one_cheat = (CheatEntry * 1)(CheatEntry(0x0009A120, 0xBEEF, 0x10))
 
-        # Safe mode enabled, frame count < 180 (boot phase): should NOT write
+        # $SAFEMODE: skipped while PS1 RAM 0x1ffea0 reads "STEM" (the original's gate)
+        struct.pack_into("<I", safe_ram, 0x1FFEA0, 0x4D455453)
         res = LIB.pops_cheat_engine_tick_ex(safe_ptr, one_cheat, 1, 100, 1)
         self.assertEqual(res, 0)
         self.assertEqual(struct.unpack_from("<H", safe_ram, 0x9A120)[0], 0)
 
-        # Safe mode enabled, frame count >= 180 (post-boot): should apply write
-        res = LIB.pops_cheat_engine_tick_ex(safe_ptr, one_cheat, 1, 180, 1)
+        # Gate no longer holds: the write applies
+        struct.pack_into("<I", safe_ram, 0x1FFEA0, 0)
+        res = LIB.pops_cheat_engine_tick_ex(safe_ptr, one_cheat, 1, 100, 1)
         self.assertEqual(res, 0)
         self.assertEqual(struct.unpack_from("<H", safe_ram, 0x9A120)[0], 0xBEEF)
 

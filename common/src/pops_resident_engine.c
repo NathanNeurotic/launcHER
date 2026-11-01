@@ -53,12 +53,20 @@ void pops_resident_cheat_pass(uint8_t *ram, const PopsCheatEntry *cheats, uint16
   }
 }
 
+int pops_safe_mode_blocks(const uint8_t *ram, uint8_t safe_mode) {
+  if (safe_mode & POPS_SAFE_MODE_BOOT)
+    return *(const volatile uint32_t *)(ram + POPS_SAFE_MODE_BOOT_ADDR) == POPS_SAFE_MODE_BOOT_VALUE;
+  if (safe_mode & POPS_SAFE_MODE_2)
+    return *(const volatile uint32_t *)(ram + POPS_SAFE_MODE_2_ADDR) == POPS_SAFE_MODE_2_VALUE;
+  return 0;
+}
+
 int pops_resident_frame(PopsResidentConfig *cfg, uint8_t *ram) {
   if (cfg->frame != UINT32_MAX)
     cfg->frame++;
   if (!(cfg->flags & POPS_RES_F_CHEATS) || !ram || !cfg->cheat_count)
     return 0;
-  if (cfg->frame <= cfg->safe_delay)
+  if (pops_safe_mode_blocks(ram, (uint8_t)cfg->safe_mode))
     return 0;
   pops_resident_cheat_pass(ram, cfg->cheats, cfg->cheat_count);
   return 1;

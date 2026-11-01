@@ -128,8 +128,6 @@ int pops_apply_cheats(void *ps1_ram_base, const PopsCheatEntry *cheats, uint16_t
 #define POPS_DEVCTL_NEXT_DISC    0x07
 #define POPS_DEVCTL_GET_LID      0x08
 
-/* Safe mode boot frame delay threshold (approximately 3 seconds at 60Hz) */
-#define POPS_SAFE_MODE_FRAME_DELAY 180
 
 /* Detect In-Game Reset button combination (buttons_active_low: 0 = pressed) */
 int pops_check_igr_combo(uint16_t buttons_active_low);
@@ -154,7 +152,8 @@ int pops_cdrom_read_subq(int (*devctl_fn)(const char *dev, int cmd, void *arg, s
 /* Periodically evaluates and applies GameShark codes to guest PS1 RAM with conditional support */
 int pops_cheat_engine_tick(void *ps1_ram_base, const PopsCheatEntry *cheats, uint16_t cheat_count);
 
-/* Evaluates GameShark codes to guest PS1 RAM with conditional support and safe mode deferral */
+/* As pops_cheat_engine_tick, skipped while the safe mode gate holds.
+ * frame_count is unused (kept for the existing callers). */
 int pops_cheat_engine_tick_ex(void *ps1_ram_base, const PopsCheatEntry *cheats,
                              uint16_t cheat_count, uint32_t frame_count, uint8_t safe_mode);
 

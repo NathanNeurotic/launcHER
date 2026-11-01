@@ -54,6 +54,18 @@ enum PopsRegion {
 #define POPS_MAX_DISCS    4
 #define POPS_MAX_CHEATS   256
 
+/* Cheat gates. POPStarter puts one test in front of its cheat codes and
+ * skips them for that pass while it holds: $SAFEMODE while the PS1 RAM word
+ * at 0x1ffea0 reads "STEM" (0x4d455453), otherwise $SAFEMODE2 while the
+ * word at 0x1ffdf4 is 2. $SAFEMODE wins when both are set. */
+#define POPS_SAFE_MODE_BOOT       0x01u /* $SAFEMODE */
+#define POPS_SAFE_MODE_2          0x02u /* $SAFEMODE2 */
+#define POPS_SAFE_MODE_BOOT_ADDR  0x001ffea0u
+#define POPS_SAFE_MODE_BOOT_VALUE 0x4d455453u
+#define POPS_SAFE_MODE_2_ADDR     0x001ffdf4u
+#define POPS_SAFE_MODE_2_VALUE    2u
+
+
 typedef struct {
   uint32_t address;
   uint16_t value;
@@ -80,7 +92,7 @@ typedef struct {
   uint8_t no_boot;      /* $NOBOOT / $BIOS keeps the PS1 BIOS boot logo */
   uint8_t no_igr;       /* $NOIGR: POPStarter's IGR-off writes */
   uint8_t igr_type;     /* 0 = launcHER direct exit, 1..6 = $IGR0..$IGR5 */
-  uint8_t safe_mode;    /* $SAFEMODE delays cheat activation */
+  uint8_t safe_mode;    /* POPS_SAFE_MODE_* bits: $SAFEMODE, $SAFEMODE2; $NOSAFEMODE clears */
   uint8_t usb_delay;    /* $USBDELAY_# seconds */
   uint8_t no_vmc0;      /* $NOVMC0 disables Memory Card 0 emulation */
   uint8_t no_vmc1;      /* $NOVMC1 disables Memory Card 1 emulation */

@@ -82,8 +82,8 @@ below need their behavior worked out and added to it.
 | `$XPOS_n`, `$YPOS_n`, `$DWSTRETCH_n`, `$DWCROP_n` | unsigned decimal immediate fields plus store suppression; X/Y first valid command wins | **PRESENT**: guarded, original-command differential; X/Y 0..65535 (up to 5 digits), width commands 0..9999 (up to 4 digits); no console run |
 | `$CACHE1` | `0x20fff4`, `0x210120`, `0x2101ac` | **PRESENT** |
 | `$FAKELC` | copies LibCrypt code from the original | **BLOCKED** |
-| `$SAFEMODE` | cheat-engine timing | **PARTIAL**: cheats start after 180 frames; the original's exact timing is not recovered |
-| `$SAFEMODE2`, `$NOSAFEMODE` | cheat-engine timing | **MISSING** |
+| `$SAFEMODE` | cheat gate: skip codes while PS1 RAM `0x1ffea0` reads `"STEM"` (`0x4d455453`) | **PRESENT**: same address and value as the original's emitted gate (0x89e954); host + unicorn checked; no console run |
+| `$SAFEMODE2`, `$NOSAFEMODE` | `$SAFEMODE2`: skip codes while PS1 RAM `0x1ffdf4 == 2`; `$NOSAFEMODE` clears both (`$SAFEMODE` is tested first) | **PRESENT**: same gate and order as the original; no console run |
 | `$HDTVFIX` / `$NOHDTVFIX` | `0x23acb0/0x23ad0c` = `li a0,1` / pristine | **PRESENT**; `$HDTVFIX` was writing an invented site |
 | `$LOAD_PADMAN`, `$KILL_PADMAN` | IOP module choice | **MISSING** |
 | `$USBDELAY_n` | config byte `0x100017` | **PARTIAL** (parsed) |
