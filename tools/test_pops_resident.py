@@ -10,6 +10,7 @@ import os
 import random
 import struct
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -242,6 +243,199 @@ class Frame(unittest.TestCase):
         cfg.frame = 0xFFFFFFFF
         L.pops_resident_frame(c.byref(cfg), None)
         self.assertEqual(cfg.frame, 0xFFFFFFFF)
+
+
+L.pops_config_load_file.argtypes = [c.c_void_p, c.c_char_p]
+L.pops_config_load_file.restype = c.c_int
+
+
+def apply_cheats_txt(text, ram):
+    """Load a CHEATS.TXT text the way the launcher does, build the resident
+    config and run one cheat pass over a copy of ram. Returns (ram, rc)."""
+    buf = (c.c_uint8 * 0x10000)()
+    L.pops_config_init(c.addressof(buf))
+    with tempfile.NamedTemporaryFile("wb", delete=False, suffix=".TXT") as f:
+        f.write(text.encode("latin-1"))
+        path = f.name
+    try:
+        rc = L.pops_config_load_file(c.addressof(buf), path.encode())
+    finally:
+        os.unlink(path)
+    if rc:
+        return None, rc
+    out = ResidentConfig()
+    L.pops_resident_build_config(c.byref(out), c.addressof(buf))
+    work = (c.c_uint8 * len(ram)).from_buffer_copy(ram)
+    out.flags |= 1
+    L.pops_resident_frame(c.byref(out), c.addressof(work))
+    return bytes(work), 0
+
+
+class CheatsTxt(unittest.TestCase):
+    """CHEATS.TXT read and run the way POPStarter r13 compiles it. Each rule
+    here was taken from the original's own cheat compiler run under
+    emulation (tools/trace_original_pops_cheats.py)."""
+
+    def run_text(self, text, setup=()):
+        ram = bytearray(0x200000)
+        for addr, val in setup:
+            struct.pack_into("<H", ram, addr, val)
+        got, rc = apply_cheats_txt(text, bytes(ram))
+        self.assertEqual(rc, 0, text)
+        return got
+
+    def half(self, ram, addr):
+        return struct.unpack_from("<H", ram, addr)[0]
+
+    def test_codes_are_found_anywhere_in_the_text(self):
+        ram = self.run_text("# $80001000 1234\nnote $30001002 0056\n"
+                            "$80001004 abcd$80001006 0001\r\n$8000100A 0002 trailing\n")
+        self.assertEqual([self.half(ram, a) for a in (0x1000, 0x1004, 0x1006, 0x100A)],
+                         [0x1234, 0xABCD, 0x0001, 0x0002])
+        self.assertEqual(ram[0x1002], 0x56)
+
+    def test_layout_is_checked_column_by_column(self):
+        ram = self.run_text("$80201000 1111\n$80001004  2222\n$80001006\t3333\n"
+                            "$80001008 44445\n$85001000 5555\n80001010 6666\n"
+                            "$C1001000 0000\n$50010202 0001\n$80001012 7777\n")
+        self.assertEqual(ram[0x1000:0x1012], bytes(0x12))
+        self.assertEqual(self.half(ram, 0x1012), 0x7777)
+        # A character that is not hex counts as 0, in the address and value.
+        ram = self.run_text("$8000100Z 1G2Z\n")
+        self.assertEqual(self.half(ram, 0x1000), 0x1020)
+
+    def test_master_code_gates_every_code(self):
+        text = "$80001000 0001\n$C0002000 0007\n$C0002002 0009\n"
+        self.assertEqual(self.half(self.run_text(text, [(0x2000, 7)]), 0x1000), 1)
+        self.assertEqual(self.half(self.run_text(text, [(0x2000, 6)]), 0x1000), 0)
+        # POPStarter compares a signed load with an unsigned value: 0x8000 and
+        # up never match, so such a master code blocks everything.
+        text = "$C0002000 8007\n$80001000 0001\n"
+        self.assertEqual(self.half(self.run_text(text, [(0x2000, 0x8007)]), 0x1000), 0)
+
+    def test_repeat_code(self):
+        ram = self.run_text("$50000302 0001\n$80001000 0010\n$80001010 0005\n")
+        self.assertEqual([self.half(ram, a) for a in (0x1000, 0x1002, 0x1004, 0x1006)],
+                         [0x10, 0x11, 0x12, 0])
+        self.assertEqual(self.half(ram, 0x1010), 5)
+        # The first pending repeat wins; one with no write after it still
+        # expands onto address 0 with the last write's store.
+        ram = self.run_text("$50000202 0001\n$50000402 0001\n$80001000 0010\n"
+                            "$30001100 0001\n$50000304 0003\n")
+        self.assertEqual([self.half(ram, a) for a in (0x1000, 0x1002, 0x1004)], [0x10, 0x11, 0])
+        self.assertEqual((ram[4], ram[8]), (3, 6))
+
+    def test_conditional(self):
+        text = "$D0002000 0005\n$80001000 0001\n$80001002 0002\n"
+        ram = self.run_text(text, [(0x2000, 5)])
+        self.assertEqual((self.half(ram, 0x1000), self.half(ram, 0x1002)), (1, 2))
+        ram = self.run_text(text, [(0x2000, 6)])
+        self.assertEqual((self.half(ram, 0x1000), self.half(ram, 0x1002)), (0, 2))
+        # A second conditional right after the first is dropped.
+        text = "$D0002000 0005\n$D0002002 0009\n$80001000 0001\n"
+        self.assertEqual(self.half(self.run_text(text, [(0x2000, 5)]), 0x1000), 1)
+        # Values of 0x8000 and up compare correctly.
+        text = "$D0002000 8005\n$80001000 0001\n"
+        self.assertEqual(self.half(self.run_text(text, [(0x2000, 0x8005)]), 0x1000), 1)
+
+    def test_conditional_repeat_block_drops_the_next_code(self):
+        text = "$D0002000 0005\n$50000202 0001\n$80001000 0010\n$80001010 0001\n$80001020 0002\n"
+        ram = self.run_text(text, [(0x2000, 5)])
+        self.assertEqual([self.half(ram, a) for a in (0x1000, 0x1002, 0x1010, 0x1020)],
+                         [0x10, 0x11, 0, 2])
+        ram = self.run_text(text, [(0x2000, 6)])
+        self.assertEqual([self.half(ram, a) for a in (0x1000, 0x1010, 0x1020)], [0, 0, 2])
+
+    def test_skipped_repeat_returns_behind_a_conditional(self):
+        text = ("$50000204 0002\n$50000402 0001\n$80001100 3A2A\n"
+                "$D0002000 0005\n$80001000 0001\n")
+        ram = self.run_text(text, [(0x2000, 5)])
+        self.assertEqual((self.half(ram, 0x1100), self.half(ram, 0x1104)), (0x3A2A, 0x3A2C))
+        self.assertEqual([self.half(ram, a) for a in (0x1000, 0x1002, 0x1004, 0x1006)],
+                         [1, 2, 3, 4])
+
+    @unittest.skipUnless(os.environ.get("POPSTARTER_TEST_ELF"), "optional external POPStarter MAIN")
+    def test_random_files_match_the_original(self):
+        try:
+            import unicorn  # noqa: F401
+        except ImportError:
+            self.skipTest("needs the unicorn package")
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from trace_original_pops_cheats import compile_cheats, run_codes
+        rng = random.Random(0x5C0DE)
+        for _ in range(int(os.environ.get("POPS_CHEAT_FUZZ_CASES", "150"))):
+            text, ram = random_cheats_txt(rng)
+            code, _ = compile_cheats(text)
+            if original_corrupts_registers(code):
+                continue
+            want = run_codes(code, ram)
+            got, rc = apply_cheats_txt(text, ram)
+            self.assertEqual(rc, 0, text)
+            if got != want:
+                first = next(a for a in range(len(ram)) if got[a] != want[a])
+                self.fail("%r differs from POPStarter at %#x" % (text, first))
+
+
+def original_corrupts_registers(code):
+    """POPStarter builds a repeat's values into "ori k1,zero,value" words.
+    Once a value reaches 0x20000 the excess spills into the register field
+    and the word loads another CPU register (gp, sp, ...) instead of k1.
+    launcHER keeps the value 16-bit; those files are left out."""
+    for (word,) in struct.iter_unpack("<I", code):
+        if word >> 26 == 0x0D and (word >> 21) & 31 == 0 and (word >> 16) & 31 not in (26, 27):
+            return True
+    return False
+
+
+CHEAT_WINDOWS = (0x097B00, 0x07FFE0, 0x1FFF80)
+CHEAT_JUNK = ("# comment", "; note", "$NOBOOT", "", "   ", "$8009ZB00 12G4",
+              "$80297B00 1234", "$C1097B00 1234", "$85097B00 1234",
+              "$80097B00  1234", "$80097B00\t1234", "$80097B00 12345",
+              "80097B00 1234", "$50010202 0001")
+
+
+def random_cheat(rng, ram, win):
+    kinds = ["80", "80", "30", "30", "D0", "D0", "C0"]
+    # POPStarter bumps a repeat's address by another 64 KB on every step
+    # after it crosses a 64 KB boundary; launcHER writes the right address.
+    # Repeats stay clear of the window that straddles one.
+    if win != 0x07FFE0:
+        kinds += ["50", "50"]
+    kind = rng.choice(kinds)
+    if kind == "50":
+        inc = rng.randrange(0x10000) if rng.random() < 0.2 else rng.randrange(4)
+        return "$5000%02X%02X %04X" % (rng.randrange(5), rng.choice([0, 2, 4, 6]), inc)
+    # 16-bit codes stay aligned: POPStarter's sh/lh would fault on the console.
+    addr = win + rng.randrange(0, 0x40, 1 if kind == "30" else 2)
+    val = ram[addr] | ram[addr + 1] << 8 if rng.random() < 0.5 else rng.randrange(0x10000)
+    if kind == "30" and rng.random() < 0.8:
+        val &= 0xFF
+    return "$%s%06X %04X" % (kind, addr, val)
+
+
+def random_cheats_txt(rng):
+    ram = bytearray(0x200000)
+    win = rng.choice(CHEAT_WINDOWS)
+    for i in range(0x80):
+        ram[win + i] = rng.randrange(256)
+    lines = []
+    for _ in range(rng.randrange(1, 11)):
+        r = rng.random()
+        if r < 0.12:
+            lines.append(rng.choice(CHEAT_JUNK))
+            continue
+        line = random_cheat(rng, ram, win)
+        if r < 0.2:
+            line = line.lower()
+        elif r < 0.26:
+            line = "# " + line
+        elif r < 0.32:
+            line += random_cheat(rng, ram, win)
+        elif r < 0.36:
+            line += " trailing"
+        lines.append(line)
+    eol = "\r\n" if rng.random() < 0.3 else "\n"
+    return eol.join(lines) + (eol if rng.random() < 0.8 else ""), bytes(ram)
 
 
 class BuildConfig(unittest.TestCase):

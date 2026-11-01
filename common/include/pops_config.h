@@ -75,8 +75,14 @@ enum PopsRegion {
 typedef struct {
   uint32_t address;
   uint16_t value;
-  uint8_t type; /* 0x80/0x10 (16-bit), 0x30/0x20 (8-bit), 0xD0..0xD3/0xE0..0xE1 (conditional) */
+  uint8_t type; /* 0x80/0x10 (16-bit), 0x30/0x20 (8-bit), 0xD0..0xD3/0xE0..0xE1 (conditional),
+                 0xC0 (master code), 0x50 (repeat: address = XXYY, value = step) */
 } PopsCheatEntry;
+
+/* Bits 0..20 of a code's address are the PS1 RAM address; a compiled
+ * conditional keeps how many codes it skips in bits 24..31. */
+#define POPS_CHEAT_ADDR_MASK  0x001FFFFFu
+#define POPS_CHEAT_SKIP_SHIFT 24
 
 typedef struct {
   /* Video settings */

@@ -8,12 +8,35 @@
 
 #include "pops_resident.h"
 
+static void cheat_write(uint8_t *ram, uint8_t type, uint32_t addr, uint16_t val) {
+  if (type == 0x80 || type == 0x10) {
+    if (addr + 2 <= POPS_PS1_RAM_SIZE)
+      *(volatile uint16_t *)(ram + (addr & ~1U)) = val;
+  } else if (type == 0x30 || type == 0x20) {
+    if (addr + 1 <= POPS_PS1_RAM_SIZE)
+      *(volatile uint8_t *)(ram + addr) = (uint8_t)val;
+  }
+}
+
 void pops_resident_cheat_pass(uint8_t *ram, const PopsCheatEntry *cheats, uint16_t count) {
   uint16_t i = 0;
   while (i < count) {
-    uint32_t addr = cheats[i].address & 0x001FFFFF;
+    uint32_t addr = cheats[i].address & POPS_CHEAT_ADDR_MASK;
+    uint32_t skip = cheats[i].address >> POPS_CHEAT_SKIP_SHIFT;
     uint8_t type = cheats[i].type;
     uint16_t val = cheats[i].value;
+    if (!skip)
+      skip = 1;
+
+    if (type == 0xC0) {
+      /* POPStarter loads the half signed and the value unsigned, so a
+       * master code value of 0x8000 or more never matches. */
+      if (val >= 0x8000 || addr + 2 > POPS_PS1_RAM_SIZE ||
+          *(volatile uint16_t *)(ram + (addr & ~1U)) != val)
+        return;
+      i++;
+      continue;
+    }
 
     if (type >= 0xD0 && type <= 0xD3) {
       int cond = 0;
@@ -28,7 +51,7 @@ void pops_resident_cheat_pass(uint8_t *ram, const PopsCheatEntry *cheats, uint16
         else
           cond = (cur > val);
       }
-      i += cond ? 1 : 2;
+      i += cond ? 1 : 1 + skip;
       continue;
     }
 
@@ -38,17 +61,31 @@ void pops_resident_cheat_pass(uint8_t *ram, const PopsCheatEntry *cheats, uint16
         uint8_t cur = *(volatile uint8_t *)(ram + addr);
         cond = (type == 0xE0) ? (cur == (uint8_t)val) : (cur != (uint8_t)val);
       }
-      i += cond ? 1 : 2;
+      i += cond ? 1 : 1 + skip;
       continue;
     }
 
-    if (type == 0x80 || type == 0x10) {
-      if (addr + 2 <= POPS_PS1_RAM_SIZE)
-        *(volatile uint16_t *)(ram + (addr & ~1U)) = val;
-    } else if (type == 0x30 || type == 0x20) {
-      if (addr + 1 <= POPS_PS1_RAM_SIZE)
-        *(volatile uint8_t *)(ram + addr) = (uint8_t)val;
+    if (type == 0x50) {
+      /* $5000XXYY ZZZZ: the next write XX times, the address up YY bytes
+       * and the value up ZZZZ each time. */
+      if (i + 1 < count) {
+        const PopsCheatEntry *t = &cheats[i + 1];
+        uint32_t times = (addr >> 8) & 0xFF, step = addr & 0xFF;
+        uint32_t at = t->address & POPS_CHEAT_ADDR_MASK;
+        uint16_t v = t->value;
+        for (uint32_t k = 0; k < times; ++k) {
+          cheat_write(ram, t->type, at, v);
+          at += step;
+          v = (uint16_t)(v + val);
+        }
+        i += 2;
+      } else {
+        i++;
+      }
+      continue;
     }
+
+    cheat_write(ram, type, addr, val);
     i++;
   }
 }

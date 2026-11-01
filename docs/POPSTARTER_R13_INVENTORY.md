@@ -48,8 +48,9 @@ below need their behavior worked out and added to it.
 
 | Command | Original effect | launcHER |
 |---|---|---|
-| `$8/3/1/2/D0..D3/E0/E1` codes | resident cheat engine | **PRESENT**: launcHER's resident code, every VBLANK_START; host tests plus the built image run under emulation, **NOT TESTED** on a console |
-| `$Cxxxxxxx`, `$S…`, `$T…` | resident cheat engine | **MISSING** (not parsed) |
+| `$80`, `$30`, `$D0`, `$C0`, `$5000` codes | cheat section from `0x883270` compiles them to MIPS at `0x01a00000`, run every VBLANK_START. Stream scan for `$` (case folded, `#` does not hide a code); fixed columns (pos 9 space, pos 14 CR/LF/NUL/space/`$`, non-hex counts as 0); first `C0` hoisted to the front, later ones dropped, values `>= 0x8000` never match (signed `lh` vs `ori`); `D0` after `D0` dropped; first pending `5000` wins, a skipped one comes back as the pending repeat behind the next emitted `D0`; a repeat with no write expands onto address 0 with the last store; the code after a `D0`-gated repeat is always skipped | **PRESENT**: launcHER parses the same columns and compiles the same order (`pops_cheats_compile`); differential test runs random CHEATS.TXT files through the original's own compiler under emulation and compares PS1 RAM (0 differences). Not copied: a repeat value `>= 0x20000` (the original's `ori` then targets another register) and repeats crossing a 64 KB boundary (the original adds 64 KB per later step). **NOT TESTED** on a console |
+| `$10/$20/$D1..$D3/$E0/$E1` codes | not POPStarter codes: skipped by its scan | **EXTRA**: launcHER keeps them (writes and conditionals) |
+| PS2-format `$0/$1/$2AAAAAAA VVVVVVVV`, `$S…`, `$T…`, `$=…`, `$!…` | EE RAW writes (sb/sh/sw) and scratchpad / IOP / EE conditionals | **MISSING** (skipped, not an error) |
 | `$SMOOTH` | `0x21af88=0xa21a22a0341a0001` (64-bit) | **PRESENT**: guarded, original-command differential; no console run |
 | `$DX_n $DY_n $MAGH_n $MAGV_n $DW_n $DH_n` | all-six, first-valid per file; fixed GS DISPLAY override | **PRESENT**: independent guarded resident bridge; 228 original file cases plus built-image comparison; no console run |
 | `$480p` | static mode/arguments plus resident DISPLAY updates | **PRESENT**: guarded owned context bridge; 31 original text/file sequences and 428 component/bridge cases; no console run; conflicting payloads reject |

@@ -511,8 +511,15 @@ class FeatureTests(unittest.TestCase):
         for line in (b"80001234 5678", b"50000202 0001", b"C0000000 0000"):
             self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), line), 0)
         self.assertEqual(cfg.cheat_count, 0)
-        for line in (b"$50000202 0001", b"$C0000000 0000"):
-            self.assertLess(LIB.pops_config_parse_line(c.byref(cfg), line), 0)
+        # POPStarter's repeat and master codes are read; a line it would not
+        # take is skipped, never an error (as in POPStarter).
+        for line, kind in ((b"$50000202 0001", 0x50), (b"$C0000000 0000", 0xC0)):
+            self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), line), 0)
+            self.assertEqual(cfg.cheats[cfg.cheat_count - 1].type, kind)
+        for line in (b"$85001234 5678", b"$80201234 5678", b"$80001234  5678"):
+            self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), line), 0)
+        self.assertEqual(cfg.cheat_count, 2)
+        LIB.pops_config_init(c.byref(cfg))
         for _ in range(256):
             self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$80001234 5678"), 0)
         self.assertLess(LIB.pops_config_parse_line(c.byref(cfg), b"$80001234 5678"), 0)
@@ -537,7 +544,8 @@ class FeatureTests(unittest.TestCase):
             self.assertEqual(LIB.pops_config_discover(c.byref(cfg),
                              (str(root) + '/').encode(), b'Game'), 0)
             self.assertEqual(cfg.vmc_dir, b'Other')
-            (title / 'CHEATS.TXT').write_text('$C0000000 0000\n')
+            (title / 'CHEATS.TXT').write_text('$80001234 5678\n' * 257)
+            LIB.pops_config_init(c.byref(cfg))
             self.assertLess(LIB.pops_config_discover(c.byref(cfg),
                             (str(root) + '/').encode(), b'Game'), 0)
             oversized = root / 'long.txt'

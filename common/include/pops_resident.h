@@ -133,9 +133,20 @@ typedef struct {
 
 /* One pass over the codes against PS1 RAM (ram = base of 2 MiB).
  * $80 16-bit write, $30 8-bit write, $10/$20 kept as writes like before,
- * $D0..$D3 16-bit and $E0/$E1 8-bit conditionals that run the next code
- * only when true. Codes outside PS1 RAM are skipped. */
+ * $D0..$D3 16-bit and $E0/$E1 8-bit conditionals that skip the next
+ * (address >> POPS_CHEAT_SKIP_SHIFT, or 1) codes when false, $C0 master
+ * code that ends the pass when false, $50 repeat of the next write.
+ * Codes outside PS1 RAM are skipped. pops_cheats_compile() turns the codes
+ * as read from CHEATS.TXT into this form. */
 void pops_resident_cheat_pass(uint8_t *ram, const PopsCheatEntry *cheats, uint16_t count);
+
+/* Order the codes the way POPStarter r13 compiles them: the first $C0 moves
+ * to the front and gates every code, later $C0s are dropped, a $50 applies
+ * to the next 80/30 write, a $D0 gates the next write or repeat block, and
+ * the code after a gated repeat block is dropped (POPStarter's leftover
+ * branch always skips it). Returns the number of codes written to out,
+ * never more than count. */
+uint16_t pops_cheats_compile(const PopsCheatEntry *in, uint16_t count, PopsCheatEntry *out);
 
 /* 1 when the selected gate holds, so the cheat pass is skipped this time. */
 int pops_safe_mode_blocks(const uint8_t *ps1_ram, uint8_t safe_mode);

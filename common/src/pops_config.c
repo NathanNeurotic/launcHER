@@ -7,6 +7,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Largest config file read; POPStarter files are a few KB. */
+#define POPS_CONFIG_FILE_MAX (1u << 20)
+
 static FILE *open_config(const char *path) {
   FILE *file = fopen(path, "r");
   int error = errno;
@@ -22,6 +25,8 @@ void pops_config_init(PopsConfig *cfg) {
   cfg->video_mode = POPS_VMODE_DEFAULT;
 }
 
+static int parse_directives(PopsConfig *cfg, const char *line);
+
 static int is_hex_string(const char *s, size_t len) {
   for (size_t i = 0; i < len; ++i) {
     if (!isxdigit((unsigned char)s[i]))
@@ -30,33 +35,85 @@ static int is_hex_string(const char *s, size_t len) {
   return 1;
 }
 
-static int try_parse_cheat(PopsConfig *cfg, const char *tok1, const char *tok2) {
-  if (*tok1 != '$')
-    return 0; /* Removing '$' disables a POPStarter code. */
-  const char *p1 = tok1 + 1;
-  if (strlen(p1) != 8 || strlen(tok2) != 4)
+/* CHEATS.TXT codes, read the way POPStarter r13's cheat section reads them
+ * (traced with its own compiler under emulation, tools/trace_original_pops_cheats.py).
+ * It scans the text for '$' anywhere, case folded, and takes a code when
+ * the 14 characters from the '$' match a fixed column layout:
+ *   $TTAAAAAA VVVV  where position 9 is a space and position 14 is CR, LF,
+ *   NUL, a space or the next '$'.
+ * TT is 80/30 (16/8-bit write), D0 (16-bit equal), C0 (master code) with
+ * the address high nibble 0 or 1, or the whole word is 5000XXYY (repeat).
+ * A character that is not hex counts as 0. Anything else is skipped, not an
+ * error, and the scan moves on one character; a '#' does not hide a code.
+ * 10/20, D1..D3 and E0/E1 are launcHER additions POPStarter skips. */
+static unsigned cheat_nibble(char c) {
+  if (c >= '0' && c <= '9')
+    return (unsigned)(c - '0');
+  c = (char)toupper((unsigned char)c);
+  if (c >= 'A' && c <= 'F')
+    return (unsigned)(c - 'A' + 10);
+  return 0;
+}
+
+static uint32_t cheat_hex(const char *s, unsigned digits) {
+  uint32_t v = 0;
+  while (digits--)
+    v = (v << 4) | cheat_nibble(*s++);
+  return v;
+}
+
+static int cheat_code_at(const char *text, PopsCheatEntry *entry) {
+  char c[15];
+  unsigned i = 0;
+  for (; i < sizeof(c) && text[i]; ++i)
+    c[i] = (char)toupper((unsigned char)text[i]);
+  for (; i < sizeof(c); ++i)
+    c[i] = '\0';
+  if (c[0] != '$' || c[9] != ' ')
     return 0;
-  if (!is_hex_string(p1, 8) || !is_hex_string(tok2, 4))
+  if (c[14] != '\r' && c[14] != '\n' && c[14] != '\0' && c[14] != ' ' && c[14] != '$')
     return 0;
 
-  uint32_t raw_addr = (uint32_t)strtoul(p1, NULL, 16);
-  uint16_t val = (uint16_t)strtoul(tok2, NULL, 16);
-  uint8_t type = (uint8_t)(raw_addr >> 24);
-
-  if (type != 0x80 && type != 0x10 && type != 0x30 && type != 0x20 &&
-      type != 0xD0 && type != 0xD1 && type != 0xD2 && type != 0xD3 &&
-      type != 0xE0 && type != 0xE1) {
-    return -ENOTSUP;
-  }
-
-  if (cfg->cheat_count < POPS_MAX_CHEATS) {
-    cfg->cheats[cfg->cheat_count].address = raw_addr & 0x001FFFFF;
-    cfg->cheats[cfg->cheat_count].value = val;
-    cfg->cheats[cfg->cheat_count].type = type;
-    cfg->cheat_count++;
+  uint8_t type = 0;
+  int low_address = c[3] == '0' || c[3] == '1';
+  if (c[1] == '5' && c[2] == '0' && c[3] == '0' && c[4] == '0') {
+    entry->type = 0x50;
+    entry->address = cheat_hex(c + 5, 4); /* XX count, YY address step */
+    entry->value = (uint16_t)cheat_hex(c + 10, 4);
     return 1;
   }
-  return -EOVERFLOW;
+  if (!low_address)
+    return 0;
+  if (c[2] == '0' && (c[1] == '8' || c[1] == '3' || c[1] == '1' || c[1] == '2' ||
+                      c[1] == 'D' || c[1] == 'C' || c[1] == 'E'))
+    type = (uint8_t)(cheat_nibble(c[1]) << 4);
+  else if (c[1] == 'D' && c[2] >= '1' && c[2] <= '3')
+    type = (uint8_t)(0xD0 | (c[2] - '0'));
+  else if (c[1] == 'E' && c[2] == '1')
+    type = 0xE1;
+  else
+    return 0;
+  entry->type = type;
+  entry->address = cheat_hex(c + 3, 6);
+  entry->value = (uint16_t)cheat_hex(c + 10, 4);
+  return 1;
+}
+
+static int scan_cheats(PopsConfig *cfg, const char *text) {
+  while (*text) {
+    PopsCheatEntry entry;
+    if (*text != '$' || !cheat_code_at(text, &entry)) {
+      ++text;
+      continue;
+    }
+    if (cfg->cheat_count >= POPS_MAX_CHEATS)
+      return -EOVERFLOW;
+    cfg->cheats[cfg->cheat_count++] = entry;
+    /* A code ends at column 14, which may be the next '$'. */
+    for (unsigned i = 0; i < 14 && *text; ++i)
+      ++text;
+  }
+  return 0;
 }
 
 /* Original commands accept decimal digits only, with bounded digit counts.
@@ -394,7 +451,11 @@ static int parse_single_directive(PopsConfig *cfg, const char *token) {
 int pops_config_parse_line(PopsConfig *cfg, const char *line) {
   if (!cfg || !line)
     return -EINVAL;
+  int result = scan_cheats(cfg, line);
+  return result ? result : parse_directives(cfg, line);
+}
 
+static int parse_directives(PopsConfig *cfg, const char *line) {
   const char *p = line;
   char token[64];
   char next_token[64];
@@ -421,10 +482,6 @@ int pops_config_parse_line(PopsConfig *cfg, const char *line) {
       next_token[len2++] = *p++;
     }
     next_token[len2] = '\0';
-
-    int cheat_result = try_parse_cheat(cfg, token, next_token);
-    if (cheat_result)
-      return cheat_result < 0 ? cheat_result : 0;
 
     if ((!strcasecmp(token, "MODE") || !strcasecmp(token, "$MODE")) &&
         isdigit((unsigned char)*next_token)) {
@@ -495,24 +552,55 @@ static int load_config_file(PopsConfig *cfg, const char *filepath, int optional_
 
   cfg->gs_mask = 0; /* The original's six acceptance flags are file-local. */
 
-  char line[256];
+  /* Read the whole file: POPStarter scans its text for codes as one stream,
+   * then the directives are taken line by line. */
+  size_t size = 0, capacity = 0;
+  char *text = NULL;
   int result = 0;
-  while (fgets(line, sizeof(line), f)) {
-    size_t length = strlen(line);
-    if (length == sizeof(line) - 1 && line[length - 1] != '\n') {
-      result = -EOVERFLOW;
-      break;
+  for (;;) {
+    if (capacity - size < 1024 + 16) {
+      if (capacity >= POPS_CONFIG_FILE_MAX) {
+        result = -EFBIG;
+        break;
+      }
+      size_t grown = capacity ? capacity * 2 : 4096;
+      char *bigger = (char *)realloc(text, grown);
+      if (!bigger) {
+        result = -ENOMEM;
+        break;
+      }
+      text = bigger;
+      capacity = grown;
     }
-    while (length && (line[length - 1] == '\r' || line[length - 1] == '\n'))
-      line[--length] = '\0';
-    result = pops_config_parse_line(cfg, line);
-    if (result)
+    size_t got = fread(text + size, 1, capacity - size - 16, f);
+    size += got;
+    if (!got)
       break;
   }
   if (!result && ferror(f))
     result = errno ? -errno : -EIO;
   if (fclose(f) && !result)
     result = errno ? -errno : -EIO;
+  if (!result && text) {
+    memset(text + size, 0, 16);
+    result = scan_cheats(cfg, text);
+  }
+
+  char *line = text;
+  while (!result && line && line < text + size) {
+    char *end = memchr(line, '\n', (size_t)(text + size - line));
+    size_t length = end ? (size_t)(end - line) : (size_t)(text + size - line);
+    if (length > 254) {
+      result = -EOVERFLOW;
+      break;
+    }
+    line[length] = '\0';
+    while (length && line[length - 1] == '\r')
+      line[--length] = '\0';
+    result = parse_directives(cfg, line);
+    line += (end ? (size_t)(end - line) + 1 : length + 1);
+  }
+  free(text);
   return result;
 }
 

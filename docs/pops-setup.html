@@ -443,8 +443,14 @@ Metal Gear Solid (Disc 2).VCD</code></pre>
 
 <h2 id="step-9-cheats">Step 9: GameShark &amp; Action Replay Cheats</h2>
 <p>
-  Add GameShark or Action Replay cheat codes to <code>CHEATS.TXT</code> in your game folder. Write each code POPStarter style, <code>$</code> then the code. A line without the <code>$</code> is switched off, as in POPStarter:
+  Add GameShark or Action Replay cheat codes to <code>CHEATS.TXT</code> in your game folder. Write each code POPStarter style, <code>$</code> then the code. launcHER reads the file the way POPStarter r13 does:
 </p>
+
+<ul>
+  <li>To switch a code off, remove its <code>$</code>. A <code>#</code> or <code>;</code> in front does not switch it off: POPStarter finds a <code>$</code> code anywhere on a line, and so does launcHER.</li>
+  <li>The layout is exact: <code>$</code>, eight characters, one space, four characters. A tab, a second space or a fifth value digit makes POPStarter skip the code, and launcHER skips it too. Upper or lower case both work.</li>
+  <li>A line that is not a code is skipped. It does not stop the game from starting.</li>
+</ul>
 
 <pre><code># Infinite Health (16-bit write)
 $8009A120 0004
@@ -452,36 +458,39 @@ $8009A120 0004
 # All Items (8-bit write)
 $3009A135 0063
 
-# GameShark Type 10 (16-bit write) and Type 20 (8-bit write)
-$1009A140 0008
-$2009A142 0002
-
 # Switched off: no $
 8009A150 0001
 
-# Conditional Checks (D0..D3: 16-bit, E0..E1: 8-bit)
-# If 0x0008B200 == 0x0001, execute next line:
+# Master code: every code runs only while 0x0008B000 holds 0x1234
+$C008B000 1234
+
+# If 0x0008B200 == 0x0001, run the next code:
 $D008B200 0001
 $8008B204 00FF
 
-# If 0x0008B210 != 0x0056, execute next line:
-$E108B210 0056
-$3008B212 0001</code></pre>
+# Repeat: write 0x0010, 0x0011, 0x0012, 0x0013 at 0x0009A200, 0x0009A202, ...
+$50000402 0001
+$8009A200 0010</code></pre>
 
 <p>
-  Supported code types include:
+  POPStarter's code types, all read and run as POPStarter compiles them:
 </p>
 
 <ul>
-  <li><code>80xxxxxx yyyy</code> / <code>10xxxxxx yyyy</code>: 16-bit constant RAM write.</li>
-  <li><code>30xxxxxx 00yy</code> / <code>20xxxxxx 00yy</code>: 8-bit constant RAM write.</li>
-  <li><code>D0xxxxxx yyyy</code>: 16-bit conditional equal (<code>==</code>). Executes the next cheat entry only when memory matches.</li>
-  <li><code>D1xxxxxx yyyy</code>: 16-bit conditional not equal (<code>!=</code>).</li>
-  <li><code>D2xxxxxx yyyy</code>: 16-bit conditional less than (<code>&lt;</code>).</li>
-  <li><code>D3xxxxxx yyyy</code>: 16-bit conditional greater than (<code>&gt;</code>).</li>
-  <li><code>E0xxxxxx 00yy</code>: 8-bit conditional equal (<code>==</code>).</li>
-  <li><code>E1xxxxxx 00yy</code>: 8-bit conditional not equal (<code>!=</code>).</li>
+  <li><code>80xxxxxx yyyy</code>: 16-bit write.</li>
+  <li><code>30xxxxxx 00yy</code>: 8-bit write.</li>
+  <li><code>D0xxxxxx yyyy</code>: run the next code only when the 16-bit value matches. A <code>D0</code> right after another <code>D0</code> is ignored.</li>
+  <li><code>C0xxxxxx yyyy</code>: master code. The first one gates every code in the file, wherever it is; later ones are ignored. As in POPStarter, a value of <code>8000</code> or more never matches, so such a master code turns every code off.</li>
+  <li><code>5000nnss vvvv</code>: repeat the next <code>80</code> or <code>30</code> code <code>nn</code> times (hex), moving the address up <code>ss</code> bytes and the value up <code>vvvv</code> each time. When a <code>D0</code> gates a repeat, POPStarter always skips the code after the repeat, and so does launcHER.</li>
 </ul>
+
+<p>
+  launcHER also keeps these GameShark types, which POPStarter skips: <code>10</code> and <code>20</code> (16-bit and 8-bit write), <code>D1</code>/<code>D2</code>/<code>D3</code> (16-bit not equal, less than, greater than) and <code>E0</code>/<code>E1</code> (8-bit equal, not equal). POPStarter's PS2-format codes (<code>$0</code>, <code>$1</code>, <code>$2</code>, <code>$S</code>, <code>$T</code>, <code>$=</code>, <code>$!</code>) are not supported yet.
+</p>
+
+<p>
+  Two POPStarter bugs are not copied. When a repeat's value passes <code>1FFFF</code>, POPStarter's generated code loads a different CPU register instead of the value; launcHER keeps the value 16-bit. When a repeat crosses a 64 KB boundary, POPStarter pushes the later writes 64 KB further up with every step; launcHER writes the addresses the code asks for.
+</p>
 
 <p>
   launcHER installs its own small resident program next to POPS and runs these codes against PlayStation 1 RAM (<code>0x00000000</code> to <code>0x001FFFFF</code>) once per frame, from POPS's vertical blank interrupt. It is independent code, not POPStarter's. Not yet tested on a console.

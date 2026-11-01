@@ -16,6 +16,99 @@ static void put_u32(uint8_t *p, uint32_t v) {
   p[3] = (uint8_t)(v >> 24);
 }
 
+static int cheat_is_condition(uint8_t type) {
+  return (type >= 0xD0 && type <= 0xD3) || type == 0xE0 || type == 0xE1;
+}
+
+static int cheat_is_write(uint8_t type) {
+  return type == 0x80 || type == 0x30 || type == 0x10 || type == 0x20;
+}
+
+uint16_t pops_cheats_compile(const PopsCheatEntry *in, uint16_t count, PopsCheatEntry *out) {
+  enum { GATE_NONE, GATE_OPEN, GATE_DROP } gate = GATE_NONE;
+  uint16_t n = 0, gate_at = 0;
+  int repeat = -1, stash = -1;
+
+  if (!in || !out)
+    return 0;
+  for (uint16_t i = 0; i < count; ++i) {
+    if (in[i].type == 0xC0) {
+      out[n] = in[i];
+      out[n++].address &= POPS_CHEAT_ADDR_MASK;
+      break;
+    }
+  }
+
+  uint8_t last_write = 0;
+  for (uint32_t i = 0; i <= count; ++i) {
+    PopsCheatEntry e;
+    if (i == count) {
+      /* A repeat with no write after it still expands, onto address 0 and
+       * value 0, with the store of the last write before it (or none). */
+      if (repeat < 0 || !last_write)
+        break;
+      e.type = last_write;
+      e.address = 0;
+      e.value = 0;
+    } else {
+      e = in[i];
+    }
+    e.address &= e.type == 0x50 ? 0xFFFFu : POPS_CHEAT_ADDR_MASK;
+    if (cheat_is_condition(e.type)) {
+      /* Dropped behind a pending gate or a pending repeat. */
+      if (gate != GATE_NONE || repeat >= 0)
+        continue;
+      gate = GATE_OPEN;
+      gate_at = n;
+      out[n++] = e;
+      /* POPStarter keeps the first repeat it skipped, and an emitted
+       * conditional makes it the pending repeat for the code it gates. */
+      if (stash >= 0) {
+        repeat = stash;
+        stash = -1;
+      }
+    } else if (e.type == 0x50) {
+      if (repeat < 0)
+        repeat = (int)i;
+      else if (stash < 0)
+        stash = (int)i; /* skipped while the first waits, kept for later */
+    } else if (cheat_is_write(e.type)) {
+      last_write = e.type;
+      int block = repeat >= 0 ? 2 : 1;
+      uint32_t times = repeat >= 0 ? (in[repeat].address >> 8) & 0xFF : 1;
+      if (gate == GATE_DROP) {
+        /* POPStarter's leftover branch skips this code; after a skipped
+         * repeat block it is left in place for the next code too. */
+        if (block == 1)
+          gate = GATE_NONE;
+        repeat = -1;
+        continue;
+      }
+      if (repeat >= 0) {
+        out[n] = in[repeat];
+        out[n++].address &= 0xFFFFu;
+      }
+      out[n++] = e;
+      repeat = -1;
+      if (gate == GATE_OPEN) {
+        out[gate_at].address += (uint32_t)block << POPS_CHEAT_SKIP_SHIFT;
+        /* After a gated repeat block the leftover branch compares the last
+         * write's address and value, never equal, so the next code is
+         * always skipped. With no writes it is the gate's own compare. */
+        if (block == 2)
+          gate = times ? GATE_DROP : GATE_OPEN;
+        else
+          gate = GATE_NONE;
+      }
+    }
+    /* $C0 is hoisted above; anything else is not a code. */
+  }
+  /* A conditional with nothing after it has no branch. */
+  if (gate == GATE_OPEN && !(out[gate_at].address >> POPS_CHEAT_SKIP_SHIFT))
+    n = gate_at;
+  return n;
+}
+
 int pops_resident_check_image(const void *image, size_t image_len, PopsResidentHeader *out) {
   const uint8_t *b = (const uint8_t *)image;
   if (!b || image_len < sizeof(PopsResidentHeader))
@@ -115,8 +208,7 @@ int pops_resident_build_config(PopsResidentConfig *out, const PopsConfig *cfg) {
     return -ERANGE;
   if (count) {
     out->flags |= POPS_RES_F_CHEATS;
-    out->cheat_count = count;
-    memcpy(out->cheats, cfg->cheats, count * sizeof(PopsCheatEntry));
+    out->cheat_count = pops_cheats_compile(cfg->cheats, count, out->cheats);
     out->safe_mode = cfg->safe_mode & (POPS_SAFE_MODE_BOOT | POPS_SAFE_MODE_2);
   }
   return out->flags ? 1 : 0;
