@@ -22,10 +22,12 @@ CORE = 0x00200000
 LUI, ADDIU = 0x0021B184, 0x0021B18C
 LUI_PRISTINE, ADDIU_PRISTINE = 0x3C050022, 0x24A5CD68
 MAX_CHEATS = 256
+COMPILED_MAX = 2 * MAX_CHEATS + 4
 
 
 class CheatEntry(c.Structure):
-    _fields_ = [("address", c.c_uint32), ("value", c.c_uint16), ("type", c.c_uint8)]
+    _fields_ = [("address", c.c_uint32), ("value", c.c_uint32), ("type", c.c_uint8),
+                ("cond", c.c_uint8), ("skip", c.c_uint8), ("reserved", c.c_uint8)]
 
 
 class ResidentConfig(c.Structure):
@@ -40,9 +42,14 @@ class ResidentConfig(c.Structure):
         ("pad_override", c.c_uint8),
         ("pad_id", c.c_uint8 * 2),
         ("gte_divisor", c.c_uint8),
-        ("cheats", CheatEntry * MAX_CHEATS),
+        ("cheats", CheatEntry * COMPILED_MAX),
         ("timings_ready", c.c_uint8),
     ]
+
+
+class CheatMemory(c.Structure):
+    _fields_ = [("ps1", c.c_void_p), ("ee", c.c_void_p), ("ee_size", c.c_uint32),
+                ("spr", c.c_void_p), ("ps1spr", c.c_void_p)]
 
 
 class Header(c.Structure):
@@ -80,6 +87,7 @@ L = build()
 L.pops_resident_cheat_pass.argtypes = [c.c_void_p, c.POINTER(CheatEntry), c.c_uint16]
 L.pops_resident_cheat_pass.restype = None
 L.pops_resident_frame.argtypes = [c.POINTER(ResidentConfig), c.c_void_p]
+L.pops_resident_frame_mem.argtypes = [c.POINTER(ResidentConfig), c.POINTER(CheatMemory)]
 L.pops_resident_check_image.argtypes = [c.c_void_p, c.c_size_t, c.POINTER(Header)]
 L.pops_resident_hook_core.argtypes = [c.c_void_p, c.c_size_t, c.c_uint32]
 L.pops_resident_hook_gp1.argtypes = [c.c_void_p, c.c_size_t, c.c_uint32]
@@ -138,7 +146,8 @@ class CheatPass(unittest.TestCase):
     def test_out_of_range_is_skipped(self):
         ram = (c.c_uint8 * 0x200000)()
         self.run_codes(ram, (0x801FFFFF, 0xFFFF), (0xD01FFFFF, 0), (0x30000000, 9))
-        self.assertEqual(ram[0x1FFFFE], 0)
+        # An odd 16-bit write is aligned down (quirk 11), so it stays inside.
+        self.assertEqual(ram[0x1FFFFE], 0xFF)
         self.assertEqual(ram[0], 0)  # the failed conditional skipped it
         self.run_codes(ram, (0x301FFFFF, 0x55))
         self.assertEqual(ram[0x1FFFFF], 0x55)
@@ -273,6 +282,44 @@ def apply_cheats_txt(text, ram):
     return bytes(work), 0
 
 
+def resident_config_for(text):
+    buf = (c.c_uint8 * 0x10000)()
+    L.pops_config_init(c.addressof(buf))
+    with tempfile.NamedTemporaryFile("wb", delete=False, suffix=".TXT") as f:
+        f.write(text.encode("latin-1"))
+        path = f.name
+    try:
+        rc = L.pops_config_load_file(c.addressof(buf), path.encode())
+    finally:
+        os.unlink(path)
+    if rc:
+        return None, rc
+    out = ResidentConfig()
+    L.pops_resident_build_config(c.byref(out), c.addressof(buf))
+    out.flags |= 1
+    return out, 0
+
+
+EE_SIZE = 0x02000000
+EE_PS1 = 0x01000000
+
+
+def apply_cheats_txt_mem(text, ee, spr, ps1spr):
+    """apply_cheats_txt over the whole memory a PS2-format code can reach:
+    EE RAM (32 MB, PS1 RAM at 0x01000000 inside it, as on the console), the
+    EE scratchpad and the page at 0x5F800000. Returns ((ee, spr, ps1spr), rc)."""
+    out, rc = resident_config_for(text)
+    if rc:
+        return None, rc
+    work_ee = (c.c_uint8 * len(ee)).from_buffer_copy(ee)
+    work_spr = (c.c_uint8 * len(spr)).from_buffer_copy(spr)
+    work_ps1spr = (c.c_uint8 * len(ps1spr)).from_buffer_copy(ps1spr)
+    mem = CheatMemory(c.addressof(work_ee) + EE_PS1, c.addressof(work_ee), EE_SIZE,
+                      c.addressof(work_spr), c.addressof(work_ps1spr))
+    L.pops_resident_frame_mem(c.byref(out), c.byref(mem))
+    return (bytes(work_ee), bytes(work_spr), bytes(work_ps1spr)), 0
+
+
 class CheatsTxt(unittest.TestCase):
     """CHEATS.TXT read and run the way POPStarter r13 compiles it. Each rule
     here was taken from the original's own cheat compiler run under
@@ -397,6 +444,30 @@ class CheatsTxt(unittest.TestCase):
                 first = next(a for a in range(len(ram)) if got[a] != want[a])
                 self.fail("%r differs from POPStarter at %#x" % (text, first))
 
+    @unittest.skipUnless(os.environ.get("POPSTARTER_TEST_ELF"), "optional external POPStarter MAIN")
+    def test_random_ps2_format_files_match_the_original(self):
+        try:
+            import unicorn  # noqa: F401
+        except ImportError:
+            self.skipTest("needs the unicorn package")
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from trace_original_pops_cheats import compile_cheats, run_codes_mem
+        rng = random.Random(0x95C0DE)
+        names = ("EE RAM", "scratchpad", "0x5F800000 page")
+        for _ in range(int(os.environ.get("POPS_CHEAT_FUZZ_CASES", "150"))):
+            text, mem = random_cheats_txt(rng, ps2=True)
+            code, _ = compile_cheats(text)
+            if original_reads_unknown_registers(code):
+                continue
+            want = run_codes_mem(code, *mem)
+            got, rc = apply_cheats_txt_mem(text, *mem)
+            self.assertEqual(rc, 0, text)
+            for name, g, w in zip(names, got, want):
+                if g != w:
+                    first = next(a for a in range(len(w)) if g[a] != w[a])
+                    self.fail("%r differs from POPStarter in %s at %#x (got %02x, want %02x)"
+                              % (text, name, first, g[first], w[first]))
+
 
 def original_reads_unknown_registers(code):
     """POPStarter builds a repeat's values into "ori k1,zero,value" words.
@@ -432,18 +503,81 @@ def random_cheat(rng, ram, win):
     return "$%s%06X %04X" % (kind, addr, val)
 
 
-def random_cheats_txt(rng):
+# PS2-format codes reach EE RAM directly. These windows sit in PS1 RAM (as
+# EE 0x01000000 + address, so they meet the PS1 codes) and in plain EE RAM,
+# away from where the original's emitted code runs (0x01a00000).
+PS2_EE_WINDOWS = (0x00100000, 0x01097B00, 0x0107FFE0)
+PS2_JUNK = ("$01097B00 1234567", "$31097B00 12345678", "$S3000000 12345678",
+            "$S0004000 12345678", "$T0001400 12345678", "$T0010000 12345678",
+            "$=2097B00 12345678", "$S0030000 12345678", "$01097B00 12345678 x")
+
+
+def random_ps2_cheat(rng, mem, wins):
+    """One PS2-format line: $0/$1/$2 EE writes, $S/$T scratchpad writes and
+    conditionals, $=/$! word compares. Kept aligned, as an unaligned access
+    faults in the original."""
+    ee, spr, ps1spr = mem
+    kind = rng.choice(["W", "W", "S", "S", "T", "T", "=", "!"])
+    size = rng.randrange(3)
+    if kind in "=!":
+        size = 2
+    n = 1 << size
+    if kind in "W=!":
+        win = rng.choice(wins)
+        addr = win + rng.randrange(0, 0x40, n)
+        cur = int.from_bytes(ee[addr:addr + n], "little")
+    elif kind == "S":
+        addr = rng.choice((0, 0x3FC0)) + rng.randrange(0, 0x40, n)
+        cur = int.from_bytes(spr[addr:addr + n], "little")
+    else:
+        addr = rng.choice((0, 0x3C0)) + rng.randrange(0, 0x40, n)
+        cur = int.from_bytes(ps1spr[addr:addr + n], "little")
+    r = rng.random()
+    if r < 0.4:
+        val = cur  # often true when compared
+        if rng.random() < 0.5 and cur >> (8 * n - 1):
+            val |= (0xFFFFFFFF << (8 * n)) & 0xFFFFFFFF  # sign-extended form
+    elif r < 0.6:
+        val = rng.randrange(1 << (8 * n))
+    else:
+        val = rng.randrange(1 << 32)
+    if kind == "W":
+        return "$%d%07X %08X" % (size, addr, val)
+    if kind in "=!":
+        return "$%s%07X %08X" % (kind, addr, val)
+    cond = rng.choice((0, 0, 1, 2))
+    if kind == "S":
+        return "$S%d%d0%04X %08X" % (size, cond, addr, val)
+    return "$T%d%d00%03X %08X" % (size, cond, addr, val)
+
+
+def random_cheats_txt(rng, ps2=False):
     ram = bytearray(0x200000)
     win = rng.choice(CHEAT_WINDOWS)
     for i in range(0x80):
         ram[win + i] = rng.randrange(256)
+    if ps2:
+        ee = bytearray(EE_SIZE)
+        spr, ps1spr = bytearray(0x4000), bytearray(0x1000)
+        wins = (PS2_EE_WINDOWS[0], EE_PS1 + win)
+        for i in range(0x80):
+            ee[wins[0] + i] = rng.randrange(256)
+            spr[i] = rng.randrange(256)
+            spr[0x3F80 + i] = rng.randrange(256)
+            ps1spr[i] = rng.randrange(256)
+            ps1spr[0x380 + i] = rng.randrange(256)
+        ee[EE_PS1:EE_PS1 + len(ram)] = ram
+        mem = (ee, spr, ps1spr)
     lines = []
     for _ in range(rng.randrange(1, 11)):
         r = rng.random()
         if r < 0.12:
-            lines.append(rng.choice(CHEAT_JUNK))
+            lines.append(rng.choice(CHEAT_JUNK + (PS2_JUNK if ps2 else ())))
             continue
-        line = random_cheat(rng, ram, win)
+        if ps2 and rng.random() < 0.5:
+            line = random_ps2_cheat(rng, mem, wins)
+        else:
+            line = random_cheat(rng, ram, win)
         if r < 0.2:
             line = line.lower()
         elif r < 0.26:
@@ -454,7 +588,10 @@ def random_cheats_txt(rng):
             line += " trailing"
         lines.append(line)
     eol = "\r\n" if rng.random() < 0.3 else "\n"
-    return eol.join(lines) + (eol if rng.random() < 0.8 else ""), bytes(ram)
+    text = eol.join(lines) + (eol if rng.random() < 0.8 else "")
+    if ps2:
+        return text, tuple(bytes(m) for m in mem)
+    return text, bytes(ram)
 
 
 class BuildConfig(unittest.TestCase):
@@ -474,7 +611,9 @@ class BuildConfig(unittest.TestCase):
         cfg = self.parsed("$80012345 00FF", "$D0001000 0001", "$30001001 0002", "$SAFEMODE")
         self.assertEqual(L.pops_resident_build_config(c.byref(out), c.addressof(cfg)), 1)
         self.assertEqual(out.flags, 1)
-        self.assertEqual(out.cheat_count, 3)
+        # The $D0 compiles to a load and a branch in front of the write it gates.
+        self.assertEqual(out.cheat_count, 4)
+        self.assertEqual([out.cheats[i].type for i in range(4)], [0x80, 0x02, 0x01, 0x30])
         self.assertEqual((out.cheats[0].type, out.cheats[0].address, out.cheats[0].value),
                          (0x80, 0x012345, 0xFF))
         self.assertEqual(out.safe_mode, 1)
@@ -607,9 +746,9 @@ class HookGp1(unittest.TestCase):
             self.assertEqual(struct.unpack_from("<I", data, 0x1000 + addr - 0x200000)[0], word, hex(addr))
 
 
-def image(file_size=0x60, image_size=0x900, entry=BASE + 0x40, config=BASE + 0x60, magic=0x5352484C):
+def image(file_size=0x60, image_size=0x2000, entry=BASE + 0x40, config=BASE + 0x60, magic=0x5352484C):
     img = bytearray(file_size)
-    struct.pack_into("<IHHIIIIIIIIIIII", img, 0, magic, 8, 56, file_size, image_size, entry, config,
+    struct.pack_into("<IHHIIIIIIIIIIII", img, 0, magic, 9, 56, file_size, image_size, entry, config,
                      BASE + 0x44, BASE + 0x48, BASE + 0x4C, BASE + 0x50, BASE + 0x54, BASE + 0x58,
                      BASE + 0x5C, BASE + 0x40)
     img[0x40:0x44] = b"\x08\x00\xe0\x03"
@@ -625,7 +764,7 @@ class Install(unittest.TestCase):
     def test_valid_image(self):
         res, h = self.check(image())
         self.assertEqual(res, 0)
-        self.assertEqual((h.file_size, h.image_size, h.vblank_entry), (0x60, 0x900, BASE + 0x40))
+        self.assertEqual((h.file_size, h.image_size, h.vblank_entry), (0x60, 0x2000, BASE + 0x40))
 
     def test_rejects_bad_images(self):
         self.assertEqual(self.check(image(magic=0))[0], -errno.EINVAL)
@@ -634,7 +773,7 @@ class Install(unittest.TestCase):
         self.assertEqual(self.check(image(entry=BASE + 0x60))[0], -errno.ERANGE)
         self.assertEqual(self.check(image(entry=BASE + 0x42))[0], -errno.ERANGE)
         self.assertEqual(self.check(image(entry=BASE + 0x10))[0], -errno.ERANGE)
-        self.assertEqual(self.check(image(config=BASE + 0x900 - 8))[0], -errno.ERANGE)
+        self.assertEqual(self.check(image(config=BASE + 0x2000 - 8))[0], -errno.ERANGE)
         self.assertEqual(self.check(image(config=BASE + 0x64))[0], -errno.ERANGE)
         for offset in (24, 28, 32, 36, 40, 44, 48, 52):
             img = image()
@@ -646,29 +785,29 @@ class Install(unittest.TestCase):
 
     def test_install_copies_zeroes_and_configures(self):
         img = image()
-        dest = (c.c_uint8 * 0x1000)(*([0xCC] * 0x1000))
+        dest = (c.c_uint8 * 0x3000)(*([0xCC] * 0x3000))
         cfg = ResidentConfig()
         cfg.flags, cfg.cheat_count = 1, 1
         cfg.cheats[0].address, cfg.cheats[0].type, cfg.cheats[0].value = 0x10, 0x30, 0x7F
         buf = (c.c_uint8 * len(img)).from_buffer(img)
-        self.assertEqual(L.pops_resident_install(dest, 0x1000, BASE, buf, len(img), c.byref(cfg)), 0)
+        self.assertEqual(L.pops_resident_install(dest, 0x3000, BASE, buf, len(img), c.byref(cfg)), 0)
         raw = bytes(dest)
         self.assertEqual(raw[:0x60], bytes(img))
         got = ResidentConfig.from_buffer_copy(raw[0x60:0x60 + c.sizeof(ResidentConfig)])
         self.assertEqual((got.flags, got.cheat_count, got.cheats[0].value), (1, 1, 0x7F))
         end = 0x60 + c.sizeof(ResidentConfig)
-        self.assertEqual(raw[end:0x900], bytes(0x900 - end))
-        self.assertEqual(raw[0x900:], b"\xcc" * (0x1000 - 0x900))
+        self.assertEqual(raw[end:0x2000], bytes(0x2000 - end))
+        self.assertEqual(raw[0x2000:], b"\xcc" * (0x3000 - 0x2000))
 
     def test_install_refuses_short_destination_or_wrong_base(self):
         img = image()
         buf = (c.c_uint8 * len(img)).from_buffer(img)
-        dest = (c.c_uint8 * 0x8FF)()
+        dest = (c.c_uint8 * 0x1FFF)()
         cfg = ResidentConfig()
-        self.assertEqual(L.pops_resident_install(dest, 0x8FF, BASE, buf, len(img), c.byref(cfg)), -errno.ERANGE)
-        self.assertEqual(bytes(dest), bytes(0x8FF))
-        dest = (c.c_uint8 * 0x1000)()
-        self.assertEqual(L.pops_resident_install(dest, 0x1000, BASE + 0x10, buf, len(img), c.byref(cfg)),
+        self.assertEqual(L.pops_resident_install(dest, 0x1FFF, BASE, buf, len(img), c.byref(cfg)), -errno.ERANGE)
+        self.assertEqual(bytes(dest), bytes(0x1FFF))
+        dest = (c.c_uint8 * 0x3000)()
+        self.assertEqual(L.pops_resident_install(dest, 0x3000, BASE + 0x10, buf, len(img), c.byref(cfg)),
                          -errno.EINVAL)
 
 

@@ -24,15 +24,35 @@ BASE = 0x0143A000
  pad_read_entry, pad_read_exit, gte_scale, gte_divide, gte_ultra,
  gp1_entry) = struct.unpack_from('<IHHIIIIIIIIIIII', img, 0)
 assert magic == 0x5352484C and fsz == len(img), (hex(magic), fsz, len(img))
-assert ver == 8 and hs == 56
+assert ver == 9 and hs == 56
 
 mu = Uc(UC_ARCH_MIPS, UC_MODE_MIPS64 + UC_MODE_LITTLE_ENDIAN)
 # The R5900 has MIPS IV's movz/movn, which unicorn's default R4000 model
 # rejects. The 5Kf model accepts them and runs the rest unchanged.
 mu.ctl_set_cpu_model(UC_CPU_MIPS64_5KF)
+
+# The R5900's three-operand mult/multu (rd = LO as well) is not MIPS64;
+# GCC uses it, e.g. to index the 12-byte cheat entries. Modelled here.
+_MREGS = [getattr(_mips, 'UC_MIPS_REG_%d' % r) for r in range(32)]
+def _r5900_mult(u, addr, size, _):
+    word = struct.unpack('<I', u.mem_read(addr, 4))[0]
+    if word >> 26 or (word & 63) not in (0x18, 0x19) or not (word >> 11) & 31:
+        return
+    rs, rt, rd = (word >> 21) & 31, (word >> 16) & 31, (word >> 11) & 31
+    a, b = u.reg_read(_MREGS[rs]) & 0xFFFFFFFF, u.reg_read(_MREGS[rt]) & 0xFFFFFFFF
+    if word & 63 == 0x18:
+        a, b = a - ((a & 0x80000000) << 1), b - ((b & 0x80000000) << 1)
+    prod = (a * b) & 0xFFFFFFFFFFFFFFFF
+    sx = lambda v: (v & 0xFFFFFFFF) - ((v & 0x80000000) << 1)
+    lo, hi = sx(prod) & 0xFFFFFFFFFFFFFFFF, sx(prod >> 32) & 0xFFFFFFFFFFFFFFFF
+    u.reg_write(UC_MIPS_REG_LO, lo); u.reg_write(UC_MIPS_REG_HI, hi)
+    u.reg_write(_MREGS[rd], lo)
+    u.reg_write(UC_MIPS_REG_PC, addr + 4)
+mu.hook_add(UC_HOOK_CODE, _r5900_mult)
 mu.mem_map(0x00000000, 0x02000000)      # EE RAM
 mu.mem_map(0x40000000, 0x00200000)      # PS1 RAM as POPS maps it
 mu.mem_map(0x70000000, 0x00004000)      # scratchpad
+mu.mem_map(0x5F800000, 0x00001000)      # page $T codes address
 mu.mem_write(BASE, img + bytes(isz - fsz))
 
 # Fake POPS VBLANK_START handler at 0x21cd68: counts calls in 0x1000, returns -1.
@@ -41,8 +61,12 @@ mu.mem_write(0x0021CD68, b''.join(struct.pack('<I', w) for w in code))
 
 def config(codes, safe=0, flags=1, pads=(0, 0, 0), divisor=0):
     blob = struct.pack('<QIIIIHHBBBB', 0, flags, 0x0021CD68, 0x70003364, 0, safe, len(codes), *pads, divisor)
-    for addr, val in codes:
-        blob += struct.pack('<IHBx', addr & 0x1FFFFF, val, addr >> 24)
+    for code in codes:
+        if len(code) == 2:  # PS1 code: (type << 24 | address, value)
+            addr, val = code
+            code = (addr >> 24, addr & 0x1FFFFF, val, 0, 0)
+        kind, addr, val, cond, skip = code
+        blob += struct.pack('<IIBBBx', addr, val, kind, cond, skip)
     mu.mem_write(cfga, blob)
 
 def vblank(cause=2):
@@ -126,6 +150,20 @@ assert mu.mem_read(0x40000010, 1) == b'\x00'
 mu.mem_write(0x401FFDF4, struct.pack('<I', 3))
 gp1()
 assert mu.mem_read(0x40000010, 1) == b'\x5a' and calls() == 0
+# 4. PS2-format codes: an EE word write, a scratchpad halfword compare that
+# gates the next code, and a byte write to the 0x5F800000 page.
+mu.mem_write(0x70000100, struct.pack('<H', 0x1234))
+ps2 = [(0x92, 0x00100000, 0xDEADBEEF, 0, 0), (0x95, 0x100, 0x1234, 1, 1),
+       (0x98, 0x10, 0x77, 0, 0), (0x30000010, 0x5A)]
+mu.mem_write(0x40000010, b'\x00')
+config(ps2)
+gp1()
+assert bytes(mu.mem_read(0x00100000, 4)) == struct.pack('<I', 0xDEADBEEF)
+assert mu.mem_read(0x5F800010, 1) == b'\x77' and mu.mem_read(0x40000010, 1) == b'\x5a'
+mu.mem_write(0x5F800010, b'\x00')
+mu.mem_write(0x70000100, struct.pack('<H', 0x1235))
+gp1()
+assert mu.mem_read(0x5F800010, 1) == b'\x00', 'gated $T write ran'
 print('resident image under emulation: PASS (VBLANK entry %#x, GP1 entry %#x, config %#x, %d bytes resident; registers kept)' % (entry, gp1_entry, cfga, isz))
 
 # Mid-function display entry: no call/return ABI and no stack/gp dependency.
@@ -359,7 +397,7 @@ print('resident widescreen GTE stubs: PASS (%d values x 3 modes, both sites, 28 
 # image, restores a saved copy once, then adjusts from the pads every frame.
 # Without the save flag the card copy is not written; with it (the launcher
 # sets it for $SET_TIMINGS) new values are mirrored there, as in POPStarter.
-TREADY = cfga + 32 + 256 * 8
+TREADY = cfga + 32 + (2 * 256 + 4) * 12
 u32 = lambda a: struct.unpack('<I', mu.mem_read(a, 4))[0]
 w32 = lambda a, v: mu.mem_write(a, struct.pack('<I', v & 0xffffffff))
 timings = lambda: (u32(0x502770), u32(0x700033e0), u32(0x700033e4))

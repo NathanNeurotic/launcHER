@@ -485,7 +485,22 @@ $8009A200 0010</code></pre>
 </ul>
 
 <p>
-  Other GameShark types (<code>10</code>, <code>20</code>, <code>D1</code>..<code>D3</code>, <code>E0</code>, <code>E1</code>) are skipped, as in POPStarter, so the code after one of them runs on its own. POPStarter's PS2-format codes (<code>$0</code>, <code>$1</code>, <code>$2</code>, <code>$S</code>, <code>$T</code>, <code>$=</code>, <code>$!</code>) are not supported yet.
+  Other GameShark types (<code>10</code>, <code>20</code>, <code>D1</code>..<code>D3</code>, <code>E0</code>, <code>E1</code>) are skipped, as in POPStarter, so the code after one of them runs on its own.
+</p>
+
+<p>
+  POPStarter's PS2-format codes are read and run as POPStarter compiles them too. They have an 8-digit value, so a code is 18 characters long:
+</p>
+
+<ul>
+  <li><code>$0aaaaaaa vvvvvvvv</code>, <code>$1…</code>, <code>$2…</code>: 8, 16 or 32-bit write to PS2 (EE) RAM at the 7-digit address. PlayStation 1 RAM is at <code>01000000</code> there.</li>
+  <li><code>$Szc0oooo vvvvvvvv</code>: the EE scratchpad (<code>70000000</code>), offset <code>0000</code>..<code>3FFF</code>. <code>z</code> is the size (0 byte, 1 halfword, 2 word), <code>c</code> is 0 for a write, 1 to run the next code only if the memory equals the value, 2 only if it differs.</li>
+  <li><code>$Tzc00ooo vvvvvvvv</code>: the same at <code>5F800000</code>, offset <code>000</code>..<code>3FF</code>.</li>
+  <li><code>$=aaaaaaa vvvvvvvv</code> / <code>$!aaaaaaa vvvvvvvv</code>: run the next code only if the 32-bit word at the EE address (below <code>02000000</code>) equals / differs from the value.</li>
+</ul>
+
+<p>
+  Their POPStarter quirks are copied as well. Byte and halfword compares read the memory as signed, so a byte of <code>80</code> matches the value <code>FFFFFF80</code>, not <code>00000080</code>. After the first PS2-format conditional, every later conditional and repeat in the file is ignored, and so are <code>$T</code> writes after a <code>$S</code> conditional and <code>$S</code> writes after a <code>$=</code> or <code>$!</code>. A <code>$0</code>/<code>$1</code>/<code>$2</code> write between a <code>D0</code> and the code it gates runs on its own and usually makes that code skipped; a <code>$S</code>/<code>$T</code> write there is ignored. A code at an address its size does not divide, which crashes POPStarter, is aligned down instead.
 </p>
 
 <p>
@@ -493,7 +508,7 @@ $8009A200 0010</code></pre>
 </p>
 
 <p>
-  launcHER installs its own small resident program next to POPS and runs these codes against PlayStation 1 RAM (<code>0x00000000</code> to <code>0x001FFFFF</code>) from the same place in POPS as POPStarter: each time the game writes the GPU control port with interrupts enabled; how often that is depends on the game and was not measured. A game that stops writing it gets no codes until it writes it again, in POPStarter too. It is independent code, not POPStarter's. Not yet tested on a console.
+  launcHER installs its own small resident program next to POPS and runs these codes against PlayStation 1 RAM (<code>0x00000000</code> to <code>0x001FFFFF</code>), and PS2-format codes against the memory they name, from the same place in POPS as POPStarter: each time the game writes the GPU control port with interrupts enabled; how often that is depends on the game and was not measured. A game that stops writing it gets no codes until it writes it again, in POPStarter too. It is independent code, not POPStarter's. Not yet tested on a console.
 </p>
 
 <h2 id="step-10-igr-hotkeys">Step 10: In-Game Reset &amp; Controller Hotkeys</h2>

@@ -29,6 +29,19 @@ needed).
 | 9 | Repeat values from `0x10000` wrap to 16 bits; from `0x20000` the generated `ori` no longer loads the value register, so the store repeats the last value that fitted. | Wrap values to 16 bits. |
 | 10 | Other GameShark types (`10`, `20`, `D1`..`D3`, `E0`, `E1`) are skipped, so the code after a conditional of those types runs on its own. | Support them (launcHER's engine still can, for direct callers). |
 | 11 | `80`/`D0`/`C0` at an odd address would raise an address error on the console (unaligned `sh`/`lh`). launcHER aligns the address down instead. | Keep launcHER's alignment. |
+| 8b | When quirk 8 carries a repeat past the end of PS1 RAM (2 MB), the writes land in the EE RAM above it (EE `0x01000000` + address). launcHER writes there too, but never past the first 32 MB of EE RAM. | Stop at the end of PS1 RAM. |
+
+## PS2-format codes (`$0`/`$1`/`$2`, `$S`, `$T`, `$=`, `$!`)
+
+| # | POPStarter behaviour (copied) | Possible fix later |
+|---|---|---|
+| 13 | Byte and halfword conditionals (`$S`/`$T` with size 0 or 1) load the memory sign-extended (`lb`/`lh`) and compare it with the whole 32-bit value. A byte of `80` only matches `FFFFFF80`, never `00000080`. | Compare only the low 8/16 bits. |
+| 14 | After the first PS2 conditional, POPStarter compiles the rest of the file with a cut-down copy of its loop that knows only writes. Every later `D0`, `5000` and conditional of any kind is dropped. Which writes survive depends on the conditional: after `$S` a `$T` write is dropped, after `$=`/`$!` a `$S` write is dropped, after `$T` both are kept. PS1 and `$0`/`$1`/`$2` writes are always kept. | One loop that handles every code type. |
+| 15 | A PS2 conditional behind a pending `D0` (or behind a `D0`-gated repeat, or a pending repeat) is dropped. | Chain conditionals. |
+| 16 | Between a `D0` and the write it gates, a `$S`/`$T` write is dropped, and a `$0`/`$1`/`$2` write is placed there and runs on its own. It also replaces the registers the `D0` compares, so the `D0` then compares that write's address with its value instead of the RAM it read, which in practice almost always skips the gated code. | Keep the compare apart from the writes. |
+| 17 | A PS2-format write after a `5000` that has not met its PS1 write yet is dropped. | Let the repeat wait. |
+| 18 | A PS2 conditional with nothing after it branches, when false, past the end of the generated code, over POPStarter's exit jump, into whatever follows in memory. launcHER just ends the pass. | Branch to the exit. |
+| 19 | A PS2-format code at an address its size does not divide, or outside the memory it names, faults on the console (`sh`/`sw`/`lh`/`lw`). launcHER aligns the address down, and skips a code that falls outside EE RAM (32 MB), the scratchpad (16 KB) or the first 1 KB of the `0x5F800000` page, together with the code a skipped conditional gates. | Keep launcHER's checks. |
 
 ## Known gaps (not copyable)
 

@@ -13,8 +13,11 @@ ROOT = Path(__file__).resolve().parent.parent
 class CheatEntry(c.Structure):
     _fields_ = [
         ("address", c.c_uint32),
-        ("value", c.c_uint16),
+        ("value", c.c_uint32),
         ("type", c.c_uint8),
+        ("cond", c.c_uint8),
+        ("skip", c.c_uint8),
+        ("reserved", c.c_uint8),
     ]
 
 class PopsConfig(c.Structure):

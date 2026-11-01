@@ -8,31 +8,143 @@
 
 #include "pops_resident.h"
 
-static void cheat_write(uint8_t *ram, uint8_t type, uint32_t addr, uint16_t val) {
-  if (type == 0x80 || type == 0x10) {
-    if (addr + 2 <= POPS_PS1_RAM_SIZE)
-      *(volatile uint16_t *)(ram + (addr & ~1U)) = val;
-  } else if (type == 0x30 || type == 0x20) {
-    if (addr + 1 <= POPS_PS1_RAM_SIZE)
-      *(volatile uint8_t *)(ram + addr) = (uint8_t)val;
-  }
+#define CHEAT_U8(a)  (*(volatile uint8_t *)(a))
+#define CHEAT_U16(a) (*(volatile uint16_t *)(a))
+#define CHEAT_U32(a) (*(volatile uint32_t *)(a))
+
+static int64_t sext32(uint32_t v) {
+  return (int64_t)(int32_t)v;
 }
 
-void pops_resident_cheat_pass(uint8_t *ram, const PopsCheatEntry *cheats, uint16_t count) {
+/* PS1 RAM as POPStarter addresses it: EE 0x01000000 + address. */
+#define CHEAT_EE_PS1 0x01000000u
+
+static void cheat_write(const PopsCheatMemory *mem, uint8_t type, uint32_t addr, uint32_t val) {
+  unsigned size;
+  uintptr_t at;
+  if (type == 0x80 || type == 0x10)
+    size = 2;
+  else if (type == 0x30 || type == 0x20)
+    size = 1;
+  else if (type == POPS_CHEAT_W32)
+    size = 4;
+  else
+    return;
+  addr &= ~(uint32_t)(size - 1u);
+  if (addr + size <= POPS_PS1_RAM_SIZE)
+    at = mem->ps1 + addr;
+  else if (mem->ee_size && addr < mem->ee_size - CHEAT_EE_PS1 - size + 1u &&
+           mem->ee_size >= CHEAT_EE_PS1 + size)
+    /* A repeat can carry the address past PS1 RAM (quirk 8); POPStarter's
+     * store then lands in the EE RAM above it, and so does this one. */
+    at = mem->ee + CHEAT_EE_PS1 + addr;
+  else
+    return;
+  if (size == 2)
+    CHEAT_U16(at) = (uint16_t)val;
+  else if (size == 1)
+    CHEAT_U8(at) = (uint8_t)val;
+  else
+    CHEAT_U32(at) = val;
+}
+
+/* A PS2-format code's memory: its base, how far it reaches, and the EE
+ * address POPStarter loads into k0 (lui) for it. */
+static int cheat_ps2_place(const PopsCheatMemory *mem, const PopsCheatEntry *e, uintptr_t *at,
+                           uint32_t *ee_addr) {
+  unsigned size = 1u << (e->type & 3u);
+  uint32_t addr = e->address & ~(size - 1u);
+  uintptr_t base;
+  uint32_t limit, ee_base;
+  switch (e->type & 0xFCu) {
+  case POPS_CHEAT_EE:
+    base = mem->ee, limit = mem->ee_size, ee_base = 0;
+    break;
+  case POPS_CHEAT_SPR:
+    base = mem->spr, limit = mem->spr ? 0x4000u : 0, ee_base = POPS_CHEAT_SPR_ADDR;
+    break;
+  default:
+    base = mem->ps1spr, limit = mem->ps1spr ? 0x400u : 0, ee_base = POPS_CHEAT_PS1SPR_ADDR;
+    break;
+  }
+  if (addr >= limit || limit - addr < size)
+    return 0;
+  *at = base + addr;
+  *ee_addr = ee_base + addr;
+  return 1;
+}
+
+void pops_resident_cheat_run(const PopsCheatMemory *mem, const PopsCheatEntry *cheats,
+                             uint16_t count) {
+  uintptr_t ram = mem->ps1;
+  /* POPStarter's compare registers. */
+  int64_t k0 = 0, k1 = 0;
   uint16_t i = 0;
+  if (!ram)
+    return;
   while (i < count) {
-    uint32_t addr = cheats[i].address & POPS_CHEAT_ADDR_MASK;
-    uint32_t skip = cheats[i].address >> POPS_CHEAT_SKIP_SHIFT;
-    uint8_t type = cheats[i].type;
-    uint16_t val = cheats[i].value;
-    if (!skip)
-      skip = 1;
+    const PopsCheatEntry *e = &cheats[i];
+    uint32_t addr = e->address & POPS_CHEAT_ADDR_MASK;
+    uint32_t skip = e->skip ? e->skip : 1;
+    uint8_t type = e->type;
+    uint32_t val = e->value;
+
+    if (POPS_CHEAT_IS_PS2(type)) {
+      uintptr_t at;
+      uint32_t ee_addr;
+      if (!cheat_ps2_place(mem, e, &at, &ee_addr)) {
+        i += e->cond ? 2 : 1; /* out of reach: the code and what it gates */
+        continue;
+      }
+      if (e->cond == POPS_CHEAT_COND_NONE) {
+        if ((type & 3u) == 0)
+          CHEAT_U8(at) = (uint8_t)val;
+        else if ((type & 3u) == 1)
+          CHEAT_U16(at) = (uint16_t)val;
+        else
+          CHEAT_U32(at) = val;
+        /* lui k0, (address + 0x8000) >> 16; lui/ori k1, value */
+        k0 = sext32((ee_addr + 0x8000u) & 0xFFFF0000u);
+        k1 = sext32(val);
+        i++;
+        continue;
+      }
+      /* lb/lh/lw k0 (signed), lui/ori k1, value; bne (EQ) or beq (NE)
+       * over the next code. */
+      if ((type & 3u) == 0)
+        k0 = (int8_t)CHEAT_U8(at);
+      else if ((type & 3u) == 1)
+        k0 = (int16_t)CHEAT_U16(at);
+      else
+        k0 = (int32_t)CHEAT_U32(at);
+      k1 = sext32(val);
+      int holds = e->cond == POPS_CHEAT_COND_EQ ? k0 == k1 : k0 != k1;
+      i += holds ? 1 : 2;
+      continue;
+    }
+
+    if (type == POPS_CHEAT_BNE) {
+      i += k0 != k1 ? 1 + skip : 1;
+      continue;
+    }
+
+    if (type == POPS_CHEAT_LOAD16) {
+      /* lh k0 and addiu k1, both sign-extended, so they compare equal
+       * exactly when the halves match. */
+      k0 = addr + 2 <= POPS_PS1_RAM_SIZE ? (int16_t)CHEAT_U16(ram + (addr & ~1U)) : 0;
+      k1 = (int16_t)(uint16_t)val;
+      i++;
+      continue;
+    }
 
     if (type == 0xC0) {
       /* POPStarter loads the half signed and the value unsigned, so a
        * master code value of 0x8000 or more never matches. */
-      if (val >= 0x8000 || addr + 2 > POPS_PS1_RAM_SIZE ||
-          *(volatile uint16_t *)(ram + (addr & ~1U)) != val)
+      if (addr + 2 > POPS_PS1_RAM_SIZE)
+        return;
+      k0 = (int16_t)CHEAT_U16(ram + (addr & ~1U));
+      k1 = (uint16_t)val;
+      if (k0 != k1)
         return;
       i++;
       continue;
@@ -41,15 +153,16 @@ void pops_resident_cheat_pass(uint8_t *ram, const PopsCheatEntry *cheats, uint16
     if (type >= 0xD0 && type <= 0xD3) {
       int cond = 0;
       if (addr + 2 <= POPS_PS1_RAM_SIZE) {
-        uint16_t cur = *(volatile uint16_t *)(ram + (addr & ~1U));
+        uint16_t cur = CHEAT_U16(ram + (addr & ~1U));
+        uint16_t v16 = (uint16_t)val;
         if (type == 0xD0)
-          cond = (cur == val);
+          cond = (cur == v16);
         else if (type == 0xD1)
-          cond = (cur != val);
+          cond = (cur != v16);
         else if (type == 0xD2)
-          cond = (cur < val);
+          cond = (cur < v16);
         else
-          cond = (cur > val);
+          cond = (cur > v16);
       }
       i += cond ? 1 : 1 + skip;
       continue;
@@ -58,7 +171,7 @@ void pops_resident_cheat_pass(uint8_t *ram, const PopsCheatEntry *cheats, uint16
     if (type == 0xE0 || type == 0xE1) {
       int cond = 0;
       if (addr + 1 <= POPS_PS1_RAM_SIZE) {
-        uint8_t cur = *(volatile uint8_t *)(ram + addr);
+        uint8_t cur = CHEAT_U8(ram + addr);
         cond = (type == 0xE0) ? (cur == (uint8_t)val) : (cur != (uint8_t)val);
       }
       i += cond ? 1 : 1 + skip;
@@ -76,21 +189,25 @@ void pops_resident_cheat_pass(uint8_t *ram, const PopsCheatEntry *cheats, uint16
        * field, k1 keeps its last value and the store repeats it. */
       if (i + 1 < count) {
         const PopsCheatEntry *t = &cheats[i + 1];
-        uint32_t times = (addr >> 8) & 0xFF, step = addr & 0xFF;
+        uint32_t a16 = e->address & 0xFFFFu;
+        uint32_t times = (a16 >> 8) & 0xFF, step = a16 & 0xFF;
         uint32_t base = t->address & POPS_CHEAT_ADDR_MASK;
         uint32_t high = base & ~UINT32_C(0xFFFF), low = base & 0xFFFF;
-        uint32_t sum = t->value;
-        uint16_t k1 = t->value;
+        uint32_t sum = t->value & 0xFFFFu;
+        uint16_t kv = (uint16_t)sum;
         for (uint32_t k = 0; k < times; ++k) {
           if (k) {
             low += step;
             if (low > 0xFFFF)
               high += 0x10000;
-            sum += val;
+            sum += val & 0xFFFFu;
           }
           if (sum < 0x20000)
-            k1 = (uint16_t)sum;
-          cheat_write(ram, t->type, high + (low & 0xFFFF), k1);
+            kv = (uint16_t)sum;
+          uint32_t at = high + (low & 0xFFFF);
+          cheat_write(mem, t->type, at, kv);
+          k0 = 0x01000000 + (int64_t)at;
+          k1 = kv;
         }
         i += 2;
       } else {
@@ -99,9 +216,16 @@ void pops_resident_cheat_pass(uint8_t *ram, const PopsCheatEntry *cheats, uint16
       continue;
     }
 
-    cheat_write(ram, type, addr, val);
+    cheat_write(mem, type, addr, val);
+    k0 = 0x01000000 + (int64_t)addr;
+    k1 = type == POPS_CHEAT_W32 ? (int64_t)val : (int64_t)(uint16_t)val;
     i++;
   }
+}
+
+void pops_resident_cheat_pass(uint8_t *ram, const PopsCheatEntry *cheats, uint16_t count) {
+  PopsCheatMemory mem = {(uintptr_t)ram, 0, 0, 0, 0};
+  pops_resident_cheat_run(&mem, cheats, count);
 }
 
 int pops_safe_mode_blocks(const uint8_t *ram, uint8_t safe_mode) {
@@ -112,15 +236,20 @@ int pops_safe_mode_blocks(const uint8_t *ram, uint8_t safe_mode) {
   return 0;
 }
 
-int pops_resident_frame(PopsResidentConfig *cfg, uint8_t *ram) {
+int pops_resident_frame_mem(PopsResidentConfig *cfg, const PopsCheatMemory *mem) {
   if (cfg->frame != UINT32_MAX)
     cfg->frame++;
-  if (!(cfg->flags & POPS_RES_F_CHEATS) || !ram || !cfg->cheat_count)
+  if (!(cfg->flags & POPS_RES_F_CHEATS) || !mem->ps1 || !cfg->cheat_count)
     return 0;
-  if (pops_safe_mode_blocks(ram, (uint8_t)cfg->safe_mode))
+  if (pops_safe_mode_blocks((const uint8_t *)mem->ps1, (uint8_t)cfg->safe_mode))
     return 0;
-  pops_resident_cheat_pass(ram, cfg->cheats, cfg->cheat_count);
+  pops_resident_cheat_run(mem, cfg->cheats, cfg->cheat_count);
   return 1;
+}
+
+int pops_resident_frame(PopsResidentConfig *cfg, uint8_t *ram) {
+  PopsCheatMemory mem = {(uintptr_t)ram, 0, 0, 0, 0};
+  return pops_resident_frame_mem(cfg, &mem);
 }
 
 void pops_resident_pad_ids(const PopsResidentConfig *cfg, uint8_t *state) {
@@ -443,7 +572,8 @@ void pops_resident_gp1_work(void) {
   if (cfg->flags & POPS_RES_F_PAD_ID)
     pops_resident_pad_ids(cfg, (uint8_t *)POPS_PAD_STATE_ADDR);
   pops_resident_timings(cfg, 0, POPS_SCRATCHPAD_ADDR);
-  pops_resident_frame(cfg, (uint8_t *)base);
+  PopsCheatMemory mem = {base, 0, 0x02000000u, POPS_CHEAT_SPR_ADDR, POPS_CHEAT_PS1SPR_ADDR};
+  pops_resident_frame_mem(cfg, &mem);
 }
 
 #endif

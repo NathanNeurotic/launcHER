@@ -62,8 +62,18 @@ static uint32_t cheat_hex(const char *s, unsigned digits) {
   return v;
 }
 
+static int cheat_digit_in(char c, char hi) {
+  return c >= '0' && c <= hi;
+}
+
+/* POPStarter r13's code columns (its scan at 0x885a04): a code is '$', a
+ * type, its address, a space at column 9 and a value. PS1 codes have a
+ * 4-digit value, so column 14 ends them (CR, LF, NUL, space or the next
+ * '$'); PS2-format codes have an 8-digit value, so column 14 must not end
+ * them. Non-hex digits count as 0. Returns the code's length (14 or 18),
+ * or 0 when this is not a code. */
 static int cheat_code_at(const char *text, PopsCheatEntry *entry) {
-  char c[15];
+  char c[19];
   unsigned i = 0;
   for (; i < sizeof(c) && text[i]; ++i)
     c[i] = (char)toupper((unsigned char)text[i]);
@@ -71,41 +81,67 @@ static int cheat_code_at(const char *text, PopsCheatEntry *entry) {
     c[i] = '\0';
   if (c[0] != '$' || c[9] != ' ')
     return 0;
-  if (c[14] != '\r' && c[14] != '\n' && c[14] != '\0' && c[14] != ' ' && c[14] != '$')
-    return 0;
+  memset(entry, 0, sizeof(*entry));
+  int ends = c[14] == '\r' || c[14] == '\n' || c[14] == '\0' || c[14] == ' ' || c[14] == '$';
 
-  uint8_t type = 0;
-  int low_address = c[3] == '0' || c[3] == '1';
+  if (!ends) {
+    entry->value = cheat_hex(c + 10, 8);
+    if (cheat_digit_in(c[1], '2')) {
+      entry->type = (uint8_t)(POPS_CHEAT_EE | (unsigned)(c[1] - '0'));
+      entry->address = cheat_hex(c + 2, 7);
+      return 18;
+    }
+    if ((c[1] == 'S' || c[1] == 'T') && cheat_digit_in(c[2], '2') && cheat_digit_in(c[3], '2') &&
+        c[4] == '0') {
+      if (c[1] == 'S' && cheat_digit_in(c[5], '3')) {
+        entry->type = (uint8_t)(POPS_CHEAT_SPR | (unsigned)(c[2] - '0'));
+        entry->address = cheat_hex(c + 5, 4);
+      } else if (c[1] == 'T' && c[5] == '0' && cheat_digit_in(c[6], '3')) {
+        entry->type = (uint8_t)(POPS_CHEAT_PS1SPR | (unsigned)(c[2] - '0'));
+        entry->address = cheat_hex(c + 6, 3);
+      } else {
+        return 0;
+      }
+      entry->cond = (uint8_t)(c[3] - '0');
+      return 18;
+    }
+    if ((c[1] == '=' || c[1] == '!') && cheat_digit_in(c[2], '1')) {
+      entry->type = (uint8_t)(POPS_CHEAT_EE | 2u);
+      entry->cond = c[1] == '=' ? POPS_CHEAT_COND_EQ : POPS_CHEAT_COND_NE;
+      entry->address = cheat_hex(c + 2, 7);
+      return 18;
+    }
+    return 0;
+  }
+
+  entry->value = cheat_hex(c + 10, 4);
   if (c[1] == '5' && c[2] == '0' && c[3] == '0' && c[4] == '0') {
     entry->type = 0x50;
     entry->address = cheat_hex(c + 5, 4); /* XX count, YY address step */
-    entry->value = (uint16_t)cheat_hex(c + 10, 4);
-    return 1;
+    return 14;
   }
-  if (!low_address)
+  if (c[3] != '0' && c[3] != '1')
     return 0;
-  if (c[2] == '0' && (c[1] == '8' || c[1] == '3' || c[1] == 'D' || c[1] == 'C'))
-    type = (uint8_t)(cheat_nibble(c[1]) << 4);
-  else
+  if (c[2] != '0' || (c[1] != '8' && c[1] != '3' && c[1] != 'D' && c[1] != 'C'))
     return 0;
-  entry->type = type;
+  entry->type = (uint8_t)(cheat_nibble(c[1]) << 4);
   entry->address = cheat_hex(c + 3, 6);
-  entry->value = (uint16_t)cheat_hex(c + 10, 4);
-  return 1;
+  return 14;
 }
 
 static int scan_cheats(PopsConfig *cfg, const char *text) {
   while (*text) {
     PopsCheatEntry entry;
-    if (*text != '$' || !cheat_code_at(text, &entry)) {
+    int len = *text == '$' ? cheat_code_at(text, &entry) : 0;
+    if (!len) {
       ++text;
       continue;
     }
     if (cfg->cheat_count >= POPS_MAX_CHEATS)
       return -EOVERFLOW;
     cfg->cheats[cfg->cheat_count++] = entry;
-    /* A code ends at column 14, which may be the next '$'. */
-    for (unsigned i = 0; i < 14 && *text; ++i)
+    /* A code ends at column 14 (PS1) or 18 (PS2), which may be the next '$'. */
+    for (int i = 0; i < len && *text; ++i)
       ++text;
   }
   return 0;

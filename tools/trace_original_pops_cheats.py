@@ -172,29 +172,64 @@ def compile_cheats(text: bytes | str):
     return bytes(uc.mem_read(CURSOR, cursor - CURSOR)), count
 
 
-def run_codes(code: bytes, ram: bytes, k0: int = 0, k1: int = 0):
-    """Execute emitted code once against a PS1 RAM image; return new RAM."""
+EE_SIZE = 0x02000000
+SPR = 0x70000000
+SPR_SIZE = 0x4000
+PS1_SPR = 0x5F800000
+PS1_SPR_SIZE = 0x1000
+
+
+def run_codes_mem(code: bytes, ee: bytes, spr: bytes = b"", ps1spr: bytes = b"",
+                  k0: int = 0, k1: int = 0):
+    """Execute emitted code once against an EE RAM image (32 MB, PS1 RAM at
+    0x01000000 inside it), the EE scratchpad (16 KB at 0x70000000) and the
+    page at 0x5F800000 (4 KB) that PS2-format $T codes address. Returns the
+    three images afterwards. The emitted code itself lives at 0x01a00000 in
+    the EE image, as in the original; codes that write there change it."""
     from unicorn import Uc, UC_ARCH_MIPS, UC_MODE_MIPS32, UC_MODE_LITTLE_ENDIAN, UC_HOOK_CODE
     from unicorn import mips_const as R
 
-    if len(ram) != PS1_RAM_SIZE:
-        raise ValueError("PS1 RAM image must be 2 MB")
+    if len(ee) != EE_SIZE:
+        raise ValueError("EE RAM image must be 32 MB")
+    spr = bytes(spr).ljust(SPR_SIZE, b"\0")
+    ps1spr = bytes(ps1spr).ljust(PS1_SPR_SIZE, b"\0")
     uc = Uc(UC_ARCH_MIPS, UC_MODE_MIPS32 + UC_MODE_LITTLE_ENDIAN)
-    uc.mem_map(0, 0x02000000)
-    uc.mem_write(PS1_RAM, bytes(ram))
+    uc.mem_map(0, EE_SIZE)
+    uc.mem_map(SPR, SPR_SIZE)
+    uc.mem_map(PS1_SPR, PS1_SPR_SIZE)
+    uc.mem_write(0, bytes(ee))
+    uc.mem_write(SPR, spr)
+    uc.mem_write(PS1_SPR, ps1spr)
     uc.mem_write(CURSOR, bytes(code))
     uc.reg_write(R.UC_MIPS_REG_K0, k0)
     uc.reg_write(R.UC_MIPS_REG_K1, k1)
     end = CURSOR + len(code)
 
     def hook(u, addr, size, _):
-        if addr == EXIT:
+        # The exit jump, or a branch past the end (a PS2 conditional left
+        # dangling at the end of the file branches over the exit).
+        if addr == EXIT or not CURSOR <= addr < end:
             u.emu_stop()
 
     uc.hook_add(UC_HOOK_CODE, hook)
     if code:
         uc.emu_start(CURSOR, end, count=1_000_000)
-    return bytes(uc.mem_read(PS1_RAM, PS1_RAM_SIZE))
+    out = bytearray(uc.mem_read(0, EE_SIZE))
+    # Put back what the emitted code itself replaced, so only the codes'
+    # own writes show.
+    out[CURSOR:end] = bytes(ee)[CURSOR:end]
+    return (bytes(out), bytes(uc.mem_read(SPR, SPR_SIZE)),
+            bytes(uc.mem_read(PS1_SPR, PS1_SPR_SIZE)))
+
+
+def run_codes(code: bytes, ram: bytes, k0: int = 0, k1: int = 0):
+    """Execute emitted code once against a PS1 RAM image; return new RAM."""
+    if len(ram) != PS1_RAM_SIZE:
+        raise ValueError("PS1 RAM image must be 2 MB")
+    ee = bytearray(EE_SIZE)
+    ee[PS1_RAM:PS1_RAM + PS1_RAM_SIZE] = ram
+    ee, _, _ = run_codes_mem(code, bytes(ee), k0=k0, k1=k1)
+    return ee[PS1_RAM:PS1_RAM + PS1_RAM_SIZE]
 
 
 def main(argv):

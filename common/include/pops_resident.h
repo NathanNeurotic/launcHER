@@ -33,7 +33,7 @@ extern "C" {
 #define POPS_RESIDENT_BASE        UINT32_C(0x0143a000)
 #define POPS_RESIDENT_LIMIT       UINT32_C(0x01460000)
 #define POPS_RESIDENT_MAGIC       UINT32_C(0x5352484c) /* "LHRS" */
-#define POPS_RESIDENT_VERSION     8
+#define POPS_RESIDENT_VERSION     9
 
 /* POPS's VBLANK_START registration and handler (verified on the pinned core) */
 #define POPS_VBLANK_LUI_ADDR      UINT32_C(0x0021b184)
@@ -130,6 +130,9 @@ typedef struct {
 #define POPS_PAD_READ_RESUME_ADDR UINT32_C(0x002377a4)
 #define POPS_PAD_READ_EXIT_ADDR   UINT32_C(0x0023780c)
 
+/* Compiled cheat codes the resident holds (see pops_cheats_compile). */
+#define POPS_CHEAT_COMPILED_MAX (2u * POPS_MAX_CHEATS + 4u)
+
 typedef struct {
   uint64_t gs_display;   /* offset zero, read by the stackless display entry */
   uint32_t flags;        /* POPS_RES_F_* */
@@ -141,26 +144,47 @@ typedef struct {
   uint8_t pad_override;  /* bit n: port n reports pad_id[n] */
   uint8_t pad_id[2];
   uint8_t gte_divisor;   /* widescreen: 100, or 4 for $EYEFINITY */
-  PopsCheatEntry cheats[POPS_MAX_CHEATS];
+  PopsCheatEntry cheats[POPS_CHEAT_COMPILED_MAX];
   uint8_t timings_ready; /* $SET_TIMINGS: VMC image seen, adjusting */
 } PopsResidentConfig;
 
-/* One pass over the codes against PS1 RAM (ram = base of 2 MiB).
- * $80 16-bit write, $30 8-bit write, $10/$20 writes (the CHEATS.TXT parser no longer emits them or $D1..$E1),
- * $D0..$D3 16-bit and $E0/$E1 8-bit conditionals that skip the next
- * (address >> POPS_CHEAT_SKIP_SHIFT, or 1) codes when false, $C0 master
- * code that ends the pass when false, $50 repeat of the next write.
- * Codes outside PS1 RAM are skipped. pops_cheats_compile() turns the codes
- * as read from CHEATS.TXT into this form. */
+/* Where the codes write. ps1 is PS1 RAM (2 MiB); ee is EE address 0 and
+ * ee_size how much of EE RAM PS2-format codes may touch (0: none); spr is
+ * the EE scratchpad (16 KiB) and ps1spr POPS's PS1 scratchpad mapping
+ * (1 KiB), 0 for none. On the console: POPS's PS1 RAM base, 0, 32 MiB,
+ * POPS_CHEAT_SPR_ADDR and POPS_CHEAT_PS1SPR_ADDR. */
+typedef struct {
+  uintptr_t ps1;
+  uintptr_t ee;
+  uint32_t ee_size;
+  uintptr_t spr;
+  uintptr_t ps1spr;
+} PopsCheatMemory;
+
+/* One pass over the codes. PS1 codes: $80 16-bit write, $30 8-bit write,
+ * $10/$20 writes, $D0..$D3 16-bit and $E0/$E1 8-bit conditionals that skip
+ * the next `skip` (or 1) codes when false, $C0 master code that ends the
+ * pass when false, $50 repeat of the next write. PS2-format codes
+ * (POPS_CHEAT_EE/SPR/PS1SPR): writes, and conditionals that skip the next
+ * code when false. Compiled codes (LOAD16, BNE, W32) use the k0/k1 model
+ * described at pops_cheats_compile. Codes outside their memory are skipped
+ * (POPStarter would fault there); misaligned ones are aligned down. */
+void pops_resident_cheat_run(const PopsCheatMemory *mem, const PopsCheatEntry *cheats,
+                             uint16_t count);
+
+/* pops_resident_cheat_run with PS1 RAM only (ram = base of 2 MiB). */
 void pops_resident_cheat_pass(uint8_t *ram, const PopsCheatEntry *cheats, uint16_t count);
 
 /* Order the codes the way POPStarter r13 compiles them: the first $C0 moves
  * to the front and gates every code, later $C0s are dropped, a $50 applies
- * to the next 80/30 write, a $D0 gates the next write or repeat block, and
- * the code after a gated repeat block is dropped (POPStarter's leftover
- * branch always skips it). Returns the number of codes written to out,
- * never more than count. */
-uint16_t pops_cheats_compile(const PopsCheatEntry *in, uint16_t count, PopsCheatEntry *out);
+ * to the next PS1 write, a $D0 becomes a LOAD16 plus a BNE in front of the
+ * next PS1 write ($0/$1/$2 writes in between run unconditionally and
+ * change the compare; $S/$T writes there are dropped), PS2 conditionals
+ * skip the next code and switch the rest of the file to POPStarter's reduced
+ * loop (writes only; $S drops $T writes, $=/$! drop $S writes). out must hold POPS_CHEAT_COMPILED_MAX codes
+ * (2 * count + 4); returns how many were written, 0 when it is too small. */
+uint16_t pops_cheats_compile(const PopsCheatEntry *in, uint16_t count, PopsCheatEntry *out,
+                             uint16_t capacity);
 
 /* 1 when the selected gate holds, so the cheat pass is skipped this time. */
 int pops_safe_mode_blocks(const uint8_t *ps1_ram, uint8_t safe_mode);
@@ -168,6 +192,9 @@ int pops_safe_mode_blocks(const uint8_t *ps1_ram, uint8_t safe_mode);
 /* The cheat work done each time the GP1 hook runs, separate from the entry
  * so host tests can run it. Returns 1 when the codes ran this time. */
 int pops_resident_frame(PopsResidentConfig *cfg, uint8_t *ram);
+
+/* The same with every memory PS2-format codes can reach. */
+int pops_resident_frame_mem(PopsResidentConfig *cfg, const PopsCheatMemory *mem);
 
 /* Force the controller IDs selected by pad_override. state is the first of
  * the two per-port blocks (POPS_PAD_STATE_ADDR on the console). */

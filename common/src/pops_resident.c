@@ -24,17 +24,37 @@ static int cheat_is_write(uint8_t type) {
   return type == 0x80 || type == 0x30 || type == 0x10 || type == 0x20;
 }
 
-uint16_t pops_cheats_compile(const PopsCheatEntry *in, uint16_t count, PopsCheatEntry *out) {
-  enum { GATE_NONE, GATE_OPEN, GATE_DROP } gate = GATE_NONE;
-  uint16_t n = 0, gate_at = 0;
+/* The PS1 store a repeat's leftover write uses after a PS2 write of this
+ * size: sb, sh or sw. */
+static uint8_t cheat_store_of_size(unsigned size) {
+  return size == 0 ? 0x30 : size == 1 ? 0x80 : POPS_CHEAT_W32;
+}
+
+/* POPStarter emits each code as a few instructions that leave values in
+ * k0/k1; a $D0 loads its compare into them and its branch is emitted only
+ * in front of the next PS1 write. The compiled codes keep that shape:
+ * LOAD16 for the $D0, BNE in front of the code it gates, so whatever runs
+ * in between (PS2 writes) changes the compare exactly as it does there. */
+uint16_t pops_cheats_compile(const PopsCheatEntry *in, uint16_t count, PopsCheatEntry *out,
+                             uint16_t capacity) {
+  int pending = 0; /* a $D0 branch waits for the next PS1 write */
+  /* After a PS2 conditional, POPStarter compiles the rest of the file in a
+   * reduced copy of its loop, one per kind of conditional, that knows only
+   * writes: 0 (none yet), or the conditional's type (EE, SPR, PS1SPR). */
+  unsigned nested = 0;
+  uint16_t n = 0;
   int repeat = -1, stash = -1;
 
-  if (!in || !out)
+  /* Each code yields at most two compiled ones (a write may take a branch
+   * in front), plus a repeat copy and the leftover expansion at the end. */
+  if (!in || !out || capacity < 2u * count + 4u)
     return 0;
   for (uint16_t i = 0; i < count; ++i) {
     if (in[i].type == 0xC0) {
       out[n] = in[i];
-      out[n++].address &= POPS_CHEAT_ADDR_MASK;
+      out[n].address &= POPS_CHEAT_ADDR_MASK;
+      out[n].value &= 0xFFFFu;
+      out[n++].skip = 0;
       break;
     }
   }
@@ -47,19 +67,49 @@ uint16_t pops_cheats_compile(const PopsCheatEntry *in, uint16_t count, PopsCheat
        * value 0, with the store of the last write before it (or none). */
       if (repeat < 0 || !last_write)
         break;
+      memset(&e, 0, sizeof(e));
       e.type = last_write;
-      e.address = 0;
-      e.value = 0;
     } else {
       e = in[i];
+      e.skip = 0;
+    }
+    if (POPS_CHEAT_IS_PS2(e.type)) {
+      unsigned kind = e.type & 0xFCu;
+      if (e.cond != POPS_CHEAT_COND_NONE) {
+        /* Dropped behind a pending branch, a pending repeat, or an earlier
+         * PS2 conditional. Its own branch is fixed: it skips the next code. */
+        if (pending || repeat >= 0 || nested)
+          continue;
+        nested = kind;
+        e.skip = 1;
+        out[n++] = e;
+        continue;
+      }
+      if (nested) {
+        /* What each reduced loop still knows: EE writes always, $S writes
+         * after a $S or $T conditional, $T writes after a $T or $=/$!. */
+        if ((kind == POPS_CHEAT_SPR && nested == POPS_CHEAT_EE) ||
+            (kind == POPS_CHEAT_PS1SPR && nested == POPS_CHEAT_SPR))
+          continue;
+      } else {
+        /* Dropped while a repeat waits. A $0/$1/$2 write is placed even
+         * between a $D0 and its branch; a $S/$T write there is dropped. */
+        if (repeat >= 0 || (pending && kind != POPS_CHEAT_EE))
+          continue;
+      }
+      last_write = cheat_store_of_size(e.type & 3u);
+      out[n++] = e;
+      continue;
     }
     e.address &= e.type == 0x50 ? 0xFFFFu : POPS_CHEAT_ADDR_MASK;
+    e.value &= 0xFFFFu;
     if (cheat_is_condition(e.type)) {
-      /* Dropped behind a pending gate or a pending repeat. */
-      if (gate != GATE_NONE || repeat >= 0)
+      /* Dropped behind a pending branch, a pending repeat or a PS2
+       * conditional. */
+      if (pending || repeat >= 0 || nested)
         continue;
-      gate = GATE_OPEN;
-      gate_at = n;
+      pending = 1;
+      e.type = POPS_CHEAT_LOAD16;
       out[n++] = e;
       /* POPStarter keeps the first repeat it skipped, and an emitted
        * conditional makes it the pending repeat for the code it gates. */
@@ -68,44 +118,37 @@ uint16_t pops_cheats_compile(const PopsCheatEntry *in, uint16_t count, PopsCheat
         stash = -1;
       }
     } else if (e.type == 0x50) {
+      if (nested)
+        continue; /* after a PS2 conditional, repeats are ignored */
       if (repeat < 0)
         repeat = (int)i;
       else if (stash < 0)
         stash = (int)i; /* skipped while the first waits, kept for later */
-    } else if (cheat_is_write(e.type)) {
+    } else if (cheat_is_write(e.type) || e.type == POPS_CHEAT_W32) {
       last_write = e.type;
       int block = repeat >= 0 ? 2 : 1;
-      uint32_t times = repeat >= 0 ? (in[repeat].address >> 8) & 0xFF : 1;
-      if (gate == GATE_DROP) {
-        /* POPStarter's leftover branch skips this code; after a skipped
-         * repeat block it is left in place for the next code too. */
-        if (block == 1)
-          gate = GATE_NONE;
-        repeat = -1;
-        continue;
+      if (pending) {
+        PopsCheatEntry b;
+        memset(&b, 0, sizeof(b));
+        b.type = POPS_CHEAT_BNE;
+        b.skip = (uint8_t)block;
+        out[n++] = b;
+        /* After a repeat block a leftover branch compares again, in front
+         * of the next PS1 write: k0/k1 then hold the block's last write
+         * (never equal), or the $D0's compare when the block wrote nothing. */
+        pending = block == 2;
       }
       if (repeat >= 0) {
         out[n] = in[repeat];
-        out[n++].address &= 0xFFFFu;
+        out[n].address &= 0xFFFFu;
+        out[n].value &= 0xFFFFu;
+        out[n++].skip = 0;
       }
       out[n++] = e;
       repeat = -1;
-      if (gate == GATE_OPEN) {
-        out[gate_at].address += (uint32_t)block << POPS_CHEAT_SKIP_SHIFT;
-        /* After a gated repeat block the leftover branch compares the last
-         * write's address and value, never equal, so the next code is
-         * always skipped. With no writes it is the gate's own compare. */
-        if (block == 2)
-          gate = times ? GATE_DROP : GATE_OPEN;
-        else
-          gate = GATE_NONE;
-      }
     }
     /* $C0 is hoisted above; anything else is not a code. */
   }
-  /* A conditional with nothing after it has no branch. */
-  if (gate == GATE_OPEN && !(out[gate_at].address >> POPS_CHEAT_SKIP_SHIFT))
-    n = gate_at;
   return n;
 }
 
@@ -209,7 +252,7 @@ int pops_resident_build_config(PopsResidentConfig *out, const PopsConfig *cfg) {
     return -ERANGE;
   if (count) {
     out->flags |= POPS_RES_F_CHEATS;
-    out->cheat_count = pops_cheats_compile(cfg->cheats, count, out->cheats);
+    out->cheat_count = pops_cheats_compile(cfg->cheats, count, out->cheats, POPS_CHEAT_COMPILED_MAX);
     out->safe_mode = cfg->safe_mode & (POPS_SAFE_MODE_BOOT | POPS_SAFE_MODE_2);
   }
   return out->flags ? 1 : 0;

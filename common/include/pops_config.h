@@ -74,15 +74,42 @@ enum PopsRegion {
 
 typedef struct {
   uint32_t address;
-  uint16_t value;
-  uint8_t type; /* 0x80/0x10 (16-bit), 0x30/0x20 (8-bit), 0xD0..0xD3/0xE0..0xE1 (conditional),
+  uint32_t value;
+  uint8_t type; /* POPS_CHEAT_* below, or a PS1 GameShark type: 0x80/0x10 (16-bit),
+                 0x30/0x20 (8-bit), 0xD0..0xD3/0xE0..0xE1 (conditional),
                  0xC0 (master code), 0x50 (repeat: address = XXYY, value = step) */
+  uint8_t cond; /* PS2-format codes: POPS_CHEAT_COND_* */
+  uint8_t skip; /* conditionals: codes skipped when false (0 counts as 1) */
+  uint8_t reserved;
 } PopsCheatEntry;
 
-/* Bits 0..20 of a code's address are the PS1 RAM address; a compiled
- * conditional keeps how many codes it skips in bits 24..31. */
+/* Bits 0..20 of a PS1 code's address are the PS1 RAM address. */
 #define POPS_CHEAT_ADDR_MASK  0x001FFFFFu
-#define POPS_CHEAT_SKIP_SHIFT 24
+
+/* PS2-format codes, POPStarter style, type | size (0 byte, 1 half, 2 word):
+ *   $0/$1/$2AAAAAAA VVVVVVVV  EE RAM write
+ *   $S<size><cond>0OOOO VVVVVVVV  EE scratchpad (0x70000000 + 0..0x3FFF)
+ *   $T<size><cond>00OOO VVVVVVVV  PS1 scratchpad as POPS maps it
+ *                                  (0x5F800000 + 0..0x3FF)
+ *   $=/$!AAAAAAA VVVVVVVV  EE RAM word equal / not equal (cond EQ / NE)
+ * A conditional runs the next code only when it holds. */
+#define POPS_CHEAT_EE         0x90u
+#define POPS_CHEAT_SPR        0x94u
+#define POPS_CHEAT_PS1SPR     0x98u
+#define POPS_CHEAT_IS_PS2(t)  (((t) & 0xF0u) == 0x90u && ((t) & 3u) != 3u && (t) < 0x9Cu)
+#define POPS_CHEAT_COND_NONE  0u
+#define POPS_CHEAT_COND_EQ    1u
+#define POPS_CHEAT_COND_NE    2u
+#define POPS_CHEAT_SPR_ADDR   0x70000000u
+#define POPS_CHEAT_PS1SPR_ADDR 0x5F800000u
+
+/* Only in compiled code (pops_cheats_compile), modelling POPStarter's two
+ * compare registers: LOAD16 is a $D0's load (k0 = signed RAM half, k1 =
+ * value), BNE skips `skip` codes when k0 != k1, W32 is a 32-bit PS1 write
+ * (a repeat's leftover store after a $2 code). */
+#define POPS_CHEAT_BNE        0x01u
+#define POPS_CHEAT_LOAD16     0x02u
+#define POPS_CHEAT_W32        0x40u
 
 typedef struct {
   /* Video settings */
