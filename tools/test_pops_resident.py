@@ -325,6 +325,26 @@ class CheatsTxt(unittest.TestCase):
         self.assertEqual([self.half(ram, a) for a in (0x1000, 0x1002, 0x1004)], [0x10, 0x11, 0])
         self.assertEqual((ram[4], ram[8]), (3, 6))
 
+    def test_repeat_copies_popstarters_bugs(self):
+        # Crossing a 64 KB boundary: every later write lands 64 KB further up.
+        ram = self.run_text("$50000604 0001\n$8007FFF8 0010\n")
+        self.assertEqual([self.half(ram, a) for a in (0x7FFF8, 0x7FFFC, 0x80000)],
+                         [0x10, 0x11, 0x12])
+        self.assertEqual([self.half(ram, a) for a in (0x90004, 0xA0008, 0xB000C)],
+                         [0x13, 0x14, 0x15])
+        self.assertEqual(self.half(ram, 0x80004), 0)
+        # Values: 0x10000..0x1FFFF wrap; from 0x20000 the store repeats the
+        # last value that still fitted.
+        ram = self.run_text("$50000402 8000\n$80001000 F000\n")
+        self.assertEqual([self.half(ram, 0x1000 + 2 * k) for k in range(4)],
+                         [0xF000, 0x7000, 0xF000, 0xF000])
+
+    def test_other_gameshark_types_are_skipped(self):
+        text = "$D1002000 0005\n$10001000 0001\n$20001002 0002\n$E0002000 0000\n$80001004 0003\n"
+        ram = self.run_text(text)
+        self.assertEqual(ram[0x1000:0x1004], bytes(4))
+        self.assertEqual(self.half(ram, 0x1004), 3)
+
     def test_conditional(self):
         text = "$D0002000 0005\n$80001000 0001\n$80001002 0002\n"
         ram = self.run_text(text, [(0x2000, 5)])
@@ -366,7 +386,7 @@ class CheatsTxt(unittest.TestCase):
         for _ in range(int(os.environ.get("POPS_CHEAT_FUZZ_CASES", "150"))):
             text, ram = random_cheats_txt(rng)
             code, _ = compile_cheats(text)
-            if original_corrupts_registers(code):
+            if original_reads_unknown_registers(code):
                 continue
             want = run_codes(code, ram)
             got, rc = apply_cheats_txt(text, ram)
@@ -376,13 +396,14 @@ class CheatsTxt(unittest.TestCase):
                 self.fail("%r differs from POPStarter at %#x" % (text, first))
 
 
-def original_corrupts_registers(code):
+def original_reads_unknown_registers(code):
     """POPStarter builds a repeat's values into "ori k1,zero,value" words.
-    Once a value reaches 0x20000 the excess spills into the register field
-    and the word loads another CPU register (gp, sp, ...) instead of k1.
-    launcHER keeps the value 16-bit; those files are left out."""
+    From 0x20000 up the excess changes the register fields; launcHER copies
+    the RAM effect of that (the store repeats k1's last value). From 0x60000
+    up the source register is no longer zero, so the result depends on CPU
+    registers this harness does not model; those files are left out."""
     for (word,) in struct.iter_unpack("<I", code):
-        if word >> 26 == 0x0D and (word >> 21) & 31 == 0 and (word >> 16) & 31 not in (26, 27):
+        if word >> 26 == 0x0D and (word >> 21) & 31:
             return True
     return False
 
@@ -391,20 +412,16 @@ CHEAT_WINDOWS = (0x097B00, 0x07FFE0, 0x1FFF80)
 CHEAT_JUNK = ("# comment", "; note", "$NOBOOT", "", "   ", "$8009ZB00 12G4",
               "$80297B00 1234", "$C1097B00 1234", "$85097B00 1234",
               "$80097B00  1234", "$80097B00\t1234", "$80097B00 12345",
-              "80097B00 1234", "$50010202 0001")
+              "80097B00 1234", "$50010202 0001", "$10097B00 1234",
+              "$20097B01 0012", "$D1097B00 1234", "$E0097B00 0012")
 
 
 def random_cheat(rng, ram, win):
-    kinds = ["80", "80", "30", "30", "D0", "D0", "C0"]
-    # POPStarter bumps a repeat's address by another 64 KB on every step
-    # after it crosses a 64 KB boundary; launcHER writes the right address.
-    # Repeats stay clear of the window that straddles one.
-    if win != 0x07FFE0:
-        kinds += ["50", "50"]
-    kind = rng.choice(kinds)
+    kind = rng.choice(["80", "80", "30", "30", "D0", "D0", "C0", "50", "50"])
     if kind == "50":
         inc = rng.randrange(0x10000) if rng.random() < 0.2 else rng.randrange(4)
-        return "$5000%02X%02X %04X" % (rng.randrange(5), rng.choice([0, 2, 4, 6]), inc)
+        times = rng.randrange(5) if rng.random() < 0.85 else rng.randrange(5, 0x30)
+        return "$5000%02X%02X %04X" % (times, rng.choice([0, 2, 4, 6]), inc)
     # 16-bit codes stay aligned: POPStarter's sh/lh would fault on the console.
     addr = win + rng.randrange(0, 0x40, 1 if kind == "30" else 2)
     val = ram[addr] | ram[addr + 1] << 8 if rng.random() < 0.5 else rng.randrange(0x10000)

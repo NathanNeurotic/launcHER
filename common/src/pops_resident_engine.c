@@ -67,16 +67,30 @@ void pops_resident_cheat_pass(uint8_t *ram, const PopsCheatEntry *cheats, uint16
 
     if (type == 0x50) {
       /* $5000XXYY ZZZZ: the next write XX times, the address up YY bytes
-       * and the value up ZZZZ each time. */
+       * and the value up ZZZZ each time, copied with POPStarter's two bugs.
+       * Address: it keeps the low half as a running sum and adds another
+       * 64 KB to the high half on every step once that sum passes 0xFFFF,
+       * so after crossing a 64 KB boundary each later write lands 64 KB
+       * further up. Value: it builds "ori k1,zero,value" from the running
+       * sum; from 0x20000 up the excess changes the instruction's register
+       * field, k1 keeps its last value and the store repeats it. */
       if (i + 1 < count) {
         const PopsCheatEntry *t = &cheats[i + 1];
         uint32_t times = (addr >> 8) & 0xFF, step = addr & 0xFF;
-        uint32_t at = t->address & POPS_CHEAT_ADDR_MASK;
-        uint16_t v = t->value;
+        uint32_t base = t->address & POPS_CHEAT_ADDR_MASK;
+        uint32_t high = base & ~UINT32_C(0xFFFF), low = base & 0xFFFF;
+        uint32_t sum = t->value;
+        uint16_t k1 = t->value;
         for (uint32_t k = 0; k < times; ++k) {
-          cheat_write(ram, t->type, at, v);
-          at += step;
-          v = (uint16_t)(v + val);
+          if (k) {
+            low += step;
+            if (low > 0xFFFF)
+              high += 0x10000;
+            sum += val;
+          }
+          if (sum < 0x20000)
+            k1 = (uint16_t)sum;
+          cheat_write(ram, t->type, high + (low & 0xFFFF), k1);
         }
         i += 2;
       } else {

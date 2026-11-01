@@ -45,7 +45,7 @@ static int is_hex_string(const char *s, size_t len) {
  * the address high nibble 0 or 1, or the whole word is 5000XXYY (repeat).
  * A character that is not hex counts as 0. Anything else is skipped, not an
  * error, and the scan moves on one character; a '#' does not hide a code.
- * 10/20, D1..D3 and E0/E1 are launcHER additions POPStarter skips. */
+ * Other GameShark types (10, 20, D1..D3, E0, E1) are skipped, as there. */
 static unsigned cheat_nibble(char c) {
   if (c >= '0' && c <= '9')
     return (unsigned)(c - '0');
@@ -84,13 +84,8 @@ static int cheat_code_at(const char *text, PopsCheatEntry *entry) {
   }
   if (!low_address)
     return 0;
-  if (c[2] == '0' && (c[1] == '8' || c[1] == '3' || c[1] == '1' || c[1] == '2' ||
-                      c[1] == 'D' || c[1] == 'C' || c[1] == 'E'))
+  if (c[2] == '0' && (c[1] == '8' || c[1] == '3' || c[1] == 'D' || c[1] == 'C'))
     type = (uint8_t)(cheat_nibble(c[1]) << 4);
-  else if (c[1] == 'D' && c[2] >= '1' && c[2] <= '3')
-    type = (uint8_t)(0xD0 | (c[2] - '0'));
-  else if (c[1] == 'E' && c[2] == '1')
-    type = 0xE1;
   else
     return 0;
   entry->type = type;

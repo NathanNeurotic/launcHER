@@ -485,11 +485,11 @@ $8009A200 0010</code></pre>
 </ul>
 
 <p>
-  launcHER also keeps these GameShark types, which POPStarter skips: <code>10</code> and <code>20</code> (16-bit and 8-bit write), <code>D1</code>/<code>D2</code>/<code>D3</code> (16-bit not equal, less than, greater than) and <code>E0</code>/<code>E1</code> (8-bit equal, not equal). POPStarter's PS2-format codes (<code>$0</code>, <code>$1</code>, <code>$2</code>, <code>$S</code>, <code>$T</code>, <code>$=</code>, <code>$!</code>) are not supported yet.
+  Other GameShark types (<code>10</code>, <code>20</code>, <code>D1</code>..<code>D3</code>, <code>E0</code>, <code>E1</code>) are skipped, as in POPStarter, so the code after one of them runs on its own. POPStarter's PS2-format codes (<code>$0</code>, <code>$1</code>, <code>$2</code>, <code>$S</code>, <code>$T</code>, <code>$=</code>, <code>$!</code>) are not supported yet.
 </p>
 
 <p>
-  Two POPStarter bugs are not copied. When a repeat's value passes <code>1FFFF</code>, POPStarter's generated code loads a different CPU register instead of the value; launcHER keeps the value 16-bit. When a repeat crosses a 64 KB boundary, POPStarter pushes the later writes 64 KB further up with every step; launcHER writes the addresses the code asks for.
+  launcHER copies POPStarter's two repeat bugs too, so a file behaves the same in both. When a repeat crosses a 64 KB boundary, every later write lands another 64 KB further up. When a repeat's value reaches <code>20000</code> (hex), the rest of the writes repeat the last value that still fitted. In that second case POPStarter's generated code also changes another CPU register; launcHER cannot copy that part, and what it does on a console is unknown. The full list of copied POPStarter quirks is in <a href="POPSTARTER_QUIRKS_TO_FIX_LATER.md">POPSTARTER_QUIRKS_TO_FIX_LATER.md</a>.
 </p>
 
 <p>

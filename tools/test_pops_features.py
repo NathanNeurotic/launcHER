@@ -677,13 +677,10 @@ class FeatureTests(unittest.TestCase):
         self.assertEqual(cfg.cheats[2].type, 0x30)
         self.assertEqual(cfg.cheats[2].value, 0x12)
 
-        self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$1009A126 0034"), 0)
-        self.assertEqual(cfg.cheat_count, 4)
-        self.assertEqual(cfg.cheats[3].type, 0x10)
-
-        self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$2009A128 0056"), 0)
-        self.assertEqual(cfg.cheat_count, 5)
-        self.assertEqual(cfg.cheats[4].type, 0x20)
+        # GameShark types POPStarter does not take are skipped, as there.
+        for line in (b"$1009A126 0034", b"$2009A128 0056", b"$D109A128 0056", b"$E009A128 0056"):
+            self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), line), 0)
+        self.assertEqual(cfg.cheat_count, 3)
 
         # Multi-directive line
         self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$SAFEMODE $WIDESCREEN $DITHER_OFF"), 0)

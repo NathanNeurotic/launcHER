@@ -132,7 +132,7 @@ typedef struct {
 } PopsResidentConfig;
 
 /* One pass over the codes against PS1 RAM (ram = base of 2 MiB).
- * $80 16-bit write, $30 8-bit write, $10/$20 kept as writes like before,
+ * $80 16-bit write, $30 8-bit write, $10/$20 writes (the CHEATS.TXT parser no longer emits them or $D1..$E1),
  * $D0..$D3 16-bit and $E0/$E1 8-bit conditionals that skip the next
  * (address >> POPS_CHEAT_SKIP_SHIFT, or 1) codes when false, $C0 master
  * code that ends the pass when false, $50 repeat of the next write.
