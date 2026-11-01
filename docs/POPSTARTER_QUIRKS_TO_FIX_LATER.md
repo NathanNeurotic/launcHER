@@ -56,3 +56,7 @@ needed).
 - Always-on SLBB-00001 check bypass: POPStarter applies it only when its
   config byte `0x100023` is 1 (`fp+0x10e4 == 1` at `0x874c0c`). launcHER
   applies it always. This one is a parity gap still to close, not a fix.
+- Where cheats run: POPStarter runs its cheat code from POPS's call at
+  `0x21a63c` (hooked to its blob at `0x239490`); launcHER runs it from its
+  own VBLANK_START hook. How often POPS reaches `0x21a63c` was not measured,
+  so the two may apply codes at different rates. Parity gap still to check.
