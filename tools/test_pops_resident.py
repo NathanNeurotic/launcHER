@@ -1227,6 +1227,24 @@ class SetTimings(unittest.TestCase):
         print("Original $SET_TIMINGS block PASS: %d runs x 40 frames" % cases)
 
 
+class OriginalPresets(unittest.TestCase):
+    """POPStarter gates some core patches on bytes of a preset block in its
+    own ELF segment (file offset 0x410.., loaded at 0x100000), not on user
+    commands. launcHER applies those patches always; that is only right
+    while every gating preset is 1."""
+
+    @unittest.skipUnless(os.environ.get("POPSTARTER_TEST_ELF"), "optional external POPStarter ELF")
+    def test_gating_presets_are_on(self):
+        elf = Path(os.environ["POPSTARTER_TEST_ELF"]).read_bytes()
+        phoff = struct.unpack_from("<I", elf, 0x1C)[0]
+        _, off, vaddr = struct.unpack_from("<III", elf, phoff)
+        self.assertEqual((off, vaddr), (0x400, 0x100000))
+        # 0x22 exception breakpoints, 0x23 SLBB-00001 bypass, 0x24 IGR exit
+        # fix, 0x27 module error checks, 0x28 HddInit exit (0x8710a0..).
+        for preset in (0x22, 0x23, 0x24, 0x27, 0x28):
+            self.assertEqual(elf[off + preset], 1, hex(0x100000 + preset))
+
+
 class Layout(unittest.TestCase):
     def test_config_fits_in_the_reserved_range(self):
         self.assertEqual(c.sizeof(Header), 56)

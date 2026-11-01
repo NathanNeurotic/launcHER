@@ -52,11 +52,19 @@ needed).
   breaks POPStarter anyway. Files from `0x60000` up are left out of the
   differential test.
 
-## Elsewhere
+## Not a gap after all
 
-- Always-on SLBB-00001 check bypass: POPStarter applies it only when its
-  config byte `0x100023` is 1 (`fp+0x10e4 == 1` at `0x874c0c`). launcHER
-  applies it always. This one is a parity gap still to close, not a fix.
+- SLBB-00001 check bypass: POPStarter applies it when byte `0x100023` is 1
+  (`fp+0x10e4 == 1` at `0x874c0c`). That byte is a build preset, not a user
+  setting: it sits in the preset block of POPSTARTER.ELF's own segment
+  (file offset `0x423`, loaded at `0x100000`), and the only code that touches
+  it reads it (`0x8710c8`). It is 1 in every shipped r13 build (MAIN, DEBUG,
+  USBDELAY, USBDELAY_DEBUG, USBDELAY_LONGER_DEBUG), so POPStarter always
+  applies the bypass, and launcHER always applying it matches. The same
+  holds for the neighbouring presets `0x100022` (exception breakpoints,
+  `FUN_008dbafc`), `0x100024` (IGR exit fix, `FUN_008dbe08`), `0x100027`
+  (module error checks, `FUN_008dbfd4`) and `0x100028` (HddInit exit,
+  `FUN_008dc0c0`): all 1 in every build, all applied by launcHER.
 
 ## Copied: where the codes run
 
