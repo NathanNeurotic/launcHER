@@ -207,6 +207,19 @@ int pops_apply_slbb_vcd_path_redirect(void *staged_core, size_t core_size);
 /* Relink resource paths to pfs1:/ or pfs1:/POPS/ (FUN_008db7e4) */
 int pops_apply_resource_relink(void *staged_core, size_t core_size, int is_usb_flat);
 
+/* One compatibility mode's writes (FUN_008dc2c4 mode k, 1..7) with no
+ * check of the current bytes, the way the original's built-in per-game
+ * list applies them before any command runs. */
+int pops_compat_mode_write(void *staged_core, size_t core_size, uint8_t mode);
+
+/* pops_fix_context_init_video after built-in entry `builtin_id` (0: none)
+ * was applied to the staged core: the entry's compatibility modes and core
+ * writes are replayed over the expected site values, in the entry's order,
+ * before initial_modes. Computed from the entry data, not from live bytes. */
+int pops_fix_context_init_builtin(PopsFixContext *context, const void *staged_core,
+                                  size_t core_size, uint16_t builtin_id,
+                                  uint8_t initial_modes, uint8_t initial_video_mode);
+
 /* Install exception hook at 0x00232d08 (FUN_008d6da4) */
 int pops_apply_exception_hook(void *staged_core, size_t core_size);
 

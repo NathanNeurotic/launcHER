@@ -11,6 +11,7 @@
 #include "pops_config.h"
 #include "pops_compat_db.h"
 #include "pops_modes_patches.h"
+#include "pops_builtin_db.h"
 #include "pops_resident.h"
 #include "pops_read_trace.h"
 #include <ctype.h>
@@ -279,12 +280,13 @@ static int readPopsDependency(const char *path, void *buffer, size_t max_size,
  * The staged executable is discarded by the caller on any failure. */
 static int pops_stage_fix_files(void *stagedCore, size_t coreSize,
                                  const char *vcdDir, const char *titleDir,
-                                 uint8_t initialModes, uint8_t initialVideo,
+                                 uint16_t builtinId, uint8_t initialModes,
+                                 uint8_t initialVideo,
                                  uint32_t progressiveEntry, uint32_t initialInterlace,
                                  PopsFixContext *finalContext) {
   PopsFixContext context;
-  int result = pops_fix_context_init_video(&context, stagedCore, coreSize,
-                                            initialModes, initialVideo);
+  int result = pops_fix_context_init_builtin(&context, stagedCore, coreSize, builtinId,
+                                              initialModes, initialVideo);
   if (result)
     return result;
   if (progressiveEntry) {
@@ -744,10 +746,75 @@ int launchPOPS(int argc, char *argv[]) {
 
   PopsConfig cfg;
   pops_config_init(&cfg);
+
+  /* POPStarter's built-in per-game list runs before its config commands:
+   * 144 bytes of the VCD (pops_builtin_db.h) pick an entry, applied to the
+   * core once it is staged. An unreadable fingerprint picks nothing, which
+   * leaves $VCDID_n to choose, as a mismatch does in the original. */
+  uint16_t builtinId = 0;
+  PopsBuiltinPlan builtinPlan;
+  memset(&builtinPlan, 0, sizeof(builtinPlan));
+  if (vcdInfo.sector_size) {
+    uint8_t sig[POPS_BUILTIN_SIG_SIZE];
+    static const uint32_t sigLen[3] = {0x30, 0x20, 0x40};
+    uint64_t sigAt[3];
+    pops_builtin_sig_offsets(vcdInfo.image_offset, vcdInfo.sector_size,
+                             vcdInfo.data_offset, sigAt);
+    int sigFd = open(vcdPath, O_RDONLY);
+    int sigOk = sigFd >= 0;
+    for (unsigned i = 0, at = 0; sigOk && i < 3; at += sigLen[i++]) {
+      if (lseek(sigFd, (off_t)sigAt[i], SEEK_SET) != (off_t)sigAt[i] ||
+          read(sigFd, sig + at, sigLen[i]) != (int)sigLen[i])
+        sigOk = 0;
+    }
+    if (sigFd >= 0)
+      close(sigFd);
+    if (sigOk)
+      builtinId = pops_builtin_lookup(sig);
+    DPRINTF("POPS: Built-in list fingerprint %s, entry %u\n", sigOk ? "read" : "unreadable",
+            (unsigned)builtinId);
+  }
+  if (builtinId) {
+    res = pops_builtin_apply(builtinId, NULL, 0, NULL, 0, 0, &builtinPlan);
+    if (res) {
+      msg("POPS: Built-in entry %u is unusable: %d\n", (unsigned)builtinId, res);
+      return res;
+    }
+    /* The entry's gp+0x3458 flag gates the compatibility commands parsed next. */
+    cfg.subcd_seen = builtinPlan.subcd;
+  }
+
   res = pops_config_discover(&cfg, vcdDir, gameBase);
   if (res) {
     msg("POPS: Cannot load game configuration: %d\n", res);
     return res;
+  }
+  /* $VCDID_n applies only when the fingerprint matched nothing, as in the
+   * original (its handlers skip when gp+0x38d8 is already set). An id with
+   * no entry, as there, selects nothing and disables the list. */
+  if (!builtinId && cfg.vcdid_set) {
+    if (cfg.vcdid <= POPS_BUILTIN_MAX_ID) {
+      res = pops_builtin_apply(cfg.vcdid, NULL, 0, NULL, 0, 0, &builtinPlan);
+      if (res) {
+        msg("POPS: $VCDID_%u is unusable: %d\n", (unsigned)cfg.vcdid, res);
+        return res;
+      }
+      builtinId = cfg.vcdid;
+    }
+    DPRINTF("POPS: $VCDID_%u -> entry %u\n", (unsigned)cfg.vcdid, (unsigned)builtinId);
+  }
+  if (builtinId) {
+    cfg.builtin_id = builtinId;
+    cfg.builtin_fix_call = builtinPlan.fix_call;
+    cfg.builtin_break_call = builtinPlan.break_call;
+    cfg.builtin_libcrypt2 = builtinPlan.libcrypt2;
+    memcpy(cfg.builtin_libcrypt2_code, builtinPlan.libcrypt2_code, POPS_BUILTIN_LIBCRYPT2_SIZE);
+    if (builtinPlan.no_vmc1)
+      cfg.no_vmc1 = 1; /* the entry's gp+0x38bc=2, the same helper as $NOVMC1 */
+    DPRINTF("POPS: Built-in entry %u: compat=0x%02X subcd=%u novmc1=%u fix=%u break=%u "
+            "libcrypt2=%u nopal=%u\n", (unsigned)builtinId, builtinPlan.compat_modes,
+            builtinPlan.subcd, builtinPlan.no_vmc1, builtinPlan.fix_call,
+            builtinPlan.break_call, builtinPlan.libcrypt2, builtinPlan.no_auto_pal);
   }
   if (cfg.cheat_count) {
     DPRINTF("POPS: Enabled %u cheats from CHEATS.TXT\n", (unsigned)cfg.cheat_count);
@@ -1138,6 +1205,22 @@ int launchPOPS(int argc, char *argv[]) {
     DPRINTF("POPS: Applied runtime corrections mask=0x%02X\n", (unsigned)cfg.runtime_corrections);
   }
 
+  /* The built-in entry's core writes come first, as in the original; the
+   * user's commands below can undo them ($UNDO_*). Its EE code is copied
+   * just before handoff, with the resident image. */
+  if (builtinId) {
+    if ((uint32_t)(uintptr_t)stagedCore + plan.core_size > POPS_BUILTIN_FIX_ADDR) {
+      msg("POPS: Staged core overlaps the built-in fix code area\n");
+      return -ERANGE;
+    }
+    res = pops_builtin_apply(builtinId, (void *)stagedCore, plan.core_size, NULL, 0, 0,
+                             &builtinPlan);
+    if (res) {
+      msg("POPS: Applying built-in entry %u failed: %d\n", (unsigned)builtinId, res);
+      return res;
+    }
+  }
+
   /* Apply compatibility modes and user directive patches */
   res = pops_apply_all_config_patches((void *)stagedCore, plan.core_size, &cfg);
   if (res) {
@@ -1167,7 +1250,7 @@ int launchPOPS(int argc, char *argv[]) {
   }
   PopsFixContext fixContext;
   res = pops_stage_fix_files((void *)stagedCore, plan.core_size, vcdDir,
-                              gameConfigDir, cfg.compat_modes,
+                              gameConfigDir, builtinId, cfg.compat_modes,
                               cfg.progressive_requested ? POPS_VMODE_480P : cfg.video_mode,
                               residentHdr.progressive_entry,
                               cfg.hdtv_fix ? 0x24040001 : 0x32240001,
@@ -1199,7 +1282,8 @@ int launchPOPS(int argc, char *argv[]) {
   /* POPStarter's region pass: European auto PAL and region letters. An
    * unreadable licence leaves POPS as shipped rather than "unknown". */
   res = regionRead ? pops_apply_region((void *)stagedCore, plan.core_size, cfg.disc_region,
-                                       cfg.video_mode, fixContext.video_auto_disabled)
+                                       cfg.video_mode,
+                                       fixContext.video_auto_disabled || builtinPlan.no_auto_pal)
                    : 0;
   if (res) {
     msg("POPS: Region patch failed: %d\n", res);
@@ -1416,6 +1500,17 @@ int launchPOPS(int argc, char *argv[]) {
   if (trampolineCodeSize == 0 || trampolineCodeSize > 0x180) {
     msg("POPS: Invalid trampoline code size\n");
     return -EINVAL;
+  }
+
+  /* The built-in entry's EE code (game fix at 0x01410000, breakpoint handler
+   * at 0x01460000): the original copies it to the same addresses. Nothing
+   * of launcHER's lives there; the trampoline flushes caches afterwards. */
+  if (builtinId && (builtinPlan.fix_size || builtinPlan.break_size)) {
+    res = pops_builtin_apply(builtinId, NULL, 0, (uint8_t *)0, 0, 0x02000000u, &builtinPlan);
+    if (res) {
+      msg("POPS: Built-in entry code install failed: %d\n", res);
+      return res;
+    }
   }
 
   /* Last write before handoff: nothing of launcHER's lives at the resident

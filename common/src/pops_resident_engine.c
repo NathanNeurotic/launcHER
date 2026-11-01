@@ -7,6 +7,7 @@
  * interrupt handler while POPS owns the machine. */
 
 #include "pops_resident.h"
+#include "pops_builtin_db.h"
 
 #define CHEAT_U8(a)  (*(volatile uint8_t *)(a))
 #define CHEAT_U16(a) (*(volatile uint16_t *)(a))
@@ -564,14 +565,27 @@ __asm__(".set push\n.set noreorder\n.set noat\n.text\n.align 2\n"
         "addiu $sp, $sp, 0xa0\n"
         ".set pop\n");
 
-/* In POPStarter's chain order: the controller ID stores (0x232cb0..), then
- * the $SET_TIMINGS check (0x238a90), then the cheat code (0x2397e8). */
+/* In POPStarter's chain order: the controller ID stores (0x232cb0..), the
+ * built-in list's breakpoint handler (slot 0x232d08), the $SET_TIMINGS
+ * check (0x238a90), the second LibCrypt code (slot 0x238d00, code at
+ * 0x239780), the game-fix code (slot 0x2397d8), then the cheat code
+ * (0x2397e8). The three built-in pieces are the original's own MIPS,
+ * copied by the launcher; they use k0/k1 (two of them t6) and return with
+ * jr ra, and gp is still POPS's, as in the original, since nothing here
+ * changes it. */
+typedef void (*PopsBuiltinCode)(void);
 void pops_resident_gp1_work(void) {
   PopsResidentConfig *cfg = &pops_resident_config;
   uint32_t base = *(volatile uint32_t *)cfg->ram_base_ptr;
   if (cfg->flags & POPS_RES_F_PAD_ID)
     pops_resident_pad_ids(cfg, (uint8_t *)POPS_PAD_STATE_ADDR);
+  if (cfg->flags & POPS_RES_F_BREAK_CALL)
+    ((PopsBuiltinCode)POPS_BUILTIN_BREAK_ADDR)();
   pops_resident_timings(cfg, 0, POPS_SCRATCHPAD_ADDR);
+  if (cfg->flags & POPS_RES_F_LIBCRYPT2)
+    ((PopsBuiltinCode)cfg->libcrypt2_code)();
+  if (cfg->flags & POPS_RES_F_FIX_CALL)
+    ((PopsBuiltinCode)POPS_BUILTIN_FIX_ADDR)();
   PopsCheatMemory mem = {base, 0, 0x02000000u, POPS_CHEAT_SPR_ADDR, POPS_CHEAT_PS1SPR_ADDR};
   pops_resident_frame_mem(cfg, &mem);
 }

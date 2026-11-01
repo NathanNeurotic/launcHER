@@ -84,3 +84,13 @@ needed).
 | # | POPStarter behaviour (copied) | Possible fix later |
 |---|---|---|
 | 12 | Cheats, the controller ID override and `$SET_TIMINGS` run from POPS's GP1 write path (`0x21a63c`), not once per frame: once for every GPU control-port write the game makes while interrupts are enabled. A game that writes GP1 several times a frame gets several passes; one that stops writing it (or writes it only with interrupts off) gets none, so its codes, forced pad ID and timing keys stop working. How often that happens per game was not measured. | Run them once per VBLANK as well, or instead. |
+
+## Built-in per-game list (`$VCDID_n`, docs/POPSTARTER_BUILTIN_DB.md)
+
+| # | POPStarter behaviour (copied) | Possible fix later |
+|---|---|---|
+| 20 | The list runs on every launch and cannot be switched off except by a `$VCDID_n` with an unused id (625..9999), which is what makes the original skip its scan. A fingerprint match also silently disables `$VCDID_n`. | A `$NOVCDID` command, and let `$VCDID_n` override a match. |
+| 21 | The 14 "breakpoint killer" entries scan up to 2 MB of PS1 RAM on every GP1 write the game makes, with the handler at `0x01460000` using POPS's `gp-0x7ff0` as scratch, exactly as the original's code does. The 134 game-fix entries run their code on every GP1 write too. | Move both to once per frame, or rewrite the handler to remember where it stopped. |
+| 22 | Tokenizing differs in two small ways. `$VCDID_5<tab>` is accepted by launcHER (tokens split on any white space) but ignored by the original, which ends the digits only at a space, CR, LF or NUL. And the original starts a command at any `$`, so `x$VCDID_9999` is a command there; launcHER needs the `$` at the start of a white-space delimited token (this holds for every command, not only `$VCDID_n`). Not copied: both would need a parser change for one character. | Keep launcHER's. |
+| 23 | With no fingerprint match, the original applies `$VCDID_n` at the point of the command, so commands before it in the files run first and commands after it run later. launcHER applies the entry before all commands; only matters when the same file both selects an entry and, before the `$VCDID_n` line, writes one of its sites. | Record command order in the parser. |
+| 24 | `$SUBCDSTATUS` makes every later `$COMPATIBILITY_0x01/02/03/05` in the files do nothing (the original's `FUN_008dc2c4` checks `gp+0x3458`); modes 4, 6 and 7 still apply. Now copied, per file order. Before this change launcHER applied them anyway. | Decide whether the skip is wanted; it looks accidental. |

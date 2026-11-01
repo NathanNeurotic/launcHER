@@ -65,7 +65,7 @@ below need their behavior worked out and added to it.
 | `$480p` | static mode/arguments plus resident DISPLAY updates | **PRESENT**: guarded owned context bridge; 31 original text/file sequences and 428 component/bridge cases; no console run; conflicting payloads reject |
 | `$LEFTADJ_` | `1..255`: `0x21a0a4=0x64a50f00 + ((4096-n)&255)`, `0x21a0a8=0xfc450000` | **PRESENT**: guarded, original-command differential; no console run |
 | `$SCANLINES` | `0x21e454=0x22b50006` | **PRESENT** |
-| `$VCDID_n` | selects a built-in per-game DB entry | **MISSING** |
+| `$VCDID_n` | selects a built-in per-game DB entry (handlers `0x890f4c..0x891e78`: 1..4 digits, first command wins, ignored after a fingerprint match) | **PRESENT**: parsed as the original does (fixed + random texts vs the original's handlers), applies the entry when the fingerprint matched nothing; see [POPSTARTER_BUILTIN_DB.md](POPSTARTER_BUILTIN_DB.md). No console run |
 | `$SUBCDSTATUS` | `0x20e850/0x20e86c/0x20e87c` | **PRESENT** |
 | `$RESET_WARMBOOT` | flag in the original's own exit path | **MISSING** |
 | `$MUTE_CDDA` / `$UNDO_MUTE_CDDA` | `0x20f0b6`, `0x20ebf2`, `0x20f0e0` | **PRESENT** |
@@ -143,7 +143,7 @@ record 60 original region-control-flow combinations. **No console test.**
 | User BIOS.BIN with integrity check | **MISSING** |
 | MODULE_0..9.IRX resident modules | **PARTIAL** (see audit) |
 | Physical PS1 disc boot | **MISSING** |
-| Built-in per-game DB (LibCrypt list, breakpoint killer, compat modes, VMC1-off for some titles) | **PARTIAL**: launcHER's own compat DB, not the original's table |
+| Built-in per-game DB (LibCrypt list, breakpoint killer, compat modes, VMC1-off for some titles) | **PRESENT**: the original's list (607 fingerprints as hashes, 625 entries) generated from MAIN by `tools/gen_pops_builtin_db.py`; every entry's core/EE writes and flags equal the original's `FUN_008e00d0` (`tools/test_pops_builtin_db.py`); game-fix code, breakpoint handler and second LibCrypt code run from the resident chain in the original's order. launcHER's own serial DB still runs beside it. See [POPSTARTER_BUILTIN_DB.md](POPSTARTER_BUILTIN_DB.md). No console run |
 | padman_hsync | **MISSING** |
 
 ## Remaining work, in order

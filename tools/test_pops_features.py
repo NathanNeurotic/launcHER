@@ -58,6 +58,18 @@ class PopsConfig(c.Structure):
         ("gs_mask", c.c_uint8),
         ("gs_display_valid", c.c_uint8),
         ("progressive_requested", c.c_uint8),
+        ("pad_override", c.c_uint8),
+        ("pad_id", c.c_uint8 * 2),
+        ("pad_d2ls", c.c_uint8),
+        ("set_timings", c.c_uint8),
+        ("vcdid", c.c_uint16),
+        ("vcdid_set", c.c_uint8),
+        ("subcd_seen", c.c_uint8),
+        ("builtin_id", c.c_uint16),
+        ("builtin_fix_call", c.c_uint8),
+        ("builtin_break_call", c.c_uint8),
+        ("builtin_libcrypt2", c.c_uint8),
+        ("builtin_libcrypt2_code", c.c_uint8 * 84),
     ]
 
 class PopsCompatEntry(c.Structure):
@@ -91,6 +103,8 @@ def compile_shared_library():
         str(ROOT / "tools/fixtures/pops_config_host_io.c"),
         str(ROOT / "common/src/pops_compat_db.c"),
         str(ROOT / "common/src/pops_modes_patches.c"),
+        str(ROOT / "common/src/pops_builtin_db.c"),
+        str(ROOT / "common/src/pops_builtin_db_data.c"),
         str(ROOT / "common/src/pops_resident_engine.c"),
         str(ROOT / "common/src/pops_external.c"),
         str(ROOT / "common/src/pops_vcd.c"),
@@ -832,8 +846,18 @@ class FeatureTests(unittest.TestCase):
         for unsupported in (1 << 5, 1 << 7, 0xff):
             self.assertLess(LIB.pops_apply_compat_modes(core_ptr, core_size, unsupported), 0)
             self.assertEqual(bytes(buf), before)
-        # A guard mismatch leaves every selected site unchanged.
+        # A site already holding a mode's value (the built-in per-game list
+        # runs first and may have written it) is accepted: applying the same
+        # mask again changes nothing and succeeds.
+        self.assertEqual(LIB.pops_apply_compat_modes(core_ptr, core_size, mask), 0)
+        self.assertEqual(bytes(buf), before)
+        # Any other value at a selected site is a guard mismatch that leaves
+        # every selected site unchanged.
+        struct.pack_into('<I', buf, 0x10318, 0x12345678)
+        corrupted = bytes(buf)
         self.assertLess(LIB.pops_apply_compat_modes(core_ptr, core_size, mask), 0)
+        self.assertEqual(bytes(buf), corrupted)
+        struct.pack_into('<I', buf, 0x10318, 0x240322e8)
         self.assertEqual(bytes(buf), before)
 
         # Guard mismatches leave the core untouched.

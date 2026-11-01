@@ -702,7 +702,7 @@ launcHER loads user-supplied IOP driver modules and peripheral replacements righ
 
 ### Built-in compatibility database and LibCrypt
 
-launcHER contains an internal catalogue of 568 verified game profiles and 229 validated 16-bit LibCrypt keys. When launching a `.VCD`, launcHER extracts the title serial from `SYSTEM.CNF` inside the ISO9660 volume descriptor, sets required compatibility modes, and programs hardware Subchannel Q emulation into the driver. Protected European games boot without manual patching.
+launcHER carries POPStarter r13's own built-in per-game list: the disc is identified from 144 bytes of the VCD (stored as hashes), and the matching entry's compatibility modes, LibCrypt fix, game-fix code, breakpoint handler or memory card 1 switch are applied as the original applies them, before your own commands, which can still undo them (`$UNDO_*`). `$VCDID_n` picks an entry by hand when nothing matched. Details and the measured behaviour are in [docs/POPSTARTER_BUILTIN_DB.md](docs/POPSTARTER_BUILTIN_DB.md); not yet tested on a console. Beside it, launcHER contains an internal catalogue of 568 verified game profiles and 229 validated 16-bit LibCrypt keys. When launching a `.VCD`, launcHER extracts the title serial from `SYSTEM.CNF` inside the ISO9660 volume descriptor, sets required compatibility modes, and programs hardware Subchannel Q emulation into the driver. Protected European games boot without manual patching.
 
 ### Virtual Memory Cards (VMC)
 

@@ -33,7 +33,7 @@ extern "C" {
 #define POPS_RESIDENT_BASE        UINT32_C(0x0143a000)
 #define POPS_RESIDENT_LIMIT       UINT32_C(0x01460000)
 #define POPS_RESIDENT_MAGIC       UINT32_C(0x5352484c) /* "LHRS" */
-#define POPS_RESIDENT_VERSION     9
+#define POPS_RESIDENT_VERSION     10
 
 /* POPS's VBLANK_START registration and handler (verified on the pinned core) */
 #define POPS_VBLANK_LUI_ADDR      UINT32_C(0x0021b184)
@@ -83,6 +83,14 @@ typedef struct {
 #define POPS_RES_F_WIDESCREEN     (1u << 5)
 #define POPS_RES_F_TIMINGS        (1u << 6)
 #define POPS_RES_F_TIMINGS_SAVE   (1u << 7)
+/* The built-in per-game list's resident work (pops_builtin_db.h), in the
+ * original's chain order: breakpoint handler (its slot 0x232d08, after the
+ * controller IDs), second LibCrypt code (slot 0x238d00, after $SET_TIMINGS),
+ * game-fix code (slot 0x2397d8, just before the cheats). */
+#define POPS_RES_F_BREAK_CALL     (1u << 8)  /* call POPS_BUILTIN_BREAK_ADDR */
+#define POPS_RES_F_LIBCRYPT2      (1u << 9)  /* run libcrypt2_code */
+#define POPS_RES_F_FIX_CALL       (1u << 10) /* call POPS_BUILTIN_FIX_ADDR */
+#define POPS_RESIDENT_LIBCRYPT2_WORDS 23     /* 84 bytes of code, jr ra, nop */
 
 /* $SET_TIMINGS: three POPS timing words, adjusted live with L1/L2/R1/R2.
  * The original keeps a copy of them at offset 0x800 of the slot 0 VMC
@@ -146,6 +154,10 @@ typedef struct {
   uint8_t gte_divisor;   /* widescreen: 100, or 4 for $EYEFINITY */
   PopsCheatEntry cheats[POPS_CHEAT_COMPILED_MAX];
   uint8_t timings_ready; /* $SET_TIMINGS: VMC image seen, adjusting */
+  uint8_t reserved[3];
+  /* POPS_RES_F_LIBCRYPT2: the entry's 84 bytes of code (it falls through
+   * in the original) followed by jr ra, nop; run in place. */
+  uint32_t libcrypt2_code[POPS_RESIDENT_LIBCRYPT2_WORDS];
 } PopsResidentConfig;
 
 /* Where the codes write. ps1 is PS1 RAM (2 MiB); ee is EE address 0 and

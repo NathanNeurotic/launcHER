@@ -40,6 +40,8 @@ list(APPEND EE_SOURCES
     ../common/src/pops_boot_stage.c
     ../common/src/pops_core_patches.c
     ../common/src/pops_bootstrap.c
+    ../common/src/pops_builtin_db.c
+    ../common/src/pops_builtin_db_data.c
     ../common/src/pops_vcd.c
     ../common/src/pops_vmc.c
     ../common/src/pops_config.c

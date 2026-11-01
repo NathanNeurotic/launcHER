@@ -183,6 +183,25 @@ typedef struct {
 
   /* $SET_TIMINGS: live timing adjust in the resident code (pops_resident.h). */
   uint8_t set_timings;
+
+  /* $VCDID_n (1..4 decimal digits; the first one in the files wins, as the
+   * original's handlers check gp+0x38d8 first): a built-in per-game entry
+   * by hand (pops_builtin_db.h). It is used only when the disc fingerprint
+   * matched nothing, which is also how the original behaves. */
+  uint16_t vcdid;
+  uint8_t vcdid_set;
+  /* $SUBCDSTATUS seen: the original's gp+0x3458 flag, after which its
+   * compatibility helper ignores modes 1, 2, 3 and 5. */
+  uint8_t subcd_seen;
+
+  /* Set by the launcher from the built-in entry it applied (PopsBuiltinPlan),
+   * for the resident code: the entry id, the chain calls, and the second
+   * LibCrypt code the chain runs. */
+  uint16_t builtin_id;
+  uint8_t builtin_fix_call;
+  uint8_t builtin_break_call;
+  uint8_t builtin_libcrypt2;
+  uint8_t builtin_libcrypt2_code[84];
 } PopsConfig;
 
 /* $WIDESCREEN, $ULTRA_WIDESCREEN, $EYEFINITY: the last one in the files wins,

@@ -24,7 +24,7 @@ BASE = 0x0143A000
  pad_read_entry, pad_read_exit, gte_scale, gte_divide, gte_ultra,
  gp1_entry) = struct.unpack_from('<IHHIIIIIIIIIIII', img, 0)
 assert magic == 0x5352484C and fsz == len(img), (hex(magic), fsz, len(img))
-assert ver == 9 and hs == 56
+assert ver == 10 and hs == 56
 
 mu = Uc(UC_ARCH_MIPS, UC_MODE_MIPS64 + UC_MODE_LITTLE_ENDIAN)
 # The R5900 has MIPS IV's movz/movn, which unicorn's default R4000 model
@@ -434,3 +434,31 @@ for save in (0, 1):
     expect_card = (0x3e2d3130, 0x111, 0x222, 0x333) if not save else (0x3e2d3130, *base)
     assert card() == expect_card, [hex(v) for v in card()]
 print('resident $SET_TIMINGS: PASS (VMC wait, restore, 11 pad cases, card untouched unless save flag)')
+
+# 6. The built-in per-game list's chain work (pops_builtin_db.h), in the
+# original's order: breakpoint handler (0x01460000) after the controller
+# IDs, the second LibCrypt code from the config after $SET_TIMINGS, the
+# game-fix code (0x01410000) just before the cheats. Each piece appends its
+# number to a log word; the fix code and a cheat write the same PS1 byte so
+# the cheat's value shows it ran last. All three are k0/k1-only leaves,
+# like the original's. gp is left alone (the breakpoint handler uses POPS's).
+LC2 = cfga + 32 + (2 * 256 + 4) * 12 + 4  # after timings_ready + reserved[3]
+def leaf(n, extra=()):
+    words = [0x8c1a1204, 0x001ad100, 0x375a0000 | n, 0xac1a1204] + list(extra) + [0x03e00008, 0]
+    return b''.join(struct.pack('<I', w) for w in words)
+mu.mem_write(0x01460000, leaf(1))
+mu.mem_write(0x01410000, leaf(3, (0x241b0011, 0x3c1a4000, 0xa35b0010)))  # PS1 0x10 = 0x11
+mu.mem_write(0x1204, b'\0' * 4)
+mu.mem_write(0x40000010, b'\0')
+config([(0x30000010, 0x5A)], flags=1 | (1 << 8) | (1 << 9) | (1 << 10))
+lc2 = leaf(2)
+mu.mem_write(LC2, lc2 + b'\0' * (92 - len(lc2)))
+gp1()  # checks every register, gp included, comes back unchanged
+assert u32(0x1204) == 0x123, hex(u32(0x1204))
+assert mu.mem_read(0x40000010, 1) == b'\x5a', 'cheats must run after the fix code'
+# Without the flags none of them runs.
+mu.mem_write(0x1204, b'\0' * 4)
+config([(0x30000010, 0x5A)])
+gp1()
+assert u32(0x1204) == 0
+print('resident built-in chain calls: PASS (break, LibCrypt 2, fix, then cheats; gp kept)')

@@ -172,9 +172,32 @@ static int display_decimal(const char *text, unsigned digits, unsigned maximum,
   return 1;
 }
 
+/* FUN_008dc2c4: once $SUBCDSTATUS (or a built-in entry) set gp+0x3458,
+ * modes 1, 2, 3 and 5 do nothing; 4, 6 and 7 still apply. */
+static void add_compat_mode(PopsConfig *cfg, int mode) {
+  if (mode < 1 || mode > 8)
+    return;
+  if (cfg->subcd_seen && (mode == 1 || mode == 2 || mode == 3 || mode == 5))
+    return;
+  cfg->compat_modes |= (uint8_t)(1 << (mode - 1));
+}
+
 static int parse_single_directive(PopsConfig *cfg, const char *token) {
   if (!cfg || !token || !*token)
     return 0;
+
+  /* $VCDID_n: handlers 0x890f4c/0x8912e4/0x8917f0/0x891e78, one per digit
+   * count 1..4; the digits must end the token (the original accepts only a
+   * space, CR, LF or NUL after them). Leading zeros count as digits. The
+   * first command wins; later ones are ignored (gp+0x38d8 is already set). */
+  if (!strncasecmp(token, "$VCDID_", 7)) {
+    uint32_t value;
+    if (display_decimal32(token + 7, 4, 9999, &value) && !cfg->vcdid_set) {
+      cfg->vcdid = (uint16_t)value;
+      cfg->vcdid_set = 1;
+    }
+    return 1;
+  }
 
   static const char *const gs_commands[] = {
     "$DX_", "$DY_", "$MAGH_", "$MAGV_", "$DW_", "$DH_"
@@ -332,6 +355,8 @@ static int parse_single_directive(PopsConfig *cfg, const char *token) {
         cfg->original_tokens |= tokens[i].flag;
         if (tokens[i].flag == POPS_TOK_NOHDTVFIX)
           cfg->hdtv_fix = 0;
+        if (tokens[i].flag == POPS_TOK_SUBCDSTATUS)
+          cfg->subcd_seen = 1;
         return 1;
       }
     }
@@ -426,28 +451,28 @@ static int parse_single_directive(PopsConfig *cfg, const char *token) {
   if (!strncasecmp(token, "$COMPATIBILITY_0x0", 18)) {
     int mode = (int)strtol(token + 18, NULL, 16);
     if (mode >= 1 && mode <= 8) {
-      cfg->compat_modes |= (uint8_t)(1 << (mode - 1));
+      add_compat_mode(cfg, mode);
       return 1;
     }
   }
   if (!strncasecmp(token, "$COMPATIBILITY_0x", 17)) {
     int mode = (int)strtol(token + 17, NULL, 16);
     if (mode >= 1 && mode <= 8) {
-      cfg->compat_modes |= (uint8_t)(1 << (mode - 1));
+      add_compat_mode(cfg, mode);
       return 1;
     }
   }
   if (!strncasecmp(token, "$MODE", 5) && isdigit((unsigned char)token[5])) {
     int mode = (int)strtol(token + 5, NULL, 10);
     if (mode >= 1 && mode <= 8) {
-      cfg->compat_modes |= (uint8_t)(1 << (mode - 1));
+      add_compat_mode(cfg, mode);
       return 1;
     }
   }
   if (isdigit((unsigned char)*token)) {
     int mode = (int)strtol(token, NULL, 10);
     if (mode >= 1 && mode <= 8 && token[1] == '\0') {
-      cfg->compat_modes |= (uint8_t)(1 << (mode - 1));
+      add_compat_mode(cfg, mode);
       return 1;
     }
   }
@@ -518,7 +543,7 @@ static int parse_directives(PopsConfig *cfg, const char *line) {
         isdigit((unsigned char)*next_token)) {
       int mode = (int)strtol(next_token, NULL, 10);
       if (mode >= 1 && mode <= 8) {
-        cfg->compat_modes |= (uint8_t)(1 << (mode - 1));
+        add_compat_mode(cfg, mode);
       }
       goto loop_remaining;
     }
@@ -555,7 +580,7 @@ loop_remaining:
       next_token[nlen] = '\0';
       int mode = (int)strtol(next_token, NULL, 10);
       if (mode >= 1 && mode <= 8) {
-        cfg->compat_modes |= (uint8_t)(1 << (mode - 1));
+        add_compat_mode(cfg, mode);
         continue;
       }
       p = save_p;

@@ -1,4 +1,5 @@
 #include "pops_resident.h"
+#include "pops_builtin_db.h"
 #include "pops_modes_patches.h"
 #include <errno.h>
 #include <string.h>
@@ -245,6 +246,18 @@ int pops_resident_build_config(PopsResidentConfig *out, const PopsConfig *cfg) {
   if (cfg->widescreen) {
     out->flags |= POPS_RES_F_WIDESCREEN;
     out->gte_divisor = cfg->widescreen == POPS_WIDESCREEN_EYEFINITY ? 4 : 100;
+  }
+
+  /* The built-in per-game entry's chain work (pops_builtin_db.h). */
+  if (cfg->builtin_break_call)
+    out->flags |= POPS_RES_F_BREAK_CALL;
+  if (cfg->builtin_fix_call)
+    out->flags |= POPS_RES_F_FIX_CALL;
+  if (cfg->builtin_libcrypt2) {
+    out->flags |= POPS_RES_F_LIBCRYPT2;
+    memcpy(out->libcrypt2_code, cfg->builtin_libcrypt2_code, POPS_BUILTIN_LIBCRYPT2_SIZE);
+    out->libcrypt2_code[POPS_BUILTIN_LIBCRYPT2_SIZE / 4] = 0x03e00008; /* jr ra */
+    out->libcrypt2_code[POPS_BUILTIN_LIBCRYPT2_SIZE / 4 + 1] = 0;      /* nop */
   }
 
   uint16_t count = cfg->cheat_count;

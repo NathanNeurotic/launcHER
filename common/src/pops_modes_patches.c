@@ -1,4 +1,5 @@
 #include "pops_modes_patches.h"
+#include "pops_builtin_db.h"
 #include "pops_resident.h"
 #include "pops_external.h"
 #include <errno.h>
@@ -217,6 +218,50 @@ int pops_fix_context_init(PopsFixContext *context, const void *staged_core,
 int pops_fix_context_init_video(PopsFixContext *context, const void *staged_core,
                                  size_t core_size, uint8_t initial_modes,
                                  uint8_t initial_video_mode) {
+  return pops_fix_context_init_builtin(context, staged_core, core_size, 0,
+                                       initial_modes, initial_video_mode);
+}
+
+/* Replay one built-in entry over the expected compat site values: its
+ * compatibility modes (skipping 1/2/3/5 once its gp+0x3458 flag is set, as
+ * FUN_008dc2c4 does) and any core write that lands on a site. */
+static int builtin_expected(PopsFixContext *candidate, uint16_t id) {
+  const PopsBuiltinOp *ops;
+  unsigned count, subcd = 0;
+  int result = pops_builtin_entry_ops(id, &ops, &count);
+  if (result)
+    return result;
+  for (unsigned n = 0; n < count; ++n) {
+    const PopsBuiltinOp *op = &ops[n];
+    if (op->kind == POPS_BUILTIN_OP_SUBCD)
+      subcd = 1;
+    if (op->kind == POPS_BUILTIN_OP_COMPAT) {
+      if (subcd && (op->arg == 1 || op->arg == 2 || op->arg == 3 || op->arg == 5))
+        continue;
+      for (unsigned i = 0; i < POPS_COMPAT_SITE_COUNT; ++i)
+        if (compat_patches[i].mode == op->arg)
+          for (unsigned j = 0; j < POPS_COMPAT_SITE_COUNT; ++j)
+            if (compat_patches[j].address == compat_patches[i].address)
+              candidate->expected[j] = compat_patches[i].replacement;
+    }
+    if (op->kind == POPS_BUILTIN_OP_CORE) {
+      for (unsigned j = 0; j < POPS_COMPAT_SITE_COUNT; ++j) {
+        const CompatPatch *p = &compat_patches[j];
+        if (p->address < op->addr || p->address + p->width > op->addr + op->len)
+          continue;
+        uint32_t value = 0;
+        for (unsigned k = 0; k < p->width; ++k)
+          value |= (uint32_t)pops_builtin_data[op->data + (p->address - op->addr) + k] << (8 * k);
+        candidate->expected[j] = value;
+      }
+    }
+  }
+  return 0;
+}
+
+int pops_fix_context_init_builtin(PopsFixContext *context, const void *staged_core,
+                                  size_t core_size, uint16_t builtin_id,
+                                  uint8_t initial_modes, uint8_t initial_video_mode) {
   PopsFixContext candidate;
   if (!context || !staged_core ||
       fix_alias(context, sizeof(*context), staged_core, core_size))
@@ -228,6 +273,11 @@ int pops_fix_context_init_video(PopsFixContext *context, const void *staged_core
   memset(&candidate, 0, sizeof(candidate));
   for (unsigned i = 0; i < POPS_COMPAT_SITE_COUNT; ++i)
     candidate.expected[i] = compat_patches[i].expected;
+  if (builtin_id) {
+    int replayed = builtin_expected(&candidate, builtin_id);
+    if (replayed)
+      return replayed;
+  }
   for (unsigned i = 0; i < POPS_PATCH_PAL_SITE_COUNT; ++i)
     candidate.video_expected[i] = fix_pal_sites[i].pristine;
   candidate.video_auto_disabled = initial_video_mode == POPS_VMODE_480P;
@@ -432,6 +482,34 @@ int pops_fix_stage(PopsFixContext *context, void *staged_core, size_t core_size,
   return 0;
 }
 
+static int compat_site_value_known(uint32_t address, uint32_t value) {
+  for (size_t i = 0; i < sizeof(compat_patches) / sizeof(compat_patches[0]); ++i)
+    if (compat_patches[i].address == address &&
+        (compat_patches[i].replacement == value || compat_patches[i].expected == value))
+      return 1;
+  return address == 0x0021af70 && value == 0x32;
+}
+
+int pops_compat_mode_write(void *staged_core, size_t core_size, uint8_t mode) {
+  uint8_t *bytes = staged_core;
+  if (!bytes || mode < 1 || mode > 7)
+    return -EINVAL;
+  for (size_t i = 0; i < sizeof(compat_patches) / sizeof(compat_patches[0]); ++i) {
+    const CompatPatch *p = &compat_patches[i];
+    if (p->mode != mode)
+      continue;
+    if (p->address - POPS_CORE_BASE_ADDR + p->width > core_size)
+      return -ERANGE;
+  }
+  for (size_t i = 0; i < sizeof(compat_patches) / sizeof(compat_patches[0]); ++i) {
+    const CompatPatch *p = &compat_patches[i];
+    if (p->mode == mode)
+      for (unsigned j = 0; j < p->width; ++j)
+        bytes[p->address - POPS_CORE_BASE_ADDR + j] = (uint8_t)(p->replacement >> (8 * j));
+  }
+  return 0;
+}
+
 int pops_apply_compat_modes(void *staged_core, size_t core_size, uint8_t modes_mask) {
   uint8_t *bytes = staged_core;
   size_t i;
@@ -453,10 +531,10 @@ int pops_apply_compat_modes(void *staged_core, size_t core_size, uint8_t modes_m
     for (j = 0; j < p->width; ++j)
       actual |= (uint32_t)bytes[offset + j] << (8 * j);
     /* $UNDO_COMPATIBILITY_CODES (applied first, as in the original) leaves
-     * 0x20083c/0x20085c at the very values modes 2 and 5 write. */
-    if (actual != p->expected &&
-        !(actual == p->replacement &&
-          (p->address == 0x0020083c || p->address == 0x0020085c)))
+     * 0x20083c/0x20085c at the very values modes 2 and 5 write, and the
+     * built-in per-game list (also first) may have left any mode's value,
+     * or its own 0x32 at 0x21af70. */
+    if (actual != p->expected && !compat_site_value_known(p->address, actual))
       return -EINVAL;
   }
   for (i = 0; i < sizeof(compat_patches) / sizeof(compat_patches[0]); ++i) {
