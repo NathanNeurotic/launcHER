@@ -69,7 +69,9 @@ verifies all 15 guarded sites. CI runs the nine synthetic tests and explicitly
 skips the two external-input tests. Proprietary bytes are neither committed
 nor emitted by the oracle.
 
-PATCH video actions 6/7 remain rejected before payload/mode/context writes:
-they install `j 0x2394f0` into a resident block launcHER does not install.
+PATCH video actions 6/7: the original installs `j 0x2394f0` into its own
+resident block. Since `a8da126` launcHER installs a jump to its own resident
+progressive entry instead, behind the same custom-video gate (see
+POPS_PROGRESSIVE_CONTRACTS.md); without a bound entry they still reject.
 These direct command implementations do not unlock `$480p`, the `$DX/$DY`,
 `$MAGH/$MAGV`, `$DW/$DH` family, widescreen, pads, timings or cheats.

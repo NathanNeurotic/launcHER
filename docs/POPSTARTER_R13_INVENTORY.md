@@ -137,7 +137,7 @@ record 60 original region-control-flow combinations. **No console test.**
 | VMC directory relinker (VMCDIR.TXT), SLOT0/1.VMC | **PRESENT** |
 | DISCS.TXT disc swap, D-pad assignment, lid emulation | **PARTIAL**: discs map; no resident swap during play |
 | CHEATS.TXT / PATCHES.TXT / per-title config locations | **PRESENT** (parsing) |
-| TROJAN_n.BIN / PATCH_n.BIN, all games and per game | **PARTIAL**: payload/modes/PAL/disable-auto stage; video actions 6/7 reject atomically until independent resident code exists |
+| TROJAN_n.BIN / PATCH_n.BIN, all games and per game | **PARTIAL**: payload, modes, PAL, disable-auto and video actions 6/7 (since `a8da126` these jump to launcHER's own resident progressive entry, behind the original's custom-video gate; `test_pops_fix_files.py` matches the original on 100 ordered file sequences). Only the PATCH format-1 record the original's loader was measured with is accepted; other formats are rejected. No console run |
 | IGR menu skin (IGR_BG/NO/YES.TM2) | **MISSING** |
 | Replacement OSD image | **MISSING** |
 | User BIOS.BIN with integrity check | **MISSING** |
@@ -152,9 +152,9 @@ record 60 original region-control-flow combinations. **No console test.**
 1. Hardware check of this change: a US disc and a European disc on an NTSC
    console, plus `$FORCEPAL` and `$NOPAL` (picture rate and colour).
 2. Grow the resident code (cheats, manual/progressive display and pad
-   commands, widescreen and `$SET_TIMINGS` exist, NOT TESTED on a console). Complete PATCH video
-   actions 6/7 session/owned-entry dispatch separately; text `$480p` now works
-   at the component/staging level. [Progressive contracts](POPS_PROGRESSIVE_CONTRACTS.md).
+   commands, widescreen and `$SET_TIMINGS` exist, NOT TESTED on a console). PATCH video
+   actions 6/7 dispatch exists since `a8da126` (stale note corrected 2026-11-02);
+   text `$480p` works at the component/staging level. [Progressive contracts](POPS_PROGRESSIVE_CONTRACTS.md).
 3. Recover the built-in per-game DB at `0x8e00d0`. (The pad commands are
    done; the original also sets `+0x28` of both pad blocks to 1 on every pass
    of its always-on block, a field POPS uses for actuator setup; launcHER

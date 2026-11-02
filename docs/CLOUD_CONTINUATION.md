@@ -16,9 +16,8 @@ Continue [draft launcHER PR #23](https://github.com/NathanNeurotic/launcHER/pull
   guarded static setup. Manual all-six file priority and HDTVFIX/NOHDTVFIX
   order match original sequences. All five static sites are checked before
   any hook write. Conflicting payload changes reject and discard that launch.
-- **PATCH actions 6/7 still reject before payload/mode/context writes.** Their
-  separate session/mode/owned-entry dispatch is the next implementation task;
-  do not simply remove the old guard now that a text bridge exists.
+- PATCH actions 6/7 dispatch to the owned progressive bridge since `a8da126`
+  (see the R28 checkpoint below); without a bound entry they still reject.
 - Manual `$DX/$DY/$MAGH/$MAGV/$DW/$DH`: 228 original file cases, 18 option-order
   sequences, first valid 0..99999 in each file, all six required per file.
   Six direct display commands retain 1,596 original inputs plus two one-shot

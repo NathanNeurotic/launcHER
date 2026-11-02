@@ -2,8 +2,8 @@
 
 **Current state:** text `$480p` now selects the guarded independent resident
 bridge. Its component and staging proofs are recorded below; no console/GS
-acceptance is claimed. PATCH actions 6/7 still reject pending their separate
-dispatch sequencing. The [manual DISPLAY hook](POPS_MANUAL_DISPLAY_CONTRACTS.md)
+acceptance is claimed. PATCH actions 6/7 dispatch to the same bridge since
+`a8da126` (100 ordered file sequences match the original). The [manual DISPLAY hook](POPS_MANUAL_DISPLAY_CONTRACTS.md)
 is a separate entry. Earlier candidate checkpoints below are historical.
 
 The original loader copies `0xd60` bytes from `0x983890` to `0x238a90`.

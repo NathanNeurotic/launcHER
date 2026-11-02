@@ -39,7 +39,7 @@ DISPLAY entry at `0x239768`, writes its value at `0x239778`, jumps there from
 
 This is distinct from the original progressive helper at `0x2394f0`.
 Text `$480p` now selects the independent owned progressive bridge; PATCH
-actions 6/7 still reject pending their separate dispatch integration.
+actions 6/7 dispatch to it too since `a8da126`.
 
 ## Independent production implementation
 
