@@ -1140,37 +1140,39 @@ int launchPOPS(int argc, char *argv[]) {
     }
   }
 
-  /* Map multi-disc paths from DISCS.TXT */
+  /* DISCS.TXT's slots 2..4 also back popfs's own discs 1..3 (its
+   * disc/discN names, its pops0:IMAGEn.VCD names and its pad swap). The
+   * in-game swap is POPStarter's: the resident hands POPS the slot,
+   * "pfs0:/<name>", and popfs's pfs name (the real PFS on the HDD) opens
+   * <name> in the game's folder, IMAGE0.VCD to IMAGE3.VCD included. As in
+   * the original, a disc that is missing does not stop the launch; mapping
+   * stops at the first one popfs could not take. */
   char discPaths[POPS_MAX_DISCS][PATH_MAX];
   const char *discArgs[POPS_MAX_DISCS] = { vcdPath, NULL, NULL, NULL };
+  char proxyArgs[POPS_PROXY_ARGS_MAX];
+  int virtualPfs = device != Device_APA;
   strncpy(discPaths[0], vcdPath, sizeof(discPaths[0]) - 1);
-
-  if (cfg.disc_count > 1) {
-    for (int d = 1; d < cfg.disc_count && d < POPS_MAX_DISCS; ++d) {
-      int length;
-      if (strchr(cfg.discs[d], ':') || cfg.discs[d][0] == '/' || cfg.discs[d][0] == '\\') {
-        length = snprintf(discPaths[d], sizeof(discPaths[d]), "%s", cfg.discs[d]);
-      } else {
-        length = snprintf(discPaths[d], sizeof(discPaths[d]), "%s%s", vcdDir, cfg.discs[d]);
-      }
-      if (length < 0 || (size_t)length >= sizeof(discPaths[d])) {
-        msg("POPS: Disc %d path is too long\n", d + 1);
-        return -ENAMETOOLONG;
-      }
-      if (tryFile(discPaths[d])) {
-        msg("POPS: Disc %d not readable: %s\n", d + 1, discPaths[d]);
-        return -ENOENT;
-      }
-      discArgs[d] = discPaths[d];
-      DPRINTF("POPS: Disc %d mapped to %s\n", d + 1, discPaths[d]);
+  for (int d = 1; d < cfg.disc_count && d < POPS_MAX_DISCS; ++d) {
+    const char *name = (const char *)cfg.disc_slot[d] + sizeof(POPS_DISC_SLOT_PREFIX) - 1;
+    int length = snprintf(discPaths[d], sizeof(discPaths[d]), "%s%s", vcdDir, name);
+    if (length < 0 || (size_t)length >= sizeof(discPaths[d]) || tryFile(discPaths[d])) {
+      DPRINTF("POPS: Disc %d not found for popfs: %s\n", d + 1, name);
+      break;
     }
+    discArgs[d] = discPaths[d];
+    if (pops_format_proxy_args_mode(proxyArgs, sizeof(proxyArgs), discArgs[0], card0Path,
+                                    card1Path, discArgs[1], discArgs[2], discArgs[3],
+                                    virtualPfs) <= 0) {
+      DPRINTF("POPS: Disc %d not usable for popfs: %s\n", d + 1, discPaths[d]);
+      discArgs[d] = NULL;
+      break;
+    }
+    DPRINTF("POPS: Disc %d mapped to %s\n", d + 1, discPaths[d]);
   }
 
   /* Reject invalid disc/save backend paths before staging, creating cards or
    * triggering the irreversible external IOP reboot. */
   /* Format proxy arguments for popfs */
-  char proxyArgs[POPS_PROXY_ARGS_MAX];
-  int virtualPfs = device != Device_APA;
   int argLen = pops_format_proxy_args_mode(proxyArgs, sizeof(proxyArgs),
                                            discArgs[0], card0Path, card1Path,
                                            discArgs[1], discArgs[2], discArgs[3],

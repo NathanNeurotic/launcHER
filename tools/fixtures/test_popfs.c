@@ -214,6 +214,109 @@ static void test_event_trace(void) {
   pops_trace_reset();
 }
 
+/* POPStarter's in-game disc swap hands POPS "pfs0:/" + a DISCS.TXT line,
+ * and its PFS wrapper opens that name in the games' folder (mass:/POPS/).
+ * Through the pfs alias popfs opens it in the launched game's folder,
+ * read-only and counted as a disc; the pops name never does, and neither
+ * do mkdir, remove or rename. Runs with the alias registered for
+ * mass7:/POPS/Game.VCD and no other disc. */
+static void test_pfs_alias_folder(void) {
+  iomanX_iop_file_t file = {0};
+  iox_stat_t stat;
+  char name[300], out[PATH_LIMIT], saved[PATH_LIMIT];
+  int lid = 1;
+  file.device = &virtual_pfs;
+  next_open = 23; calls = 0; io_result = 7;
+  assert(!virtual_pfs.ops->open(&file, "/Game (Disc 2).VCD", FIO_O_RDONLY, 0));
+  assert(!strcmp(observed, "mass7:/POPS/Game (Disc 2).VCD") && calls == 1);
+  assert(open_flags == FIO_O_RDONLY);
+  assert(virtual_pfs.ops->deinit(&virtual_pfs) == -EBUSY);
+  assert(active_disc_handles == 1);
+  assert(virtual_pfs.ops->write(&file, name, 1) == -EROFS);
+  assert(virtual_pfs.ops->read(&file, name, 7) == 7 && io_fd == 23);
+  assert(!virtual_pfs.ops->close(&file) && io_fd == 23);
+  assert(!virtual_pfs.ops->deinit(&virtual_pfs) && active_disc_handles == 0);
+  /* Read-only like every disc, and refused while popfs's lid is open. */
+  assert(virtual_pfs.ops->open(&file, "/Game (Disc 2).VCD", FIO_O_RDWR, 0) == -EROFS);
+  assert(!virtual_pfs.ops->devctl(&file, "pfs:", 0x03, NULL, 0, NULL, 0));
+  assert(virtual_pfs.ops->open(&file, "/Game (Disc 2).VCD", FIO_O_RDONLY, 0) == -ENODEV);
+  assert(!virtual_pfs.ops->devctl(&file, "pfs:", 0x08, NULL, 0, &lid, sizeof(lid)) && lid == 1);
+  assert(!virtual_pfs.ops->devctl(&file, "pfs:", 0x04, NULL, 0, NULL, 0));
+  /* A backslash name, as Sony's code may pass, is the same file. */
+  assert(!virtual_pfs.ops->open(&file, "\\Disc3.VCD", FIO_O_RDONLY, 0));
+  assert(!strcmp(observed, "mass7:/POPS/Disc3.VCD"));
+  assert(!virtual_pfs.ops->close(&file));
+  /* A numbered image is a file there too, configured or not: a DISCS.TXT
+   * line IMAGE1.VCD (say the first of IMAGE1.VCD, IMAGE2.VCD) must not
+   * open the disc the second line names. The pops name keeps the slots.
+   * IMAGE.VCD stays the launched disc (launcHER's probe opens it). */
+  assert(!virtual_pfs.ops->open(&file, "IMAGE2.VCD", FIO_O_RDONLY, 0));
+  assert(!strcmp(observed, "mass7:/POPS/IMAGE2.VCD"));
+  assert(!virtual_pfs.ops->close(&file));
+  memcpy(saved, paths[1], sizeof(saved));
+  strcpy(paths[1], "mass7:/POPS/IMAGE2.VCD");
+  assert(!virtual_pfs.ops->open(&file, "IMAGE1.VCD", FIO_O_RDONLY, 0));
+  assert(!strcmp(observed, "mass7:/POPS/IMAGE1.VCD"));
+  assert(!virtual_pfs.ops->close(&file));
+  assert(!virtual_pfs.ops->open(&file, "/IMAGE0.VCD", FIO_O_RDONLY, 0));
+  assert(!strcmp(observed, "mass7:/POPS/IMAGE0.VCD"));
+  assert(!virtual_pfs.ops->close(&file));
+  assert(!virtual_pfs.ops->getstat(&file, "IMAGE1.VCD", &stat));
+  assert(!strcmp(observed, "mass7:/POPS/IMAGE1.VCD"));
+  file.device = &device;
+  assert(!device.ops->open(&file, "IMAGE1.VCD", FIO_O_RDONLY, 0));
+  assert(!strcmp(observed, "mass7:/POPS/IMAGE2.VCD"));
+  assert(!device.ops->close(&file));
+  assert(!device.ops->open(&file, "IMAGE0.VCD", FIO_O_RDONLY, 0));
+  assert(!strcmp(observed, "mass7:/POPS/Game.VCD"));
+  assert(!device.ops->close(&file));
+  file.device = &virtual_pfs;
+  memcpy(paths[1], saved, sizeof(saved));
+  assert(!virtual_pfs.ops->open(&file, "/IMAGE.VCD", FIO_O_RDONLY, 0));
+  assert(!strcmp(observed, "mass7:/POPS/Game.VCD"));
+  assert(!virtual_pfs.ops->close(&file));
+  assert(!virtual_pfs.ops->open(&file, "/SLOT1.VMC", FIO_O_RDWR, 0));
+  assert(!strcmp(observed, "mmce1:/POPS/Game/Card1.VMC"));
+  assert(!virtual_pfs.ops->close(&file));
+  /* Only a plain name: no slash, backslash or colon, and not . or .. */
+  calls = 0;
+  assert(virtual_pfs.ops->open(&file, "/POPS/Other.VCD", 1, 0) == -ENOENT);
+  assert(virtual_pfs.ops->open(&file, "\\sub\\x.VCD", 1, 0) == -ENOENT);
+  assert(virtual_pfs.ops->open(&file, "/a:b.VCD", 1, 0) == -ENOENT);
+  assert(virtual_pfs.ops->open(&file, "/..", 1, 0) == -ENOENT);
+  assert(virtual_pfs.ops->open(&file, "/.", 1, 0) == -ENOENT);
+  assert(virtual_pfs.ops->open(&file, "/", 1, 0) == -ENOENT);
+  assert(virtual_pfs.ops->open(&file, "", 1, 0) == -ENOENT);
+  memset(name, 'x', sizeof(name));
+  name[0] = '/';
+  name[PATH_LIMIT - 1] = 0; /* fits the request, not the folder plus it */
+  assert(virtual_pfs.ops->open(&file, name, 1, 0) == -ENAMETOOLONG);
+  assert(calls == 0 && active == 0);
+  /* getstat finds the same file and reports it read-only. */
+  memset(&stat, 0, sizeof(stat));
+  stat.mode = FIO_S_IRUSR | FIO_S_IWUSR | FIO_S_IWGRP | FIO_S_IWOTH;
+  assert(!virtual_pfs.ops->getstat(&file, "/Game (Disc 2).VCD", &stat));
+  assert(!strcmp(observed, "mass7:/POPS/Game (Disc 2).VCD"));
+  assert(stat.mode == FIO_S_IRUSR);
+  /* The pops name, mkdir, remove and rename never look in the folder. */
+  file.device = &device;
+  assert(device.ops->open(&file, "/Game (Disc 2).VCD", 1, 0) == -ENOENT);
+  assert(device.ops->getstat(&file, "/Game (Disc 2).VCD", &stat) == -ENOENT);
+  file.device = &virtual_pfs;
+  assert(virtual_pfs.ops->remove(&file, "/Game (Disc 2).VCD") == -ENOENT);
+  assert(virtual_pfs.ops->mkdir(&file, "/Game (Disc 2).VCD", 0) == -ENOENT);
+  assert(virtual_pfs.ops->rename(&file, "/A.VCD", "/B.VCD") == -EINVAL);
+  assert(calls == 0);
+  /* Disc 0's folder is up to its last / (or the device when it has none). */
+  memcpy(saved, paths[0], sizeof(saved));
+  strcpy(paths[0], "mass7:Game.VCD");
+  assert(folder_name("X.VCD", out) == FOLDER_DISC && !strcmp(out, "mass7:X.VCD"));
+  strcpy(paths[0], "smb0:/share/PS1/Game.VCD");
+  assert(folder_name("X.VCD", out) == FOLDER_DISC && !strcmp(out, "smb0:/share/PS1/X.VCD"));
+  memcpy(paths[0], saved, sizeof(saved));
+  next_open = 0;
+}
+
 int main(void) {
   char *arguments[] = {"popfs", "mass7:/POPS/Game.VCD", "udpfs:/saves/Card0.VMC",
                         "mmce1:/POPS/Game/Card1.VMC", "pfs0:/disc/Second.VCD"};
@@ -520,6 +623,7 @@ int main(void) {
   assert(registered_drivers[1] == &virtual_pfs);
   assert(!virtual_pfs.ops->open(&file, "IMAGE.VCD", FIO_O_RDONLY, 0));
   assert(!virtual_pfs.ops->close(&file));
+  test_pfs_alias_folder();
   assert(!iomanX_DelDrv("pfs"));
   assert(!iomanX_DelDrv("pops"));
   /* Re-establish the two-disc configuration for the resident-path test. */
@@ -529,6 +633,7 @@ int main(void) {
   test_pad_swap_popfs_integration();
   test_event_trace();
   puts("POPFS production-driver contract PASS: paths, multi-disc, save backups, descriptor zero,");
-  puts("short I/O, device errors, readonly discs, 64-bit seeks, devctl tray/disc, LibCrypt SubQ, and active-handle lifetime");
+  puts("short I/O, device errors, readonly discs, 64-bit seeks, devctl tray/disc, LibCrypt SubQ, active-handle lifetime,");
+  puts("and the pfs alias's game-folder names for POPStarter's in-game disc swap");
   return 0;
 }

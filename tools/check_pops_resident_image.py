@@ -29,7 +29,7 @@ BASE = 0x0143A000
  gp1_entry) = struct.unpack_from('<IHHIIIIIIIIIIII', img, 0)
 guard_entries = list(struct.unpack_from('<9I', img, 56))
 assert magic == 0x5352484C and fsz == len(img), (hex(magic), fsz, len(img))
-assert ver == 12 and hs == 92
+assert ver == 13 and hs == 92
 
 mu = Uc(UC_ARCH_MIPS, UC_MODE_MIPS64 + UC_MODE_LITTLE_ENDIAN)
 # The R5900 has MIPS IV's movz/movn, which unicorn's default R4000 model
@@ -239,7 +239,10 @@ n = calls()
 gp1()
 after = bytes(mu.mem_read(PAD, 0x120))
 assert after[0x90 + 0x34] == 0x73 and after[0x34] == before[0x34], 'port selection'
-assert sum(a != b for a, b in zip(before, after)) == 1 and calls() == n
+# Besides the ID, every pass sets +0x28 of both blocks to 1 (the original's
+# always-live block, section 7b).
+assert after[0x28] == after[0x90 + 0x28] == 1, 'pad flags'
+assert sum(a != b for a, b in zip(before, after)) == 3 and calls() == n
 config([], flags=(1 << 3) | 1, pads=(3, 0x01, 0x41))
 gp1()
 assert mu.mem_read(PAD + 0x34, 1) == b'\x01' and mu.mem_read(PAD + 0xC4, 1) == b'\x41'
@@ -486,6 +489,63 @@ for other in (0xBCFF, 0xFFFF, 0x3CFE, 0x0000):
     assert u32(0x70000000) == 0, hex(other)
 mu.mem_write(PAD + 2, struct.pack('<H', 0xFFFF))
 print('resident in-game reset: PASS (combo stores the vector to scratchpad 0, nothing else does)')
+
+# 7b. POPStarter's always-live block (0x232790..0x232c90), the first thing
+# the GP1 entry runs: emode, lid, $SCANLINES, both pads' +0x28 flag, and
+# the in-game disc swap, which calls POPS's disc init (0x210540, a stub
+# here that records $a0, $gp and $sp) with the selected slot. POPS DMAs
+# 0x80 bytes from that address, so it must be 16-byte aligned and inside the
+# configuration. Empty slots (first word zero) get main's boot path.
+DISC_SELECTED = RESET_VECTOR + 4
+DISC_SLOT = cfga + ((DISC_SELECTED + 4 - cfga + 15) & ~15)
+BOOT = 0x01FFECB0
+stub = [0xAC041300, 0x8C021304, 0x24420001, 0xAC021304, 0xAC1C1308, 0xAC1D130C, 0x03E00008, 0]
+mu.mem_write(0x00210540, b''.join(struct.pack('<I', w) for w in stub))
+mu.mem_write(0x1300, bytes(16))
+config([(0x30000010, 0x5A)])
+names = [b'pfs0:/Game (Disc %d).VCD' % (n + 1) for n in range(3)]
+slots = b''.join(n.ljust(0x60, b'\0') for n in names) + bytes(0x60)
+mu.mem_write(DISC_SELECTED, bytes(4))
+mu.mem_write(DISC_SLOT, slots + bytes(32))
+mu.mem_write(BOOT, b'pops:/disc/disc0'.ljust(0x60, b'\0'))
+mu.mem_write(0x70003390, b'\x55')
+mu.mem_write(0x0059C200, struct.pack('<H', 0x0200))
+mu.mem_write(0x0021E454, struct.pack('<I', 0x8CA42158))
+mu.mem_write(PAD + 0x28, b'\0'); mu.mem_write(PAD + 0xB8, b'\0')
+def press(buttons):
+    mu.mem_write(PAD + 2, struct.pack('<H', buttons))
+    gp1()
+press(0xFFFF)
+assert mu.mem_read(PAD + 0x28, 1) == b'\x01' and mu.mem_read(PAD + 0xB8, 1) == b'\x01', 'pad flags'
+assert mu.mem_read(DISC_SLOT + 3 * 0x60, 0x60) == b'pops:/disc/disc0'.ljust(0x60, b'\0'), 'boot path'
+assert mu.mem_read(DISC_SLOT, 3 * 0x60) == slots[:3 * 0x60]
+for buttons, address, size, want in ((0xF6FE, 0x70003390, 1, 0), (0xF9FE, 0x70003390, 1, 1),
+                                     (0xF5FE, 0x0021E454, 4, 0x22B50006),
+                                     (0xFAFE, 0x0021E454, 4, 0x8CA42158),
+                                     (0xECFE, 0x0059C200, 2, 0x1000)):
+    press(buttons)
+    got = int.from_bytes(mu.mem_read(address, size), 'little')
+    assert got == want, (hex(buttons), hex(got))
+assert u32(0x1304) == 0, 'no swap yet'
+for select, slot in ((0xFCDE, 1), (0xFC7E, 3), (0xFCEE, 0), (0xFCBE, 2)):
+    press(select)
+    assert u32(DISC_SELECTED) == slot, (hex(select), u32(DISC_SELECTED))
+    press(0xECFE)
+    calls = u32(0x1304)
+    press(0x7CFE)
+    assert u32(0x1304) == calls + 1, 'one swap per close'
+    a0 = u32(0x1300)
+    assert a0 == DISC_SLOT + 0x60 * slot and a0 % 16 == 0, hex(a0)
+    assert a0 + 0x80 <= DISC_SLOT + 4 * 0x60 + 32, hex(a0)  # the slots and disc_tail
+    assert struct.unpack('<H', mu.mem_read(0x0059C200, 2))[0] == 0x0200, 'lid closed'
+    # POPS's code runs with POPS's own gp, which the resident never sets.
+    assert u32(0x1308) == (0x0123456789AB0000 + (GP1_REGS.index(UC_MIPS_REG_GP) << 8) + 0x11) & 0xFFFFFFFF
+    assert u32(0x130C) % 16 == 0, hex(u32(0x130C))
+press(0x7CFE)  # lid closed now: no swap
+assert u32(0x1304) == 4
+mu.mem_write(PAD + 2, struct.pack('<H', 0xFFFF))
+print('resident always-live block: PASS (emode, lid, scanlines, pad flags, boot path, 4 swaps '
+      'from aligned slots with POPS\'s gp)')
 
 # 8. POPStarter's nine always-on misaligned-read guards. The built stubs must
 # be the words assembled from common/src/pops_resident_guards.S, and must do

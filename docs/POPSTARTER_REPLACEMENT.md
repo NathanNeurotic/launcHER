@@ -738,6 +738,13 @@ paths and verifies that *every listed disc* can be opened before the IOP
 reboot. Missing secondary discs no longer cause a late file open error only
 after transfer to Sony POPS.
 
+2026-11-02: replaced by POPStarter's behaviour. `DISCS.TXT` is now read as
+the original reads it (a `/`, `\` or `:` anywhere makes it ignore the whole
+file, so absolute paths are no longer accepted; no trimming or comments), a
+missing disc no longer stops the launch, and popfs's own disc mapping stops at
+the first disc it cannot take. The in-game swap opens the names itself. See
+[POPSTARTER_LAUNCH_HOOKS.md](POPSTARTER_LAUNCH_HOOKS.md).
+
 **Blocking Sony interface issue:** The actual PS2 POPStarter wrapper
 registers a `pfs:` service; the present driver registers `pops:` only.
 A device alias must never hijack or unregister the genuine Sony/APA `pfs`
@@ -1239,6 +1246,13 @@ This is additive filename compatibility, **not** proof that Sony IOPCD
 requests `IMAGE1.VCD` or that the selected POPS build will use the
 private disc-swap devctl interface. The actual multi-disc file-open
 sequence and card sharing still need hardware/runtime tracing.
+
+2026-11-02: these mappings stay on the `pops` name only. Through the `pfs`
+alias (off the HDD), `IMAGE0.VCD` to `IMAGE3.VCD` are now plain names in the
+launched game's folder, because POPStarter's in-game swap, now copied, opens
+`pfs0:/` + a `DISCS.TXT` line there; a line that reads `IMAGE1.VCD` must open
+that file, not the disc on `DISCS.TXT`'s second line. `IMAGE.VCD` keeps the
+launched disc on both names. See [POPSTARTER_LAUNCH_HOOKS.md](POPSTARTER_LAUNCH_HOOKS.md).
 
 ## PSXCore reference submodule — 2026-10-14
 

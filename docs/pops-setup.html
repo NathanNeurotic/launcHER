@@ -254,7 +254,7 @@ arg=-dev9=NIC</code></pre>
   <li><code>PATCHES.TXT</code>: General directives, video modes, and memory patches.</li>
   <li><code>MODES.TXT</code>: Compatibility modes 1 through 8.</li>
   <li><code>CHEATS.TXT</code>: GameShark and Action Replay cheat codes.</li>
-  <li><code>DISCS.TXT</code>: Multi-disc image file paths.</li>
+  <li><code>DISCS.TXT</code>: The disc file names of a multi-disc game (up to 4), for POPStarter's in-game disc swap.</li>
   <li><code>VMCDIR.TXT</code>: Custom folder path for Virtual Memory Cards.</li>
 </ul>
 
@@ -426,20 +426,32 @@ arg=-dev9=NIC</code></pre>
 Metal Gear Solid (Disc 2).VCD</code></pre>
 
 <p>
-  You can list up to 4 discs. Paths can be relative to the game folder or absolute device paths.
+  launcHER reads <code>DISCS.TXT</code> the way POPStarter r13 does:
 </p>
+
+<ul>
+  <li>Up to 4 lines, one disc each, in order: disc 1 to disc 4. Lines after the fourth are not read.</li>
+  <li>Each line is the name of a file beside the launched game, not a path. A <code>/</code>, <code>\</code> or <code>:</code> anywhere in the file makes launcHER ignore the whole file, as POPStarter does.</li>
+  <li>Nothing is trimmed and there are no comments: a line of spaces or a <code>#</code> line counts as a disc name. Empty lines are skipped.</li>
+  <li>A line of 90 characters or more clears the whole list.</li>
+  <li>A <code>DISCS.TXT</code> beside the games applies to all of them. One in the game's own subfolder (named like the game) is read after it and replaces its lines from the first.</li>
+</ul>
 
 <h3>In-Game Disc Swapping</h3>
 <p>
-  When the game prompts you to change discs:
+  POPStarter's disc swap, on controller 1, holding nothing else (not yet tested on a console):
 </p>
 
 <ol class="checklist">
-  <li>Press <b>SELECT + L1 + R1</b> on your controller.</li>
-  <li>launcHER's virtual disc driver signals a disc tray open event to POPS.</li>
-  <li>The driver switches the active sector stream to the next <code>.VCD</code> file listed in <code>DISCS.TXT</code>.</li>
-  <li>The driver signals a disc tray closed event, and the game resumes loading from the new disc.</li>
+  <li>Press <b>SELECT + L2 + R2 + TRIANGLE</b> to open the virtual disc lid.</li>
+  <li>Press <b>SELECT + L2 + R2</b> with <b>UP</b>, <b>RIGHT</b>, <b>DOWN</b> or <b>LEFT</b> to pick disc 1, 2, 3 or 4 of <code>DISCS.TXT</code>.</li>
+  <li>Press <b>SELECT + L2 + R2 + SQUARE</b> to close the lid. POPS loads the disc you picked and the game carries on.</li>
 </ol>
+
+<p>
+  Without a <code>DISCS.TXT</code> line for the disc you picked, closing the lid reloads the disc the game started with.
+  launcHER's older <b>SELECT + L1 + R1</b> swap is under review: its code refuses to switch while the game has the disc open, which is all the time in game.
+</p>
 
 <h2 id="step-9-cheats">Step 9: GameShark &amp; Action Replay Cheats</h2>
 <p>
@@ -530,8 +542,8 @@ $8009A200 0010</code></pre>
       </tr>
       <tr>
         <td><b>Disc Swap</b></td>
-        <td><code>SELECT + L1 + R1</code></td>
-        <td>Cycles to the next disc image defined in <code>DISCS.TXT</code>.</td>
+        <td><code>SELECT + L2 + R2 + TRIANGLE</code>, then <code>SELECT + L2 + R2</code> + a direction, then <code>SELECT + L2 + R2 + SQUARE</code></td>
+        <td>POPStarter's swap: open the lid, pick disc 1 to 4 of <code>DISCS.TXT</code> (UP, RIGHT, DOWN, LEFT), close the lid to load it. Controller 1.</td>
       </tr>
     </tbody>
   </table>

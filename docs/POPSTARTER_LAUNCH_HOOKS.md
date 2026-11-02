@@ -36,7 +36,7 @@ POPSTARTER.ELF MAIN.
 | Original | What it does | launcHER |
 |---|---|---|
 | `0x8744a8` | `0x20c0c4 = 0` (later replaced by `0x874a04`) | same end result, `pops_apply_always_on_pokes` |
-| `0x874764` | copies `0x738` bytes of its own code to `0x232790`: the always-live block the GP1 hook runs (pad hotkeys, slot copies, `$NOVMC0/1` and controller ID stores, the reset combo, the chain slots) | launcHER's own resident GP1 work. The reset combo, controller IDs and chain calls are in it; the pad hotkeys are not yet (below) |
+| `0x874764` | copies `0x738` bytes of its own code to `0x232790`: the always-live block the GP1 hook runs (pad hotkeys, slot copies, `$NOVMC0/1` and controller ID stores, the reset combo, the chain slots) | launcHER's own resident GP1 work: the pad hotkeys and in-game disc swap (below), the controller ID stores, the reset combo and the chain calls. The `$NOVMC0/1` stores are not (below) |
 | `0x87477c` | copies `0xd60` bytes to `0x238a90`: its `$SET_TIMINGS`, LibCrypt 2 and cheat code area, entered at `0x239490` | launcHER's own resident code |
 | `0x874790` | `0x21a63c = jal 0x239490`: the GP1 hook | `pops_resident_hook_gp1`, **now on every launch** (it was only with cheats, controller IDs or `$SET_TIMINGS`) |
 | `0x8747ec` | `0x2075e8..0x2075ef = j 0x143a160; nop` (over two `ld`s near the end of a POPS routine that builds an instruction word and stores it, `sw $v1, 0($a2)` at `0x2075f8`), into the code copied at `0x874808` | **not copied yet** (below) |
@@ -115,19 +115,85 @@ they change in the shell's behaviour was not worked out. When launcHER
 gains `BIOS.BIN` or OSD support, they must be skipped for those, as the
 original does (`gp+0x3b98`, `gp+0x38a4`, `gp+0x344c`, `gp+0x3430`).
 
+## The pad hotkeys and the in-game disc swap
+
+The first thing the GP1 hook runs, on every GP1 write, is the always-live
+block (`0x232790..0x232c90`). It reads controller 1's buttons (`0x507002`,
+active low) and compares them with exact values, so another button held
+with a combo cancels it. Every check reads the buttons again, except the
+first two, which share one read. In its order:
+
+| Controller 1, nothing else held | What the original does | launcHER |
+|---|---|---|
+| SELECT+L2+R1, SELECT+R2+L1 | the byte at `0x70003390` (scratchpad, read by POPS) = 0, 1 | same |
+| SELECT+L2+R2+TRIANGLE | POPS's lid halfword `0x59c200` = `0x1000`: lid open | same |
+| any (every pass) | `+0x28` of both pad blocks (`0x507028`, `0x5070b8`) = 1 | same |
+| SELECT+R2+R1, SELECT+L2+L1 | the `$SCANLINES` word at `0x21e454` = `0x22b50006` (on), POPS's own `0x8ca42158` (off), with no cache flush | same, no flush |
+| SELECT+L2+R2+SQUARE, while the lid is open | lid = `0x200` (closed), then POPS's disc init (`0x210540`) with the selected slot | same |
+| SELECT+L2+R2+UP, RIGHT, DOWN, LEFT | selects slot 0, 1, 2, 3 for the next close, by rewriting the immediate of the `ori` at `0x2328bc` (its own code, no cache flush) | same slots; the selection is a word in the resident config (quirk 49) |
+| any (every pass) | each slot whose first word is 0 gets `0x60` bytes from POPS's boot path (`0x1ffecb0`) | same |
+
+So the in-game disc swap is: SELECT+L2+R2+TRIANGLE (open the lid), then
+SELECT+L2+R2 and a direction (pick the disc), then SELECT+L2+R2+SQUARE
+(close it, load the disc). The four slots (`0x232950..0x232ad0`, `0x60`
+bytes each) hold `pfs0:/` and a `DISCS.TXT` line. With no `DISCS.TXT` the
+slots are empty, so each gets the boot path and a swap reloads the disc the
+game started with.
+
+**DISCS.TXT.** The original reads it at launch (`0x8d5cf8`), first the one
+for all games, then the game's own (skipped when the word `gp+0x38dc` or
+`gp+0x3460` is set), each from slot 0 over what was there; never in
+physical-disc mode (`gp+0x3410` = 1). In a file:
+
+- an empty file changes nothing;
+- a `\`, `/` or `:` anywhere and the whole file is ignored (its message:
+  "An illegal character was found. Aborded."), the slots keep what they
+  held;
+- CR and LF end lines and empty lines are skipped; nothing is trimmed and
+  there are no comments, so a line of spaces or `# note` is a disc name;
+- each of the first four lines becomes `pfs0:/` + the line + one NUL in
+  its slot; the slot's other bytes stay; lines after the fourth are not
+  read;
+- a line of 90 characters or more clears all four slots and stops
+  ("VCD %d filename exceeds 89 characters. Aborded."): `pfs0:/`, 89
+  characters and the NUL fill a slot exactly.
+
+launcHER: `pops_config_parse_discs`, the same rules byte for byte, in the
+same order (global, then per game); the slots go to the resident config,
+`PopsResidentConfig.disc_slot` (resident image v13), 16-byte aligned like
+the original's because POPS sends the name to the IOP by DMA straight from
+the slot. Quirks 45 to 48.
+
+**The disc init.** The original calls POPS's `0x210540` straight from the
+GP1 hook, with interrupts disabled, on the POPS thread's stack; launcHER
+does the same from its resident code (quirk 50).
+
+**Where the disc opens.** POPS's disc init sends the name to its IOP CD
+module, which opens it. On the HDD, `pfs0:/<name>` is a file in the game's
+partition. On USB and SMB, POPStarter's PFS wrapper opens `pfs0:/<name>` as
+`mass:/POPS/<name>`. launcHER's popfs registers a `pfs` name off the HDD
+(`virtualPfs`) that opens `<name>` in the folder of the game it launched,
+read-only like every disc. Through it a few names keep launcHER's own
+meaning: `IMAGE.VCD` (the launched disc; launcHER's live storage probe
+opens `pfs0:IMAGE.VCD`), `SLOT0.VMC`, `SLOT1.VMC` (and `.bak`), `ps1emu`
+and `disc/discN`. `IMAGE0.VCD` to `IMAGE3.VCD` are plain files there, so a
+`DISCS.TXT` that names its discs `IMAGE1.VCD`, `IMAGE2.VCD` opens those
+files (quirk 51).
+
+**launcHER's own swap.** popfs also has a disc swap of its own,
+SELECT+L1+R1, armed when two or more discs are mapped. It switches only
+while no disc file is open, and POPS's CD module keeps the disc open while
+the game runs, so in game it never switches; with two or more discs it
+still sits on controller reads (SIO2). It is not POPStarter's and is not
+used by POPStarter's swap.
+
 ## Not copied yet
 
-- **The pad hotkeys and slot copies in the always-live block**
-  (`0x232790..0x232c90`), run on every GP1 write in the original. Read
-  from its code so far: SELECT+L2+R1 and SELECT+R2+L1 set a byte at
-  `0x70003390` to 0 or 1; SELECT+R2+R1 and SELECT+L2+L1 write the
-  `$SCANLINES` word at `0x21e454` on and back off; SELECT+L2+R2+TRIANGLE
-  sets the halfword at `0x59c200` to `0x1000`, and SELECT+L2+R2+SQUARE
-  then sets it to `0x200` and calls POPS's `0x210540` with one of four
-  `0x60`-byte slots (`0x232950..0x232ad0`), picked by SELECT+L2+R2 and a
-  D-pad direction; four slot copies follow. Every pass also writes 1 to
-  `+0x28` of both pad blocks (`0x507028`, `0x5070b8`). Being worked out
-  next, then copied with an emulation test against the original block.
+- **The `$NOVMC0/1` stores in the always-live block**: `0x232c90` and
+  `0x232ca0` are branches over a store of 0 to byte `0x507920` and to byte
+  `0x527930`. The commands' handlers write byte 1 into the branch's offset
+  (`0x8d6b9c`), so the store runs on every pass. launcHER handles the
+  commands at launch only (see the inventory).
 - **The recompiler hook** at `0x2075e8` and the `0x5ea0` bytes behind it,
   which the `$RECOMPILER_ADDON_0..4` commands change. It runs on every
   launch in the original. Followed through the copied block (MAIN
@@ -141,7 +207,7 @@ original does (`gp+0x3b98`, `gp+0x38a4`, `gp+0x344c`, `gp+0x3430`).
   larger than the EE's 16 KB instruction cache, on each call of that POPS
   routine. When the word is not 0 it takes another path (`0x143a274`),
   not worked out yet; the only stores to that word found in MAIN write 0.
-  Next after the hotkeys, with the `$RECOMPILER_ADDON` commands.
+  Next, with the `$RECOMPILER_ADDON` commands.
 
 ## Verification
 
@@ -173,3 +239,27 @@ builds), the built stubs are the assembled words and pass the model;
 `tools/check_pops_resident_image.py` checks the same. With
 `POPS_TRAMPOLINE_BIN` (the `.text` of the built `pops_trampoline.S`
 object), the built trampoline is the assembled one.
+
+The pad hotkeys and the disc swap, in CI:
+
+- `tools/test_pops_features.py` checks every `DISCS.TXT` rule above on
+  `pops_config_parse_discs` and on the global-then-per-game order of
+  `pops_config_discover`. With `POPSTARTER_TEST_ELF` it runs the original's
+  reader (`0x8d64b0..0x8d6b5c`) under the interpreter on the same text:
+  258 cases, single files and two-file sequences over random earlier
+  slots, the same slots byte for byte.
+- `tools/test_pops_resident.py` (`Hotkeys`) checks each combo, the exact
+  match, the lid order and the boot path copies on
+  `pops_resident_hotkeys`. With `POPSTARTER_TEST_ELF` it runs the
+  original's always-live block at `0x232790`, as its launch copies it,
+  pass for pass beside launcHER's: 150 random button sequences (3,075
+  passes, 145 swaps), with the same scratchpad byte, lid, pad flags,
+  scanlines word, selected slot, four slots and disc init calls.
+- `tools/check_pops_resident_image.py` (section 7b, manual, needs unicorn)
+  runs the built image's GP1 entry with a stand-in for POPS's disc init
+  at `0x210540` that records its argument, `$gp` and `$sp`: each of the
+  four swaps passes its slot, 16-byte aligned with the DMA window inside
+  the config, with the lid closed and POPS's `$gp`.
+- `tools/test_popfs.py`: through the `pfs` name a `DISCS.TXT` name opens
+  in the game's folder, `IMAGE0.VCD` to `IMAGE3.VCD` included, read-only;
+  the `pops` name keeps its disc slots.

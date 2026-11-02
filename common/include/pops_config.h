@@ -58,6 +58,12 @@ enum PopsRegion {
 #define POPS_DISPLAY_ALL     0x0f
 
 #define POPS_MAX_DISCS    4
+/* POPStarter's disc slots (its resident block, 0x232950): 0x60 bytes each,
+ * "pfs0:/" + a DISCS.TXT line + NUL. Lines of POPS_DISC_LINE_MAX characters
+ * or more clear all four. */
+#define POPS_DISC_SLOT_SIZE   0x60
+#define POPS_DISC_SLOT_PREFIX "pfs0:/"
+#define POPS_DISC_LINE_MAX    90
 #define POPS_MAX_CHEATS   256
 
 /* Cheat gates. POPStarter puts one test in front of its cheat codes and
@@ -142,9 +148,12 @@ typedef struct {
   /* Runtime core corrections bitmask: POPS_FIX_* (0x01..0x1F) */
   uint8_t runtime_corrections;
 
-  /* Multi-disc support from DISCS.TXT */
+  /* DISCS.TXT, as POPStarter keeps it: the four slots its in-game swap
+   * loads, byte for byte (POPS_DISC_SLOT_*). A slot no file wrote stays
+   * zero; in game it then gets POPS's boot path. disc_count: how many
+   * slots, from the first, hold a line. */
   uint8_t disc_count;
-  char discs[POPS_MAX_DISCS][128];
+  uint8_t disc_slot[POPS_MAX_DISCS][POPS_DISC_SLOT_SIZE];
 
   /* Custom VMC directory from VMCDIR.TXT */
   char vmc_dir[128];
@@ -248,7 +257,17 @@ int pops_config_parse_line(PopsConfig *cfg, const char *line);
 /* Parse a text file into configuration */
 int pops_config_load_file(PopsConfig *cfg, const char *filepath);
 
-/* Parse DISCS.TXT (up to 4 VCD filenames, 1 per line) */
+/* POPStarter's DISCS.TXT reader (0x8d5cf8 in its main image), for one
+ * file of `size` bytes; text needs size + 1 bytes and is changed. An empty
+ * file, or one with a backslash, / or : anywhere, changes nothing. CR, LF
+ * and NUL end lines and every other byte is kept: no trimming, no
+ * comments. Line n (n = 1..4) becomes slot n-1 as "pfs0:/" + line + NUL;
+ * the rest of the slot is left as it was. A line of POPS_DISC_LINE_MAX
+ * characters or more zeroes all four slots and ends the file; a fifth line
+ * is not read. */
+void pops_config_parse_discs(PopsConfig *cfg, char *text, size_t size);
+
+/* Read one DISCS.TXT into the slots (pops_config_parse_discs). */
 int pops_config_load_discs(PopsConfig *cfg, const char *filepath);
 
 /* Parse VMCDIR.TXT (single folder name) */

@@ -47,6 +47,10 @@ class ResidentConfig(c.Structure):
         ("reserved", c.c_uint8 * 3),
         ("libcrypt2_code", c.c_uint32 * 23),
         ("reset_vector", c.c_uint32),
+        ("disc_selected", c.c_uint32),
+        ("disc_align", c.c_uint8 * 8),  # disc_slot is 16-byte aligned
+        ("disc_slot", (c.c_uint8 * 0x60) * 4),
+        ("disc_tail", c.c_uint32 * 8),
     ]
 
 
@@ -111,6 +115,19 @@ L.pops_resident_build_config.argtypes = [c.POINTER(ResidentConfig), c.c_void_p]
 L.pops_config_init.argtypes = [c.c_void_p]
 L.pops_config_parse_line.argtypes = [c.c_void_p, c.c_char_p]
 L.pops_config_parse_line.restype = c.c_int
+L.pops_config_parse_discs.argtypes = [c.c_void_p, c.c_char_p, c.c_size_t]
+L.pops_config_parse_discs.restype = None
+
+HOTKEY_CD_INIT = c.CFUNCTYPE(c.c_int, c.c_void_p)
+
+
+class HotkeyMemory(c.Structure):
+    _fields_ = [("pad", c.c_size_t), ("emode", c.c_size_t), ("lid", c.c_size_t),
+                ("scanlines", c.c_size_t), ("boot_path", c.c_size_t), ("cd_init", HOTKEY_CD_INIT)]
+
+
+L.pops_resident_hotkeys.argtypes = [c.POINTER(ResidentConfig), c.POINTER(HotkeyMemory)]
+L.pops_resident_hotkeys.restype = None
 
 
 def assert_gp1_hook_always(test, src):
@@ -769,7 +786,7 @@ class HookGp1(unittest.TestCase):
 
 def image(file_size=0xC0, image_size=0x2000, entry=BASE + 0x60, config=BASE + 0xC0, magic=0x5352484C):
     img = bytearray(file_size)
-    struct.pack_into("<IHHIIIIIIIIIIII9I", img, 0, magic, 12, 92, file_size, image_size, entry, config,
+    struct.pack_into("<IHHIIIIIIIIIIII9I", img, 0, magic, 13, 92, file_size, image_size, entry, config,
                      BASE + 0x64, BASE + 0x68, BASE + 0x6C, BASE + 0x70, BASE + 0x74, BASE + 0x78,
                      BASE + 0x7C, BASE + 0x60, *[BASE + 0x80 + 4 * i for i in range(9)])
     img[0x60:0x64] = b"\x08\x00\xe0\x03"
@@ -797,6 +814,8 @@ class Install(unittest.TestCase):
         self.assertEqual(self.check(image(entry=BASE + 0x10))[0], -errno.ERANGE)
         self.assertEqual(self.check(image(config=BASE + 0x2000 - 8))[0], -errno.ERANGE)
         self.assertEqual(self.check(image(config=BASE + 0xC4))[0], -errno.ERANGE)
+        # 16-byte aligned: POPS DMAs the disc names straight from the slots.
+        self.assertEqual(self.check(image(config=BASE + 0xC8))[0], -errno.ERANGE)
         # Every entry, the nine guard stubs included, must be code in the image.
         for offset in range(24, 92, 4):
             for bad in (BASE + len(img_ok := image()), BASE + 0x58, BASE + 0x62):
@@ -804,9 +823,10 @@ class Install(unittest.TestCase):
                 struct.pack_into('<I', img, offset, bad)
                 self.assertEqual(self.check(img)[0], -errno.ERANGE, (offset, hex(bad)))
             self.assertEqual(self.check(img_ok)[0], 0)
-        img = image()
-        struct.pack_into('<H', img, 4, 11)
-        self.assertEqual(self.check(img)[0], -errno.EINVAL)
+        for version in (11, 12, 14):
+            img = image()
+            struct.pack_into('<H', img, 4, version)
+            self.assertEqual(self.check(img)[0], -errno.EINVAL, version)
         img = image()
         struct.pack_into('<H', img, 6, 56)
         self.assertEqual(self.check(img)[0], -errno.EINVAL)
@@ -1411,6 +1431,266 @@ class OriginalPresets(unittest.TestCase):
         # fix, 0x27 module error checks, 0x28 HddInit exit (0x8710a0..).
         for preset in (0x22, 0x23, 0x24, 0x27, 0x28):
             self.assertEqual(elf[off + preset], 1, hex(0x100000 + preset))
+
+
+COMBO_EMODE_0, COMBO_EMODE_1, COMBO_LID_OPEN = 0xF6FE, 0xF9FE, 0xECFE
+COMBO_SCANLINES_ON, COMBO_SCANLINES_OFF, COMBO_LID_CLOSE = 0xF5FE, 0xFAFE, 0x7CFE
+COMBO_DISC = (0xFCEE, 0xFCDE, 0xFCBE, 0xFC7E)
+LID_OPEN, LID_CLOSED = 0x1000, 0x0200
+SCANLINES_ON, SCANLINES_OFF = 0x22B50006, 0x8CA42158
+SLOT = 0x60
+
+
+def disc_slots(*names):
+    """Slots as POPStarter's DISCS.TXT reader writes them."""
+    out = bytearray(4 * SLOT)
+    for n, name in enumerate(names):
+        if name is not None:
+            out[n * SLOT:n * SLOT + 7 + len(name)] = b"pfs0:/" + name + b"\0"
+    return bytes(out)
+
+
+class _HotkeyMachine:
+    """launcHER's pops_resident_hotkeys over host memory standing in for
+    POPS's: the two pad state blocks, the emode byte, the lid halfword, the
+    $SCANLINES word, main's boot path and the disc init (recorded)."""
+
+    def __init__(self, slots=bytes(4 * SLOT), lid=LID_CLOSED, boot=bytes(SLOT), emode=0x55,
+                 scanlines=SCANLINES_OFF):
+        self.cfg = ResidentConfig()
+        c.memmove(c.addressof(self.cfg.disc_slot), slots, 4 * SLOT)
+        self.pad = (c.c_uint8 * (2 * 0x90))()
+        self.emode = c.c_uint8(emode)
+        self.lid = c.c_uint16(lid)
+        self.scanlines = c.c_uint32(scanlines)
+        self.boot = (c.c_uint8 * SLOT).from_buffer_copy(boot)
+        self.calls = []
+        self._cd_init = HOTKEY_CD_INIT(self.cd_init)
+        self.mem = HotkeyMemory(c.addressof(self.pad), c.addressof(self.emode), c.addressof(self.lid),
+                                c.addressof(self.scanlines), c.addressof(self.boot), self._cd_init)
+
+    def cd_init(self, path):
+        slot, rest = divmod(path - c.addressof(self.cfg.disc_slot), SLOT)
+        assert rest == 0 and 0 <= slot < 4, (slot, rest)
+        # POPS sends 0x80 bytes from there to the IOP by DMA: the slot and
+        # what follows it, which must still be the configuration.
+        assert path + 0x80 <= c.addressof(self.cfg) + c.sizeof(self.cfg)
+        assert path % 16 == 0
+        self.calls.append((slot, c.string_at(path, SLOT)))
+        return 0
+
+    def frame(self, buttons):
+        struct.pack_into("<H", self.pad, 2, buttons)
+        L.pops_resident_hotkeys(c.byref(self.cfg), c.byref(self.mem))
+
+    def slots(self):
+        return c.string_at(c.addressof(self.cfg.disc_slot), 4 * SLOT)
+
+    def state(self):
+        return (self.emode.value, self.lid.value, self.pad[0x28], self.pad[0x90 + 0x28],
+                self.scanlines.value, self.cfg.disc_selected, self.slots())
+
+
+class _OriginalHotkeys:
+    """POPStarter's always-live block as shipped (its resident blob, MAIN
+    0x983150, which the launch copies to 0x232790), from 0x232790 to the
+    $NOVMC0 slot at 0x232c90, on tools/r5900_mini.py. The selected slot
+    lives in the immediate of the ori at 0x2328bc."""
+    SRC, RUN, END = 0x983150, 0x232790, 0x232C90
+    SLOTS, ORI = 0x232950, 0x2328BC
+
+    def __init__(self, image, slots=bytes(4 * SLOT), lid=LID_CLOSED, boot=bytes(SLOT), emode=0x55,
+                 scanlines=SCANLINES_OFF):
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from r5900_mini import M32, Machine
+        self.m = m = Machine()
+        m.record = False
+        m.write(self.RUN, bytes(image[self.SRC - 0x870000:self.SRC - 0x870000 + self.END - self.RUN]))
+        m.write(self.SLOTS, slots)
+        m.write(0x70003390, bytes([emode]))
+        m.write(0x0059C200, struct.pack("<H", lid))
+        m.put32(0x0021E454, scanlines)
+        m.write(0x01FFECB0, boot)
+        self.calls = []
+
+        def cd_init(mm):
+            path = mm.lo(4) & M32
+            slot, rest = divmod(path - self.SLOTS, SLOT)
+            assert rest == 0 and 0 <= slot < 4, hex(path)
+            self.calls.append((slot, mm.read(path, SLOT)))
+            mm.set_lo(2, 0)
+
+        m.natives[0x00210540] = cd_init
+
+    def frame(self, buttons):
+        self.m.write(0x00507002, struct.pack("<H", buttons))
+        self.m.steps = 0
+        self.m.run(self.RUN, self.END, limit=5000)
+
+    def slots(self):
+        return self.m.read(self.SLOTS, 4 * SLOT)
+
+    def state(self):
+        m = self.m
+        selected, rest = divmod(struct.unpack("<H", m.read(self.ORI, 2))[0] - 0x2950, SLOT)
+        assert rest == 0 and 0 <= selected < 4
+        return (m.read(0x70003390, 1)[0], struct.unpack("<H", m.read(0x0059C200, 2))[0],
+                m.read(0x00507028, 1)[0], m.read(0x005070B8, 1)[0], m.u32(0x0021E454), selected,
+                self.slots())
+
+
+class Hotkeys(unittest.TestCase):
+    """POPStarter's always-live block: emode, lid, $SCANLINES and the
+    in-game disc swap (pops_resident_hotkeys). Host memory, no console."""
+
+    def test_emode_scanlines_lid_and_pad_flags(self):
+        m = _HotkeyMachine(emode=0x55)
+        m.frame(0xFFFF)
+        self.assertEqual(m.state()[:5], (0x55, LID_CLOSED, 1, 1, SCANLINES_OFF))
+        for buttons, emode in ((COMBO_EMODE_0, 0), (0xFFFF, 0), (COMBO_EMODE_1, 1), (0x1234, 1)):
+            m.frame(buttons)
+            self.assertEqual(m.emode.value, emode, hex(buttons))
+        m.frame(COMBO_SCANLINES_ON)
+        self.assertEqual(m.scanlines.value, SCANLINES_ON)
+        m.frame(COMBO_SCANLINES_OFF)
+        self.assertEqual(m.scanlines.value, SCANLINES_OFF)
+        m.frame(COMBO_LID_OPEN)
+        self.assertEqual(m.lid.value, LID_OPEN)
+        # Every pass sets +0x28 of both pad blocks, whatever the buttons.
+        m.pad[0x28] = m.pad[0xB8] = 0
+        m.frame(0x0000)
+        self.assertEqual((m.pad[0x28], m.pad[0xB8]), (1, 1))
+        self.assertEqual(m.calls, [])
+
+    def test_buttons_must_match_exactly(self):
+        for buttons in (0xF6FF, 0x76FE, 0xECFF, 0xECFC, 0x7CFF, 0x7CFC, 0xF5FF, 0xFAFF, 0xFCEF,
+                        0xFCFE, 0xFCEC, 0x0000, 0xFFFF):
+            m = _HotkeyMachine(lid=LID_OPEN, slots=disc_slots(b"A.VCD"), emode=0x55)
+            m.frame(buttons)
+            self.assertEqual(m.state()[:6], (0x55, LID_OPEN, 1, 1, SCANLINES_OFF, 0), hex(buttons))
+            self.assertEqual(m.calls, [])
+
+    def test_swap_loads_the_selected_slot_with_the_lid_open(self):
+        names = (b"Game (Disc 1).VCD", b"Game (Disc 2).VCD", b"Game (Disc 3).VCD", b"Game (Disc 4).VCD")
+        slots = disc_slots(*names)
+        m = _HotkeyMachine(slots=slots)
+        m.frame(COMBO_LID_CLOSE)  # the lid is closed: nothing to close
+        self.assertEqual((m.lid.value, m.calls), (LID_CLOSED, []))
+        for want in (2, 1, 3, 0, 3):
+            m.frame(COMBO_DISC[want])
+            self.assertEqual(m.cfg.disc_selected, want)
+            m.frame(COMBO_LID_OPEN)
+            m.frame(COMBO_LID_CLOSE)
+            self.assertEqual(m.lid.value, LID_CLOSED)
+            self.assertEqual(m.calls[-1], (want, slots[want * SLOT:(want + 1) * SLOT]))
+        m.frame(COMBO_LID_CLOSE)
+        self.assertEqual(len(m.calls), 5)
+        # Any lid value other than open: no swap.
+        m.lid.value = 0x1001
+        m.frame(COMBO_LID_CLOSE)
+        self.assertEqual((m.lid.value, len(m.calls)), (0x1001, 5))
+        self.assertEqual(m.slots(), slots)
+
+    def test_empty_slots_take_the_boot_path(self):
+        boot = b"pops:/disc/disc0".ljust(SLOT, b"\0")
+        slots = bytearray(disc_slots(b"A.VCD"))
+        slots[2 * SLOT:3 * SLOT] = bytes(4) + b"x" * (SLOT - 4)  # first word zero: empty
+        slots[3 * SLOT:4 * SLOT] = b"\0abc" + bytes(SLOT - 4)     # first word not zero: kept
+        m = _HotkeyMachine(slots=bytes(slots), boot=boot)
+        m.frame(0xFFFF)
+        got = m.slots()
+        self.assertEqual(got[:SLOT], bytes(slots[:SLOT]))
+        self.assertEqual(got[SLOT:3 * SLOT], boot * 2)
+        self.assertEqual(got[3 * SLOT:], bytes(slots[3 * SLOT:]))
+        # A boot path whose first word is zero is copied again every pass.
+        m = _HotkeyMachine(boot=bytes(4) + b"y" * (SLOT - 4))
+        m.frame(0xFFFF)
+        m.boot[4] = ord("z")
+        m.frame(0xFFFF)
+        self.assertEqual(m.slots()[4:6], b"zy")
+
+    def test_close_comes_before_the_slot_copies(self):
+        """On the first pass a close loads the still empty slot; the copy
+        after it fills the slot for the next one."""
+        boot = b"pops:/disc/disc0".ljust(SLOT, b"\0")
+        m = _HotkeyMachine(lid=LID_OPEN, boot=boot)
+        m.frame(COMBO_LID_CLOSE)
+        self.assertEqual(m.calls, [(0, bytes(SLOT))])
+        self.assertEqual(m.slots(), boot * 4)
+        m.frame(COMBO_LID_OPEN)
+        m.frame(COMBO_LID_CLOSE)
+        self.assertEqual(m.calls[-1], (0, boot))
+
+    def test_build_config_carries_the_slots(self):
+        cfg = BuildConfig.parsed(self)
+        text = b"A.VCD\nB.VCD"
+        L.pops_config_parse_discs(c.addressof(cfg), c.create_string_buffer(text, len(text) + 1), len(text))
+        out = ResidentConfig()
+        out.disc_selected, out.disc_tail[0] = 3, 7
+        L.pops_resident_build_config(c.byref(out), c.addressof(cfg))
+        self.assertEqual(c.string_at(c.addressof(out.disc_slot), 4 * SLOT), disc_slots(b"A.VCD", b"B.VCD"))
+        self.assertEqual((out.disc_selected, list(out.disc_tail)), (0, [0] * 8))
+        self.assertEqual(ResidentConfig.disc_slot.offset % 16, 0)
+        self.assertEqual(ResidentConfig.disc_tail.offset, ResidentConfig.disc_slot.offset + 4 * SLOT)
+
+    def test_gp1_work_runs_it_first(self):
+        """In the original the block is the first thing after the GP1 hook's
+        jump: before the controller IDs, the reset and the break slot."""
+        src = (ROOT / "common/src/pops_resident_engine.c").read_text()
+        body = src[src.index("void pops_resident_gp1_work(void) {"):]
+        body = body[:body.index("\n}\n")]
+        at = body.index("pops_resident_hotkeys(cfg, &keys);")
+        for later in ("pops_resident_pad_ids(", "POPS_RESET_COMBO", "POPS_BUILTIN_BREAK_ADDR",
+                      "pops_resident_timings("):
+            self.assertLess(at, body.index(later), later)
+        self.assertEqual(body.count("pops_resident_hotkeys("), 1)
+        self.assertNotIn("if (", body[:at])
+
+    @unittest.skipUnless(os.environ.get("POPSTARTER_TEST_ELF"), "optional external POPStarter MAIN")
+    def test_matches_the_original_block(self):
+        from trace_original_pops_io import decode_main
+
+        image = decode_main(Path(os.environ["POPSTARTER_TEST_ELF"]).read_bytes())
+        self.assertEqual(struct.unpack_from("<3I", image, 0x983150 - 0x870000),
+                         (0x3C1A0050, 0x241BF6FE, 0x875A7002))
+        rng = random.Random(0x484B4559)
+        combos = [COMBO_EMODE_0, COMBO_EMODE_1, COMBO_LID_OPEN, COMBO_LID_OPEN, COMBO_SCANLINES_ON,
+                  COMBO_SCANLINES_OFF, COMBO_LID_CLOSE, COMBO_LID_CLOSE, *COMBO_DISC, 0xFFFF, 0xBCFE,
+                  0xFCFE, 0x7CFF, 0xECFF]
+
+        def slot():
+            kind = rng.random()
+            if kind < 0.3:
+                return bytes(SLOT)
+            if kind < 0.7:
+                name = bytes(rng.choice(b"ABCD ()._-0123456789") for _ in range(rng.randint(1, 40)))
+                return (b"pfs0:/" + name + b"\0").ljust(SLOT, bytes([rng.getrandbits(8)]))
+            if kind < 0.78:  # first word zero: empty
+                return bytes(4) + bytes(rng.getrandbits(8) for _ in range(SLOT - 4))
+            if kind < 0.86:  # first byte zero, first word not: kept
+                return b"\0" + bytes(rng.randint(1, 255) for _ in range(3)) + bytes(SLOT - 4)
+            return bytes(rng.getrandbits(8) for _ in range(SLOT))
+
+        frames = swaps = 0
+        for case in range(150):
+            setup = dict(slots=b"".join(slot() for _ in range(4)),
+                         lid=rng.choice([LID_OPEN, LID_CLOSED, 0, rng.getrandbits(16)]),
+                         boot=rng.choice([b"pops:/disc/disc0".ljust(SLOT, b"\0"), bytes(SLOT),
+                                          bytes(rng.getrandbits(8) for _ in range(SLOT))]),
+                         emode=rng.getrandbits(8),
+                         scanlines=rng.choice([SCANLINES_ON, SCANLINES_OFF, rng.getrandbits(32)]))
+            ours, theirs = _HotkeyMachine(**setup), _OriginalHotkeys(image, **setup)
+            for frame in range(rng.randint(1, 40)):
+                buttons = rng.choice(combos) if rng.random() < 0.85 else rng.getrandbits(16)
+                ours.frame(buttons)
+                theirs.frame(buttons)
+                where = (case, frame, hex(buttons))
+                self.assertEqual(ours.state(), theirs.state(), where)
+                self.assertEqual(ours.calls, theirs.calls, where)
+                frames += 1
+            swaps += len(ours.calls)
+        self.assertGreater(swaps, 50)
+        print("Original always-live block PASS: %d passes, %d swaps" % (frames, swaps))
 
 
 class Layout(unittest.TestCase):

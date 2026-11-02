@@ -4,6 +4,7 @@ import errno
 import os
 import struct
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -41,7 +42,7 @@ class PopsConfig(c.Structure):
         ("compat_modes", c.c_uint8),
         ("runtime_corrections", c.c_uint8),
         ("disc_count", c.c_uint8),
-        ("discs", (c.c_char * 128) * 4),
+        ("disc_slot", (c.c_uint8 * 0x60) * 4),
         ("vmc_dir", c.c_char * 128),
         ("cheat_count", c.c_uint16),
         ("cheats", CheatEntry * 256),
@@ -123,6 +124,94 @@ def compile_shared_library():
     return c.CDLL(str(so_path))
 
 LIB = None
+
+DISC_SLOT_SIZE = 0x60
+DISC_SLOTS_SIZE = 4 * DISC_SLOT_SIZE
+
+
+def slots(cfg):
+    """The four DISCS.TXT slots, 0x180 bytes."""
+    return c.string_at(c.addressof(cfg) + PopsConfig.disc_slot.offset, DISC_SLOTS_SIZE)
+
+
+def disc_name(cfg, n):
+    slot = slots(cfg)[n * DISC_SLOT_SIZE:(n + 1) * DISC_SLOT_SIZE]
+    if not slot.startswith(b'pfs0:/'):
+        assert slot[0] == 0, slot
+        return b''
+    return slot[6:].split(b'\0')[0]
+
+
+def parse_discs(cfg, data):
+    LIB.pops_config_parse_discs.argtypes = [c.POINTER(PopsConfig), c.c_char_p, c.c_size_t]
+    LIB.pops_config_parse_discs.restype = None
+    text = c.create_string_buffer(data, len(data) + 1)
+    LIB.pops_config_parse_discs(c.byref(cfg), text, len(data))
+
+
+class OriginalDiscsReader:
+    """POPStarter's DISCS.TXT reader as shipped, from where its file has been
+    read (MAIN 0x8d64b0) to its return (0x8d6b5c), on tools/r5900_mini.py:
+    one call of 0x8d5cf8 per file, in order. strlen, memcpy, memset and
+    printf run natively. Needs the external POPSTARTER.ELF; not a console
+    test."""
+    START, END = 0x8D64B0, 0x8D6B5C
+    MAIN, GP = 0x870000, 0x9B68F0
+    FRAME, BUFFER, SLOTS = 0x01F00000, 0x01000000, 0x232950
+
+    def __init__(self, elf):
+        sys.path.insert(0, str(ROOT / "tools"))
+        from r5900_mini import M32, Machine
+        from trace_original_pops_io import decode_main
+
+        self.m = m = Machine()
+        m.record = False
+        m.write(self.MAIN, decode_main(elf))
+
+        def args(mm):
+            return [mm.lo(r) & M32 for r in (4, 5, 6)]
+
+        def strlen(mm):
+            at = mm.lo(4) & M32
+            n = 0
+            while mm.read(at + n, 1) != b'\0':
+                n += 1
+            mm.set_lo(2, n)
+
+        def memcpy(mm):
+            to, src, n = args(mm)
+            mm.write(to, mm.read(src, n))
+            mm.set_lo(2, to)
+
+        def memset(mm):
+            to, value, n = args(mm)
+            mm.write(to, bytes([value & 0xFF]) * n)
+            mm.set_lo(2, to)
+
+        def printf(mm):
+            mm.set_lo(2, 0)
+
+        m.natives.update({0x918E08: strlen, 0x918808: memcpy, 0x9188B8: memset, 0x915708: printf})
+
+    def run(self, files, before):
+        m = self.m
+        m.write(self.SLOTS, before)
+        for data in files:
+            if not data:
+                continue  # "FAILED, its size is zero": it returns before this code
+            size = len(data)
+            # malloc(size * 2), the file read into its start, never cleared.
+            m.write(self.BUFFER, data + b'\xa5' * size)
+            m.write(self.FRAME, bytes(0x110))
+            m.put32(self.FRAME + 0x98, 1)  # the line counter, 1 at entry
+            m.put32(self.FRAME + 0x9C, self.BUFFER)
+            m.put32(self.FRAME + 0xA0, size)
+            for reg, value in ((28, self.GP), (29, self.FRAME), (30, self.FRAME)):
+                m.set_lo(reg, value)
+            m.steps = 0
+            m.run(self.START, self.END, limit=400 * size + 20000)
+        return m.read(self.SLOTS, DISC_SLOTS_SIZE)
+
 
 class FeatureTests(unittest.TestCase):
     @classmethod
@@ -621,13 +710,20 @@ class FeatureTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / 'config.txt'
             encoded = str(path).encode()
-            path.write_text('\n  \n# comment\nDisc1.VCD\nDisc2.VCD\n')
+            # POPStarter keeps every byte of a line: no trimming, no comments.
+            path.write_bytes(b'\n  \n# comment\nDisc1.VCD\nDisc2.VCD\n')
             self.assertEqual(LIB.pops_config_load_discs(c.byref(cfg), encoded), 0)
-            self.assertEqual(cfg.disc_count, 2)
-            self.assertEqual(bytes(cfg.discs[0]).split(b'\0')[0], b'Disc1.VCD')
-            for content in ('X' * 128, 'Disc.VCD\n' * 5, 'X' * 300):
-                path.write_text(content)
-                self.assertLess(LIB.pops_config_load_discs(c.byref(cfg), encoded), 0)
+            self.assertEqual(cfg.disc_count, 4)
+            self.assertEqual([disc_name(cfg, n) for n in range(4)],
+                             [b'  ', b'# comment', b'Disc1.VCD', b'Disc2.VCD'])
+            # Too long a line clears all four, a fifth line is never read, and
+            # neither is an error.
+            for content, count in ((b'X' * 128, 0), (b'Disc.VCD\n' * 5, 4), (b'X' * 300, 0)):
+                path.write_bytes(content)
+                self.assertEqual(LIB.pops_config_load_discs(c.byref(cfg), encoded), 0)
+                self.assertEqual(cfg.disc_count, count, content[:12])
+            path.unlink()
+            self.assertEqual(LIB.pops_config_load_discs(c.byref(cfg), encoded), -errno.ENOENT)
             cfg.vmc_dir = b'Keep'
             path.write_text('X' * 128)
             self.assertLess(LIB.pops_config_load_vmcdir(c.byref(cfg), encoded), 0)
@@ -644,6 +740,126 @@ class FeatureTests(unittest.TestCase):
             path.write_text('\n')
             self.assertEqual(LIB.pops_config_load_vmcdir(c.byref(cfg), encoded), 0)
             self.assertEqual(cfg.vmc_dir, b'Keep')
+
+    def test_discs_txt_follows_the_original(self):
+        """POPStarter's DISCS.TXT reader (MAIN 0x8d64b0..0x8d6b5c), rule by rule."""
+        def parsed(data, before=None):
+            cfg = PopsConfig()
+            LIB.pops_config_init(c.byref(cfg))
+            if before is not None:
+                c.memmove(c.addressof(cfg) + PopsConfig.disc_slot.offset, before, DISC_SLOTS_SIZE)
+            parse_discs(cfg, data)
+            return cfg
+
+        cfg = parsed(b'Game (Disc 1).VCD\r\nGame (Disc 2).VCD\r\n')
+        self.assertEqual(cfg.disc_count, 2)
+        self.assertEqual(slots(cfg)[:0x60], b'pfs0:/Game (Disc 1).VCD' + bytes(0x60 - 23))
+        self.assertEqual(disc_name(cfg, 1), b'Game (Disc 2).VCD')
+        self.assertEqual(slots(cfg)[0xC0:], bytes(0xC0))
+        # CR, LF and NUL end a line; nothing else does, and empty lines take
+        # no slot. Bytes above 0x7f are kept.
+        cfg = parsed(b'\r\r\nA\0B\n\n\xe9t\xe9.VCD\t ')
+        self.assertEqual([disc_name(cfg, n) for n in range(4)], [b'A', b'B', b'\xe9t\xe9.VCD\t ', b''])
+        self.assertEqual(cfg.disc_count, 3)
+        # 89 characters fill a slot exactly; 90 clear all four and end the file.
+        line = b'D' * 89
+        self.assertEqual(slots(parsed(line))[:0x60], b'pfs0:/' + line + b'\0')
+        before = bytes(range(256)) + bytes(range(128))
+        for data in (b'D' * 90, b'A\nB\n' + b'D' * 90 + b'\nC', b'D' * 4000):
+            cfg = parsed(data, before)
+            self.assertEqual(slots(cfg), bytes(DISC_SLOTS_SIZE), data[:8])
+            self.assertEqual(cfg.disc_count, 0)
+        # Four lines at most: a fifth, however long, is never read.
+        cfg = parsed(b'1\n2\n3\n4\n' + b'D' * 90)
+        self.assertEqual([disc_name(cfg, n) for n in range(4)], [b'1', b'2', b'3', b'4'])
+        # A backslash, / or : anywhere and the file changes nothing.
+        for bad in (b'\\', b'/', b':'):
+            for data in (bad + b'A.VCD', b'A.VCD\nB.VCD\n' + bad, b'A.VCD\n' + b'D' * 95 + bad):
+                self.assertEqual(slots(parsed(data, before)), before, data)
+        # So does an empty file.
+        self.assertEqual(slots(parsed(b'', before)), before)
+        # Each line writes "pfs0:/", itself and one NUL: the rest of the
+        # slot keeps what an earlier file left there.
+        cfg = parsed(b'LongerName1.VCD\nB.VCD\nC.VCD\n')
+        parse_discs(cfg, b'A.VCD')
+        first = bytearray(b'pfs0:/LongerName1.VCD'.ljust(0x60, b'\0'))
+        first[:12] = b'pfs0:/A.VCD\0'
+        self.assertEqual(slots(cfg)[:0x60], bytes(first))
+        self.assertEqual([disc_name(cfg, n) for n in range(4)], [b'A.VCD', b'B.VCD', b'C.VCD', b''])
+        self.assertEqual(cfg.disc_count, 3)
+
+    def test_discs_txt_per_game_over_global(self):
+        """The original reads POPS/DISCS.TXT, then the game's own over it
+        (0x877414, then 0x8774b4)."""
+        LIB.pops_config_discover.argtypes = [c.POINTER(PopsConfig), c.c_char_p, c.c_char_p]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / 'Game').mkdir()
+            (root / 'DISCS.TXT').write_bytes(b'LongerName1.VCD\nB.VCD\nC.VCD\n')
+
+            def discovered():
+                cfg = PopsConfig()
+                LIB.pops_config_init(c.byref(cfg))
+                self.assertEqual(LIB.pops_config_discover(c.byref(cfg),
+                                 (str(root) + '/').encode(), b'Game'), 0)
+                return cfg
+
+            cfg = discovered()
+            self.assertEqual([disc_name(cfg, n) for n in range(4)],
+                             [b'LongerName1.VCD', b'B.VCD', b'C.VCD', b''])
+            (root / 'Game' / 'DISCS.TXT').write_bytes(b'A.VCD\n')
+            cfg = discovered()
+            self.assertEqual([disc_name(cfg, n) for n in range(4)], [b'A.VCD', b'B.VCD', b'C.VCD', b''])
+            self.assertEqual(slots(cfg)[12:22], b'Name1.VCD\0')
+            (root / 'Game' / 'DISCS.TXT').write_bytes(b'Disc/2.VCD\n')
+            self.assertEqual(disc_name(discovered(), 0), b'LongerName1.VCD')
+            (root / 'Game' / 'DISCS.TXT').write_bytes(b'D' * 90)
+            self.assertEqual(slots(discovered()), bytes(DISC_SLOTS_SIZE))
+            (root / 'DISCS.TXT').unlink()
+            (root / 'Game' / 'DISCS.TXT').write_bytes(b'\nOnly.VCD')
+            cfg = discovered()
+            self.assertEqual((cfg.disc_count, disc_name(cfg, 0)), (1, b'Only.VCD'))
+
+    @unittest.skipUnless(os.environ.get("POPSTARTER_TEST_ELF"), "optional external POPStarter MAIN")
+    def test_discs_txt_matches_the_original(self):
+        """POPStarter's own reader, run on tools/r5900_mini.py, against
+        pops_config_parse_discs: random files, alone and global + per-game."""
+        import random
+        original = OriginalDiscsReader(Path(os.environ["POPSTARTER_TEST_ELF"]).read_bytes())
+        rng = random.Random(0x44495343)
+        pieces = [b'Disc', b' (Disc 2)', b'.VCD', b'.vcd', b' ', b'\t', b'#', b';', b'-', b'_',
+                  b'\xe9', b'\xff', b'\0', b'\r', b'\n', b'\r\n', b'\n\n', b'(', b')', b'[', b']']
+        rare = [b'/', b'\\', b':']
+
+        def line():
+            kind = rng.random()
+            if kind < 0.1:
+                return b'L' * rng.randint(84, 95)
+            text = b''.join(rng.choice(pieces) for _ in range(rng.randint(0, 6)))
+            if rng.random() < 0.04:
+                text += rng.choice(rare)
+            return text
+
+        def file():
+            ending = rng.choice([b'\n', b'\r\n', b'\r', b'\0'])
+            return ending.join(line() for _ in range(rng.randint(0, 7))) + (
+                ending if rng.random() < 0.7 else b'')
+
+        cases = [[b'A.VCD\nB.VCD'], [b'D' * 89], [b'D' * 90], [b'1\n2\n3\n4\n' + b'D' * 90],
+                 [b'LongerName1.VCD\nB.VCD\nC.VCD\n', b'A.VCD'], [b'A:B'], [b'\n\n\r\r'],
+                 [b'1\n2\n3\n4\n', b'D' * 90]]
+        cases += [[file()] for _ in range(150)]
+        cases += [[file(), file()] for _ in range(100)]
+        for files in cases:
+            before = bytes(rng.getrandbits(8) for _ in range(DISC_SLOTS_SIZE)) if rng.random() < 0.3 \
+                else bytes(DISC_SLOTS_SIZE)
+            cfg = PopsConfig()
+            LIB.pops_config_init(c.byref(cfg))
+            c.memmove(c.addressof(cfg) + PopsConfig.disc_slot.offset, before, DISC_SLOTS_SIZE)
+            for data in files:
+                parse_discs(cfg, data)
+            self.assertEqual(slots(cfg), original.run(files, before), files)
+        print("Original DISCS.TXT reader PASS: %d" % len(cases))
 
     def test_config_parser_directives(self):
         cfg = PopsConfig()

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """A small R5900 (PS2 EE) interpreter and assembler for the few instructions
 POPStarter's launch pokes, the misaligned-read guards and launcHER's POPS
-trampoline use.
+trampoline use, and that POPStarter's always-live block and DISCS.TXT reader
+run (tools/test_pops_resident.py, tools/test_pops_features.py).
 
 128-bit GPRs, where an instruction that is not MMI/LQ writes bits 0..63 only
 and keeps bits 64..127 (as the R5900 does); branch delay slots; branch-likely;
@@ -192,6 +193,12 @@ class Machine:
             self.set_lo(rt, sext32(imm << 16))
         elif op == 0x19:     # daddiu
             self.set_lo(rt, self.lo(rs) + sext16(imm))
+        elif op == 0x0A:     # slti
+            a = self.lo(rs)
+            a -= (a & (1 << 63)) << 1
+            self.set_lo(rt, int(a < sext16(imm)))
+        elif op == 0x0B:     # sltiu: the immediate is sign-extended, then compared unsigned
+            self.set_lo(rt, int(self.lo(rs) < (sext16(imm) & M64)))
         elif op == 0x1C:     # MMI: only pcpyld
             if fn == 0x09 and sa == 0x0E:
                 self.set_full(rd, (self.lo(rs) << 64) | self.lo(rt))

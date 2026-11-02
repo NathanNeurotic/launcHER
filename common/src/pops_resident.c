@@ -210,8 +210,9 @@ int pops_resident_check_image(const void *image, size_t image_len, PopsResidentH
         h.guard_entry[i] >= POPS_RESIDENT_BASE + h.file_size)
       return -ERANGE;
   }
-  /* The configuration must fit inside the image, in its zeroed part or not. */
-  if ((h.config_addr & 7) || h.config_addr < POPS_RESIDENT_BASE + h.header_size ||
+  /* The configuration must fit inside the image, in its zeroed part or not,
+   * 16-byte aligned: POPS DMAs the disc names straight from its slots. */
+  if ((h.config_addr & 15) || h.config_addr < POPS_RESIDENT_BASE + h.header_size ||
       h.config_addr > POPS_RESIDENT_BASE + h.image_size - sizeof(PopsResidentConfig))
     return -ERANGE;
 
@@ -269,6 +270,10 @@ int pops_resident_build_config(PopsResidentConfig *out, const PopsConfig *cfg) {
   /* The in-game reset's jump word: the BIOS reset vector, or the stub
    * $RESET_WARMBOOT found (pops_apply_reset_warmboot). */
   out->reset_vector = cfg->reset_vector ? cfg->reset_vector : POPS_RESET_VECTOR_DEFAULT;
+  /* The in-game disc swap's slots, as DISCS.TXT left them; slot 0 selected
+   * at first, as the original's ori starts out. Always live. */
+  memcpy(out->disc_slot, cfg->disc_slot, sizeof(out->disc_slot));
+  out->disc_selected = 0;
 
   uint16_t count = cfg->cheat_count;
   if (count > POPS_MAX_CHEATS)

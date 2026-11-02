@@ -39,7 +39,7 @@ extern "C" {
 #define POPS_RESIDENT_BASE        UINT32_C(0x0143a000)
 #define POPS_RESIDENT_LIMIT       UINT32_C(0x01460000)
 #define POPS_RESIDENT_MAGIC       UINT32_C(0x5352484c) /* "LHRS" */
-#define POPS_RESIDENT_VERSION     12
+#define POPS_RESIDENT_VERSION     13
 
 /* POPStarter's always-on guards (pops_resident_guards.S): the POPS words
  * that become "j stub", in the order the original writes them
@@ -187,12 +187,73 @@ typedef struct {
    * port 0 buttons read exactly POPS_RESET_COMBO. The BIOS reset vector as
    * shipped; $RESET_WARMBOOT points it at the SystemErrorExit stub. */
   uint32_t reset_vector;
+  /* POPStarter's in-game disc swap (pops_resident_hotkeys): the slot
+   * SELECT+L2+R2+SQUARE loads, 0..3 (the original keeps it in the ori at
+   * 0x2328bc), and the four slots from DISCS.TXT (PopsConfig.disc_slot;
+   * the original's are at 0x232950). POPS sends the name to the IOP by DMA
+   * straight from the slot, 0x80 bytes, so the slots are 16-byte aligned
+   * like the original's and something readable follows the last one. */
+  uint32_t disc_selected;
+  uint8_t disc_slot[POPS_MAX_DISCS][POPS_DISC_SLOT_SIZE] __attribute__((aligned(16)));
+  uint32_t disc_tail[8]; /* zero; read by that DMA after the last slot */
 } PopsResidentConfig;
 
 /* Port 0 buttons (active low) for the reset: SELECT + L2 + R2 + CROSS and
  * nothing else, the original's `lh 0x507002 == 0xbcfe`. */
 #define POPS_RESET_COMBO          0xbcfeu
 #define POPS_RESET_VECTOR_DEFAULT UINT32_C(0xbfc00000)
+
+/* POPStarter's always-live block (0x232790..0x232c90), the first thing its
+ * GP1 hook runs. Port 0 buttons (active low), each compared for exactly
+ * that value: */
+#define POPS_COMBO_EMODE_0        0xf6feu /* SELECT+L2+R1: emode byte = 0 */
+#define POPS_COMBO_EMODE_1        0xf9feu /* SELECT+R2+L1: emode byte = 1 */
+#define POPS_COMBO_LID_OPEN       0xecfeu /* SELECT+L2+R2+TRIANGLE */
+#define POPS_COMBO_SCANLINES_ON   0xf5feu /* SELECT+R2+R1 */
+#define POPS_COMBO_SCANLINES_OFF  0xfafeu /* SELECT+L2+L1 */
+#define POPS_COMBO_LID_CLOSE      0x7cfeu /* SELECT+L2+R2+SQUARE */
+#define POPS_COMBO_DISC_1         0xfceeu /* SELECT+L2+R2+UP: slot 0 */
+#define POPS_COMBO_DISC_2         0xfcdeu /* SELECT+L2+R2+RIGHT: slot 1 */
+#define POPS_COMBO_DISC_3         0xfcbeu /* SELECT+L2+R2+DOWN: slot 2 */
+#define POPS_COMBO_DISC_4         0xfc7eu /* SELECT+L2+R2+LEFT: slot 3 */
+/* What they change: a byte of POPS's mode word in the scratchpad (POPS
+ * reads bit 0 at 0x22d0 and bit 1 at 0x222284), POPS's lid halfword, the
+ * $SCANLINES word in POPS's code, and +0x28 of both pad state blocks,
+ * which every pass sets to 1 (POPS sets and clears it, and passes it on
+ * with the motor bytes). POPS's disc init (0x210540) takes the path of the
+ * image to open; an empty slot gets POPS's boot path (main's buffer). */
+#define POPS_EMODE_ADDR           UINT32_C(0x70003390)
+#define POPS_LID_ADDR             UINT32_C(0x0059c200)
+#define POPS_LID_OPEN             0x1000u
+#define POPS_LID_CLOSED           0x0200u
+#define POPS_SCANLINES_ADDR       UINT32_C(0x0021e454)
+#define POPS_SCANLINES_ON         UINT32_C(0x22b50006)
+#define POPS_SCANLINES_OFF        UINT32_C(0x8ca42158) /* POPS's own word */
+#define POPS_PAD_STATE_FLAG       0x28u
+#define POPS_CD_INIT_ADDR         UINT32_C(0x00210540)
+#define POPS_BOOT_PATH_ADDR       UINT32_C(0x01ffecb0)
+
+/* Where the always-live block reads and writes: on the console the
+ * addresses above, POPS_PAD_STATE_ADDR and POPS's disc init. */
+typedef struct {
+  uintptr_t pad;       /* the two pad state blocks; port 0 buttons at +2 */
+  uintptr_t emode;     /* byte */
+  uintptr_t lid;       /* halfword */
+  uintptr_t scanlines; /* word */
+  uintptr_t boot_path; /* POPS_DISC_SLOT_SIZE bytes */
+  int (*cd_init)(const char *path);
+} PopsHotkeyMemory;
+
+/* POPStarter's always-live block, in its order, every pass: SELECT+L2+R1 /
+ * SELECT+R2+L1 set the emode byte to 0 / 1 (one reading for both);
+ * SELECT+L2+R2+TRIANGLE opens the lid; both pad blocks' +0x28 become 1;
+ * SELECT+R2+R1 / SELECT+L2+L1 write the $SCANLINES word on / off (no cache
+ * flush, as in the original); SELECT+L2+R2+SQUARE with the lid open closes
+ * it and calls the disc init with the selected slot; SELECT+L2+R2 and a
+ * direction selects slot 0..3 for the next close; then each slot whose
+ * first word is zero gets the boot path. Every check reads the buttons
+ * again, as the original does. */
+void pops_resident_hotkeys(PopsResidentConfig *cfg, const PopsHotkeyMemory *mem);
 
 /* Where the codes write. ps1 is PS1 RAM (2 MiB); ee is EE address 0 and
  * ee_size how much of EE RAM PS2-format codes may touch (0: none); spr is

@@ -311,6 +311,56 @@ void pops_resident_d2ls(uint8_t *pad, uint32_t bytes) {
   pad[7] = d2ls_axis(up, down);
 }
 
+/* POPStarter's always-live block (0x232790..0x232c90), statement for
+ * statement; its five empty slots between the emode checks and the lid
+ * (0x2327d0..0x2327f0) do nothing in r13 and have no counterpart here. */
+#define HOTKEY_BUTTONS(mem) (*(volatile uint16_t *)((mem)->pad + 2))
+
+void pops_resident_hotkeys(PopsResidentConfig *cfg, const PopsHotkeyMemory *mem) {
+  volatile uint8_t *emode = (volatile uint8_t *)mem->emode;
+  volatile uint16_t *lid = (volatile uint16_t *)mem->lid;
+  uint16_t buttons = HOTKEY_BUTTONS(mem);
+  if (buttons == POPS_COMBO_EMODE_0)
+    *emode = 0;
+  else if (buttons == POPS_COMBO_EMODE_1)
+    *emode = 1;
+
+  if (HOTKEY_BUTTONS(mem) == POPS_COMBO_LID_OPEN)
+    *lid = POPS_LID_OPEN;
+  *(volatile uint8_t *)(mem->pad + POPS_PAD_STATE_FLAG) = 1;
+  *(volatile uint8_t *)(mem->pad + POPS_PAD_STATE_STRIDE + POPS_PAD_STATE_FLAG) = 1;
+
+  /* Into POPS's code, without flushing the caches, as the original does. */
+  if (HOTKEY_BUTTONS(mem) == POPS_COMBO_SCANLINES_ON)
+    *(volatile uint32_t *)mem->scanlines = POPS_SCANLINES_ON;
+  if (HOTKEY_BUTTONS(mem) == POPS_COMBO_SCANLINES_OFF)
+    *(volatile uint32_t *)mem->scanlines = POPS_SCANLINES_OFF;
+
+  if (HOTKEY_BUTTONS(mem) == POPS_COMBO_LID_CLOSE && *lid == POPS_LID_OPEN) {
+    *lid = POPS_LID_CLOSED;
+    mem->cd_init((const char *)cfg->disc_slot[cfg->disc_selected & (POPS_MAX_DISCS - 1)]);
+  }
+
+  if (HOTKEY_BUTTONS(mem) == POPS_COMBO_DISC_1)
+    cfg->disc_selected = 0;
+  if (HOTKEY_BUTTONS(mem) == POPS_COMBO_DISC_2)
+    cfg->disc_selected = 1;
+  if (HOTKEY_BUTTONS(mem) == POPS_COMBO_DISC_3)
+    cfg->disc_selected = 2;
+  if (HOTKEY_BUTTONS(mem) == POPS_COMBO_DISC_4)
+    cfg->disc_selected = 3;
+
+  /* An empty slot (first word zero) takes POPS's boot path, 0x60 bytes. */
+  for (unsigned slot = 0; slot < POPS_MAX_DISCS; ++slot) {
+    volatile uint32_t *to = (volatile uint32_t *)cfg->disc_slot[slot];
+    const volatile uint32_t *from = (const volatile uint32_t *)mem->boot_path;
+    if (*to)
+      continue;
+    for (unsigned word = 0; word < POPS_DISC_SLOT_SIZE / 4; ++word)
+      to[word] = from[word];
+  }
+}
+
 #define TIMING_WORD(addr) (*(volatile uint32_t *)(addr))
 
 static void timing_set(volatile uint32_t *word, uint32_t value, uintptr_t copy, int save) {
@@ -385,6 +435,11 @@ extern char _pops_resident_end[];
 /* Filled by the launcher after the image is copied (lives in .bss). */
 PopsResidentConfig pops_resident_config;
 _Static_assert(offsetof(PopsResidentConfig, gs_display) == 0, "display entry ABI");
+/* POPS DMAs the disc name straight from a slot (sceSifCallRpc, 0x80 bytes). */
+_Static_assert(offsetof(PopsResidentConfig, disc_slot) % 16 == 0, "disc slot DMA alignment");
+_Static_assert(offsetof(PopsResidentConfig, disc_tail) ==
+               offsetof(PopsResidentConfig, disc_slot) + sizeof(((PopsResidentConfig *)0)->disc_slot),
+               "disc slot DMA tail");
 
 /* Independent stackless bridge for POPS's mid-function load. v0 and a1 are
  * the only clobbers; v0 is restored before the stock continuation. No gp,
@@ -587,8 +642,10 @@ __asm__(".set push\n.set noreorder\n.set noat\n.text\n.align 2\n"
         "addiu $sp, $sp, 0xa0\n"
         ".set pop\n");
 
-/* In POPStarter's chain order: the controller ID stores (0x232cb0..), the
- * built-in list's breakpoint handler (slot 0x232d08), the $SET_TIMINGS
+/* In POPStarter's chain order: its always-live block (0x232790..0x232c90:
+ * pad hotkeys, in-game disc swap, slot copies), the controller ID stores
+ * (0x232cb0..), the built-in list's breakpoint handler (slot 0x232d08), the
+ * $SET_TIMINGS
  * check (0x238a90), the second LibCrypt code (slot 0x238d00, code at
  * 0x239780), the game-fix code (slot 0x2397d8), then the cheat code
  * (0x2397e8). The three built-in pieces are the original's own MIPS,
@@ -599,6 +656,10 @@ typedef void (*PopsBuiltinCode)(void);
 void pops_resident_gp1_work(void) {
   PopsResidentConfig *cfg = &pops_resident_config;
   uint32_t base = *(volatile uint32_t *)cfg->ram_base_ptr;
+  PopsHotkeyMemory keys = {POPS_PAD_STATE_ADDR, POPS_EMODE_ADDR, POPS_LID_ADDR,
+                           POPS_SCANLINES_ADDR, POPS_BOOT_PATH_ADDR,
+                           (int (*)(const char *))POPS_CD_INIT_ADDR};
+  pops_resident_hotkeys(cfg, &keys);
   if (cfg->flags & POPS_RES_F_PAD_ID)
     pops_resident_pad_ids(cfg, (uint8_t *)POPS_PAD_STATE_ADDR);
   /* The original's reset block right after its controller-ID stores: while

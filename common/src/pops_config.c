@@ -627,24 +627,9 @@ loop_remaining:
   return 0;
 }
 
-static int load_config_file(PopsConfig *cfg, const char *filepath, int optional_global) {
-  if (!cfg || !filepath)
-    return -EINVAL;
-
-  FILE *f = open_config(filepath);
-  if (!f) {
-    int result = errno ? -errno : -EIO;
-    /* Only an optional global location that could not be opened is absent.
-     * A device removed during reading must still fail after a successful open. */
-    if (optional_global && (result == -ENOENT || result == -ENODEV || result == -ENXIO))
-      return 0;
-    return result;
-  }
-
-  cfg->gs_mask = 0; /* The original's six acceptance flags are file-local. */
-
-  /* Read the whole file: POPStarter scans its text for codes as one stream,
-   * then the directives are taken line by line. */
+/* Read a whole config file and close it. On success *out holds *out_size
+ * bytes followed by 16 zero bytes, or is NULL for an empty file. */
+static int read_config_text(FILE *f, char **out, size_t *out_size) {
   size_t size = 0, capacity = 0;
   char *text = NULL;
   int result = 0;
@@ -672,10 +657,41 @@ static int load_config_file(PopsConfig *cfg, const char *filepath, int optional_
     result = errno ? -errno : -EIO;
   if (fclose(f) && !result)
     result = errno ? -errno : -EIO;
-  if (!result && text) {
+  if (result) {
+    free(text);
+    text = NULL;
+    size = 0;
+  } else if (text) {
     memset(text + size, 0, 16);
-    result = scan_cheats(cfg, text);
   }
+  *out = text;
+  *out_size = size;
+  return result;
+}
+
+static int load_config_file(PopsConfig *cfg, const char *filepath, int optional_global) {
+  if (!cfg || !filepath)
+    return -EINVAL;
+
+  FILE *f = open_config(filepath);
+  if (!f) {
+    int result = errno ? -errno : -EIO;
+    /* Only an optional global location that could not be opened is absent.
+     * A device removed during reading must still fail after a successful open. */
+    if (optional_global && (result == -ENOENT || result == -ENODEV || result == -ENXIO))
+      return 0;
+    return result;
+  }
+
+  cfg->gs_mask = 0; /* The original's six acceptance flags are file-local. */
+
+  /* Read the whole file: POPStarter scans its text for codes as one stream,
+   * then the directives are taken line by line. */
+  size_t size;
+  char *text;
+  int result = read_config_text(f, &text, &size);
+  if (!result && text)
+    result = scan_cheats(cfg, text);
 
   char *line = text;
   while (!result && line && line < text + size) {
@@ -718,34 +734,55 @@ static int finish_file(FILE *file, int result) {
   return result;
 }
 
+void pops_config_parse_discs(PopsConfig *cfg, char *text, size_t size) {
+  size_t i, line = 0;
+  if (!size)
+    return;
+  /* Any of these anywhere and the file is ignored: the slots keep what they
+   * held, as the original's early return leaves them. */
+  for (i = 0; i < size; ++i)
+    if (text[i] == '\\' || text[i] == '/' || text[i] == ':')
+      return;
+  text[size] = '\0';
+  for (i = 0; i < size; ++i)
+    if (text[i] == '\r' || text[i] == '\n')
+      text[i] = '\0';
+  for (i = 0; i < size && line < POPS_MAX_DISCS; ++i) {
+    size_t length;
+    if (!text[i])
+      continue;
+    length = strlen(text + i);
+    if (length >= POPS_DISC_LINE_MAX) {
+      memset(cfg->disc_slot, 0, sizeof(cfg->disc_slot));
+      break;
+    }
+    /* "pfs0:/", the line and one NUL; the slot's other bytes stay. */
+    memcpy(cfg->disc_slot[line], POPS_DISC_SLOT_PREFIX, sizeof(POPS_DISC_SLOT_PREFIX) - 1);
+    memcpy(cfg->disc_slot[line] + sizeof(POPS_DISC_SLOT_PREFIX) - 1, text + i, length);
+    cfg->disc_slot[line][sizeof(POPS_DISC_SLOT_PREFIX) - 1 + length] = 0;
+    i += length;
+    ++line;
+  }
+  for (cfg->disc_count = 0; cfg->disc_count < POPS_MAX_DISCS &&
+                            cfg->disc_slot[cfg->disc_count][0];)
+    ++cfg->disc_count;
+}
+
 int pops_config_load_discs(PopsConfig *cfg, const char *filepath) {
-  char line[256];
-  int result = 0;
+  char *text;
+  size_t size;
+  int result;
   FILE *f;
   if (!cfg || !filepath)
     return -EINVAL;
   f = open_config(filepath);
   if (!f)
     return errno ? -errno : -EIO;
-  cfg->disc_count = 0;
-  while (fgets(line, sizeof(line), f)) {
-    char *start;
-    size_t length = strlen(line);
-    if (length == sizeof(line) - 1 && line[length - 1] != '\n') {
-      result = -EOVERFLOW;
-      break;
-    }
-    start = trim_line(line);
-    if (!*start || *start == '#' || *start == ';')
-      continue;
-    if (cfg->disc_count == POPS_MAX_DISCS ||
-        strlen(start) >= sizeof(cfg->discs[0])) {
-      result = -EOVERFLOW;
-      break;
-    }
-    strcpy(cfg->discs[cfg->disc_count++], start);
-  }
-  return finish_file(f, result);
+  result = read_config_text(f, &text, &size);
+  if (!result && text)
+    pops_config_parse_discs(cfg, text, size);
+  free(text);
+  return result;
 }
 
 int pops_config_load_vmcdir(PopsConfig *cfg, const char *filepath) {
@@ -859,12 +896,12 @@ int pops_config_discover(PopsConfig *cfg, const char *vcd_dir, const char *game_
     if (result && result != -ENOENT)
       return result;
 
-    if (cfg->disc_count == 0) {
-      snprintf(path, sizeof(path), "%s%s/DISCS.TXT", vcd_dir, subfolder);
-      result = pops_config_load_discs(cfg, path);
-      if (result && result != -ENOENT)
-        return result;
-    }
+    /* The original reads POPS/DISCS.TXT ("for all games") and then the
+     * game's own over it, slot by slot. */
+    snprintf(path, sizeof(path), "%s%s/DISCS.TXT", vcd_dir, subfolder);
+    result = pops_config_load_discs(cfg, path);
+    if (result && result != -ENOENT)
+      return result;
   }
 
   return 0;

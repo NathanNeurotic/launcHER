@@ -10,6 +10,11 @@ IRX_ID("launcHER_POP_filesystem", 1, 0);
 #define PATH_LIMIT 256
 #define DISC_COUNT 4
 #define PATH_COUNT (DISC_COUNT + 2)
+/* resolve(): a name in the launched game's folder, opened read-only like
+ * the discs. Only through the pfs alias (POPStarter's in-game disc swap). */
+#define FOLDER_DISC PATH_COUNT
+#define IS_DISC(index) ((index) < DISC_COUNT || (index) == FOLDER_DISC)
+static iomanX_iop_device_t virtual_pfs; /* the pfs alias, defined below */
 
 /* Module arguments: disc0, card0, card1, optional disc1/disc2/disc3.
  * Backing paths are explicit; massN is never interpreted as USB identity.
@@ -59,8 +64,35 @@ static int valid_backend(const char *path) {
   return 1;
 }
 
-/* Returns the configured path index; -1 denotes the virtual save directory. */
-static int resolve(const char *name, char output[PATH_LIMIT]) {
+/* POPStarter's PFS wrapper (r6a, its "pfs" device on USB and SMB) opens
+ * pfs0:/<name> as mass:/POPS/<name>: the folder its games live in. Its
+ * in-game disc swap hands POPS "pfs0:/" + a DISCS.TXT line, so through the
+ * pfs alias a plain name opens <name> in the launched game's folder (the
+ * folder of disc 0's backing path). DISCS.TXT lines cannot hold / \ or :,
+ * and nothing else is accepted here. */
+static int folder_name(const char *relative, char output[PATH_LIMIT]) {
+  size_t folder = 0, length = strlen(relative), i;
+  if (!length || !strcmp(relative, ".") || !strcmp(relative, ".."))
+    return -ENOENT;
+  for (i = 0; i < length; ++i)
+    if (relative[i] == '/' || relative[i] == '\\' || relative[i] == ':')
+      return -ENOENT;
+  if (!paths[0][0])
+    return -ENOENT;
+  for (i = 0; paths[0][i]; ++i)
+    if (paths[0][i] == '/' || paths[0][i] == '\\' || paths[0][i] == ':')
+      folder = i + 1;
+  if (folder + length >= PATH_LIMIT)
+    return -ENAMETOOLONG;
+  memcpy(output, paths[0], folder);
+  memcpy(output + folder, relative, length + 1);
+  return FOLDER_DISC;
+}
+
+/* Returns the configured path index; -1 denotes the virtual save directory.
+ * With `folder`, a name nothing else claims is looked up in the game's
+ * folder (folder_name). */
+static int resolve(const char *name, char output[PATH_LIMIT], int folder) {
   char normalized[PATH_LIMIT];
   const char *relative;
   size_t i, length;
@@ -77,12 +109,18 @@ static int resolve(const char *name, char output[PATH_LIMIT]) {
   /* The POPS trampoline passes pops0:IMAGE.VCD, while the sector proxy also
    * exposes /disc/disc0. Keep both names on the identical read-only backing
    * descriptor; IMAGE0.VCD covers the legacy per-partition launch filename.
-   * This does not emulate Sony's separate pfs0: namespace. */
-  if (!strcmp(relative, "IMAGE.VCD") || !strcmp(relative, "IMAGE0.VCD")) {
+   * This does not emulate Sony's separate pfs0: namespace.
+   * Through the pfs alias only IMAGE.VCD keeps this mapping (launcHER's
+   * live storage probe opens pfs0:IMAGE.VCD). IMAGE0.VCD to IMAGE3.VCD
+   * there are DISCS.TXT names like any other, files in the game's folder
+   * (folder_name): a disc swap to a line that reads IMAGE1.VCD opens that
+   * file, as POPStarter's wrapper would, not the disc DISCS.TXT's second
+   * line names. */
+  if (!strcmp(relative, "IMAGE.VCD") || (!folder && !strcmp(relative, "IMAGE0.VCD"))) {
     index = 0;
     if (active_disc > 0 && active_disc < DISC_COUNT && paths[active_disc][0])
       index = active_disc;
-  } else if (!strncmp(relative, "IMAGE", 5) &&
+  } else if (!folder && !strncmp(relative, "IMAGE", 5) &&
              relative[5] >= '1' && relative[5] < '0' + DISC_COUNT &&
              !strcmp(relative + 6, ".VCD")) {
     /* Historical partition-installed multi-disc layouts use IMAGE1.VCD
@@ -104,6 +142,8 @@ static int resolve(const char *name, char output[PATH_LIMIT]) {
              (!relative[12] || !strcmp(relative + 12, ".bak"))) {
     index = DISC_COUNT + relative[11] - '0';
     backup = relative[12] != 0;
+  } else if (folder) {
+    return folder_name(relative, output);
   } else {
     return -ENOENT;
   }
@@ -154,16 +194,16 @@ static int bridge_open(iomanX_iop_file_t *file, const char *name, int flags, int
    * between resolution and reservation, leaving the old image open while
    * active_disc already names the new one. Never hold this lock during I/O. */
   CpuSuspendIntr(&state);
-  index = resolve(name, backing);
+  index = resolve(name, backing, file->device == &virtual_pfs);
   if (index < 0)
     error = index == -1 ? -EISDIR : index;
-  else if (index < DISC_COUNT && !disc_read_only_flags(flags))
+  else if (IS_DISC(index) && !disc_read_only_flags(flags))
     error = -EROFS;
-  else if (index < DISC_COUNT && lid_open)
+  else if (IS_DISC(index) && lid_open)
     error = -ENODEV;
   else {
     ++active;
-    if (index < DISC_COUNT)
+    if (IS_DISC(index))
       ++active_disc_handles;
   }
   CpuResumeIntr(state);
@@ -171,10 +211,10 @@ static int bridge_open(iomanX_iop_file_t *file, const char *name, int flags, int
     return error;
   fd = iomanX_open(backing, flags, mode);
   if (fd < 0) {
-    count_add(-1, index < DISC_COUNT);
+    count_add(-1, IS_DISC(index));
     return fd;
   }
-  file->privdata = (void *)(((uintptr_t)(fd + 1) << 1) | (index < DISC_COUNT));
+  file->privdata = (void *)(((uintptr_t)(fd + 1) << 1) | (IS_DISC(index) ? 1u : 0u));
   return 0;
 }
 
@@ -227,7 +267,7 @@ static int bridge_stat(iomanX_iop_file_t *file, const char *name, iox_stat_t *st
   int index;
   if (file->unit < 0 || file->unit > 1) return -ENODEV;
   if (!stat) return -EINVAL;
-  index = resolve(name, backing);
+  index = resolve(name, backing, file->device == &virtual_pfs);
   if (index == -1) {
     memset(stat, 0, sizeof(*stat));
     stat->mode = FIO_S_IFDIR | FIO_S_IRUSR | FIO_S_IWUSR | FIO_S_IXUSR;
@@ -235,27 +275,27 @@ static int bridge_stat(iomanX_iop_file_t *file, const char *name, iox_stat_t *st
   }
   if (index < 0) return index;
   int status = iomanX_getstat(backing, stat);
-  if (!status && index < DISC_COUNT)
+  if (!status && IS_DISC(index))
     stat->mode &= ~(FIO_S_IWUSR | FIO_S_IWGRP | FIO_S_IWOTH);
   return status;
 }
 static int bridge_mkdir(iomanX_iop_file_t *file, const char *name, int mode) {
   char backing[PATH_LIMIT];
-  int index = resolve(name, backing);
+  int index = resolve(name, backing, 0);
   (void)mode;
   if (file->unit < 0 || file->unit > 1) return -ENODEV;
   return index == -1 ? 0 : (index < 0 ? index : -EEXIST);
 }
 static int bridge_remove(iomanX_iop_file_t *file, const char *name) {
   char backing[PATH_LIMIT];
-  int index = resolve(name, backing);
+  int index = resolve(name, backing, 0);
   if (file->unit < 0 || file->unit > 1) return -ENODEV;
   if (index < 0) return index == -1 ? -EISDIR : index;
   return index < DISC_COUNT ? -EROFS : iomanX_remove(backing);
 }
 static int bridge_rename(iomanX_iop_file_t *file, const char *old, const char *name) {
   char source[PATH_LIMIT], destination[PATH_LIMIT];
-  int from = resolve(old, source), to = resolve(name, destination);
+  int from = resolve(old, source, 0), to = resolve(name, destination, 0);
   if (file->unit < 0 || file->unit > 1) return -ENODEV;
   if (from < 0 || to < 0) return -EINVAL;
   if (from < DISC_COUNT || to < DISC_COUNT) return -EROFS;
