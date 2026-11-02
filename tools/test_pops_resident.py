@@ -68,6 +68,7 @@ class Header(c.Structure):
         ("gte_divide_entry", c.c_uint32),
         ("gte_ultra_entry", c.c_uint32),
         ("gp1_entry", c.c_uint32),
+        ("guard_entry", c.c_uint32 * 9),
     ]
 
 
@@ -110,6 +111,22 @@ L.pops_resident_build_config.argtypes = [c.POINTER(ResidentConfig), c.c_void_p]
 L.pops_config_init.argtypes = [c.c_void_p]
 L.pops_config_parse_line.argtypes = [c.c_void_p, c.c_char_p]
 L.pops_config_parse_line.restype = c.c_int
+
+
+def assert_gp1_hook_always(test, src):
+    """POPStarter hooks POPS's GP1 path on every launch (0x874790); so does
+    launcHER, before the built-in entry and the user's commands, and it
+    installs the resident image on every launch."""
+    body = src[src.index("int launchPOPS("):]
+    hook = "\n  res = pops_resident_hook_gp1((void *)stagedCore, plan.core_size, residentHdr.gp1_entry);\n"
+    test.assertEqual(body.count("pops_resident_hook_gp1("), 1)
+    test.assertIn(hook, body)
+    at = body.index(hook)
+    test.assertLess(body.index("res = pops_core_patches_stage("), at)
+    test.assertLess(at, body.index("res = pops_builtin_apply(builtinId, (void *)stagedCore"))
+    test.assertLess(at, body.index("res = pops_apply_all_config_patches("))
+    test.assertIn("\n  res = pops_resident_install((void *)POPS_RESIDENT_BASE,", body)
+    test.assertNotIn("if (residentNeeded) {\n    res = pops_resident_install(", body)
 
 
 def cheats(*codes):
@@ -750,12 +767,12 @@ class HookGp1(unittest.TestCase):
             self.assertEqual(struct.unpack_from("<I", data, 0x1000 + addr - 0x200000)[0], word, hex(addr))
 
 
-def image(file_size=0x60, image_size=0x2000, entry=BASE + 0x40, config=BASE + 0x60, magic=0x5352484C):
+def image(file_size=0xC0, image_size=0x2000, entry=BASE + 0x60, config=BASE + 0xC0, magic=0x5352484C):
     img = bytearray(file_size)
-    struct.pack_into("<IHHIIIIIIIIIIII", img, 0, magic, 11, 56, file_size, image_size, entry, config,
-                     BASE + 0x44, BASE + 0x48, BASE + 0x4C, BASE + 0x50, BASE + 0x54, BASE + 0x58,
-                     BASE + 0x5C, BASE + 0x40)
-    img[0x40:0x44] = b"\x08\x00\xe0\x03"
+    struct.pack_into("<IHHIIIIIIIIIIII9I", img, 0, magic, 12, 92, file_size, image_size, entry, config,
+                     BASE + 0x64, BASE + 0x68, BASE + 0x6C, BASE + 0x70, BASE + 0x74, BASE + 0x78,
+                     BASE + 0x7C, BASE + 0x60, *[BASE + 0x80 + 4 * i for i in range(9)])
+    img[0x60:0x64] = b"\x08\x00\xe0\x03"
     return img
 
 
@@ -768,21 +785,31 @@ class Install(unittest.TestCase):
     def test_valid_image(self):
         res, h = self.check(image())
         self.assertEqual(res, 0)
-        self.assertEqual((h.file_size, h.image_size, h.vblank_entry), (0x60, 0x2000, BASE + 0x40))
+        self.assertEqual((h.file_size, h.image_size, h.vblank_entry), (0xC0, 0x2000, BASE + 0x60))
+        self.assertEqual(list(h.guard_entry), [BASE + 0x80 + 4 * i for i in range(9)])
 
     def test_rejects_bad_images(self):
         self.assertEqual(self.check(image(magic=0))[0], -errno.EINVAL)
-        self.assertEqual(self.check(image(image_size=0x50))[0], -errno.ERANGE)
+        self.assertEqual(self.check(image(image_size=0xB0))[0], -errno.ERANGE)
         self.assertEqual(self.check(image(image_size=LIMIT - BASE + 4))[0], -errno.ERANGE)
-        self.assertEqual(self.check(image(entry=BASE + 0x60))[0], -errno.ERANGE)
-        self.assertEqual(self.check(image(entry=BASE + 0x42))[0], -errno.ERANGE)
+        self.assertEqual(self.check(image(entry=BASE + 0xC0))[0], -errno.ERANGE)
+        self.assertEqual(self.check(image(entry=BASE + 0x62))[0], -errno.ERANGE)
         self.assertEqual(self.check(image(entry=BASE + 0x10))[0], -errno.ERANGE)
         self.assertEqual(self.check(image(config=BASE + 0x2000 - 8))[0], -errno.ERANGE)
-        self.assertEqual(self.check(image(config=BASE + 0x64))[0], -errno.ERANGE)
-        for offset in (24, 28, 32, 36, 40, 44, 48, 52):
-            img = image()
-            struct.pack_into('<I', img, offset, BASE + len(img))
-            self.assertEqual(self.check(img)[0], -errno.ERANGE)
+        self.assertEqual(self.check(image(config=BASE + 0xC4))[0], -errno.ERANGE)
+        # Every entry, the nine guard stubs included, must be code in the image.
+        for offset in range(24, 92, 4):
+            for bad in (BASE + len(img_ok := image()), BASE + 0x58, BASE + 0x62):
+                img = image()
+                struct.pack_into('<I', img, offset, bad)
+                self.assertEqual(self.check(img)[0], -errno.ERANGE, (offset, hex(bad)))
+            self.assertEqual(self.check(img_ok)[0], 0)
+        img = image()
+        struct.pack_into('<H', img, 4, 11)
+        self.assertEqual(self.check(img)[0], -errno.EINVAL)
+        img = image()
+        struct.pack_into('<H', img, 6, 56)
+        self.assertEqual(self.check(img)[0], -errno.EINVAL)
         img = image()
         buf = (c.c_uint8 * len(img)).from_buffer(img)
         self.assertEqual(L.pops_resident_check_image(buf, len(img) - 4, None), -errno.ERANGE)
@@ -796,10 +823,10 @@ class Install(unittest.TestCase):
         buf = (c.c_uint8 * len(img)).from_buffer(img)
         self.assertEqual(L.pops_resident_install(dest, 0x3000, BASE, buf, len(img), c.byref(cfg)), 0)
         raw = bytes(dest)
-        self.assertEqual(raw[:0x60], bytes(img))
-        got = ResidentConfig.from_buffer_copy(raw[0x60:0x60 + c.sizeof(ResidentConfig)])
+        self.assertEqual(raw[:0xC0], bytes(img))
+        got = ResidentConfig.from_buffer_copy(raw[0xC0:0xC0 + c.sizeof(ResidentConfig)])
         self.assertEqual((got.flags, got.cheat_count, got.cheats[0].value), (1, 1, 0x7F))
-        end = 0x60 + c.sizeof(ResidentConfig)
+        end = 0xC0 + c.sizeof(ResidentConfig)
         self.assertEqual(raw[end:0x2000], bytes(0x2000 - end))
         self.assertEqual(raw[0x2000:], b"\xcc" * (0x3000 - 0x2000))
 
@@ -962,8 +989,7 @@ class PadCommands(unittest.TestCase):
 
     def test_launcher_hooks_gp1_for_pad_ids(self):
         src = (ROOT / "launcher/src/handler_pops.c").read_text()
-        self.assertIn("(POPS_RES_F_CHEATS | POPS_RES_F_PAD_ID | POPS_RES_F_TIMINGS)))\n"
-                      "      res = pops_resident_hook_gp1(", src)
+        assert_gp1_hook_always(self, src)
         self.assertNotIn("pops_resident_hook_core(", src)
         self.assertLess(src.index("pops_resident_hook_pads("), src.index("SifIopRebootBuffer("))
 
@@ -1310,8 +1336,7 @@ class SetTimings(unittest.TestCase):
         # POPStarter runs $SET_TIMINGS and its cheat code from POPS's GP1
         # write path (0x21a63c), not from VBLANK; launcHER does the same.
         src = (ROOT / "launcher/src/handler_pops.c").read_text()
-        self.assertIn("(POPS_RES_F_CHEATS | POPS_RES_F_PAD_ID | POPS_RES_F_TIMINGS)))\n"
-                      "      res = pops_resident_hook_gp1(", src)
+        assert_gp1_hook_always(self, src)
         engine = (ROOT / "common/src/pops_resident_engine.c").read_text()
         vblank = engine[engine.index("int pops_resident_vblank(int cause) {"):]
         vblank = vblank[:vblank.index("\n}\n")]
@@ -1390,7 +1415,8 @@ class OriginalPresets(unittest.TestCase):
 
 class Layout(unittest.TestCase):
     def test_config_fits_in_the_reserved_range(self):
-        self.assertEqual(c.sizeof(Header), 56)
+        self.assertEqual(c.sizeof(Header), 92)
+        self.assertEqual(Header.guard_entry.offset, 56)
         self.assertEqual(ResidentConfig.cheats.offset, 32)
         self.assertLess(c.sizeof(ResidentConfig) + 0x1000, LIMIT - BASE)
 

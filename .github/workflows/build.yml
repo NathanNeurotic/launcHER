@@ -56,6 +56,8 @@ jobs:
         run: python tools/test_pops_opcodes.py
       - name: Test POPS $BREAKPOINT0 and $BREAKPOINT1
         run: python tools/test_pops_breakpoint.py
+      - name: Test POPStarter's always-on launch hooks (guards, pokes, BIOS edits, final clears)
+        run: python tools/test_pops_launch_hooks.py
 
   build:
     runs-on: ubuntu-latest

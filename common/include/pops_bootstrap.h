@@ -7,7 +7,8 @@
 
 /* Fixed staging memory map on PS2 EE (32 MiB total main RAM).
  * Staging sits in high memory (>= 16 MiB), completely disjoint from POPS load/BSS
- * (0x00200000 - 0x00865940) and launcHER (0x00100000 - 0x00200000). */
+ * (0x00200000 - 0x00865940), the start of POPS's heap the trampoline also
+ * clears (up to POPS_CLEAR_END) and launcHER (0x00100000 - 0x00200000). */
 #define POPS_STAGING_BASE        UINT32_C(0x01000000) /* 16 MiB */
 #define POPS_STAGING_CAPACITY    UINT32_C(0x00800000) /* 8 MiB max staging buffer */
 
@@ -18,6 +19,14 @@
 #define POPS_BSS_SIZE            UINT32_C(0x00362ae0) /* Ends at 0x00865940 */
 #define POPS_SPAD_ADDR           UINT32_C(0x70000000)
 #define POPS_SPAD_SIZE           UINT32_C(0x00003c30)
+
+/* What POPStarter r13 clears before it enters POPS, and the trampoline with
+ * it: the whole 16 KB scratchpad (memset at 0x87c0f8), and from the BSS
+ * start up to its own code at 0x00870000 (memset at 0x87c130). POPS's heap
+ * starts at its BSS end (SetupHeap(0x865940, -1) in its crt0), so the first
+ * 42 KB of it start zeroed. Keep in step with pops_trampoline.S. */
+#define POPS_SPAD_CLEAR_SIZE     UINT32_C(0x00004000)
+#define POPS_CLEAR_END           UINT32_C(0x00870000)
 
 /* Low-memory trampoline in BIOS unused RAM (below 1 MiB). */
 #define POPS_TRAMPOLINE_ADDR     UINT32_C(0x00084000)
@@ -31,7 +40,7 @@ typedef struct {
   uint32_t entry;           /* Offset 0: Entrypoint (0x00200008) */
   uint32_t bss_address;     /* Offset 4: BSS start (0x00502e60) */
   uint32_t bss_size;        /* Offset 8: BSS size (0x00362ae0) */
-  uint32_t scratchpad_size; /* Offset 12: Scratchpad size (0x00003c30) */
+  uint32_t scratchpad_size; /* Offset 12: POPS's scratchpad size (0x00003c30); the trampoline clears all of it (POPS_SPAD_CLEAR_SIZE) */
   uint32_t staging_core;    /* Offset 16: Staging buffer core address */
   uint32_t core_address;    /* Offset 20: Final core load address (0x00200000) */
   uint32_t core_size;       /* Offset 24: Core size (0x00302e60) */

@@ -20,7 +20,13 @@
  * from the nop at 0x0021a63c in POPS's GP1 write path, which POPStarter
  * turns into a jal to its own code (see pops_resident_hook_gp1). The
  * launcher no longer hooks VBLANK_START; the entry and hook_core remain.
- * Progressive mode selects a context-preserving bridge at the same site. */
+ * Progressive mode selects a context-preserving bridge at the same site.
+ *
+ * POPStarter installs its resident code and that GP1 hook on every launch
+ * (the in-game reset and the built-in list's chain calls live there), plus
+ * nine guards around misaligned loads and stores (pops_resident_guards.S,
+ * pops_resident_hook_guards), so launcHER installs its image, the GP1 hook
+ * and the guards on every POPStarter-mode launch too. */
 
 #include <stddef.h>
 #include <stdint.h>
@@ -33,7 +39,24 @@ extern "C" {
 #define POPS_RESIDENT_BASE        UINT32_C(0x0143a000)
 #define POPS_RESIDENT_LIMIT       UINT32_C(0x01460000)
 #define POPS_RESIDENT_MAGIC       UINT32_C(0x5352484c) /* "LHRS" */
-#define POPS_RESIDENT_VERSION     11
+#define POPS_RESIDENT_VERSION     12
+
+/* POPStarter's always-on guards (pops_resident_guards.S): the POPS words
+ * that become "j stub", in the order the original writes them
+ * (0x874864..0x874998). POPS_GUARD_204160 is the redirected branch; its
+ * stub is the tail of POPS_GUARD_204178's. */
+enum {
+  POPS_GUARD_21C58C = 0,
+  POPS_GUARD_21C768,
+  POPS_GUARD_2082A0,
+  POPS_GUARD_204AE0,
+  POPS_GUARD_204178,
+  POPS_GUARD_204160,
+  POPS_GUARD_202250,
+  POPS_GUARD_21C5DC,
+  POPS_GUARD_21C5A8,
+  POPS_GUARD_COUNT
+};
 
 /* POPS's VBLANK_START registration and handler (verified on the pinned core) */
 #define POPS_VBLANK_LUI_ADDR      UINT32_C(0x0021b184)
@@ -73,6 +96,7 @@ typedef struct {
   uint32_t gte_divide_entry; /* $EYEFINITY: same site, divide only */
   uint32_t gte_ultra_entry;  /* $ULTRA_WIDESCREEN: IR1 store at 0x208a2c */
   uint32_t gp1_entry;        /* cheats/$SET_TIMINGS: jal'd from 0x21a63c */
+  uint32_t guard_entry[POPS_GUARD_COUNT]; /* always-on guards, no C call ABI */
 } PopsResidentHeader;
 
 #define POPS_RES_F_CHEATS         (1u << 0)
@@ -256,6 +280,14 @@ int pops_resident_hook_core(void *staged_core, size_t core_size, uint32_t entry)
  * words around it (lui $v1,1 before, di / sync.p / mfc0 Status after, and
  * the and/bnez that read $v1). Idempotent; anything else is -EILSEQ. */
 int pops_resident_hook_gp1(void *staged_core, size_t core_size, uint32_t entry);
+
+/* POPStarter's always-on guards: point the nine POPS_GUARD_* sites at the
+ * image's stubs, "j stub" plus a nop over the word after it (at 0x204160
+ * only the branch changes; its delay slot stays). Every site, the word
+ * after it and the words the stubs return to or repeat are checked before
+ * any is written. Idempotent; anything else is -EILSEQ. */
+int pops_resident_hook_guards(void *staged_core, size_t core_size,
+                              const PopsResidentHeader *hdr);
 
 /* Manual DISPLAY override at 0x21a094. Guard the displaced load, delay slot
  * and both interlace argument sites before writing the hook. The image

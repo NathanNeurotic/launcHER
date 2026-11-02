@@ -11,8 +11,12 @@ builds (build/launcher/pops_resident.bin).
 
 It checks that the entry chains to POPS's handler (a stub here) every time,
 preserves $s0/$sp, does nothing before POPS has stored its PS1 RAM base,
-applies codes and conditionals, and honours the $SAFEMODE delay. Passing
-here is not a console test."""
+applies codes and conditionals, and honours the $SAFEMODE delay. The nine
+misaligned-read guard stubs (common/src/pops_resident_guards.S) must be the
+words tools/r5900_mini.py assembles from that source and do what
+tools/pops_guard_model.py says each POPS site did (2700 random runs; with
+POPSTARTER_TEST_ELF the original's stubs run against the same model in
+tools/test_pops_launch_hooks.py). Passing here is not a console test."""
 import os, struct, sys
 from unicorn import *
 from unicorn.mips_const import *
@@ -23,8 +27,9 @@ BASE = 0x0143A000
 (magic, ver, hs, fsz, isz, entry, cfga, display_entry, progressive_entry,
  pad_read_entry, pad_read_exit, gte_scale, gte_divide, gte_ultra,
  gp1_entry) = struct.unpack_from('<IHHIIIIIIIIIIII', img, 0)
+guard_entries = list(struct.unpack_from('<9I', img, 56))
 assert magic == 0x5352484C and fsz == len(img), (hex(magic), fsz, len(img))
-assert ver == 11 and hs == 56
+assert ver == 12 and hs == 92
 
 mu = Uc(UC_ARCH_MIPS, UC_MODE_MIPS64 + UC_MODE_LITTLE_ENDIAN)
 # The R5900 has MIPS IV's movz/movn, which unicorn's default R4000 model
@@ -481,3 +486,19 @@ for other in (0xBCFF, 0xFFFF, 0x3CFE, 0x0000):
     assert u32(0x70000000) == 0, hex(other)
 mu.mem_write(PAD + 2, struct.pack('<H', 0xFFFF))
 print('resident in-game reset: PASS (combo stores the vector to scratchpad 0, nothing else does)')
+
+# 8. POPStarter's nine always-on misaligned-read guards. The built stubs must
+# be the words assembled from common/src/pops_resident_guards.S, and must do
+# what each original POPS site did (tools/pops_guard_model.py), run from the
+# site through the jump pops_resident_hook_guards writes.
+import random as _random
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import pops_guard_model as _G
+_words, _symbols = _G.assembled_stubs(guard_entries[0])
+assert [_symbols[s[4]] for s in _G.SITES] == guard_entries, [hex(e) for e in guard_entries]
+_at = guard_entries[0] - BASE
+assert img[_at:_at + 4 * len(_words)] == b''.join(w.to_bytes(4, 'little') for w in _words), \
+    'built guard stubs differ from the source'
+_runs = _G.check_stubs(_G.hooked_words(guard_entries), img, BASE, _random.Random(0x4255494C))
+print('resident misaligned-read guards: PASS (%d stub words as assembled, %d runs vs the model)'
+      % (len(_words), _runs))

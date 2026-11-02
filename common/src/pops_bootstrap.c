@@ -184,8 +184,9 @@ int pops_bootstrap_verify_layout(uint32_t staging_base, size_t staging_size,
     return POPS_FILE_INVALID;
 
   /* Subtract only after checking the base; adding/casting size to uint32_t
-   * would permit >=4 GiB sizes to wrap and appear safely inside EE RAM. */
-  if (staging_base < POPS_BSS_ADDR + POPS_BSS_SIZE ||
+   * would permit >=4 GiB sizes to wrap and appear safely inside EE RAM.
+   * The trampoline clears up to POPS_CLEAR_END before it copies the core. */
+  if (staging_base < POPS_CLEAR_END ||
       staging_base >= UINT32_C(0x02000000) ||
       staging_size > UINT32_C(0x02000000) - staging_base)
     return POPS_FILE_RANGE;

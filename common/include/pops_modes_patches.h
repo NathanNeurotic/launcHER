@@ -249,6 +249,37 @@ int pops_apply_reset_warmboot(void *staged_core, size_t core_size, uint32_t *exi
 #define POPS_PADMAN_IRX_SIZE   UINT32_C(0x0000adf0)
 int pops_apply_padman(void *staged_core, size_t core_size);
 
+/* POPStarter r13's always-on POPS changes that need no resident code (its
+ * launch function: 0x8744a8, then 0x8749ac..0x874a18; no command or build
+ * flag skips them), made before the built-in entry and the user's commands:
+ *  - 0x20c0ac: after POPS's exit to the browser (jal 0x22d130 with
+ *    "BootBrowser" at 0x20c0a4) returns, POPS spun at 0x20c0b0..0x20c0c4;
+ *    there it now jumps to POPS's exit() (0x236290: the atexit work, then
+ *    the Exit syscall).
+ *  - 0x20c0b0..0x20c0c4, the old spin loop, becomes: copy the byte at
+ *    0x85a998 to 0x863990 through $k1 (lui/lb/lui/sb, addresses formed in
+ *    $k1 and $k0), then j 0x21b680 (delay slot: the nop at 0x20c0c8).
+ *  - 0x228d5c: the tail call "j 0x21b680" that ends 0x228c80 jumps there
+ *    instead, so that byte is copied before each such call.
+ * 0x85a998 is a word POPS keeps between 0 and 0x80 (0x228c08, 0x228c40);
+ * 0x863990 is in the block POPS clears at 0x237330. Every word is checked
+ * first (POPS's word, or this one). Returns 0, -EINVAL, -ERANGE, -EILSEQ. */
+int pops_apply_always_on_pokes(void *staged_core, size_t core_size);
+
+/* POPStarter r13's edits to the PS1 BIOS shell inside POPS (0x878f94..
+ * 0x878fc0; the ROM copy at POPS_WARMBOOT_ROM_BASE is PS1 0xbfc00000 and
+ * this code runs from PS1 RAM 0x80030000), made unless a user BIOS.BIN or
+ * OSD replacement was loaded (gp+0x3b98, gp+0x38a4, gp+0x344c, gp+0x3430),
+ * which launcHER never does. Written without checks, after the fix files
+ * and the user's commands and before the region pass, as there:
+ *  - byte 0x263ed6 = 0x20: "sw $v0,0xad0($at)" at 0x263ed4 stores $zero,
+ *    so PS1 0x80050ad0 gets 0 instead of 1;
+ *  - halfword 0x263d56 = 0x1000: "bnez $v0" at 0x263d54 becomes "b", so the
+ *    function at 0x263d3c returns -1 right after its first call;
+ *  - word 0x263db0 = 0: removes a "jal 0x3e260" in that function.
+ * Returns 0, -EINVAL, -ERANGE. */
+int pops_apply_bios_shell_edits(void *staged_core, size_t core_size);
+
 /* MODULE_0..9.IRX: POPStarter r13 reads each from the game device's POPS
  * folder before its IOP reset (0x8777c4..), ignores one under
  * POPS_MODULE_IRX_MIN_SIZE bytes, and checks the IOP module name at file

@@ -14,10 +14,11 @@ pops_trampoline_code:
     /* Set stack pointer in BIOS unused RAM (0x0008fff0) */
     li      $sp, 0x0008fff0
 
-    /* 1. Zero scratchpad 0x70000000..0x70003c30 */
+    /* 1. Zero the whole scratchpad, 0x70000000..0x70004000, as POPStarter
+     *    r13 does before it enters POPS (memset at 0x87c0f8). POPS's own
+     *    part is the first scratchpad_size (0x3c30) bytes. */
     li      $t0, 0x70000000
-    lw      $t1, 12($s0)        /* scratchpad_size */
-    addu    $t2, $t0, $t1
+    li      $t2, 0x70004000
 1:
     sltu    $t3, $t0, $t2
     beqz    $t3, 2f
@@ -28,10 +29,17 @@ pops_trampoline_code:
     nop
 2:
 
-    /* 2. Zero BSS: bss_address to bss_address + bss_size */
+    /* 2. Zero BSS and the start of POPS's heap: bss_address up to the
+     *    larger of the BSS end and 0x00870000 (POPS_CLEAR_END). POPStarter
+     *    clears 0x502e60..0x870000 (memset at 0x87c130, up to its own code),
+     *    and POPS's heap starts at its BSS end (its crt0 calls
+     *    SetupHeap(0x865940, -1)), so its first 42 KB start zeroed. */
     lw      $t0, 4($s0)         /* bss_address (0x00502e60) */
     lw      $t1, 8($s0)         /* bss_size (0x00362ae0) */
     addu    $t2, $t0, $t1
+    li      $t1, 0x00870000
+    sltu    $t3, $t2, $t1
+    movn    $t2, $t1, $t3       /* end = max(BSS end, 0x00870000) */
 3:
     sltu    $t3, $t0, $t2
     beqz    $t3, 4f

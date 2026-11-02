@@ -1155,6 +1155,11 @@ class InspectorTests(unittest.TestCase):
         self.assertEqual(LIB.pops_bootstrap_verify_layout(0x01000000, 0x400000, c.byref(plan)), 0)
         # Staging buffer overlapping POPS BSS / core
         self.assertEqual(LIB.pops_bootstrap_verify_layout(0x00800000, 0x100000, c.byref(plan)), RANGE)
+        # ...or the start of POPS's heap, which the trampoline clears up to
+        # 0x00870000 as POPStarter does, before it copies the core
+        self.assertEqual(LIB.pops_bootstrap_verify_layout(0x00865940, 0x100000, c.byref(plan)), RANGE)
+        self.assertEqual(LIB.pops_bootstrap_verify_layout(0x0086FFFC, 0x100000, c.byref(plan)), RANGE)
+        self.assertEqual(LIB.pops_bootstrap_verify_layout(0x00870000, 0x100000, c.byref(plan)), 0)
         # Staging buffer exceeding 32 MiB
         self.assertEqual(LIB.pops_bootstrap_verify_layout(0x01F00000, 0x200000, c.byref(plan)), RANGE)
         # A 32-bit cast of the requested size used to wrap away 4 GiB.

@@ -544,6 +544,63 @@ int pops_apply_padman(void *staged_core, size_t core_size) {
   return 0;
 }
 
+/* pops_apply_always_on_pokes: address, POPS's word, POPStarter's word. */
+static const uint32_t always_on_words[][3] = {
+  {0x0020c0ac, 0x00000000, 0x0808d8a4}, /* nop -> j 0x236290 (exit) */
+  {0x0020c0b0, 0x00000000, 0x3c1b0086}, /* lui $k1, 0x86 */
+  {0x0020c0b4, 0x00000000, 0x837ba998}, /* lb  $k1, -0x5668($k1): 0x85a998 */
+  {0x0020c0b8, 0x00000000, 0x3c1a0086}, /* lui $k0, 0x86 */
+  {0x0020c0bc, 0x00000000, 0xa35b3990}, /* sb  $k1, 0x3990($k0): 0x863990 */
+  {0x0020c0c0, 0x00000000, 0x00000000}, /* nop */
+  {0x0020c0c4, 0x1000fffa, 0x08086da0}, /* b 0x20c0b0 -> j 0x21b680 */
+  {0x00228d5c, 0x08086da0, 0x0808302c}, /* j 0x21b680 -> j 0x20c0b0 */
+};
+
+/* Words the new code relies on; left alone. */
+static const uint32_t always_on_context[][2] = {
+  {0x0020c0a4, 0x0c08b44c}, /* jal 0x22d130 (or the IGR exit fix's jal, below)... */
+  {0x0020c0a8, 0x24a59708}, /* ...with "BootBrowser": the exit to the browser */
+  {0x0020c0c8, 0x00000000}, /* nop: delay slot of the new j 0x21b680 */
+  {0x00228d58, 0xdfbf0000}, /* ld $ra, 0($sp) */
+  {0x00228d60, 0x27bd0010}, /* addiu $sp, $sp, 0x10: the tail call's delay slot */
+  {0x00236290, 0x27bdffe0}, /* exit(): addiu $sp, $sp, -0x20 */
+};
+
+int pops_apply_always_on_pokes(void *staged_core, size_t core_size) {
+  size_t i;
+  if (!staged_core)
+    return -EINVAL;
+  if (core_size < (size_t)(0x00236290 + 4 - POPS_CORE_BASE_ADDR))
+    return -ERANGE;
+  for (i = 0; i < sizeof(always_on_context) / sizeof(always_on_context[0]); ++i) {
+    uint32_t cur = read_u32(staged_core, core_size, always_on_context[i][0]);
+    /* launcHER's IGR exit fix (FUN_008dbe08) may have rewired the call. */
+    if (cur != always_on_context[i][1] &&
+        !(always_on_context[i][0] == 0x0020c0a4 && cur == 0x0c08d8ae))
+      return -EILSEQ;
+  }
+  for (i = 0; i < sizeof(always_on_words) / sizeof(always_on_words[0]); ++i) {
+    uint32_t cur = read_u32(staged_core, core_size, always_on_words[i][0]);
+    if (cur != always_on_words[i][1] && cur != always_on_words[i][2])
+      return -EILSEQ;
+  }
+  for (i = 0; i < sizeof(always_on_words) / sizeof(always_on_words[0]); ++i)
+    write_u32(staged_core, core_size, always_on_words[i][0], always_on_words[i][2]);
+  return 0;
+}
+
+int pops_apply_bios_shell_edits(void *staged_core, size_t core_size) {
+  if (!staged_core)
+    return -EINVAL;
+  if (core_size < (size_t)(0x00263ed6 + 1 - POPS_CORE_BASE_ADDR))
+    return -ERANGE;
+  /* The original's order: poke8, poke16, poke32. */
+  write_u8(staged_core, core_size, 0x00263ed6, 0x20);
+  write_u16(staged_core, core_size, 0x00263d56, 0x1000);
+  write_u32(staged_core, core_size, 0x00263db0, 0);
+  return 0;
+}
+
 /* FUN_008d7024's chain, in the original's order. site 0: flag only. */
 static const struct {
   const char *name;

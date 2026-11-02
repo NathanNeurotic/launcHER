@@ -28,7 +28,10 @@ POPStarter itself, so these need an independent resident implementation.
 **launcHER now has one** (`common/include/pops_resident.h`,
 `common/src/pops_resident_engine.c`). It is built as a small flat image linked
 at `0x0143a000`, inside the range the original also keeps for itself, and
-copied there as the launcher's last write before handoff. The controller ID
+copied there as the launcher's last write before handoff, on every
+POPStarter launch, as the original copies its own (before 2026-11-02 only
+when a command needed it; see
+[POPSTARTER_LAUNCH_HOOKS.md](POPSTARTER_LAUNCH_HOOKS.md)). The controller ID
 override, `$SET_TIMINGS` and the cheat code run from the same place as in
 POPStarter: POPS's GP1 write path (`0x0021a568`, reached from the GPU
 register handler `0x0020b4d8` when the game writes `0x1f801814`) has a `nop`
@@ -41,7 +44,11 @@ with interrupts disabled, on the POPS thread's stack. launcHER's entry keeps
 every register POPS has (POPS needs `$v1` afterwards); the original keeps
 only `k0`/`k1`, the only ones its code uses. launcHER used to run this work
 from POPS's VBLANK_START handler instead (the `lui`/`addiu` pair at
-`0x0021b184`/`0x0021b18c`); that hook is no longer installed. The PS1 RAM base comes from the word POPS itself stores at
+`0x0021b184`/`0x0021b18c`); that hook is no longer installed. Like the
+original's, the GP1 hook is now written on every launch: until 2026-11-02
+launcHER wrote it only for cheats, controller IDs or `$SET_TIMINGS`, so the
+reset combo, the built-in list's code calls and `$BREAKPOINT` did not run on
+other launches. The PS1 RAM base comes from the word POPS itself stores at
 `0x70003364` (`0x0021af98`), so nothing assumes how POPS maps that RAM. The
 code is launcHER's own; the original also hooks other places (its code at
 `0x01450000`, reached from POPS's `ExecOSD` tail call at `0x002362fc`, is its
@@ -67,7 +74,8 @@ below need their behavior worked out and added to it.
 | `$SCANLINES` | `0x21e454=0x22b50006` | **PRESENT** |
 | `$VCDID_n` | selects a built-in per-game DB entry (handlers `0x890f4c..0x891e78`: 1..4 digits, first command wins, ignored after a fingerprint match) | **PRESENT**: parsed as the original does (fixed + random texts vs the original's handlers), applies the entry when the fingerprint matched nothing; see [POPSTARTER_BUILTIN_DB.md](POPSTARTER_BUILTIN_DB.md). No console run |
 | `$SUBCDSTATUS` | `0x20e850/0x20e86c/0x20e87c` | **PRESENT** |
-| `$RESET_WARMBOOT` | flag `gp+0x3894` (handler `0x8923a4`), read after the region pass (`0x8795f0..0x879cf4`): walks POPS's embedded PS1 BIOS ROM copy (`0x24bc20..0x2cbb4c`) and rewrites 24 BIOS call stubs (A0: 3A 40 4F 50 53 9A 9B A1; B0: 1A..1F 21 22 23 2A 2B 38 52 5A; C0: 0B 14) to A0:A0 `_boot`, and changes what the in-game reset combo makes the PS1 jump to: instead of `0xbfc00000` it stores the SystemErrorExit (A0:3A) stub's address, meaning to use its PS1 ROM address but storing the EE address of the stub inside POPS's copy (quirk 26), through its own resident block (`0x232cf4..0x232d08`, which takes over the breakpoint handler's slot, quirk 25) | **PRESENT**: `pops_apply_reset_warmboot` (same scan, same pokes, same stored address) plus `PopsResidentConfig.reset_vector`; the reset combo itself (SELECT+L2+R2+CROSS on port 0 sets the PS1 jump word at scratchpad 0, always live in the original) is now in the GP1 work too. Differential test on the real core and random cores against the original's block run as shipped; see [POPSTARTER_RESET_WARMBOOT.md](POPSTARTER_RESET_WARMBOOT.md). **NOT TESTED** on a console |
+| `$RESET_WARMBOOT` | flag `gp+0x3894` (handler `0x8923a4`), read after the region pass (`0x8795f0..0x879cf4`): walks POPS's embedded PS1 BIOS ROM copy (`0x24bc20..0x2cbb4c`) and rewrites 24 BIOS call stubs (A0: 3A 40 4F 50 53 9A 9B A1; B0: 1A..1F 21 22 23 2A 2B 38 52 5A; C0: 0B 14) to A0:A0 `_boot`, and changes what the in-game reset combo makes the PS1 jump to: instead of `0xbfc00000` it stores the SystemErrorExit (A0:3A) stub's address, meaning to use its PS1 ROM address but storing the EE address of the stub inside POPS's copy (quirk 26), through its own resident block (`0x232cf4..0x232d08`, which takes over the breakpoint handler's slot, quirk 25) | **PRESENT**: `pops_apply_reset_warmboot` (same scan, same pokes, same stored address) plus `PopsResidentConfig.reset_vector`; the reset combo itself (SELECT+L2+R2+CROSS on port 0 sets the PS1 jump word at scratchpad 0, always live in the original) is now in the GP1 work too, live on every launch since the GP1 hook is
+(2026-11-02). Differential test on the real core and random cores against the original's block run as shipped; see [POPSTARTER_RESET_WARMBOOT.md](POPSTARTER_RESET_WARMBOOT.md). **NOT TESTED** on a console |
 | `$MUTE_CDDA` / `$UNDO_MUTE_CDDA` | `0x20f0b6`, `0x20ebf2`, `0x20f0e0` | **PRESENT** |
 | `$MUTE_VAB` | five SPU sites | **PRESENT** |
 | `$MUTE_ALL` | `0x213ff4=0` | **PRESENT** |
@@ -143,8 +151,9 @@ record 60 original region-control-flow combinations. **No console test.**
 | User BIOS.BIN with integrity check | **MISSING** |
 | MODULE_0..9.IRX resident modules | **PRESENT**: read from the folder POPS came from (the original: the device's `POPS` folder), 17-byte rule, the original's name table and core pokes, slot-order starts with its `hdd`/`pfs` arguments, `MODULE_5..9` after the `SB.` network stack, fatal start check. launcHER still starts POPS's sio2man itself in all cases. See [POPSTARTER_MODULE_IRX.md](POPSTARTER_MODULE_IRX.md). No console run |
 | Physical PS1 disc boot | **MISSING** |
-| Built-in per-game DB (LibCrypt list, breakpoint killer, compat modes, VMC1-off for some titles) | **PRESENT**: the original's list (607 fingerprints as hashes, 625 entries) generated from MAIN by `tools/gen_pops_builtin_db.py`; every entry's core/EE writes and flags equal the original's `FUN_008e00d0` (`tools/test_pops_builtin_db.py`); game-fix code, breakpoint handler and second LibCrypt code run from the resident chain in the original's order. launcHER's own serial DB still runs beside it. See [POPSTARTER_BUILTIN_DB.md](POPSTARTER_BUILTIN_DB.md). No console run |
+| Built-in per-game DB (LibCrypt list, breakpoint killer, compat modes, VMC1-off for some titles) | **PRESENT**: the original's list (607 fingerprints as hashes, 625 entries) generated from MAIN by `tools/gen_pops_builtin_db.py`; every entry's core/EE writes and flags equal the original's `FUN_008e00d0` (`tools/test_pops_builtin_db.py`); game-fix code, breakpoint handler and second LibCrypt code run from the resident chain in the original's order (on every launch since 2026-11-02; before that only when cheats, controller IDs or `$SET_TIMINGS` were also set). launcHER's own serial DB still runs beside it. See [POPSTARTER_BUILTIN_DB.md](POPSTARTER_BUILTIN_DB.md). No console run |
 | padman_hsync | **PRESENT** with `$LOAD_PADMAN` / `$KILL_PADMAN` above; otherwise POPS starts it itself, as under POPStarter |
+| Always-on launch changes: GP1 hook, nine misaligned-read guards, exit and byte-copy pokes, PS1 BIOS shell edits, the final scratchpad/BSS/heap clears | **PRESENT** except the pad hotkeys of the always-live block (`0x232790..0x232c90`) and the recompiler hook at `0x2075e8`: launcHER changes the same 28 POPS words as the original's blocks run over the real core, and its own guard stubs pass the same model as the original's. Its exit program (`0x1450000`) is not copied on purpose. Quirks 41 to 44. See [POPSTARTER_LAUNCH_HOOKS.md](POPSTARTER_LAUNCH_HOOKS.md). No console run |
 | XX. external USB pair (`mc?:/POPSTARTER/usbd.irx`, `usbhdfsd.irx`), started before and after the IOP reset | **PRESENT**: same paths, order, 12-byte rule and fatal start check; built-in stand-ins are launcHER's USB modules; EE-RAM handoff at `0x140000` not copied. See [POPSTARTER_XX_USB_DRIVERS.md](POPSTARTER_XX_USB_DRIVERS.md). No console run |
 
 ## Remaining work, in order
@@ -155,12 +164,14 @@ record 60 original region-control-flow combinations. **No console test.**
    commands, widescreen and `$SET_TIMINGS` exist, NOT TESTED on a console). PATCH video
    actions 6/7 dispatch exists since `a8da126` (stale note corrected 2026-11-02);
    text `$480p` works at the component/staging level. [Progressive contracts](POPS_PROGRESSIVE_CONTRACTS.md).
-3. Recover the built-in per-game DB at `0x8e00d0`. (The pad commands are
-   done; the original also sets `+0x28` of both pad blocks to 1 on every pass
-   of its always-on block, a field POPS uses for actuator setup; launcHER
-   does not, pending a reason to.)
+3. The always-live block's pad hotkeys and slot copies (including the 1
+   it writes to `+0x28` of both pad blocks on every pass), then the
+   recompiler hook at `0x2075e8` with `$RECOMPILER_ADDON_0..4`, then
+   `$FAKELC`. See [POPSTARTER_LAUNCH_HOOKS.md](POPSTARTER_LAUNCH_HOOKS.md).
    The six manual DISPLAY commands now have an independent resident bridge
    and 228 original file cases; see [manual contracts](POPS_MANUAL_DISPLAY_CONTRACTS.md).
    The six direct display commands now have a bounded original differential;
    see [display contracts](POPS_DISPLAY_CONTRACTS.md).
-4. IGR skin, OSD replacement, BIOS.BIN and physical disc boot.
+4. IGR skin, OSD replacement, BIOS.BIN and physical disc boot. With a
+   user BIOS.BIN or OSD, the original skips its three PS1 BIOS shell edits;
+   launcHER must too.

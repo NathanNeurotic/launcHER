@@ -1340,6 +1340,33 @@ int launchPOPS(int argc, char *argv[]) {
     return res;
   }
 
+  /* POPStarter's always-on changes (its launch function, 0x874790 and
+   * 0x874864..0x874a18): no command skips them, and they come before the
+   * built-in entry and the user's commands. Its GP1 hook (0x21a63c; the
+   * reset combo, the built-in entry's calls and the cheats run from it), its
+   * nine misaligned-read guards and the exit/pad-copy pokes. The hook and
+   * the guards jump into the resident image, so it is installed on every
+   * POPStarter-mode launch (just before handoff). */
+  PopsResidentHeader residentHdr;
+  res = pops_resident_check_image(pops_resident_bin, size_pops_resident_bin, &residentHdr);
+  if (res) {
+    msg("POPS: Resident image validation failed: %d\n", res);
+    return res;
+  }
+  if ((uint32_t)(uintptr_t)stagedCore + plan.core_size > POPS_RESIDENT_BASE) {
+    msg("POPS: Staged core overlaps the resident area\n");
+    return -ERANGE; /* the trampoline still reads the staged core from there */
+  }
+  res = pops_resident_hook_gp1((void *)stagedCore, plan.core_size, residentHdr.gp1_entry);
+  if (!res)
+    res = pops_resident_hook_guards((void *)stagedCore, plan.core_size, &residentHdr);
+  if (!res)
+    res = pops_apply_always_on_pokes((void *)stagedCore, plan.core_size);
+  if (res) {
+    msg("POPS: POPStarter launch hooks failed: %d\n", res);
+    return res;
+  }
+
   /* Stage opt-in runtime core corrections when configured */
   if (cfg.runtime_corrections) {
     res = pops_core_runtime_corrections_stage(POPS_CORE_ADDR, (void *)stagedCore,
@@ -1394,12 +1421,6 @@ int launchPOPS(int argc, char *argv[]) {
   }
 
   /* Preserve original root/title and TROJAN/PATCH ordering. */
-  PopsResidentHeader residentHdr;
-  res = pops_resident_check_image(pops_resident_bin, size_pops_resident_bin, &residentHdr);
-  if (res) {
-    msg("POPS: Resident image validation failed: %d\n", res);
-    return res;
-  }
   PopsFixContext fixContext;
   res = pops_stage_fix_files((void *)stagedCore, plan.core_size, vcdDir,
                               gameConfigDir, builtinId, cfg.compat_modes,
@@ -1428,6 +1449,16 @@ int launchPOPS(int argc, char *argv[]) {
                                  cfg.disc_region, cfg.video_mode);
   if (res) {
     msg("POPS: Final video patch failed: %d\n", res);
+    return res;
+  }
+
+  /* POPStarter's edits to the PS1 BIOS shell inside POPS (0x878f94): made
+   * unless a user BIOS.BIN or OSD replacement was loaded, which launcHER
+   * never does; after the fix files and the user's commands and before the
+   * region pass, as there. */
+  res = pops_apply_bios_shell_edits((void *)stagedCore, plan.core_size);
+  if (res) {
+    msg("POPS: BIOS shell edits failed: %d\n", res);
     return res;
   }
 
@@ -1502,23 +1533,18 @@ int launchPOPS(int argc, char *argv[]) {
 
   /* launcHER's resident cheat/display/pad/widescreen/timing code runs inside POPS. Validate and
    * hook now, while failing is still
-   * harmless; the image itself is copied just before handoff. */
+   * harmless; the image itself is copied just before handoff, on every
+   * launch (the GP1 hook and the guards above jump into it). Controller
+   * IDs, $SET_TIMINGS and cheats run from POPS's GP1 write path, where
+   * POPStarter runs them, not from VBLANK. */
   int residentNeeded = pops_resident_build_config(&residentCfg, &cfg);
   if (residentNeeded < 0) {
     msg("POPS: Resident configuration failed: %d\n", residentNeeded);
     return residentNeeded;
   }
   if (residentNeeded) {
-    res = 0;
-    if ((uint32_t)(uintptr_t)stagedCore + plan.core_size > POPS_RESIDENT_BASE)
-      res = -ERANGE; /* the trampoline still reads the staged core from there */
-    /* Controller IDs, $SET_TIMINGS and cheats run from POPS's GP1 write
-     * path, where POPStarter runs them, not from VBLANK. */
-    if (!res && (residentCfg.flags & (POPS_RES_F_CHEATS | POPS_RES_F_PAD_ID | POPS_RES_F_TIMINGS)))
-      res = pops_resident_hook_gp1((void *)stagedCore, plan.core_size, residentHdr.gp1_entry);
-    if (!res)
-      res = pops_resident_hook_pads((void *)stagedCore, plan.core_size, residentCfg.flags,
-                                    residentHdr.pad_read_entry, residentHdr.pad_read_exit);
+    res = pops_resident_hook_pads((void *)stagedCore, plan.core_size, residentCfg.flags,
+                                  residentHdr.pad_read_entry, residentHdr.pad_read_exit);
     if (!res && (residentCfg.flags & POPS_RES_F_WIDESCREEN))
       res = pops_resident_hook_widescreen((void *)stagedCore, plan.core_size, cfg.widescreen,
                                           &residentHdr);
@@ -1767,15 +1793,14 @@ int launchPOPS(int argc, char *argv[]) {
   }
 
   /* Last write before handoff: nothing of launcHER's lives at the resident
-   * base, and the trampoline flushes caches before entering POPS. */
-  if (residentNeeded) {
-    res = pops_resident_install((void *)POPS_RESIDENT_BASE, POPS_RESIDENT_LIMIT - POPS_RESIDENT_BASE,
-                                POPS_RESIDENT_BASE, pops_resident_bin, size_pops_resident_bin,
-                                &residentCfg);
-    if (res) {
-      msg("POPS: Resident code install failed: %d\n", res);
-      return res;
-    }
+   * base, and the trampoline flushes caches before entering POPS. Every
+   * launch: POPS's GP1 path and the guards jump into it. */
+  res = pops_resident_install((void *)POPS_RESIDENT_BASE, POPS_RESIDENT_LIMIT - POPS_RESIDENT_BASE,
+                              POPS_RESIDENT_BASE, pops_resident_bin, size_pops_resident_bin,
+                              &residentCfg);
+  if (res) {
+    msg("POPS: Resident code install failed: %d\n", res);
+    return res;
   }
 
   memcpy((void *)POPS_TRAMPOLINE_ADDR, pops_trampoline_code, trampolineCodeSize);

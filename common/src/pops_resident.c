@@ -174,6 +174,8 @@ int pops_resident_check_image(const void *image, size_t image_len, PopsResidentH
   h.gte_divide_entry = get_u32(b + 44);
   h.gte_ultra_entry = get_u32(b + 48);
   h.gp1_entry = get_u32(b + 52);
+  for (unsigned i = 0; i < POPS_GUARD_COUNT; ++i)
+    h.guard_entry[i] = get_u32(b + 56 + 4 * i);
 
   if (h.magic != POPS_RESIDENT_MAGIC || h.version != POPS_RESIDENT_VERSION ||
       h.header_size != sizeof(PopsResidentHeader))
@@ -201,6 +203,11 @@ int pops_resident_check_image(const void *image, size_t image_len, PopsResidentH
   for (unsigned i = 0; i < 4; ++i) {
     if ((gte[i] & 3) || gte[i] < POPS_RESIDENT_BASE + h.header_size ||
         gte[i] >= POPS_RESIDENT_BASE + h.file_size)
+      return -ERANGE;
+  }
+  for (unsigned i = 0; i < POPS_GUARD_COUNT; ++i) {
+    if ((h.guard_entry[i] & 3) || h.guard_entry[i] < POPS_RESIDENT_BASE + h.header_size ||
+        h.guard_entry[i] >= POPS_RESIDENT_BASE + h.file_size)
       return -ERANGE;
   }
   /* The configuration must fit inside the image, in its zeroed part or not. */
@@ -328,6 +335,75 @@ int pops_resident_hook_gp1(void *staged_core, size_t core_size, uint32_t entry) 
   if (cur != POPS_GP1_HOOK_PRISTINE && cur != jal)
     return -EILSEQ;
   put_u32(site, jal);
+  return 0;
+}
+
+/* POPStarter's always-on guards (0x874864..0x874998), in its order: the
+ * word that becomes "j stub", POPS's word there, and POPS's word after it,
+ * which becomes a nop, except at 0x204160, where it is the branch's delay
+ * slot and stays. */
+static const struct {
+  uint32_t site, pristine, next;
+  uint8_t keep_next;
+} guard_sites[POPS_GUARD_COUNT] = {
+  {0x0021c58c, 0x8c820000, 0x24840004, 0}, /* lw $v0,0($a0) / addiu $a0,$a0,4 */
+  {0x0021c768, 0x8c440000, 0x24420004, 0}, /* lw $a0,0($v0) / addiu $v0,$v0,4 */
+  {0x002082a0, 0x8c660000, 0x14c00003, 0}, /* lw $a2,0($v1) / bnez $a2,0x2082b4 */
+  {0x00204ae0, 0x8c630000, 0x3c023c02, 0}, /* lw $v1,0($v1) / lui $v0,0x3c02 */
+  {0x00204178, 0x8c650000, 0x00053e82, 0}, /* lw $a1,0($v1) / srl $a3,$a1,26 */
+  {0x00204160, 0x10000006, 0x0040282d, 1}, /* b 0x20417c / move $a1,$v0 (kept) */
+  {0x00202250, 0x03e00008, 0xac4a0000, 0}, /* jr $ra / sw $t2,0($v0) */
+  {0x0021c5dc, 0xae052260, 0xae032270, 0}, /* sw $a1,0x2260($s0) / sw $v1,0x2270($s0) */
+  {0x0021c5a8, 0xad422288, 0xad452260, 0}, /* sw $v0,0x2288($t2) / sw $a1,0x2260($t2) */
+};
+
+/* Words the stubs return to or repeat; the hooks leave them alone. */
+static const uint32_t guard_context[][2] = {
+  {0x0021c594, 0x00471824}, /* and   $v1, $v0, $a3 (0x21c58c resumes) */
+  {0x0021c770, 0xafa20000}, /* sw    $v0, 0($sp) (0x21c768 resumes) */
+  {0x002082a8, 0x00000000}, /* nop (the bnez's delay slot) */
+  {0x002082ac, 0x0808207c}, /* j     0x2081f0 (word zero) */
+  {0x002082b0, 0x24020001}, /* addiu $v0, $zero, 1 */
+  {0x002082b4, 0x00c00008}, /* jr    $a2 (word nonzero) */
+  {0x00204ae8, 0x34428001}, /* ori   $v0, $v0, 0x8001 (0x204ae0 resumes) */
+  {0x00204180, 0x00051542}, /* srl   $v0, $a1, 21 (0x204178 resumes) */
+  {0x00202238, 0x3c02e060}, /* lui   $v0, 0xe060: the store address... */
+  {0x0020224c, 0x00431021}, /* addu  $v0, $v0, $v1 ...ends here */
+  {0x0021c5e4, 0x42000038}, /* ei (0x21c5dc resumes) */
+  {0x0021c5b0, 0xad432270}, /* sw    $v1, 0x2270($t2) (0x21c5a8 resumes) */
+};
+
+int pops_resident_hook_guards(void *staged_core, size_t core_size,
+                              const PopsResidentHeader *hdr) {
+  uint8_t *core = staged_core;
+  if (!core || !hdr)
+    return -EINVAL;
+  for (unsigned i = 0; i < POPS_GUARD_COUNT; ++i) {
+    uint32_t entry = hdr->guard_entry[i];
+    if ((entry & 3) || entry < POPS_RESIDENT_BASE || entry >= POPS_RESIDENT_LIMIT)
+      return -EINVAL;
+  }
+  if (core_size < 0x0021c770 + 4 - POPS_CORE_BASE)
+    return -ERANGE;
+  for (unsigned i = 0; i < sizeof(guard_context) / sizeof(guard_context[0]); ++i) {
+    if (get_u32(core + guard_context[i][0] - POPS_CORE_BASE) != guard_context[i][1])
+      return -EILSEQ;
+  }
+  for (unsigned i = 0; i < POPS_GUARD_COUNT; ++i) {
+    const uint8_t *site = core + guard_sites[i].site - POPS_CORE_BASE;
+    uint32_t jump = 0x08000000u | ((hdr->guard_entry[i] >> 2) & 0x03ffffffu);
+    uint32_t next = guard_sites[i].keep_next ? guard_sites[i].next : 0;
+    uint32_t cur = get_u32(site), cur_next = get_u32(site + 4);
+    if (!(cur == guard_sites[i].pristine && cur_next == guard_sites[i].next) &&
+        !(cur == jump && cur_next == next))
+      return -EILSEQ;
+  }
+  for (unsigned i = 0; i < POPS_GUARD_COUNT; ++i) {
+    uint8_t *site = core + guard_sites[i].site - POPS_CORE_BASE;
+    put_u32(site, 0x08000000u | ((hdr->guard_entry[i] >> 2) & 0x03ffffffu));
+    if (!guard_sites[i].keep_next)
+      put_u32(site + 4, 0);
+  }
   return 0;
 }
 

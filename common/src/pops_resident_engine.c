@@ -479,6 +479,17 @@ __asm__(".set push\n.set noreorder\n.text\n.align 2\n"
         "sw $8, 0x64($a0)\n"
         ".set pop\n");
 
+/* POPStarter's always-on guards, pops_resident_guards.S. */
+void pops_resident_guard_21c58c(void);
+void pops_resident_guard_21c768(void);
+void pops_resident_guard_2082a0(void);
+void pops_resident_guard_204ae0(void);
+void pops_resident_guard_204178(void);
+void pops_resident_guard_204160(void);
+void pops_resident_guard_202250(void);
+void pops_resident_guard_21c5dc(void);
+void pops_resident_guard_21c5a8(void);
+
 __attribute__((section(".resident.head"), used))
 const PopsResidentHeader pops_resident_header = {
   POPS_RESIDENT_MAGIC,
@@ -496,6 +507,17 @@ const PopsResidentHeader pops_resident_header = {
   (uint32_t)pops_resident_gte_divide,
   (uint32_t)pops_resident_gte_ultra,
   (uint32_t)pops_resident_gp1,
+  {
+    (uint32_t)pops_resident_guard_21c58c,
+    (uint32_t)pops_resident_guard_21c768,
+    (uint32_t)pops_resident_guard_2082a0,
+    (uint32_t)pops_resident_guard_204ae0,
+    (uint32_t)pops_resident_guard_204178,
+    (uint32_t)pops_resident_guard_204160,
+    (uint32_t)pops_resident_guard_202250,
+    (uint32_t)pops_resident_guard_21c5dc,
+    (uint32_t)pops_resident_guard_21c5a8,
+  },
 };
 
 /* No longer hooked by the launcher: everything it did now runs from the GP1
