@@ -642,7 +642,9 @@ class BuildConfig(unittest.TestCase):
 
     def test_no_cheats_no_resident(self):
         out = ResidentConfig()
-        self.assertEqual(L.pops_resident_build_config(c.byref(out), c.addressof(self.parsed())), 0)
+        # Hold the parsed buffer: c.addressof() keeps no reference to it.
+        cfg = self.parsed()
+        self.assertEqual(L.pops_resident_build_config(c.byref(out), c.addressof(cfg)), 0)
 
     def test_cheats_and_safe_mode(self):
         out = ResidentConfig()
@@ -874,7 +876,10 @@ class PadCommands(unittest.TestCase):
 
     def resident(self, *lines):
         out = ResidentConfig()
-        res = L.pops_resident_build_config(c.byref(out), c.addressof(self.parsed(*lines)))
+        # Hold the parsed buffer: c.addressof() keeps no reference to it, so a
+        # temporary is freed before the C function reads it.
+        cfg = self.parsed(*lines)
+        res = L.pops_resident_build_config(c.byref(out), c.addressof(cfg))
         return res, out
 
     def test_nopad_and_pad_id(self):
