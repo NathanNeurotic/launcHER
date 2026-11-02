@@ -560,7 +560,7 @@ $8009A200 0010</code></pre>
 
 <h3>Numbered Driver Modules (MODULE_0.IRX .. MODULE_9.IRX)</h3>
 <p>
-  Place driver files named <code>MODULE_0.IRX</code> through <code>MODULE_9.IRX</code> in any candidate folder. launcHER scans candidate directories and loads existing modules sequentially in ascending numerical order.
+  These work as in POPStarter r13. Put <code>MODULE_0.IRX</code> through <code>MODULE_9.IRX</code> in the same folder as your POPS files (<code>POPS_IOX.PAK</code> / <code>POPS.PAK</code>), normally the device's <code>POPS</code> folder; other folders are not searched. A module whose IOP name starts like one of POPS's own (<code>sio2man</code>, <code>padman</code>, libsd, <code>sdr_driver</code>, <code>dev9</code>, <code>atad</code>, <code>hdd</code>, <code>pfs</code>) replaces POPS's copy. They start in numerical order after the IOP reset (<code>hdd</code> and <code>pfs</code> get POPStarter's arguments), and one that fails to start stops the launch. For <code>SB.</code> launches modules 5 to 9 start after the network stack. Not yet tested on a console.
 </p>
 
 <h3>Named Peripheral Drivers</h3>

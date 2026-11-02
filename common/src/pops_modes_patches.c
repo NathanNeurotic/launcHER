@@ -544,6 +544,79 @@ int pops_apply_padman(void *staged_core, size_t core_size) {
   return 0;
 }
 
+/* FUN_008d7024's chain, in the original's order. site 0: flag only. */
+static const struct {
+  const char *name;
+  uint32_t site;
+  unsigned flag;
+} module_irx_names[] = {
+  {"sio2man", 0x00200324, POPS_MODULE_IRX_SIO2MAN},
+  {"padman", 0x00200358, POPS_MODULE_IRX_PADMAN},
+  {"Sound_Device_Library", 0x00200388, 0},
+  {"sdr_driver", 0x002003b8, 0},
+  {"dev9", 0x002003f0, 0},
+  {"atad", 0x00200420, 0},
+  {"hdd", 0x00200450, 0},
+  {"pfs", 0x00200480, 0},
+  {"IOX/File_Manager", 0, 0},
+  {"IOX/File_Manager_Rpc", 0, 0},
+  {"Poweroff_Handler", 0, 0},
+};
+
+static uint8_t module_irx_byte(const void *irx, size_t irx_size, size_t at) {
+  return at < irx_size ? ((const uint8_t *)irx)[at] : 0;
+}
+
+static int module_irx_prefix(const void *irx, size_t irx_size, const char *name) {
+  size_t i;
+  for (i = 0; name[i]; ++i)
+    if (module_irx_byte(irx, irx_size, POPS_MODULE_IRX_NAME_AT + i) != (uint8_t)name[i])
+      return 0;
+  return 1;
+}
+
+int pops_module_irx_name_apply(void *staged_core, size_t core_size,
+                               const void *irx, size_t irx_size, unsigned *flags) {
+  size_t i;
+  if (!staged_core || !irx || !flags)
+    return -EINVAL;
+  for (i = 0; i < sizeof(module_irx_names) / sizeof(module_irx_names[0]); ++i) {
+    uint8_t *at;
+    if (!module_irx_prefix(irx, irx_size, module_irx_names[i].name))
+      continue;
+    if (module_irx_names[i].site) {
+      if (core_size < (size_t)(module_irx_names[i].site + 12 - POPS_CORE_BASE_ADDR))
+        return -ERANGE;
+      at = (uint8_t *)staged_core + (module_irx_names[i].site - POPS_CORE_BASE_ADDR);
+      at[0] = at[1] = at[2] = at[3] = 0;
+      at[10] = 0x00;
+      at[11] = 0x10;
+    }
+    *flags |= module_irx_names[i].flag;
+    return 0;
+  }
+  return 0;
+}
+
+int pops_module_irx_args(const void *irx, size_t irx_size, const char **args) {
+  static const char hdd_args[12] = "-o\0" "8\0" "-n\0" "128";
+  static const char pfs_args[17] = "-m\0" "8\0" "-o\0" "8\0" "-n\0" "127";
+  if (!args)
+    return -EINVAL;
+  *args = NULL;
+  if (!irx)
+    return -EINVAL;
+  if (module_irx_prefix(irx, irx_size, "hdd")) {
+    *args = hdd_args;
+    return (int)sizeof(hdd_args);
+  }
+  if (module_irx_prefix(irx, irx_size, "pfs")) {
+    *args = pfs_args;
+    return (int)sizeof(pfs_args);
+  }
+  return 0;
+}
+
 int pops_apply_reset_warmboot(void *staged_core, size_t core_size, uint32_t *exit_vector) {
   uint8_t *bytes = staged_core;
   uint32_t p;

@@ -693,12 +693,13 @@ Place optional configuration files alongside your `.VCD` image or inside its per
 
 ### Custom IRX driver replacement and peripherals
 
-launcHER loads user-supplied IOP driver modules and peripheral replacements right after storage initialization:
+`MODULE_0.IRX` through `MODULE_9.IRX` work as in POPStarter r13: put them in the same folder as your POPS files (`POPS_IOX.PAK` / `POPS.PAK`), normally the device's `POPS` folder. Each file is read before the IOP reset; a module named like one of POPS's own (`sio2man`, `padman`, libsd, `sdr_driver`, `dev9`, `atad`, `hdd`, `pfs`) replaces POPS's copy. After the reset they start in numerical order (`hdd` and `pfs` get POPStarter's arguments) and a module that fails to start stops the launch. For `SB.` launches modules 5 to 9 start after the network stack. Details: [docs/POPSTARTER_MODULE_IRX.md](docs/POPSTARTER_MODULE_IRX.md). Not yet tested on a console.
 
-- **Numbered modules:** `MODULE_0.IRX` through `MODULE_9.IRX` load sequentially in numerical order.
+launcHER-only extras, loaded after the numbered modules:
+
 - **Named peripherals:** Specialty drivers load when present: `USBMOUSE.IRX` / `USB_MOUSE.IRX`, `USBKBD.IRX`, `USBGUN.IRX` / `GUNCON.IRX`, `MULTITAP.IRX`, `DS3.IRX` / `DS4.IRX`, `PADMAN.IRX`, `SIO2MAN.IRX`.
 - **Manifest lists:** `MODULES.TXT` and `IRX.TXT` specify arbitrary module file paths to load.
-- **Search locations:** Searches `vmcDir`, `vcdDir`, `vcdDir/IRX/`, `mc0:/POPSTARTER/`, `mc1:/POPSTARTER/`, `mc0:/POPS/`, and `mc1:/POPS/`.
+- **Search locations for these two:** `vmcDir`, `vcdDir`, `vcdDir/IRX/`, `mc0:/POPSTARTER/`, `mc1:/POPSTARTER/`, `mc0:/POPS/`, and `mc1:/POPS/`.
 
 ### Built-in compatibility database and LibCrypt
 

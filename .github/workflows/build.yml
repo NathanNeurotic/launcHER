@@ -50,6 +50,8 @@ jobs:
         run: python tools/test_pops_warmboot.py
       - name: Test POPS $LOAD_PADMAN and $KILL_PADMAN
         run: python tools/test_pops_padman.py
+      - name: Test POPS MODULE_n.IRX
+        run: python tools/test_pops_module_irx.py
 
   build:
     runs-on: ubuntu-latest

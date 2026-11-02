@@ -20,6 +20,7 @@
 #include <iopcontrol.h>
 #include <iopcontrol_special.h>
 #include <loadfile.h>
+#include <malloc.h>
 #include <ps2sdkapi.h>
 #include <sifrpc.h>
 #include <stdint.h>
@@ -382,6 +383,103 @@ static int pops_start_xx_usb(const char *stage, int builtinFallback) {
   return 0;
 }
 
+/* POPStarter's MODULE_0..9.IRX (docs/POPSTARTER_MODULE_IRX.md): read from
+ * the POPS folder before the IOP reset, name-checked against the core, then
+ * started from the buffers after it. */
+static void *s_moduleIrx[POPS_MODULE_IRX_SLOTS];
+static size_t s_moduleIrxSize[POPS_MODULE_IRX_SLOTS];
+
+static void pops_module_irx_release(void) {
+  for (int slot = 0; slot < POPS_MODULE_IRX_SLOTS; ++slot) {
+    free(s_moduleIrx[slot]);
+    s_moduleIrx[slot] = NULL;
+    s_moduleIrxSize[slot] = 0;
+  }
+}
+
+/* The original's buffer is malloc(2 * size); its name check can read past
+ * a small file, so the buffer here also covers the name and is zeroed. */
+static size_t pops_module_irx_alloc_size(size_t size) {
+  size_t want = size * 2;
+  if (want < POPS_MODULE_IRX_NAME_AT + POPS_MODULE_IRX_NAME_MAX)
+    want = POPS_MODULE_IRX_NAME_AT + POPS_MODULE_IRX_NAME_MAX;
+  return want;
+}
+
+static int pops_module_irx_read(const char *popsDir) {
+  char path[PATH_MAX];
+  pops_module_irx_release();
+  for (int slot = 0; slot < POPS_MODULE_IRX_SLOTS; ++slot) {
+    int length = snprintf(path, sizeof(path), "%sMODULE_%d.IRX", popsDir, slot);
+    if (length < 0 || (size_t)length >= sizeof(path))
+      return -ENAMETOOLONG;
+    int fd = open(path, O_RDONLY);
+    if (fd < 0) {
+      DPRINTF("POPS: %s not found\n", path);
+      continue;
+    }
+    off_t size = lseek(fd, 0, SEEK_END);
+    lseek(fd, 0, SEEK_SET);
+    if (size < POPS_MODULE_IRX_MIN_SIZE) {
+      close(fd);
+      continue;
+    }
+    size_t bytes = pops_module_irx_alloc_size((size_t)size);
+    void *buffer = memalign(64, bytes);
+    if (!buffer) {
+      close(fd);
+      return -ENOMEM;
+    }
+    memset(buffer, 0, bytes);
+    /* Like the original, a short read is not checked. */
+    (void)read(fd, buffer, (size_t)size);
+    close(fd);
+    s_moduleIrx[slot] = buffer;
+    s_moduleIrxSize[slot] = (size_t)size;
+    DPRINTF("POPS: buffered %s (%u bytes)\n", path, (unsigned)size);
+  }
+  return 0;
+}
+
+static int pops_module_irx_apply_names(void *core, size_t coreSize, unsigned *flags) {
+  *flags = 0;
+  for (int slot = 0; slot < POPS_MODULE_IRX_SLOTS; ++slot) {
+    if (!s_moduleIrx[slot])
+      continue;
+    int res = pops_module_irx_name_apply(core, coreSize, s_moduleIrx[slot],
+                                         pops_module_irx_alloc_size(s_moduleIrxSize[slot]),
+                                         flags);
+    if (res)
+      return res;
+  }
+  return 0;
+}
+
+/* Slots first..last in order; a start returning <= 0 is fatal (0x8709f8). */
+static int pops_start_module_irx(int first, int last) {
+  for (int slot = first; slot <= last; ++slot) {
+    if (!s_moduleIrx[slot])
+      continue;
+    const char *args = NULL;
+    int argLength = pops_module_irx_args(s_moduleIrx[slot],
+                                         pops_module_irx_alloc_size(s_moduleIrxSize[slot]),
+                                         &args);
+    if (argLength < 0)
+      return argLength;
+    int id = SifExecModuleBuffer(s_moduleIrx[slot], s_moduleIrxSize[slot],
+                                 (unsigned int)argLength, args, NULL);
+    DPRINTF("POPS: MODULE_%d.IRX started (%d)\n", slot, id);
+    free(s_moduleIrx[slot]);
+    s_moduleIrx[slot] = NULL;
+    s_moduleIrxSize[slot] = 0;
+    if (id <= 0) {
+      msg("POPS: MODULE_%d.IRX failed to start: %d\n", slot, id);
+      return id < 0 ? id : -EIO;
+    }
+  }
+  return 0;
+}
+
 #define POPS_BDMA_NAMES(array) (sizeof(array) / sizeof((array)[0]))
 
 static int pops_load_bdma_drivers(const char *vcdDir, const char *vmcDir, PopsBdmaMode mode) {
@@ -531,23 +629,9 @@ int pops_load_custom_modules(const char *vcdDir, const char *vmcDir) {
   searchDirs[dirCount++] = "mc0:/POPS/";
   searchDirs[dirCount++] = "mc1:/POPS/";
 
-  /* 1. Load sequential custom modules: MODULE_0.IRX .. MODULE_9.IRX */
-  for (int slot = 0; slot <= 9; ++slot) {
-    for (int d = 0; d < dirCount; ++d) {
-      int length = snprintf(modPath, sizeof(modPath), "%sMODULE_%d.IRX", searchDirs[d], slot);
-      if (length < 0 || (size_t)length >= sizeof(modPath))
-        return -ENAMETOOLONG;
-      if (!tryFile(modPath)) {
-        DPRINTF("POPS: Loading custom module %s\n", modPath);
-        int res = SifLoadModule(modPath, 0, NULL);
-        DPRINTF("POPS: Custom module %s start returned %d\n", modPath, res);
-        (void)res;
-        break;
-      }
-    }
-  }
+  /* MODULE_0..9.IRX follow POPStarter now (pops_module_irx_read). */
 
-  /* 2. Load named peripheral drivers */
+  /* 1. Load named peripheral drivers (launcHER only) */
   static const char *peripheralDrivers[] = {
     "USBMOUSE.IRX",
     "USB_MOUSE.IRX",
@@ -578,7 +662,7 @@ int pops_load_custom_modules(const char *vcdDir, const char *vmcDir) {
     }
   }
 
-  /* 3. Load optional user manifests in the original directory order. */
+  /* 2. Load optional user manifests (launcHER only). */
   static const char *manifestNames[] = {"MODULES.TXT", "IRX.TXT"};
   for (int m = 0; m < 2; ++m) {
     for (int d = 0; d < dirCount; ++d) {
@@ -754,6 +838,19 @@ int launchPOPS(int argc, char *argv[]) {
   }
 
   DPRINTF("POPS: Using emulator %s\n", popsPath);
+
+  /* POPStarter reads MODULE_0..9.IRX from the game device's POPS folder
+   * before the reset; launcHER's equivalent is the folder POPS came from. */
+  {
+    char popsDir[PATH_MAX] = {0};
+    extractDirectory(popsPath, popsDir, sizeof(popsDir));
+    res = pops_module_irx_read(popsDir);
+    if (res) {
+      msg("POPS: Cannot buffer MODULE_n.IRX from %s: %d\n", popsDir, res);
+      pops_module_irx_release();
+      return res;
+    }
+  }
 
   /* Inspect target VCD ISO9660 filesystem for game serial */
   PopsVcdInfo vcdInfo;
@@ -1355,6 +1452,16 @@ int launchPOPS(int argc, char *argv[]) {
   /* $LOAD_PADMAN / $KILL_PADMAN: remove POPS's own padman_hsync start, as
    * the original's pokes after its reset (it pokes the loaded core; the
    * staged core is the same bytes). */
+  /* MODULE_n.IRX names: a module POPS would start itself (sio2man, padman,
+   * libsd, sdr, dev9, atad, hdd, pfs) has POPS's start poked away. */
+  unsigned moduleIrxFlags = 0;
+  res = pops_module_irx_apply_names((void *)stagedCore, plan.core_size, &moduleIrxFlags);
+  if (res) {
+    msg("POPS: MODULE_n.IRX name check failed: %d\n", res);
+    return res;
+  }
+
+  /* With a "padman" module these are the same bytes already poked. */
   if (cfg.load_padman || cfg.kill_padman) {
     res = pops_apply_padman((void *)stagedCore, plan.core_size);
     if (res) {
@@ -1490,7 +1597,7 @@ int launchPOPS(int argc, char *argv[]) {
 
   /* $LOAD_PADMAN: the original starts POPS's embedded padman_hsync itself
    * right after its post-reset modules, before the XX. USB pair. */
-  if (cfg.load_padman) {
+  if (cfg.load_padman && !(moduleIrxFlags & POPS_MODULE_IRX_PADMAN)) {
     if (plan.core_size < (size_t)(POPS_PADMAN_IRX_ADDR + POPS_PADMAN_IRX_SIZE - POPS_CORE_ADDR)) {
       msg("POPS: $LOAD_PADMAN: core too small\n");
       return -ERANGE;
@@ -1521,6 +1628,14 @@ int launchPOPS(int argc, char *argv[]) {
     (void)loadedBdma;
   }
 
+  /* MODULE_0..4.IRX start here; MODULE_5..9 after the SB. network stack
+   * (the original's order; contiguous when there is no SB. stack). */
+  res = pops_start_module_irx(0, 4);
+  if (res) {
+    pops_module_irx_release();
+    return res;
+  }
+
   /* If this is an SB. launch or SMB device, load the SMB network stack */
   if (isSbLaunch) {
     DPRINTF("POPS: Loading SMB stack for SB. launch\n");
@@ -1530,6 +1645,11 @@ int launchPOPS(int argc, char *argv[]) {
       return res;
     }
   }
+
+  res = pops_start_module_irx(5, POPS_MODULE_IRX_SLOTS - 1);
+  pops_module_irx_release();
+  if (res)
+    return res;
 
   /* Stop on malformed manifests rather than accidentally executing an
    * unrelated IRX selected by a silently truncated filename. */

@@ -241,13 +241,43 @@ int pops_apply_reset_warmboot(void *staged_core, size_t core_size, uint32_t *exi
  * pokes without checking what is there. $LOAD_PADMAN additionally starts
  * the module from the core image itself, POPS_PADMAN_IRX_SIZE bytes (the
  * original's length, 11 bytes past the ELF's end), no arguments, fatal on
- * an ID <= 0; it does both only while no MODULE_n.IRX named "padman" has
- * already done the same (gp+0x3824, set by the original's MODULE_n.IRX
- * scan, which launcHER does not have yet). Returns 0, -EINVAL, -ERANGE. */
+ * an ID <= 0. The start is skipped when a MODULE_n.IRX named "padman" was
+ * read (gp+0x3824, POPS_MODULE_IRX_PADMAN below). Returns 0, -EINVAL,
+ * -ERANGE. */
 #define POPS_PADMAN_CALL_SITE  UINT32_C(0x00200358)
 #define POPS_PADMAN_IRX_ADDR   UINT32_C(0x002cd560)
 #define POPS_PADMAN_IRX_SIZE   UINT32_C(0x0000adf0)
 int pops_apply_padman(void *staged_core, size_t core_size);
+
+/* MODULE_0..9.IRX: POPStarter r13 reads each from the game device's POPS
+ * folder before its IOP reset (0x8777c4..), ignores one under
+ * POPS_MODULE_IRX_MIN_SIZE bytes, and checks the IOP module name at file
+ * offset POPS_MODULE_IRX_NAME_AT (FUN_008d7024). The check is an else-if
+ * chain of prefix compares (no terminator check), first match wins. A match
+ * on a module POPS starts itself makes POPS's start a no-op with the same two
+ * pokes as $KILL_PADMAN (call word 0, high half of the next word 0x1000).
+ * Only the sio2man and padman flags are read again by the original; the rest
+ * are set and never read, so they are not kept here. "IOX/File_Manager_Rpc"
+ * can never match because "IOX/File_Manager" is checked first (quirk).
+ *
+ * pops_module_irx_name_apply: `irx`/`irx_size` is the readable buffer; bytes
+ * past it read as 0 (the original reads past a small buffer into heap).
+ * ORs POPS_MODULE_IRX_* into *flags. Returns 0, -EINVAL, -ERANGE.
+ *
+ * pops_module_irx_args: after the reset each module starts from its buffer
+ * in slot order, fatal on an ID <= 0; a name beginning "hdd" gets
+ * "-o 8 -n 128" (12 bytes), "pfs" gets "-m 8 -o 8 -n 127" (17 bytes), all
+ * others none (only three bytes are compared). Returns the argument length,
+ * *args set to the bytes or NULL. */
+#define POPS_MODULE_IRX_SLOTS     10
+#define POPS_MODULE_IRX_MIN_SIZE  17
+#define POPS_MODULE_IRX_NAME_AT   0x8e
+#define POPS_MODULE_IRX_NAME_MAX  20
+#define POPS_MODULE_IRX_SIO2MAN   0x1u
+#define POPS_MODULE_IRX_PADMAN    0x2u
+int pops_module_irx_name_apply(void *staged_core, size_t core_size,
+                               const void *irx, size_t irx_size, unsigned *flags);
+int pops_module_irx_args(const void *irx, size_t irx_size, const char **args);
 
 /* pops_fix_context_init_video after built-in entry `builtin_id` (0: none)
  * was applied to the staged core: the entry's compatibility modes and core

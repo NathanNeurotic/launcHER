@@ -23,8 +23,8 @@ module loader (`jal 0x2001d8`) with the padman_hsync ELF at `0x2cd560`
 - `$KILL_PADMAN`: the same two pokes, nothing started (quirk 32).
 - `gp+0x3824` is set by the original's `MODULE_n.IRX` scan when one of those
   modules is named `padman`; that scan does the same two pokes itself.
-  launcHER's `MODULE_n.IRX` handling is not the original's yet, so this
-  skip is not reachable in launcHER; it belongs to that parity item.
+  launcHER copies that scan now (see POPSTARTER_MODULE_IRX.md), so
+  `$LOAD_PADMAN` skips its start when a `MODULE_n.IRX` is named `padman`.
 
 The order around it: the pad driver starts after POPStarter's other
 post-reset modules and before the `XX.` USB pair.

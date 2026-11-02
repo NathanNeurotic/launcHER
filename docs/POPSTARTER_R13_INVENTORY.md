@@ -95,7 +95,7 @@ below need their behavior worked out and added to it.
 | `$SAFEMODE` | cheat gate: skip codes while PS1 RAM `0x1ffea0` reads `"STEM"` (`0x4d455453`) | **PRESENT**: same address and value as the original's emitted gate (0x89e954); host + unicorn checked; no console run |
 | `$SAFEMODE2`, `$NOSAFEMODE` | `$SAFEMODE2`: skip codes while PS1 RAM `0x1ffdf4 == 2`; `$NOSAFEMODE` clears both (`$SAFEMODE` is tested first) | **PRESENT**: same gate and order as the original; no console run |
 | `$HDTVFIX` / `$NOHDTVFIX` | `0x23acb0/0x23ad0c` = `li a0,1` / pristine | **PRESENT**; `$HDTVFIX` was writing an invented site |
-| `$LOAD_PADMAN`, `$KILL_PADMAN` | flags `gp+0x38a8` / `gp+0x3870`; after the IOP reset both poke `0x200358=0` and `0x200362=0x1000` (POPS no longer starts its embedded padman_hsync); `$LOAD_PADMAN` starts it itself first (`0x2cd560`, `0xadf0` bytes, fatal on failure) | **PRESENT**: same pokes, same module start; the `MODULE_n.IRX` "padman" skip (`gp+0x3824`) waits on MODULE_n parity. See [POPSTARTER_PADMAN.md](POPSTARTER_PADMAN.md). No console run |
+| `$LOAD_PADMAN`, `$KILL_PADMAN` | flags `gp+0x38a8` / `gp+0x3870`; after the IOP reset both poke `0x200358=0` and `0x200362=0x1000` (POPS no longer starts its embedded padman_hsync); `$LOAD_PADMAN` starts it itself first (`0x2cd560`, `0xadf0` bytes, fatal on failure) | **PRESENT**: same pokes, same module start, skipped when a `MODULE_n.IRX` is named "padman" (`gp+0x3824`). See [POPSTARTER_PADMAN.md](POPSTARTER_PADMAN.md). No console run |
 | `$USBDELAY_n` | config byte `0x100017` | **PARTIAL** (parsed) |
 | `$COMPATIBILITY_0x01..0x07` | FUN_008dc2c4 modes | **PRESENT** (Mode 8 has no branch in the original either) |
 
@@ -141,7 +141,7 @@ record 60 original region-control-flow combinations. **No console test.**
 | IGR menu skin (IGR_BG/NO/YES.TM2) | **MISSING** |
 | Replacement OSD image | **MISSING** |
 | User BIOS.BIN with integrity check | **MISSING** |
-| MODULE_0..9.IRX resident modules | **PARTIAL** (see audit) |
+| MODULE_0..9.IRX resident modules | **PRESENT**: read from the folder POPS came from (the original: the device's `POPS` folder), 17-byte rule, the original's name table and core pokes, slot-order starts with its `hdd`/`pfs` arguments, `MODULE_5..9` after the `SB.` network stack, fatal start check. launcHER still starts POPS's sio2man itself in all cases. See [POPSTARTER_MODULE_IRX.md](POPSTARTER_MODULE_IRX.md). No console run |
 | Physical PS1 disc boot | **MISSING** |
 | Built-in per-game DB (LibCrypt list, breakpoint killer, compat modes, VMC1-off for some titles) | **PRESENT**: the original's list (607 fingerprints as hashes, 625 entries) generated from MAIN by `tools/gen_pops_builtin_db.py`; every entry's core/EE writes and flags equal the original's `FUN_008e00d0` (`tools/test_pops_builtin_db.py`); game-fix code, breakpoint handler and second LibCrypt code run from the resident chain in the original's order. launcHER's own serial DB still runs beside it. See [POPSTARTER_BUILTIN_DB.md](POPSTARTER_BUILTIN_DB.md). No console run |
 | padman_hsync | **PRESENT** with `$LOAD_PADMAN` / `$KILL_PADMAN` above; otherwise POPS starts it itself, as under POPStarter |
