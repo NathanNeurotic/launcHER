@@ -123,6 +123,27 @@ int pops_builtin_apply(uint16_t id, void *staged_core, size_t core_size,
                        uint8_t *ee, uint32_t ee_base, size_t ee_size,
                        PopsBuiltinPlan *plan);
 
+/* $BREAKPOINT0 / $BREAKPOINT1 (FUN_008d6da4 called with (0, 0) or (1, 1)):
+ * the handler the original leaves at POPS_BUILTIN_BREAK_ADDR. Each call
+ * copies the 292-byte template (the built-in entries' handler with its two
+ * data words at 0x11c/0x120 still 0) and then stores over it:
+ *   (0, 0): 0x000..0x01f run the scan only while PS1 RAM 0x1ffdf4 != 2,
+ *           0x080 (the scan's end) branches to 0x120, where four words
+ *           (0x120..0x12f, the last three past the 292 copied bytes) clear the gate's
+ *           branch at 0x014 and return: one full scan, then never again;
+ *   (1, 1): 0x000..0x01f run the scan only while the EE halfword at
+ *           0x507002 is 0xdcfe
+ *           (port 0 holding exactly SELECT+L2+R2+CIRCLE).
+ * `breakpoint` is PopsConfig.breakpoint: the last command decides; the
+ * words a $BREAKPOINT0 wrote past the copy stay when a $BREAKPOINT1 comes
+ * after it, as in the original. Writes POPS_BREAKPOINT_SIZE bytes (or 292
+ * when no $BREAKPOINT0 came) and returns that count, 0 when `breakpoint`
+ * names none, -EINVAL/-ERANGE for bad arguments, -EILSEQ without a
+ * template in the list. */
+#define POPS_BREAKPOINT_TEMPLATE_SIZE 292
+#define POPS_BREAKPOINT_SIZE 0x130
+int pops_breakpoint_build(uint8_t breakpoint, uint8_t *out, size_t out_size);
+
 /* The entry's operations in the original's order; -ENOENT past the last id. */
 int pops_builtin_entry_ops(uint16_t id, const PopsBuiltinOp **ops, unsigned *count);
 

@@ -5,6 +5,7 @@
 #include <errno.h>
 #include <string.h>
 #include "pops_builtin_db.h"
+#include "pops_config.h"
 #include "pops_modes_patches.h"
 
 #define CORE_BASE UINT32_C(0x00200000)
@@ -141,4 +142,91 @@ int pops_builtin_apply(uint16_t id, void *staged_core, size_t core_size,
       (plan->libcrypt2 && !plan->libcrypt2_code[0] && !plan->libcrypt2_code[1]))
     return -EILSEQ;
   return 0;
+}
+
+/* A 128-bit store as the original's 0x8d8cb8 (sq) makes it, given the four
+ * words in address order. */
+static void put_words(uint8_t *out, uint32_t at, const uint32_t *words, unsigned count) {
+  for (unsigned i = 0; i < count; ++i) {
+    uint32_t w = words[i];
+    out[at + 4 * i] = (uint8_t)w;
+    out[at + 4 * i + 1] = (uint8_t)(w >> 8);
+    out[at + 4 * i + 2] = (uint8_t)(w >> 16);
+    out[at + 4 * i + 3] = (uint8_t)(w >> 24);
+  }
+}
+
+int pops_breakpoint_build(uint8_t breakpoint, uint8_t *out, size_t out_size) {
+  /* FUN_008d6da4(0, 0): 0x8d6e00..0x8d6ea0. */
+  static const uint32_t bp0_head[8] = {
+    0x3c1a0120, /* lui  k0, 0x120 */
+    0x8f5afdf4, /* lw   k0, -0x20c(k0)   PS1 RAM 0x1ffdf4 */
+    0x3c1b0000, /* lui  k1, 0 */
+    0x377b0002, /* ori  k1, k1, 2 */
+    0x00000000, /* nop */
+    0x175b0002, /* bne  k0, k1, 0x020    scan */
+    0x00000000, /* nop */
+    0x03e00008, /* jr   ra */
+  };
+  static const uint32_t bp0_end = 0x10000027; /* at 0x080: b 0x120 */
+  static const uint32_t bp0_tail[4] = {
+    0x3c1a0146, /* lui  k0, 0x146 */
+    0xaf400014, /* sw   zero, 0x14(k0)   clears the bne at 0x014 */
+    0x03e00008, /* jr   ra */
+    0x00000000, /* nop */
+  };
+  /* FUN_008d6da4(1, 1): 0x8d6ecc..0x8d6f14 (the second store is por zero). */
+  static const uint32_t bp1_head[8] = {
+    0x3c1a0050, /* lui  k0, 0x50 */
+    0x875a7002, /* lh   k0, 0x7002(k0)   EE 0x507002 */
+    0x241bdcfe, /* li   k1, -0x2302 */
+    0x175b001c, /* bne  k0, k1, 0x080    return */
+    0, 0, 0, 0,
+  };
+  const PopsBuiltinOp *ops = NULL;
+  unsigned count = 0;
+  int last0 = breakpoint & POPS_BREAKPOINT_0;
+  int last1 = breakpoint & POPS_BREAKPOINT_1;
+  if (!last0 && !last1)
+    return 0;
+  if (last0 && last1)
+    return -EINVAL;
+  if (!out)
+    return -EINVAL;
+  int seen0 = last0 || (breakpoint & POPS_BREAKPOINT_0_SEEN);
+  size_t size = seen0 ? POPS_BREAKPOINT_SIZE : POPS_BREAKPOINT_TEMPLATE_SIZE;
+  if (out_size < size)
+    return -ERANGE;
+  /* The template: any built-in breakpoint handler (all copy the same
+   * 292 bytes from 0x96bde0) with the two words the entry adds cleared. */
+  for (uint16_t id = 0; id <= POPS_BUILTIN_MAX_ID && !ops; ++id) {
+    const PopsBuiltinOp *eops;
+    unsigned ecount;
+    if (pops_builtin_entry_ops(id, &eops, &ecount))
+      continue;
+    for (unsigned i = 0; i < ecount; ++i) {
+      if (eops[i].kind == POPS_BUILTIN_OP_EE && eops[i].addr == POPS_BUILTIN_BREAK_ADDR &&
+          eops[i].len == POPS_BREAKPOINT_TEMPLATE_SIZE &&
+          (uint64_t)eops[i].data + eops[i].len <= pops_builtin_data_size) {
+        ops = &eops[i];
+        count = 1;
+        break;
+      }
+    }
+  }
+  if (!count)
+    return -EILSEQ;
+  memset(out, 0, size);
+  if (seen0) /* the words a $BREAKPOINT0 left past the copy */
+    put_words(out, 0x120, bp0_tail, 4);
+  memcpy(out, pops_builtin_data + ops->data, POPS_BREAKPOINT_TEMPLATE_SIZE);
+  memset(out + 0x11c, 0, 8);
+  if (last0) {
+    put_words(out, 0x000, bp0_head, 8);
+    put_words(out, 0x080, &bp0_end, 1);
+    put_words(out, 0x120, bp0_tail, 4);
+  } else {
+    put_words(out, 0x000, bp1_head, 8);
+  }
+  return (int)size;
 }

@@ -383,6 +383,19 @@ static int parse_single_directive(PopsConfig *cfg, const char *token) {
     cfg->original_opcodes = 1;
     return 1;
   }
+  /* $BREAKPOINT0 (0x8960c4) and $BREAKPOINT1 (0x896310): each one, where
+   * it stands in the file, calls FUN_008d6da4(0, 0) or (1, 1), which
+   * copies the breakpoint handler afresh and edits it; so the last one
+   * decides, except for three words only $BREAKPOINT0 writes past the copy
+   * (pops_breakpoint_build). */
+  if (!strcasecmp(token, "$BREAKPOINT0")) {
+    cfg->breakpoint = POPS_BREAKPOINT_0 | POPS_BREAKPOINT_0_SEEN;
+    return 1;
+  }
+  if (!strcasecmp(token, "$BREAKPOINT1")) {
+    cfg->breakpoint = (uint8_t)((cfg->breakpoint & POPS_BREAKPOINT_0_SEEN) | POPS_BREAKPOINT_1);
+    return 1;
+  }
   /* Cheat gates (pops_modes_patches.h). The original keeps one flag per
    * command; $NOSAFEMODE clears both. */
   if (!strcasecmp(token, "$SAFEMODE")) {

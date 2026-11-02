@@ -76,7 +76,7 @@ class PopsConfig(c.Structure):
         ("load_padman", c.c_uint8),
         ("kill_padman", c.c_uint8),
         ("original_opcodes", c.c_uint8),
-        ("padman_pad", c.c_uint8 * 1),
+        ("breakpoint", c.c_uint8),
     ]
 
 class PopsCompatEntry(c.Structure):

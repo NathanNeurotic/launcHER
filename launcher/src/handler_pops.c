@@ -955,6 +955,13 @@ int launchPOPS(int argc, char *argv[]) {
             builtinPlan.subcd, builtinPlan.no_vmc1, builtinPlan.fix_call,
             builtinPlan.break_call, builtinPlan.libcrypt2, builtinPlan.no_auto_pal);
   }
+  /* $BREAKPOINT0/1: parsed after the built-in list, so it replaces an
+   * entry's handler at the same address, and the chain call is the same
+   * one (the original's jal at 0x232d08). */
+  if (cfg.breakpoint & (POPS_BREAKPOINT_0 | POPS_BREAKPOINT_1)) {
+    cfg.builtin_break_call = 1;
+    DPRINTF("POPS: $BREAKPOINT%u handler\n", (cfg.breakpoint & POPS_BREAKPOINT_1) ? 1u : 0u);
+  }
   if (cfg.cheat_count) {
     DPRINTF("POPS: Enabled %u cheats from CHEATS.TXT\n", (unsigned)cfg.cheat_count);
   }
@@ -1360,6 +1367,12 @@ int launchPOPS(int argc, char *argv[]) {
     }
   }
 
+  if ((cfg.breakpoint & (POPS_BREAKPOINT_0 | POPS_BREAKPOINT_1)) &&
+      (uint32_t)(uintptr_t)stagedCore + plan.core_size > POPS_BUILTIN_BREAK_ADDR) {
+    msg("POPS: Staged core overlaps the breakpoint handler area\n");
+    return -ERANGE;
+  }
+
   /* Apply compatibility modes and user directive patches */
   res = pops_apply_all_config_patches((void *)stagedCore, plan.core_size, &cfg);
   if (res) {
@@ -1741,6 +1754,15 @@ int launchPOPS(int argc, char *argv[]) {
     if (res) {
       msg("POPS: Built-in entry code install failed: %d\n", res);
       return res;
+    }
+  }
+  /* $BREAKPOINT0/1 after it, as the original's parse comes after its list. */
+  if (cfg.breakpoint & (POPS_BREAKPOINT_0 | POPS_BREAKPOINT_1)) {
+    res = pops_breakpoint_build(cfg.breakpoint, (uint8_t *)(uintptr_t)POPS_BUILTIN_BREAK_ADDR,
+                                POPS_BUILTIN_BREAK_LIMIT - POPS_BUILTIN_BREAK_ADDR);
+    if (res <= 0) {
+      msg("POPS: $BREAKPOINT handler install failed: %d\n", res);
+      return res ? res : -EINVAL;
     }
   }
 

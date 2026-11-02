@@ -218,8 +218,16 @@ typedef struct {
   /* $ORIGINAL_OPCODES (gp+0x38c4): skips POPStarter's opcode pass
    * (pops_apply_opcode_pass), which otherwise runs on every launch. */
   uint8_t original_opcodes;
-  uint8_t padman_pad[1];
+  /* $BREAKPOINT0 / $BREAKPOINT1 (handlers 0x8960c4 / 0x896310): which one
+   * came last, and whether a $BREAKPOINT0 came at all (POPS_BREAKPOINT_*,
+   * pops_breakpoint_build). */
+  uint8_t breakpoint;
 } PopsConfig;
+
+/* PopsConfig.breakpoint */
+#define POPS_BREAKPOINT_0      0x01 /* the last one was $BREAKPOINT0 */
+#define POPS_BREAKPOINT_1      0x02 /* the last one was $BREAKPOINT1 */
+#define POPS_BREAKPOINT_0_SEEN 0x04 /* a $BREAKPOINT0 came, last or not */
 
 /* $WIDESCREEN, $ULTRA_WIDESCREEN, $EYEFINITY: the last one in the files wins,
  * as each original handler rewrites all of the same sites. */
