@@ -22,7 +22,15 @@ The IGR patch at `0x0020c0a4` (redirecting a call inside Sony's own pad-check
 routine, guarded by the original opcode word) is the proven model for substrate
 1. `popfs` devctl handling is the proven substrate for 2.
 
-## 2. Disc swap — IOP-resident (new)
+## 2. Disc swap — IOP-resident (removed 2026-11-02)
+
+**Removed** on 2026-11-02 at the owner's request, with its SIO2
+interposition and the vendored ioplib subset. It could switch only while no
+disc file was open, and POPS keeps the disc open while a game runs, so it
+never switched in game. The in-game disc swap is now POPStarter's own
+(SELECT+L2+R2 combos in the resident GP1 work, discs opened through popfs's
+`pfs` alias); see [POPSTARTER_LAUNCH_HOOKS.md](../POPSTARTER_LAUNCH_HOOKS.md).
+What follows is the record of the removed mechanism.
 
 - **Mechanism:** `pops_pad_swap` (`launcher/iop/popfs/src/pops_pad_swap.c`), a
   debounced SELECT+L1+R1 detector (matching `POPS_SWAP_COMBO`), armed only when
@@ -90,7 +98,7 @@ routine, guarded by the original opcode word) is the proven model for substrate
 
 | Feature | Resident substrate | Host-verified | Console-verified |
 |---|---|---|---|
-| Disc swap | IOP (sio2 interposition) | yes (contract + fire path) | no |
+| Disc swap | EE resident GP1 work (POPStarter's combos; the IOP sio2 interposition was removed 2026-11-02) | yes (against the original under emulation) | no |
 | LibCrypt SubQ | IOP (iomanX bridge) | yes (policy + Q path) | no (request pair unconfirmed) |
 | Fix-file patches | in-image | yes (staging suites) | partial (dependency/preflight gates on prior runs) |
 | Built-in cheat engine | none yet (deferred) | interpreter only | no |

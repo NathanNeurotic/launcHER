@@ -280,8 +280,6 @@ class FeatureTests(unittest.TestCase):
         LIB.pops_check_igr_combo.restype = c.c_int
         LIB.pops_check_igr_combo_type.argtypes = [c.c_uint16, c.c_uint8]
         LIB.pops_check_igr_combo_type.restype = c.c_int
-        LIB.pops_check_disc_swap_combo.argtypes = [c.c_uint16]
-        LIB.pops_check_disc_swap_combo.restype = c.c_int
         LIB.pops_generate_subq.argtypes = [c.c_uint32, c.c_uint16, c.POINTER(c.c_uint8 * 12)]
         LIB.pops_generate_subq.restype = c.c_int
         cls.Devctl = c.CFUNCTYPE(c.c_int, c.c_char_p, c.c_int, c.c_void_p, c.c_size_t, c.c_void_p, c.c_size_t)
@@ -292,8 +290,6 @@ class FeatureTests(unittest.TestCase):
         LIB.pops_cheat_engine_tick_ex.argtypes = [c.c_void_p, c.POINTER(CheatEntry), c.c_uint16, c.c_uint32, c.c_uint8]
         LIB.pops_cheat_engine_tick_ex.restype = c.c_int
         cls.Devctl = c.CFUNCTYPE(c.c_int, c.c_char_p, c.c_int, c.c_void_p, c.c_size_t, c.c_void_p, c.c_size_t)
-        LIB.pops_handle_disc_swap.argtypes = [c.c_uint16, cls.Devctl]
-        LIB.pops_handle_disc_swap.restype = c.c_int
         LIB.pops_vcd_normalize_serial.argtypes = [c.c_char_p, c.c_char_p, c.c_size_t]
         LIB.pops_vcd_normalize_serial.restype = c.c_int
         LIB.pops_vcd_inspect_path.argtypes = [c.c_char_p, c.POINTER(PopsVcdInfo)]
@@ -1150,7 +1146,7 @@ class FeatureTests(unittest.TestCase):
         val_lcret = struct.unpack_from("<I", buf, 0x0020CFB0 - 0x00200000)[0]
         self.assertEqual(val_lcret, 0x24020000)
 
-        # Test Controller IGR and Disc Swap combo checkers
+        # Test Controller IGR combo checkers
         igr_active_low = (~(0x0400 | 0x0100 | 0x0800 | 0x0200 | 0x0001 | 0x0008)) & 0xFFFF
         self.assertEqual(LIB.pops_check_igr_combo(0xFFFF), 0)
         self.assertEqual(LIB.pops_check_igr_combo(igr_active_low), 1)
@@ -1160,10 +1156,6 @@ class FeatureTests(unittest.TestCase):
         self.assertEqual(LIB.pops_check_igr_combo_type(igr_active_low, 1), 1)
         igr2_active_low = (~(0x0400 | 0x0100 | 0x0800 | 0x0200 | 0x0001 | 0x4000)) & 0xFFFF
         self.assertEqual(LIB.pops_check_igr_combo_type(igr2_active_low, 2), 1)
-
-        swap_active_low = (~(0x0001 | 0x0400 | 0x0800)) & 0xFFFF
-        self.assertEqual(LIB.pops_check_disc_swap_combo(0xFFFF), 0)
-        self.assertEqual(LIB.pops_check_disc_swap_combo(swap_active_low), 1)
 
         # Test Subchannel Q generator
         subq = (c.c_uint8 * 12)()
@@ -1255,42 +1247,6 @@ class FeatureTests(unittest.TestCase):
 
         # Out-of-bounds rejection
         self.assertLess(LIB.pops_apply_compat_modes(core_ptr, 0x10000, 1), 0)
-
-    def test_in_game_disc_swap_handler(self):
-        calls = []
-
-        def mock_devctl(dev, cmd, arg, arglen, buf, buflen):
-            calls.append((dev.decode(), cmd))
-            return 0
-
-        devctl_cb = self.Devctl(mock_devctl)
-
-        # Combo not pressed: no action taken
-        calls.clear()
-        res = LIB.pops_handle_disc_swap(0xFFFF, devctl_cb)
-        self.assertEqual(res, 0)
-        self.assertEqual(len(calls), 0)
-
-        # SELECT + L1 + R1 pressed: active low bits cleared
-        # POPS_PAD_SELECT = 0x0001, POPS_PAD_L1 = 0x0400, POPS_PAD_R1 = 0x0800
-        swap_combo = 0xFFFF & ~(0x0001 | 0x0400 | 0x0800)
-        calls.clear()
-        res = LIB.pops_handle_disc_swap(swap_combo, devctl_cb)
-        self.assertEqual(res, 1)
-        # Should execute OPEN_LID (3), NEXT_DISC (7), CLOSE_LID (4)
-        self.assertEqual(calls, [("pops:", 3), ("pops:", 7), ("pops:", 4)])
-
-        # Error during NEXT_DISC closes lid and propagates error
-        def failing_devctl(dev, cmd, arg, arglen, buf, buflen):
-            calls.append((dev.decode(), cmd))
-            if cmd == 7:
-                return -errno.EBUSY
-            return 0
-
-        calls.clear()
-        res = LIB.pops_handle_disc_swap(swap_combo, self.Devctl(failing_devctl))
-        self.assertEqual(res, -errno.EBUSY)
-        self.assertEqual(calls, [("pops:", 3), ("pops:", 7), ("pops:", 4)])
 
     def test_novmc_directives(self):
         cfg = PopsConfig()

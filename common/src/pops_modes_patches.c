@@ -1156,44 +1156,6 @@ int pops_check_igr_combo(uint16_t buttons_active_low) {
   return pops_check_igr_combo_type(buttons_active_low, 1);
 }
 
-int pops_check_disc_swap_combo(uint16_t buttons_active_low) {
-  uint16_t pressed = (uint16_t)(~buttons_active_low);
-  return ((pressed & POPS_SWAP_COMBO) == POPS_SWAP_COMBO);
-}
-
-int pops_handle_disc_swap(uint16_t buttons_active_low,
-                          int (*devctl_fn)(const char *dev, int cmd, void *arg, size_t arglen, void *buf, size_t buflen)) {
-  if (!pops_check_disc_swap_combo(buttons_active_low)) {
-    return 0; /* Combo not active */
-  }
-  if (!devctl_fn) {
-    return -EINVAL;
-  }
-
-  /* 1. Open virtual CD-ROM lid */
-  const char *dev = "pops:";
-  int res = devctl_fn(dev, POPS_DEVCTL_OPEN_LID, NULL, 0, NULL, 0);
-  if (res < 0) {
-    dev = "pops0:";
-    res = devctl_fn(dev, POPS_DEVCTL_OPEN_LID, NULL, 0, NULL, 0);
-  }
-  if (res < 0) return res;
-
-  /* 2. Advance active disc index modulo configured disc count */
-  res = devctl_fn(dev, POPS_DEVCTL_NEXT_DISC, NULL, 0, NULL, 0);
-  if (res < 0) {
-    /* If next disc failed (e.g. busy or single disc), close lid and return error */
-    devctl_fn(dev, POPS_DEVCTL_CLOSE_LID, NULL, 0, NULL, 0);
-    return res;
-  }
-
-  /* 3. Close virtual CD-ROM lid */
-  res = devctl_fn(dev, POPS_DEVCTL_CLOSE_LID, NULL, 0, NULL, 0);
-  if (res < 0) return res;
-
-  return 1; /* Swap successfully triggered */
-}
-
 /* Red Book Subchannel Q CRC-16/CCITT, init 0, inverted, big-endian.
  * Standard data-track Q uses track-relative MSF and absolute LBA+150 MSF.
  * See psx-spx CD-ROM format (Q positional frames). */

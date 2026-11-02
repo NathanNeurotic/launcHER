@@ -121,9 +121,6 @@ int pops_apply_cheats(void *ps1_ram_base, const PopsCheatEntry *cheats, uint16_t
 /* Alternate In-Game Reset combo ($IGR2): L1 + L2 + R1 + R2 + SELECT + CROSS */
 #define POPS_IGR2_COMBO   (POPS_PAD_L1 | POPS_PAD_L2 | POPS_PAD_R1 | POPS_PAD_R2 | POPS_PAD_SELECT | POPS_PAD_CROSS)
 
-/* Multi-disc hotkey swap combo: SELECT + L1 + R1 */
-#define POPS_SWAP_COMBO   (POPS_PAD_SELECT | POPS_PAD_L1 | POPS_PAD_R1)
-
 /* POPS filesystem devctl command codes */
 #define POPS_DEVCTL_SWAP_DISC    0x01
 #define POPS_DEVCTL_GET_DISC     0x02
@@ -140,13 +137,6 @@ int pops_check_igr_combo(uint16_t buttons_active_low);
 
 /* Detect In-Game Reset button combination with mode (0 = disabled, 1 = default, 2 = alternate) */
 int pops_check_igr_combo_type(uint16_t buttons_active_low, uint8_t igr_type);
-
-/* Detect Multi-disc swap button combination (buttons_active_low: 0 = pressed) */
-int pops_check_disc_swap_combo(uint16_t buttons_active_low);
-
-/* In-game multi-disc swap handler: verifies swap combo, opens lid, advances disc, closes lid */
-int pops_handle_disc_swap(uint16_t buttons_active_low,
-                          int (*devctl_fn)(const char *dev, int cmd, void *arg, size_t arglen, void *buf, size_t buflen));
 
 /* Generates 12-byte Subchannel Q data for a requested LBA with BCD MSF and LibCrypt key in CRC */
 int pops_generate_subq(uint32_t lba, uint16_t libcrypt_key, uint8_t out_subq[12]);

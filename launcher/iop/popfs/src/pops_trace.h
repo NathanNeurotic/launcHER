@@ -6,8 +6,8 @@
  * ps2link dies at the foreign IOP reboot, so nothing printed during Sony
  * execution reaches the host. popfs survives on the IOP and can write a
  * bounded event log to the backing device instead; a later probe run reads
- * the log file. Events recorded: Subchannel-Q requests (LibCrypt evidence),
- * pad-swap fires, and EE-driven NEXT_DISC switches.
+ * the log file. Events recorded: Subchannel-Q requests (LibCrypt evidence)
+ * and EE-driven NEXT_DISC switches.
  *
  * All calls are best-effort: a failed open disables tracing, never the
  * caller. The log is bounded (POPS_TRACE_EVENT_LIMIT) to protect the device.

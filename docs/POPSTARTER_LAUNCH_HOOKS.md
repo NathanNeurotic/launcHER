@@ -180,12 +180,13 @@ and `disc/discN`. `IMAGE0.VCD` to `IMAGE3.VCD` are plain files there, so a
 `DISCS.TXT` that names its discs `IMAGE1.VCD`, `IMAGE2.VCD` opens those
 files (quirk 51).
 
-**launcHER's own swap.** popfs also has a disc swap of its own,
-SELECT+L1+R1, armed when two or more discs are mapped. It switches only
-while no disc file is open, and POPS's CD module keeps the disc open while
-the game runs, so in game it never switches; with two or more discs it
-still sits on controller reads (SIO2). It is not POPStarter's and is not
-used by POPStarter's swap.
+**launcHER's own swap, removed.** popfs used to have a disc swap of its
+own, SELECT+L1+R1, armed when two or more discs were mapped and fed by an
+interposition on the SIO2 controller reads. It could switch only while no
+disc file was open, and POPS's CD module keeps the disc open while the game
+runs, so in game it never switched. It was removed on 2026-11-02 at the
+owner's request: popfs no longer touches controller reads, and POPStarter's
+combos above are the only disc swap.
 
 ## Not copied yet
 

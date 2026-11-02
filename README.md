@@ -714,7 +714,7 @@ launcHER looks for card saves using `<SERIAL>.VMC0` and `<SERIAL>.VMC1` (or `<GA
 - **In-Game Reset (IGR):** `L1 + L2 + R1 + R2 + SELECT + START` (returns to OSDSYS, OPL, or wLaunchELF).
 - **Disc Swap (POPStarter's, controller 1, not yet tested on a console):** `SELECT + L2 + R2 + TRIANGLE` opens the virtual lid; `SELECT + L2 + R2` with `UP`, `RIGHT`, `DOWN` or `LEFT` picks disc 1, 2, 3 or 4 of `DISCS.TXT`; `SELECT + L2 + R2 + SQUARE` closes the lid and loads that disc. Hold nothing else with a combo. Without `DISCS.TXT` it reloads the disc the game started with.
 - **Other POPStarter hotkeys (controller 1):** `SELECT + R2 + R1` / `SELECT + L2 + L1` turn scanlines on / off; `SELECT + L2 + R2 + CROSS` resets the PS1.
-- **launcHER's older disc swap:** `SELECT + L1 + R1` is under review: its code refuses to switch while the game has the disc open, which is all the time in game. Use POPStarter's combos above.
+- **launcHER's older disc swap** (`SELECT + L1 + R1`) was removed on November 2, 2026: it could never switch while the game had the disc open, which is all the time in game. POPStarter's combos above are the only disc swap.
 - **Custom UI graphics:** Place `IGR_BG.TM2`, `IGR_YES.TM2`, or `IGR_NO.TM2` beside the game.
 - **Custom patches:** Place `TROJAN_0.BIN` through `TROJAN_9.BIN` beside the game.
 

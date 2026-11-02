@@ -2,7 +2,6 @@
 #include <errno.h>
 #include <stdint.h>
 
-#include "pops_pad_swap.h"
 #include "pops_trace.h"
 
 IRX_ID("launcHER_POP_filesystem", 1, 0);
@@ -351,45 +350,6 @@ static uint8_t pops_bcd(uint32_t n) {
 
 static uint16_t active_libcrypt_key = 0;
 
-/* Resident pad-swap detector state. Armed only when the module arguments
- * configure at least two disc images; the sio2 interposition glue in
- * pops_pad_sio2.c feeds observed pad polls into this machine. */
-static pops_pad_swap pad_swap;
-static int pad_swap_installed;
-
-/* Internal OPEN_LID -> NEXT_DISC -> CLOSE_LID sequence for the pad-swap
- * detector. Returns 0 on success, -EBUSY while a disc handle is open, and
- * -ENOENT when no alternate disc is configured. The lid flags bracket the
- * switch so a polling observer sees an eject/insert pair. */
-int pops_pad_swap_fire_internal(void *ctx) {
-  int state, next, old, busy;
-  (void)ctx;
-  CpuSuspendIntr(&state);
-  old = active_disc;
-  next = (old + 1) % DISC_COUNT;
-  while (next != old && !paths[next][0])
-    next = (next + 1) % DISC_COUNT;
-  busy = active_disc_handles != 0;
-  if (!busy && next != old && paths[next][0]) {
-    lid_open = 1;
-    active_disc = next;
-    lid_open = 0;
-  }
-  CpuResumeIntr(state);
-  pops_trace_event("swap", (uint32_t)old, (uint32_t)(busy ? old : next),
-                   busy ? 0xfffffff0u : 0u);
-  if (busy)
-    return -EBUSY;
-  return (next != old && paths[next][0]) ? 0 : -ENOENT;
-}
-
-pops_pad_swap *pops_pad_swap_instance(void) {
-  return pad_swap_installed ? &pad_swap : NULL;
-}
-
-/* Defined by the IOP-only interposition glue (pops_pad_sio2.c). */
-int pops_pad_sio2_install(void);
-
 static int bridge_devctl(iomanX_iop_file_t *file, const char *devname, int cmd,
                          void *arg, unsigned int arglen, void *buf, unsigned int buflen) {
   (void)file; (void)devname;
@@ -605,19 +565,11 @@ int _start(int argc, char **argv) {
         return MODULE_NO_RESIDENT_END;
     }
   }
-  {
-    int disc_paths = 0;
-    for (i = 0; i < DISC_COUNT; ++i)
-      if (paths[i][0])
-        ++disc_paths;
-    pops_pad_swap_init(&pad_swap, pops_pad_swap_fire_internal, NULL, 25, disc_paths > 1);
-    pad_swap_installed = disc_paths > 1;
-    pops_trace_init(paths[0]);
-#ifndef POPS_HOST_TEST
-    if (pad_swap_installed)
-      pops_pad_sio2_install();
-#endif
-  }
+  /* The in-game disc swap is POPStarter's (SELECT+L2+R2 combos in the
+   * resident GP1 work, discs opened through the pfs alias). popfs no longer
+   * watches controller reads: its own SELECT+L1+R1 swap was removed on
+   * 2026-11-02, since it could never switch while POPS held the disc open. */
+  pops_trace_init(paths[0]);
   result = iomanX_AddDrv(&device);
   if (result < 0)
     return MODULE_NO_RESIDENT_END;
