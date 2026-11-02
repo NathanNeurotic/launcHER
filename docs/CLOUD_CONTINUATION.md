@@ -79,7 +79,10 @@ stay external. No merge or release was performed.
 2. Extend independently implemented resident services for progressive output,
    pads, timings, widescreen and the remaining cheat commands. The
    `$RECOMPILER_ADDON_0..4` commands now run from launcHER's own resident
-   recompiler hook (2026-11-02; see `docs/POPSTARTER_LAUNCH_HOOKS.md`).
+   recompiler hook (2026-11-02; see `docs/POPSTARTER_LAUNCH_HOOKS.md`), and
+   `$FAKELC` is copied, with the built-in list entries it cuts (2026-11-02;
+   see `docs/POPSTARTER_BUILTIN_DB.md`). Next: the always-live block's
+   `$NOVMC0/1` per-pass stores.
 3. Recover the built-in per-game DB and remaining BIOS/OSD/IGR-skin/module and
    physical-disc behavior from original contracts. Do not infer completion
    from annotation coverage or an archive build.

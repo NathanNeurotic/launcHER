@@ -224,7 +224,8 @@ int pops_fix_context_init_video(PopsFixContext *context, const void *staged_core
 
 /* Replay one built-in entry over the expected compat site values: its
  * compatibility modes (skipping 1/2/3/5 once its gp+0x3458 flag is set, as
- * FUN_008dc2c4 does) and any core write that lands on a site. */
+ * FUN_008dc2c4 does) and any core write that lands on a site. An id with
+ * POPS_BUILTIN_AFTER_FAKELC leaves out what the entry skips then. */
 static int builtin_expected(PopsFixContext *candidate, uint16_t id) {
   const PopsBuiltinOp *ops;
   unsigned count, subcd = 0;
@@ -233,6 +234,8 @@ static int builtin_expected(PopsFixContext *candidate, uint16_t id) {
     return result;
   for (unsigned n = 0; n < count; ++n) {
     const PopsBuiltinOp *op = &ops[n];
+    if (!pops_builtin_op_runs(id, n))
+      continue;
     if (op->kind == POPS_BUILTIN_OP_SUBCD)
       subcd = 1;
     if (op->kind == POPS_BUILTIN_OP_COMPAT) {
@@ -1102,6 +1105,29 @@ int pops_apply_undo_tokens(void *staged_core, size_t core_size, uint32_t tokens)
   return 0;
 }
 
+int pops_apply_fakelc(void *staged_core, size_t core_size) {
+  /* The handler zeroes the three template bytes a built-in entry sets
+   * (0x972370, 0x972374, 0x972375) and copies the 21 bytes. POPS's loop at
+   * 0x210cf8 clears scratchpad quadwords from 0x70000ea0; this version
+   * stores $s3 at 0x7000009c first, and the bnez at 0x210d0c goes back to
+   * the moved loop at 0x210d04 (low byte 0xfa -> 0xfd). */
+  static const uint8_t loop[POPS_FAKELC_SIZE] = {
+    0x00, 0x1f, 0x13, 0x3c, /* lui   s3, 0x1f00        (entries: 0x1f00 or 0x1f01) */
+    0x00, 0x00, 0x73, 0x26, /* addiu s3, s3, 0         (entries: their value) */
+    0xfc, 0xf1, 0x73, 0xac, /* sw    s3, -0xe04(v1) */
+    0xff, 0xff, 0x42, 0x24, /* addiu v0, v0, -1        (POPS's first loop word) */
+    0x00, 0x00, 0x64, 0x7c, /* sq    a0, 0(v1)         (POPS's second loop word) */
+    0xfd,                   /* bnez v0, 0x210d04: low byte of the word at 0x210d0c */
+  };
+  if (!staged_core)
+    return -EINVAL;
+  if (core_size < (size_t)(POPS_FAKELC_ADDR - POPS_CORE_BASE_ADDR + POPS_FAKELC_SIZE))
+    return -ERANGE;
+  memcpy((uint8_t *)staged_core + (POPS_FAKELC_ADDR - POPS_CORE_BASE_ADDR), loop,
+         POPS_FAKELC_SIZE);
+  return 0;
+}
+
 /* POPStarter r13 $IGR0..$IGR5 (igr_type 1..6) and $NOIGR. Masks select the
  * pad combination; $IGR3..5 jump straight to 0x20c08c instead of the dialog. */
 int pops_apply_igr_original(void *staged_core, size_t core_size,
@@ -1469,7 +1495,8 @@ int pops_apply_all_config_patches(void *staged_core, size_t core_size, const Pop
     return -ENOTSUP;
   if (cfg->video_mode > POPS_VMODE_240P)
     return -ENOTSUP;
-  if ((video_requested || cfg->original_tokens || cfg->no_igr || cfg->igr_type) &&
+  if ((video_requested || cfg->original_tokens || cfg->fakelc || cfg->no_igr ||
+       cfg->igr_type) &&
       core_size < 0x250000)
     return -EINVAL;
   if (cfg->video_mode == POPS_VMODE_NTSC2PAL &&
@@ -1484,6 +1511,14 @@ int pops_apply_all_config_patches(void *staged_core, size_t core_size, const Pop
 
   if (cfg->original_tokens & POPS_TOK_UNDO_MASK) {
     result = pops_apply_undo_tokens(staged_core, core_size, cfg->original_tokens);
+    if (result)
+      return result;
+  }
+  /* Both write at the point of the command, over the built-in entry's
+   * LibCrypt write; only $UNDO_LIBCRYPT_FIX touches the same bytes, and the
+   * parser keeps POPS_FAKELC_LAST only when no such command came later. */
+  if (cfg->fakelc & POPS_FAKELC_LAST) {
+    result = pops_apply_fakelc(staged_core, core_size);
     if (result)
       return result;
   }

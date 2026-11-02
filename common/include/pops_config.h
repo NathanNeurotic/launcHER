@@ -194,9 +194,10 @@ typedef struct {
   uint8_t set_timings;
 
   /* $VCDID_n (1..4 decimal digits; the first one in the files wins, as the
-   * original's handlers check gp+0x38d8 first): a built-in per-game entry
-   * by hand (pops_builtin_db.h). It is used only when the disc fingerprint
-   * matched nothing, which is also how the original behaves. */
+   * original's handlers check gp+0x38d8 first, except $VCDID_0, which
+   * leaves it 0): a built-in per-game entry by hand (pops_builtin_db.h). It
+   * is used only when the disc fingerprint matched nothing, which is also
+   * how the original behaves. vcdid_set is never set for 0. */
   uint16_t vcdid;
   uint8_t vcdid_set;
   /* $SUBCDSTATUS seen: the original's gp+0x3458 flag, after which its
@@ -238,7 +239,17 @@ typedef struct {
    * (pops_resident_recompiler.S). The order does not matter: no two of
    * them change the same thing, and 4 is 3 plus changes to its code. */
   uint8_t recompiler_addons;
+  /* $FAKELC (handler 0x89caf0), POPS_FAKELC_* bits. It writes 21 bytes of
+   * POPS where it stands in the files (pops_apply_fakelc), the same bytes
+   * $UNDO_LIBCRYPT_FIX restores, so the later of the two wins; and it sets
+   * gp+0x3424, which makes the built-in entry a later $VCDID_n runs skip
+   * part of itself (POPS_BUILTIN_AFTER_FAKELC). */
+  uint8_t fakelc;
 } PopsConfig;
+
+/* PopsConfig.fakelc */
+#define POPS_FAKELC_LAST         0x01 /* it came after the last $UNDO_LIBCRYPT_FIX */
+#define POPS_FAKELC_BEFORE_VCDID 0x02 /* it came before the $VCDID_n that set the id */
 
 /* PopsConfig.recompiler_addons */
 #define POPS_RECOMPILER_ADDON_0 0x01

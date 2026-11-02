@@ -20,7 +20,11 @@ What it does (docs/POPSTARTER_BUILTIN_DB.md):
   original installs code in (0x01410000 game-fix code, 0x01460000
   breakpoint handler), or one of the original's own resident slots
   (0x232d08, 0x238d00, 0x239780..0x2397d7, 0x2397d8), which launcHER's
-  resident code reproduces. Anything else stops the generator.
+  resident code reproduces. Anything else stops the generator;
+- runs every id again with $FAKELC's flag (gp+0x3424) set, as the original
+  does for a $VCDID_n that comes after a $FAKELC. 216 arms test the flag
+  and jump over part of themselves; the operations they leave out must be
+  one run of the full list, stored per entry as lc_first/lc_count.
 
     POPSTARTER_TEST_ELF=... python tools/gen_pops_builtin_db.py [--check]
 
@@ -57,6 +61,12 @@ NOVMC1 = 0x8DC12C
 # Template buffers the routine edits in place before copying them.
 SCRATCH = ((0x972300, 0x972380), (0x984C80, 0x984CA0))
 GP_FLAGS = {0x38C0: "busy", 0x3458: "subcd", 0x38BC: "novmc1", 0x4FA0: "autopal"}
+# $FAKELC's flag (set by its handler at 0x89ccb4, zeroed at 0x870c78). The
+# 216 arms that read it skip part of themselves while it is set. The handler
+# also clears template bytes 0x972370/74/75 before its copy; they are 0 in
+# the image and the only template bytes any entry edits, so the flag is the
+# only thing an entry run after it sees differently.
+FAKELC_FLAG = 0x3424
 
 CORE = (0x200000, 0x600000)
 FIX_AREA = (0x01410000, 0x01420000)
@@ -110,9 +120,10 @@ def signatures(img):
     return out
 
 
-def run_entry(img, n, mode=3):
+def run_entry(img, n, mode=3, fakelc=False):
     """Ordered operations of FUN_008e00d0(n, mode) as ('write', addr, bytes),
-    ('compat', k), ('novmc1', k) and ('flag', name, value)."""
+    ('compat', k), ('novmc1', k) and ('flag', name, value). fakelc: run it
+    with $FAKELC's flag set, as after a $FAKELC in the user's files."""
     from unicorn import Uc, UC_ARCH_MIPS, UC_MODE_MIPS64, UC_MODE_LITTLE_ENDIAN
     from unicorn import UC_HOOK_CODE, UC_HOOK_MEM_WRITE
     from unicorn import mips_const as R
@@ -124,6 +135,7 @@ def run_entry(img, n, mode=3):
         pass
     uc.mem_map(0, 0x02000000)
     uc.mem_write(BASE, bytes(img))
+    uc.mem_write(GP + FAKELC_FLAG, struct.pack("<I", 1 if fakelc else 0))
     regs = [getattr(R, "UC_MIPS_REG_%d" % i) for i in range(32)]
     upper = [0] * 32
     ops = []
@@ -327,15 +339,36 @@ def build(img):
         if h in seen and seen[h] != s:
             raise SystemExit("FNV-1a collision between stored fingerprints")
         seen[h] = s
-    entries = []
+    entries, cuts = [], []
     for n in range(MAX_ID + 1):
         ops = classify(n, run_entry(img, n))
         check_code(n, ops)
+        after = classify(n, run_entry(img, n, fakelc=True))
+        check_code(n, after)
+        cut = lc_cut(n, ops, after)
         entries.append(ops)
-    return hashes, entries
+        cuts.append(cut)
+    skipping = sum(1 for _, count in cuts if count)
+    if skipping != 216:
+        raise SystemExit("expected 216 entries that skip ops after $FAKELC, found %d" % skipping)
+    return hashes, entries, cuts
 
 
-def emit(hashes, entries):
+def lc_cut(n, ops, after):
+    """(first, count) with after == ops[:first] + ops[first + count:]: the run
+    of operations the arm jumps over while $FAKELC's flag is set."""
+    if after == ops:
+        return 0, 0
+    for first in range(len(ops)):
+        for end in range(first + 1, len(ops) + 1):
+            if ops[:first] + ops[end:] == after:
+                if end > 255:
+                    raise SystemExit("entry %d: cut past 255 operations" % n)
+                return first, end - first
+    raise SystemExit("entry %d: with $FAKELC set it is not the full entry minus one run" % n)
+
+
+def emit(hashes, entries, cuts):
     pool = bytearray()
     where = {}
 
@@ -359,6 +392,8 @@ def emit(hashes, entries):
     lines.append(" * built-in per-game list (FUN_008e00d0 and its lookup FUN_008ff0e4). Do")
     lines.append(" * not edit by hand: rerun the generator against the external MAIN.")
     lines.append(" * Disc fingerprints are kept as 64-bit FNV-1a hashes, not disc bytes.")
+    lines.append(" * Entry rows: first op, op count, then the run of the entry's own ops")
+    lines.append(" * (index in the entry, count) its arm skips after a $FAKELC; 0, 0: none.")
     lines.append(" * See docs/POPSTARTER_BUILTIN_DB.md. Not tested on a console. */")
     lines.append('#include "pops_builtin_db.h"')
     lines.append("")
@@ -369,8 +404,8 @@ def emit(hashes, entries):
     lines.append("};")
     lines.append("")
     lines.append("const PopsBuiltinEntry pops_builtin_entries[POPS_BUILTIN_MAX_ID + 1] = {")
-    for n, (first, count) in enumerate(index):
-        lines.append("  {%d, %d}, /* %d */" % (first, count, n))
+    for n, ((first, count), (lc_first, lc_count)) in enumerate(zip(index, cuts)):
+        lines.append("  {%d, %d, %d, %d}, /* %d */" % (first, count, lc_first, lc_count, n))
     lines.append("};")
     lines.append("")
     lines.append("const uint16_t pops_builtin_op_count = %d;" % len(rows))

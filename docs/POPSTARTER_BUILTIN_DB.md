@@ -51,11 +51,16 @@ count 1..4 (measured on the original's parser, 2026-11-01):
   files wins over later ones;
 - it sets `gp+0x38d8 = n`, `gp+0x38c0 = 1` and calls `FUN_008e00d0(n, 3)` at
   once; an `n` past the last entry (625..9999) selects nothing but still
-  sets the id, which also stops the fingerprint scan. `$VCDID_0` sets 0 and
-  changes nothing.
+  sets the id, so later `$VCDID_n` lines do nothing. The scan cannot be
+  stopped this way: it has already run (corrected 2026-11-02; this said an
+  unused id also stopped the scan, but no branch in the launch code leads
+  from the parse back to it). `$VCDID_0` runs entry 0, which does nothing,
+  and leaves the id 0, so the next `$VCDID_n` still runs.
 
-launcHER: `PopsConfig.vcdid`/`vcdid_set` (first wins), used only when the
-fingerprint matched nothing, ids past 624 select nothing. Two tokenizing
+launcHER: `PopsConfig.vcdid`/`vcdid_set` (first nonzero wins), used only
+when the fingerprint matched nothing, ids past 624 select nothing. Until
+2026-11-02 launcHER took `$VCDID_0` as the first command and ignored every
+later one; it now leaves the id free, as the original does. Two tokenizing
 differences: launcHER's parser splits tokens on any white space, so
 `$VCDID_5<tab>` is accepted, and it needs the `$` at the start of a token,
 so `x$VCDID_9999` is not a command (quirk 22 in
@@ -85,6 +90,41 @@ Every entry ends by clearing `gp+0x38c0`. Entries 485..493 edit a template in
 MAIN (`0x984c88..0x984c9d`) before copying it; the copied bytes are what is
 stored.
 
+## After a `$FAKELC`
+
+`$FAKELC` (handler `0x89caf0`) clears the per-game bytes of the template the
+LibCrypt entries copy (`0x972370`, `0x972374`, `0x972375`), copies its 21
+bytes over POPS's LibCrypt loop at `0x210cf8` where the command stands, and
+sets `gp+0x3424` to 1. Nothing clears that flag while the files are read
+(only the launch start, `0x870c78`). 216 arms of `FUN_008e00d0` read it
+(`lw v0, 0x3424(gp)` / `bnez`, after their mode check) and jump over one
+run of their own actions, so a `$VCDID_n` after a `$FAKELC` gets less of its
+entry:
+
+| Entries | Skipped after a `$FAKELC` |
+|---|---|
+| 203 | the LibCrypt write only |
+| 207..216 | the LibCrypt write, the breakpoint handler and its call, the game-fix code and its call |
+| 230, 231 | the game-fix code and its call (they have no LibCrypt write) |
+| 232 | the game-fix code and its call, the three sub-CD writes and the sub-CD flag |
+
+The fingerprint match runs before the files are read, so its entry always
+runs in full. The template's per-game bytes are the only template bytes any
+entry edits, and they are 0 in the image, so the flag is the only thing an
+entry run after a `$FAKELC` sees differently. Quirk 61.
+
+The generator runs every id a second time with the flag set and requires the
+result to be the full entry minus one run of its actions; that run is stored
+per entry (`PopsBuiltinEntry.lc_first`, `lc_count`; `0, 0` for the other
+409). launcHER: `PopsConfig.fakelc` records whether the `$FAKELC` came before
+the `$VCDID_n` that set the id (`POPS_FAKELC_BEFORE_VCDID`); the handler then
+passes the id with `POPS_BUILTIN_AFTER_FAKELC`, and `pops_builtin_apply`
+(and the fix-file context, through `pops_builtin_op_runs`) leaves that run
+out. The 21 bytes themselves are written by `pops_apply_fakelc` in the config
+pass, after the `$UNDO_` writes, unless an `$UNDO_LIBCRYPT_FIX` came after
+the last `$FAKELC` (`POPS_FAKELC_LAST`): the two write the same bytes, so the
+later one wins.
+
 ## Order against the user's commands
 
 The list is applied before the config files are parsed, so a user's command
@@ -95,7 +135,10 @@ tells the fix-file context what the entry changed
 (`pops_fix_context_init_builtin`, computed from the entry data, not from
 live bytes), and lets `pops_apply_compat_modes` accept a site the entry
 already changed. `$VCDID_n` with no match applies at the point of the
-command in the original; launcHER applies it before all commands (quirk 23).
+command in the original; launcHER applies it before all commands (quirk 23),
+except that a `$FAKELC` before it still cuts the entry as above, and its 21
+bytes still end up as in the original in every order of `$FAKELC`,
+`$UNDO_LIBCRYPT_FIX` and `$VCDID_n` that includes a `$FAKELC`.
 
 `$SUBCDSTATUS` sets the same `gp+0x3458` flag an entry can set, so
 compatibility commands for modes 1, 2, 3 and 5 **after** it in the files do
@@ -126,7 +169,15 @@ whole file, as in the original.
   the core image, the EE images and the flags must equal
   `pops_builtin_apply`'s. Every stored fingerprint must find its first id;
   random ones none. `$VCDID_n` parsing is compared with the original's
-  handlers on fixed and random texts.
+  handlers on fixed and random texts. Every id is also run with
+  `$FAKELC`'s flag set and compared with `pops_builtin_apply(id |
+  POPS_BUILTIN_AFTER_FAKELC)`: all 625 match, and 216 differ from the full
+  entry. `$FAKELC`, `$UNDO_LIBCRYPT_FIX` and `$VCDID_n` go through the
+  original's whole parser in 27 fixed and 60 random orders: the bytes at
+  `0x210cf8` and the id and flag the entry runs with match launcHER's, apart
+  from the known differences of quirks 22 and 23, which are checked as such.
+- `tools/test_pops_features.py` (CI, no inputs needed): `$FAKELC`'s parsing,
+  its bytes, its order against `$UNDO_LIBCRYPT_FIX`, and the cut entries.
 - `tools/gen_pops_builtin_db.py --check` regenerates and compares the data
   file.
 - `tools/check_pops_resident_image.py` runs the built GP1 entry with the

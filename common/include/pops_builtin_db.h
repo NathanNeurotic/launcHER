@@ -27,6 +27,15 @@
  *                 after the controller-ID stores (the original's jump at
  *                 0x238d00); LIBCRYPT2_ON is that jump
  *   BREAK_CALL    POPS's exception path (0x232d08) calls 0x01460000
+ *
+ * $FAKELC sets the original's gp+0x3424, and 216 arms test it: while it is
+ * set they jump over part of themselves, always one run of their
+ * operations (lc_first/lc_count below). In 203 that is just the LibCrypt
+ * write; 207..216 also lose their breakpoint handler and game-fix code;
+ * 230 and 231 lose their game-fix code and 232 its sub-CD writes, flag and
+ * game-fix code (those three write no LibCrypt code). The flag is only set
+ * while the user's files are read, so it matters only for a $VCDID_n that
+ * comes after a $FAKELC.
  * Not tested on a console. */
 
 #include <stddef.h>
@@ -43,6 +52,12 @@ extern "C" {
 #define POPS_BUILTIN_BREAK_ADDR UINT32_C(0x01460000)
 #define POPS_BUILTIN_BREAK_LIMIT UINT32_C(0x01460200)
 #define POPS_BUILTIN_LIBCRYPT2_SIZE 84
+
+/* OR'd into an entry id given to pops_builtin_apply, pops_builtin_op_runs
+ * or pops_fix_context_init_builtin: the entry runs as the original runs it
+ * after a $FAKELC (gp+0x3424 set), without its lc_first/lc_count run. */
+#define POPS_BUILTIN_AFTER_FAKELC 0x8000u
+#define POPS_BUILTIN_ID(id) ((uint16_t)((id) & 0x7fffu))
 
 enum {
   POPS_BUILTIN_OP_CORE = 0,
@@ -65,6 +80,10 @@ typedef struct {
 typedef struct {
   uint16_t first; /* index into pops_builtin_ops */
   uint16_t count;
+  /* The entry's own operations lc_first .. lc_first + lc_count - 1 are the
+   * ones its arm jumps over while $FAKELC's flag is set; 0, 0: none. */
+  uint8_t lc_first;
+  uint8_t lc_count;
 } PopsBuiltinEntry;
 
 typedef struct {
@@ -117,6 +136,7 @@ void pops_builtin_sig_offsets(uint64_t image_offset, uint32_t sector_size,
  * stands for EE addresses ee_base..ee_base+ee_size (NULL: sizes only), and
  * the rest into *plan. compat modes found
  * after a SUBCD op are dropped for k in 1,2,3,5, as FUN_008dc2c4 does.
+ * `id` may carry POPS_BUILTIN_AFTER_FAKELC; plan->id is the entry alone.
  * Returns -ENOENT for an id with no entry, -ERANGE when a write does not
  * fit, 0 otherwise. */
 int pops_builtin_apply(uint16_t id, void *staged_core, size_t core_size,
@@ -144,8 +164,15 @@ int pops_builtin_apply(uint16_t id, void *staged_core, size_t core_size,
 #define POPS_BREAKPOINT_SIZE 0x130
 int pops_breakpoint_build(uint8_t breakpoint, uint8_t *out, size_t out_size);
 
-/* The entry's operations in the original's order; -ENOENT past the last id. */
+/* The entry's operations in the original's order, all of them (a
+ * POPS_BUILTIN_AFTER_FAKELC in `id` is ignored here: see
+ * pops_builtin_op_runs); -ENOENT past the last id. */
 int pops_builtin_entry_ops(uint16_t id, const PopsBuiltinOp **ops, unsigned *count);
+
+/* 1 when operation n of the entry runs: always, except the entry's
+ * lc_first/lc_count run when `id` carries POPS_BUILTIN_AFTER_FAKELC.
+ * 0 for an id with no entry. */
+int pops_builtin_op_runs(uint16_t id, unsigned n);
 
 #ifdef __cplusplus
 }

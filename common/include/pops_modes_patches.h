@@ -84,6 +84,15 @@ int pops_apply_original_tokens(void *staged_core, size_t core_size, uint32_t tok
  * are left out. */
 int pops_apply_undo_tokens(void *staged_core, size_t core_size, uint32_t tokens);
 
+/* $FAKELC (handler 0x89caf0): the 21 bytes it copies to 0x210cf8, POPS's
+ * scratchpad clear loop. They are the built-in entries' LibCrypt template
+ * with the per-game value cleared: the loop stores 0x1f000000 at
+ * 0x7000009c once, then clears as before (pops_config.h, POPS_FAKELC_*).
+ * Returns -EINVAL / -ERANGE for a bad or short core. */
+#define POPS_FAKELC_ADDR UINT32_C(0x00210cf8)
+#define POPS_FAKELC_SIZE 21
+int pops_apply_fakelc(void *staged_core, size_t core_size);
+
 /* $SMOOTH, $LEFTADJ_, $XPOS_/$YPOS_, $DWSTRETCH_ and $DWCROP_. All
  * selected sites are checked before writes; no resident code is required. */
 int pops_apply_display_config(void *staged_core, size_t core_size, const PopsConfig *cfg);
@@ -314,10 +323,11 @@ int pops_module_irx_args(const void *irx, size_t irx_size, const char **args);
 #define POPS_OPCODE_PASS_LAST UINT32_C(0x004f677f)
 int pops_apply_opcode_pass(void *staged_core, size_t core_size);
 
-/* pops_fix_context_init_video after built-in entry `builtin_id` (0: none)
- * was applied to the staged core: the entry's compatibility modes and core
- * writes are replayed over the expected site values, in the entry's order,
- * before initial_modes. Computed from the entry data, not from live bytes. */
+/* pops_fix_context_init_video after built-in entry `builtin_id` (0: none;
+ * it may carry POPS_BUILTIN_AFTER_FAKELC) was applied to the staged core:
+ * the entry's compatibility modes and core writes are replayed over the
+ * expected site values, in the entry's order, before initial_modes.
+ * Computed from the entry data, not from live bytes. */
 int pops_fix_context_init_builtin(PopsFixContext *context, const void *staged_core,
                                   size_t core_size, uint16_t builtin_id,
                                   uint8_t initial_modes, uint8_t initial_video_mode);

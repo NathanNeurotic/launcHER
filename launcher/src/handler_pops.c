@@ -930,20 +930,28 @@ int launchPOPS(int argc, char *argv[]) {
   }
   /* $VCDID_n applies only when the fingerprint matched nothing, as in the
    * original (its handlers skip when gp+0x38d8 is already set). An id with
-   * no entry, as there, selects nothing and disables the list. */
+   * no entry, as there, selects nothing and disables the list. After a
+   * $FAKELC the original runs the entry with gp+0x3424 set, and it skips
+   * part of itself: builtinId then carries POPS_BUILTIN_AFTER_FAKELC into
+   * every use of the entry below. */
   if (!builtinId && cfg.vcdid_set) {
     if (cfg.vcdid <= POPS_BUILTIN_MAX_ID) {
-      res = pops_builtin_apply(cfg.vcdid, NULL, 0, NULL, 0, 0, &builtinPlan);
+      uint16_t id = cfg.vcdid;
+      if (cfg.fakelc & POPS_FAKELC_BEFORE_VCDID)
+        id |= POPS_BUILTIN_AFTER_FAKELC;
+      res = pops_builtin_apply(id, NULL, 0, NULL, 0, 0, &builtinPlan);
       if (res) {
         msg("POPS: $VCDID_%u is unusable: %d\n", (unsigned)cfg.vcdid, res);
         return res;
       }
-      builtinId = cfg.vcdid;
+      builtinId = id;
     }
-    DPRINTF("POPS: $VCDID_%u -> entry %u\n", (unsigned)cfg.vcdid, (unsigned)builtinId);
+    DPRINTF("POPS: $VCDID_%u -> entry %u%s\n", (unsigned)cfg.vcdid,
+            (unsigned)POPS_BUILTIN_ID(builtinId),
+            (builtinId & POPS_BUILTIN_AFTER_FAKELC) ? " after $FAKELC" : "");
   }
   if (builtinId) {
-    cfg.builtin_id = builtinId;
+    cfg.builtin_id = POPS_BUILTIN_ID(builtinId);
     cfg.builtin_fix_call = builtinPlan.fix_call;
     cfg.builtin_break_call = builtinPlan.break_call;
     cfg.builtin_libcrypt2 = builtinPlan.libcrypt2;
@@ -951,7 +959,7 @@ int launchPOPS(int argc, char *argv[]) {
     if (builtinPlan.no_vmc1)
       cfg.no_vmc1 = 1; /* the entry's gp+0x38bc=2, the same helper as $NOVMC1 */
     DPRINTF("POPS: Built-in entry %u: compat=0x%02X subcd=%u novmc1=%u fix=%u break=%u "
-            "libcrypt2=%u nopal=%u\n", (unsigned)builtinId, builtinPlan.compat_modes,
+            "libcrypt2=%u nopal=%u\n", (unsigned)POPS_BUILTIN_ID(builtinId), builtinPlan.compat_modes,
             builtinPlan.subcd, builtinPlan.no_vmc1, builtinPlan.fix_call,
             builtinPlan.break_call, builtinPlan.libcrypt2, builtinPlan.no_auto_pal);
   }
@@ -1395,7 +1403,7 @@ int launchPOPS(int argc, char *argv[]) {
     res = pops_builtin_apply(builtinId, (void *)stagedCore, plan.core_size, NULL, 0, 0,
                              &builtinPlan);
     if (res) {
-      msg("POPS: Applying built-in entry %u failed: %d\n", (unsigned)builtinId, res);
+      msg("POPS: Applying built-in entry %u failed: %d\n", (unsigned)POPS_BUILTIN_ID(builtinId), res);
       return res;
     }
   }

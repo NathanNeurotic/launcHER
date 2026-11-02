@@ -79,6 +79,7 @@ class PopsConfig(c.Structure):
         ("original_opcodes", c.c_uint8),
         ("breakpoint", c.c_uint8),
         ("recompiler_addons", c.c_uint8),
+        ("fakelc", c.c_uint8),
     ]
 
 class PopsCompatEntry(c.Structure):
@@ -267,6 +268,8 @@ class FeatureTests(unittest.TestCase):
         LIB.pops_apply_original_tokens.restype = c.c_int
         LIB.pops_apply_undo_tokens.argtypes = [c.c_void_p, c.c_size_t, c.c_uint32]
         LIB.pops_apply_undo_tokens.restype = c.c_int
+        LIB.pops_apply_fakelc.argtypes = [c.c_void_p, c.c_size_t]
+        LIB.pops_apply_fakelc.restype = c.c_int
         LIB.pops_apply_igr_original.argtypes = [c.c_void_p, c.c_size_t, c.c_uint8, c.c_uint8]
         LIB.pops_apply_igr_original.restype = c.c_int
         LIB.pops_region_from_licence.argtypes = [c.c_char_p]
@@ -1638,6 +1641,117 @@ class FeatureTests(unittest.TestCase):
             self.assertEqual(LIB.pops_apply_undo_tokens(ptr, size, flag), 0)
             self.assertEqual(buf, expected, command)
             del ptr
+
+    # $FAKELC's 21 bytes at 0x210cf8 (handler 0x89caf0), as the original
+    # leaves them (measured with its whole parser): the built-in entries'
+    # LibCrypt template with the per-game value cleared. POPS_LC_BYTES are
+    # POPS's own, which $UNDO_LIBCRYPT_FIX puts back.
+    FAKELC_AT = 0x210CF8
+    FAKELC_BYTES = bytes.fromhex("001f133c" "00007326" "fcf173ac" "ffff4224" "0000647c" "fd")
+    POPS_LC_BYTES = bytes.fromhex("ffff4224" "0000647c" "00000000" "00000000" "00000000" "fa")
+    FAKELC_LAST, FAKELC_BEFORE_VCDID = 1, 2
+
+    def fakelc_config(self, *lines):
+        cfg = PopsConfig()
+        LIB.pops_config_init(c.byref(cfg))
+        for line in lines:
+            self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), line.encode()), 0)
+        return cfg
+
+    def test_fakelc_command(self):
+        LAST, BEFORE = self.FAKELC_LAST, self.FAKELC_BEFORE_VCDID
+        # (lines) -> (PopsConfig.fakelc, the $VCDID_n id that applies)
+        cases = {
+            ("$FAKELC",): (LAST | BEFORE, None),
+            ("$fakelc",): (LAST | BEFORE, None),
+            ("$FAKELCX",): (0, None),
+            ("$FAKE_LC",): (0, None),
+            ("$VCDID_5", "$FAKELC"): (LAST, 5),
+            ("$FAKELC", "$VCDID_5"): (LAST | BEFORE, 5),
+            # $VCDID_0 leaves the id free, so the $FAKELC is still before it.
+            ("$VCDID_0", "$FAKELC", "$VCDID_7"): (LAST | BEFORE, 7),
+            ("$FAKELC", "$UNDO_LIBCRYPT_FIX"): (BEFORE, None),
+            ("$UNDO_LIBCRYPT_FIX", "$FAKELC"): (LAST | BEFORE, None),
+            ("$FAKELC $UNDO_LIBCRYPT_FIX $FAKELC",): (LAST | BEFORE, None),
+            ("$FAKELC $UNDO_LIBCRYPT_FIX",): (BEFORE, None),
+        }
+        for lines, (flags, vcdid) in cases.items():
+            cfg = self.fakelc_config(*lines)
+            self.assertEqual((cfg.fakelc, cfg.vcdid if cfg.vcdid_set else None), (flags, vcdid), lines)
+
+        size = 0x303000
+        at = self.FAKELC_AT - 0x200000
+        buf = bytearray(b"\xA5" * size)
+        ptr = (c.c_uint8 * size).from_buffer(buf)
+        self.assertEqual(LIB.pops_apply_fakelc(ptr, size), 0)
+        self.assertEqual(bytes(buf[at:at + 21]), self.FAKELC_BYTES)
+        self.assertEqual(buf[:at] + buf[at + 21:], bytearray(b"\xA5" * (size - 21)))
+        del ptr
+        short = bytearray(at + 20)
+        sptr = (c.c_uint8 * len(short)).from_buffer(short)
+        self.assertEqual(LIB.pops_apply_fakelc(sptr, len(short)), -errno.ERANGE)
+        self.assertEqual(short, bytearray(at + 20))
+        del sptr
+        self.assertEqual(LIB.pops_apply_fakelc(None, size), -errno.EINVAL)
+
+        # In the config pass: the later of $FAKELC and $UNDO_LIBCRYPT_FIX wins.
+        def lc_after(*lines):
+            cfg = self.fakelc_config(*lines)
+            b = bytearray(size)
+            b[at:at + 21] = self.POPS_LC_BYTES
+            bp = (c.c_uint8 * size).from_buffer(b)
+            self.assertEqual(LIB.pops_apply_all_config_patches(bp, size, c.byref(cfg)), 0, lines)
+            del bp
+            return bytes(b[at:at + 21])
+        self.assertEqual(lc_after("$FAKELC"), self.FAKELC_BYTES)
+        self.assertEqual(lc_after("$FAKELC", "$UNDO_LIBCRYPT_FIX"), self.POPS_LC_BYTES)
+        self.assertEqual(lc_after("$UNDO_LIBCRYPT_FIX", "$FAKELC"), self.FAKELC_BYTES)
+        self.assertEqual(lc_after("$UNDO_LIBCRYPT_FIX $FAKELC $UNDO_LIBCRYPT_FIX"), self.POPS_LC_BYTES)
+        self.assertEqual(lc_after("$NOPAD0"), self.POPS_LC_BYTES)
+
+    def test_builtin_entries_after_fakelc(self):
+        class Plan(c.Structure):
+            _fields_ = [("id", c.c_uint16), ("compat_modes", c.c_uint8), ("subcd", c.c_uint8),
+                        ("no_vmc1", c.c_uint8), ("no_auto_pal", c.c_uint8), ("fix_call", c.c_uint8),
+                        ("break_call", c.c_uint8), ("libcrypt2", c.c_uint8),
+                        ("libcrypt2_code", c.c_uint8 * 84),
+                        ("fix_size", c.c_uint32), ("break_size", c.c_uint32)]
+        LIB.pops_builtin_apply.argtypes = [c.c_uint16, c.c_void_p, c.c_size_t, c.c_void_p,
+                                           c.c_uint32, c.c_size_t, c.POINTER(Plan)]
+        LIB.pops_builtin_apply.restype = c.c_int
+        LIB.pops_builtin_op_runs.argtypes = [c.c_uint16, c.c_uint]
+        LIB.pops_builtin_op_runs.restype = c.c_int
+        AFTER = 0x8000
+        size, at = 0x400000, self.FAKELC_AT - 0x200000
+
+        def apply(n):
+            core = (c.c_uint8 * size)()
+            plan = Plan()
+            self.assertEqual(LIB.pops_builtin_apply(n, core, size, None, 0, 0, c.byref(plan)), 0, hex(n))
+            return bytes(core), plan
+
+        # Entry 6 is only its LibCrypt write; after a $FAKELC it writes nothing.
+        core, _ = apply(6)
+        self.assertEqual(core[at:at + 21], bytes.fromhex("011f133c70ad7326fcf173acffff42240000647cfd"))
+        core, plan = apply(6 | AFTER)
+        self.assertEqual(core, bytes(size))
+        self.assertEqual(plan.id, 6)
+        # 207 keeps only its compatibility mode 4; 232 only mode 1 (no sub-CD
+        # flag, so nothing gates it); 230 keeps nothing.
+        for n, modes in ((207, 1 << 3), (232, 1 << 0), (230, 0)):
+            _, full = apply(n)
+            self.assertTrue(full.fix_call, n)
+            _, plan = apply(n | AFTER)
+            self.assertEqual((plan.compat_modes, plan.fix_call, plan.break_call, plan.subcd,
+                              plan.fix_size, plan.break_size), (modes, 0, 0, 0, 0, 0), n)
+        # Entries without the test are the same either way.
+        for n in (0, 1, 3, 504):
+            self.assertEqual(apply(n)[0], apply(n | AFTER)[0], n)
+        self.assertEqual([LIB.pops_builtin_op_runs(207, i) for i in range(6)], [1] * 6)
+        self.assertEqual([LIB.pops_builtin_op_runs(207 | AFTER, i) for i in range(6)], [0] * 5 + [1])
+        self.assertEqual(LIB.pops_builtin_op_runs(625, 0), 0)
+        plan = Plan()
+        self.assertEqual(LIB.pops_builtin_apply(625 | AFTER, None, 0, None, 0, 0, c.byref(plan)), -errno.ENOENT)
 
     def test_region_pass_matches_original(self):
         self.assertEqual(LIB.pops_region_from_licence(b"Euro"), 1)

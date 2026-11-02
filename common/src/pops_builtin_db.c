@@ -43,14 +43,27 @@ void pops_builtin_sig_offsets(uint64_t image_offset, uint32_t sector_size,
 }
 
 int pops_builtin_entry_ops(uint16_t id, const PopsBuiltinOp **ops, unsigned *count) {
+  id = POPS_BUILTIN_ID(id);
   if (id > POPS_BUILTIN_MAX_ID)
     return -ENOENT;
   const PopsBuiltinEntry *e = &pops_builtin_entries[id];
-  if ((unsigned)e->first + e->count > pops_builtin_op_count)
+  if ((unsigned)e->first + e->count > pops_builtin_op_count ||
+      (unsigned)e->lc_first + e->lc_count > e->count)
     return -EILSEQ;
   *ops = &pops_builtin_ops[e->first];
   *count = e->count;
   return 0;
+}
+
+int pops_builtin_op_runs(uint16_t id, unsigned n) {
+  uint16_t entry = POPS_BUILTIN_ID(id);
+  if (entry > POPS_BUILTIN_MAX_ID)
+    return 0;
+  if (!(id & POPS_BUILTIN_AFTER_FAKELC))
+    return 1;
+  const PopsBuiltinEntry *e = &pops_builtin_entries[entry];
+  /* The arm's bnez on gp+0x3424 jumps over exactly this run. */
+  return n < e->lc_first || n >= (unsigned)e->lc_first + e->lc_count;
 }
 
 static int fits(uint64_t addr, uint32_t len, uint64_t base, uint64_t size) {
@@ -68,7 +81,7 @@ int pops_builtin_apply(uint16_t id, void *staged_core, size_t core_size,
   if (!plan)
     return -EINVAL;
   memset(plan, 0, sizeof(*plan));
-  plan->id = id;
+  plan->id = POPS_BUILTIN_ID(id);
   /* Bounds first, so a rejected entry changes nothing. */
   for (unsigned i = 0; i < count; ++i) {
     const PopsBuiltinOp *op = &ops[i];
@@ -91,6 +104,8 @@ int pops_builtin_apply(uint16_t id, void *staged_core, size_t core_size,
   for (unsigned i = 0; i < count; ++i) {
     const PopsBuiltinOp *op = &ops[i];
     const uint8_t *src = pops_builtin_data + op->data;
+    if (!pops_builtin_op_runs(id, i))
+      continue; /* skipped after a $FAKELC */
     switch (op->kind) {
     case POPS_BUILTIN_OP_CORE:
       if (staged_core)

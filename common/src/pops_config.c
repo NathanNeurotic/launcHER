@@ -189,12 +189,14 @@ static int parse_single_directive(PopsConfig *cfg, const char *token) {
   /* $VCDID_n: handlers 0x890f4c/0x8912e4/0x8917f0/0x891e78, one per digit
    * count 1..4; the digits must end the token (the original accepts only a
    * space, CR, LF or NUL after them). Leading zeros count as digits. The
-   * first command wins; later ones are ignored (gp+0x38d8 is already set). */
+   * first command wins; later ones are ignored (gp+0x38d8 is already set).
+   * $VCDID_0 stores 0 there, so it changes nothing and the next one still
+   * runs. */
   if (!strncasecmp(token, "$VCDID_", 7)) {
     uint32_t value;
     if (display_decimal32(token + 7, 4, 9999, &value) && !cfg->vcdid_set) {
       cfg->vcdid = (uint16_t)value;
-      cfg->vcdid_set = 1;
+      cfg->vcdid_set = value != 0;
     }
     return 1;
   }
@@ -357,6 +359,8 @@ static int parse_single_directive(PopsConfig *cfg, const char *token) {
           cfg->hdtv_fix = 0;
         if (tokens[i].flag == POPS_TOK_SUBCDSTATUS)
           cfg->subcd_seen = 1;
+        if (tokens[i].flag == POPS_TOK_UNDO_LIBCRYPT)
+          cfg->fakelc &= (uint8_t)~POPS_FAKELC_LAST; /* it restores $FAKELC's bytes */
         return 1;
       }
     }
@@ -376,6 +380,16 @@ static int parse_single_directive(PopsConfig *cfg, const char *token) {
   }
   if (!strcasecmp(token, "$KILL_PADMAN")) {
     cfg->kill_padman = 1;
+    return 1;
+  }
+  /* $FAKELC (0x89caf0): writes POPS's LibCrypt loop at once (applied after
+   * the $UNDO_ writes, unless a $UNDO_LIBCRYPT_FIX came later) and sets
+   * gp+0x3424, never cleared, which a later $VCDID_n's entry tests. The
+   * original accepts the name followed by a space, CR, LF, NUL or '$'. */
+  if (!strcasecmp(token, "$FAKELC")) {
+    cfg->fakelc |= POPS_FAKELC_LAST;
+    if (!cfg->vcdid_set)
+      cfg->fakelc |= POPS_FAKELC_BEFORE_VCDID;
     return 1;
   }
   /* $ORIGINAL_OPCODES (0x894254): flag only (gp+0x38c4). */
