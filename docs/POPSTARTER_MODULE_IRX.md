@@ -91,5 +91,9 @@ and a module that fails to start stops the launch, as under POPStarter.
 
 launcHER's own named peripheral drivers (`USBMOUSE.IRX` ... `SIO2MAN.IRX`)
 and its `MODULES.TXT` / `IRX.TXT` manifests are launcHER-only extras that
-the original does not have. They are still loaded, after `MODULE_9`, and
-are listed in the PR as the next thing to decide.
+the original does not have. The owner chose (2026-11-02) to keep them as
+a bonus as long as they do not get in the way of POPStarter compatibility.
+They load only when those files exist, after `MODULE_9`. Caution: a
+`PADMAN.IRX` or `SIO2MAN.IRX` loaded this way does not go through the name
+check, so POPS still starts its own copy as well; put such a driver in a
+`MODULE_n.IRX` slot instead, where it replaces POPS's copy as in POPStarter.
