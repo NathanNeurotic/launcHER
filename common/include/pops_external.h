@@ -201,6 +201,10 @@ typedef struct {
   uint8_t metadata[32]; /* Not just a string: PATCH records contain binary data. */
 } PopsContainer;
 
+/* Every container is a 64-byte header followed by exactly payload_size bytes
+ * of payload: the payload's first byte is at this offset in the file. */
+#define POPS_CONTAINER_HEADER_SIZE 64u
+
 /* Recognizes TROJAN_0..9 and PATCH_1..9 containers, including data-only PATCHes.
  * Output is unchanged on error. A CONFIG success is not an executable payload. */
 int pops_container_inspect(const void *file, size_t size, PopsContainer *out);

@@ -5,7 +5,7 @@
 #define EE_END UINT32_C(0x02000000)
 #define SCRATCH_START UINT32_C(0x70000000)
 #define SCRATCH_END UINT32_C(0x70004000)
-#define HEADER_SIZE 64u
+#define HEADER_SIZE POPS_CONTAINER_HEADER_SIZE
 
 static uint16_t le16(const uint8_t *p) {
   return (uint16_t)((uint16_t)p[0] | ((uint16_t)p[1] << 8));

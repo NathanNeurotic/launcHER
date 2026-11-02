@@ -410,14 +410,18 @@ int pops_fix_stage(PopsFixContext *context, void *staged_core, size_t core_size,
     return result;
   if (options.video == POPS_PATCH_VIDEO_CONTROL6 && !context->video_custom_set) {
     /* A payload may replace the original delay slot. Predict this field
-     * before the first write; the owned bridge requires its known LUI. */
+     * before the first write; the owned bridge requires its known LUI. A
+     * byte the payload covers comes from the file, whose payload starts
+     * after the header (plan.payload_offset is where it lands in the core,
+     * not where it is in the file). */
     uint32_t delay = 0;
     for (unsigned j = 0; j < 4; ++j) {
       uint32_t address = 0x21a098 + j;
       uint8_t byte = bytes[address - POPS_CORE_BASE_ADDR];
       if (address >= plan.container.load &&
           address - plan.container.load < plan.container.payload_size)
-        byte = ((const uint8_t *)file)[plan.payload_offset + address - plan.container.load];
+        byte = ((const uint8_t *)file)[POPS_CONTAINER_HEADER_SIZE + address -
+                                       plan.container.load];
       delay |= (uint32_t)byte << (8 * j);
     }
     if (delay != 0x3c031200)

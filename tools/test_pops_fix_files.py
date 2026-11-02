@@ -350,6 +350,31 @@ void test_io_failures(int reads, int closes) { fail_reads=reads; fail_closes=clo
             else:
                 self.assertEqual(bytes(self.memory), before)
 
+    def test_bound_progressive_reads_the_delay_slot_from_the_payload(self):
+        # The bridge needs lui $v1,0x1200 at 0x21a098 once the file is staged:
+        # a byte the payload covers comes from the file (after its 64-byte
+        # header), the others from the core. This used to read the file at
+        # the payload's core offset instead, far past its end (a flaky
+        # segfault in CI, garbage on the console).
+        lui = struct.pack('<I', 0x3c031200)
+        for load, payload, accepted in ((0x21a098, lui, True),
+                                        (0x21a09a, lui[2:], True),
+                                        (0x21a09a, b'\x03\x3d', False),
+                                        (0x21a098, b'\x00\x12\x03\x3d', False)):
+            with self.subTest(load=hex(load), payload=payload):
+                self.setUp()
+                self.bind()
+                blob = patch(control=7, modes=(), payload=payload, address=load)
+                if not accepted:
+                    self.assert_rejected_without_writes(blob)
+                    continue
+                self.assertEqual(self.stage(blob), 0)
+                self.assertEqual(bytes(self.memory[0x21a098 - BASE:0x21a09c - BASE]), lui)
+                self.assertEqual(struct.unpack_from('<I', self.memory, 0x21a094 - BASE)[0],
+                                 0x08000000 | (0x143a5d8 >> 2))
+                self.assertEqual(self.lib.pops_fix_require_progressive(c.byref(self.context),
+                                                                       self.pointer, SIZE), 0)
+
     def test_bound_progressive_guards_payload_order_and_conflicts(self):
         self.bind()
         for address in (0x21a094, 0x21a098, 0x23acb0, 0x23ad0c):
