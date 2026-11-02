@@ -51,7 +51,8 @@ class DisplayTests(unittest.TestCase):
                         '-I', str(ROOT / 'common/include'),
                         *(str(ROOT / 'common/src' / name) for name in
                           ('pops_modes_patches.c', 'pops_resident_engine.c', 'pops_external.c',
-                           'pops_config.c', 'pops_resident.c')),
+                           'pops_config.c', 'pops_resident.c', 'pops_builtin_db.c',
+                           'pops_builtin_db_data.c')),
                         '-o', str(lib)], check=True)
         cls.lib = c.CDLL(str(lib))
         cls.lib.pops_config_init.argtypes = [c.POINTER(PopsConfig)]

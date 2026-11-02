@@ -103,19 +103,19 @@ static int test_close(int fd) {
 ''' + functions + '''
 int test_directory(void *core, size_t size, const char *root, const char *title) {
   PopsFixContext state;
-  int result = pops_stage_fix_files(core, size, root, title, 0, 0, 0, 0, &state);
+  int result = pops_stage_fix_files(core, size, root, title, 0, 0, 0, 0, 0, &state);
   return !result && state.video_auto_disabled > 1 ? -1000 : result;
 }
 int test_directory_video(void *core, size_t size, const char *root, const char *title,
                            unsigned video_mode) {
   PopsFixContext state;
-  int result = pops_stage_fix_files(core, size, root, title, 0, video_mode, 0, 0, &state);
+  int result = pops_stage_fix_files(core, size, root, title, 0, 0, video_mode, 0, 0, &state);
   return result ? result : state.video_auto_disabled;
 }
 int test_directory_resident(void *core, size_t size, const char *root, const char *title,
                               unsigned video_mode) {
   PopsFixContext state;
-  int result = pops_stage_fix_files(core, size, root, title, 0, video_mode,
+  int result = pops_stage_fix_files(core, size, root, title, 0, 0, video_mode,
                                     0x143a5d8, 0x32240001, &state);
   if (!result) result = pops_fix_require_progressive(&state, core, size);
   return result ? result : state.progressive_set;
@@ -130,6 +130,8 @@ void test_io_failures(int reads, int closes) { fail_reads=reads; fail_closes=clo
                         '-I', str(ROOT / 'common/include'), str(wrapper),
                         str(ROOT / 'common/src/pops_modes_patches.c'),
                         str(ROOT / 'common/src/pops_resident_engine.c'),
+                        str(ROOT / 'common/src/pops_builtin_db.c'),
+                        str(ROOT / 'common/src/pops_builtin_db_data.c'),
                         str(ROOT / 'common/src/pops_external.c'), '-o', str(library)], check=True)
         cls.lib = c.CDLL(str(library))
         cls.lib.pops_fix_context_init.argtypes = [c.POINTER(Context), c.c_void_p, c.c_size_t, c.c_uint8]

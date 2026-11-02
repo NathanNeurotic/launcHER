@@ -510,6 +510,71 @@ int pops_compat_mode_write(void *staged_core, size_t core_size, uint8_t mode) {
   return 0;
 }
 
+/* $RESET_WARMBOOT: see pops_modes_patches.h. The scan and its pokes follow
+ * the original's loop (0x87960c..0x879cf4) step for step: p walks down by 4,
+ * a stub is `addiu $t2,$zero,table ; jr $t2 ; addiu $t1,$zero,func`, and
+ * each case pokes single bytes (0x87c298), so a poke can change what a
+ * lower p later reads, as there. */
+static const uint8_t warmboot_a0_funcs[] = {0x3a, 0x40, 0x4f, 0x50, 0x53, 0x9a, 0x9b, 0xa1};
+static const uint8_t warmboot_b0_funcs[] = {0x52, 0x5a, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f,
+                                            0x21, 0x22, 0x23, 0x2a, 0x2b, 0x38};
+static const uint8_t warmboot_c0_funcs[] = {0x0b, 0x14};
+
+static int warmboot_listed(const uint8_t *list, size_t n, uint32_t func_word) {
+  for (size_t i = 0; i < n; ++i)
+    if (func_word == (0x24090000u | list[i]))
+      return 1;
+  return 0;
+}
+
+static uint32_t warmboot_word(const uint8_t *at) {
+  return (uint32_t)at[0] | ((uint32_t)at[1] << 8) | ((uint32_t)at[2] << 16) | ((uint32_t)at[3] << 24);
+}
+
+int pops_apply_reset_warmboot(void *staged_core, size_t core_size, uint32_t *exit_vector) {
+  uint8_t *bytes = staged_core;
+  uint32_t p;
+  if (!bytes || !exit_vector)
+    return -EINVAL;
+  *exit_vector = 0;
+  if (core_size < (size_t)(POPS_WARMBOOT_SCAN_TOP + 12 - POPS_CORE_BASE_ADDR))
+    return -ERANGE;
+  for (p = POPS_WARMBOOT_SCAN_TOP; p != POPS_WARMBOOT_ROM_BASE; p -= 4) {
+    uint8_t *at = bytes + (p - POPS_CORE_BASE_ADDR);
+    uint32_t w0 = warmboot_word(at), w1 = warmboot_word(at + 4), w2 = warmboot_word(at + 8);
+    if ((w0 >> 16) != 0x240a || w1 != 0x01400008)
+      continue;
+    switch (w0 & 0xffff) {
+    case 0xa0:
+      if (warmboot_listed(warmboot_a0_funcs, sizeof(warmboot_a0_funcs), w2)) {
+        at[8] = 0xa0;
+        /* The original computes the stub's PS1 ROM address here
+         * (p - 0x24bc20 + 0xbfc00000) and then stores p itself, the EE
+         * address inside POPS's ROM copy, into its resident block. Copied
+         * as is (quirk 26). */
+        if (w2 == 0x2409003a)
+          *exit_vector = p;
+      }
+      break;
+    case 0xb0:
+      if (warmboot_listed(warmboot_b0_funcs, sizeof(warmboot_b0_funcs), w2)) {
+        at[0] = 0xa0;
+        at[8] = 0xa0;
+      }
+      break;
+    case 0xc0:
+      if (warmboot_listed(warmboot_c0_funcs, sizeof(warmboot_c0_funcs), w2)) {
+        at[0] = 0xa0;
+        at[8] = 0xa0;
+      }
+      break;
+    default:
+      break;
+    }
+  }
+  return *exit_vector ? 1 : 0;
+}
+
 int pops_apply_compat_modes(void *staged_core, size_t core_size, uint8_t modes_mask) {
   uint8_t *bytes = staged_core;
   size_t i;

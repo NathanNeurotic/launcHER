@@ -579,6 +579,11 @@ void pops_resident_gp1_work(void) {
   uint32_t base = *(volatile uint32_t *)cfg->ram_base_ptr;
   if (cfg->flags & POPS_RES_F_PAD_ID)
     pops_resident_pad_ids(cfg, (uint8_t *)POPS_PAD_STATE_ADDR);
+  /* The original's reset block right after its controller-ID stores: while
+   * port 0 reads exactly the combo, the PS1 jump word (scratchpad 0) is set
+   * to the reset vector. Always on, as in its resident block. */
+  if (*(volatile uint16_t *)(POPS_PAD_STATE_ADDR + 2) == POPS_RESET_COMBO)
+    *(volatile uint32_t *)POPS_SCRATCHPAD_ADDR = cfg->reset_vector;
   if (cfg->flags & POPS_RES_F_BREAK_CALL)
     ((PopsBuiltinCode)POPS_BUILTIN_BREAK_ADDR)();
   pops_resident_timings(cfg, 0, POPS_SCRATCHPAD_ADDR);

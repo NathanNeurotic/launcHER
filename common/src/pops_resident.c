@@ -259,6 +259,9 @@ int pops_resident_build_config(PopsResidentConfig *out, const PopsConfig *cfg) {
     out->libcrypt2_code[POPS_BUILTIN_LIBCRYPT2_SIZE / 4] = 0x03e00008; /* jr ra */
     out->libcrypt2_code[POPS_BUILTIN_LIBCRYPT2_SIZE / 4 + 1] = 0;      /* nop */
   }
+  /* The in-game reset's jump word: the BIOS reset vector, or the stub
+   * $RESET_WARMBOOT found (pops_apply_reset_warmboot). */
+  out->reset_vector = cfg->reset_vector ? cfg->reset_vector : POPS_RESET_VECTOR_DEFAULT;
 
   uint16_t count = cfg->cheat_count;
   if (count > POPS_MAX_CHEATS)

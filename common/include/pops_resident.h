@@ -33,7 +33,7 @@ extern "C" {
 #define POPS_RESIDENT_BASE        UINT32_C(0x0143a000)
 #define POPS_RESIDENT_LIMIT       UINT32_C(0x01460000)
 #define POPS_RESIDENT_MAGIC       UINT32_C(0x5352484c) /* "LHRS" */
-#define POPS_RESIDENT_VERSION     10
+#define POPS_RESIDENT_VERSION     11
 
 /* POPS's VBLANK_START registration and handler (verified on the pinned core) */
 #define POPS_VBLANK_LUI_ADDR      UINT32_C(0x0021b184)
@@ -158,7 +158,17 @@ typedef struct {
   /* POPS_RES_F_LIBCRYPT2: the entry's 84 bytes of code (it falls through
    * in the original) followed by jr ra, nop; run in place. */
   uint32_t libcrypt2_code[POPS_RESIDENT_LIBCRYPT2_WORDS];
+  /* The in-game reset: POPStarter's resident block (0x232ce8..0x232d08,
+   * always live) stores this word to the EE scratchpad word 0 while the
+   * port 0 buttons read exactly POPS_RESET_COMBO. The BIOS reset vector as
+   * shipped; $RESET_WARMBOOT points it at the SystemErrorExit stub. */
+  uint32_t reset_vector;
 } PopsResidentConfig;
+
+/* Port 0 buttons (active low) for the reset: SELECT + L2 + R2 + CROSS and
+ * nothing else, the original's `lh 0x507002 == 0xbcfe`. */
+#define POPS_RESET_COMBO          0xbcfeu
+#define POPS_RESET_VECTOR_DEFAULT UINT32_C(0xbfc00000)
 
 /* Where the codes write. ps1 is PS1 RAM (2 MiB); ee is EE address 0 and
  * ee_size how much of EE RAM PS2-format codes may touch (0: none); spr is

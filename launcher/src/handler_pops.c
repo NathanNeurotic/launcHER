@@ -1290,6 +1290,26 @@ int launchPOPS(int argc, char *argv[]) {
     return res;
   }
 
+  /* $RESET_WARMBOOT: the original's pass right after its region pass
+   * (0x8795f0). It rewrites BIOS error/exit stubs in POPS's ROM copy and,
+   * when it finds the SystemErrorExit stub, makes the in-game reset jump
+   * there; that store takes over the slot its breakpoint handler would use,
+   * so the handler is dropped, as there (quirk 25). */
+  if (cfg.reset_warmboot) {
+    uint32_t exitVector = 0;
+    res = pops_apply_reset_warmboot((void *)stagedCore, plan.core_size, &exitVector);
+    if (res < 0) {
+      msg("POPS: $RESET_WARMBOOT failed: %d\n", res);
+      return res;
+    }
+    DPRINTF("POPS: $RESET_WARMBOOT: exit stub %s (0x%08x)\n", res ? "found" : "not found",
+            (unsigned)exitVector);
+    if (exitVector) {
+      cfg.reset_vector = exitVector;
+      cfg.builtin_break_call = 0;
+    }
+  }
+
   /* Apply SLBB-00001 VCD check bypass (FUN_008dbcdc) after fix-file staging
    * so compat site invariants in PopsFixContext remain pristine during staging. */
   if (plan.core_size >= (size_t)(0x0020085c - POPS_CORE_ADDR + 4)) {

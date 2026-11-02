@@ -212,6 +212,27 @@ int pops_apply_resource_relink(void *staged_core, size_t core_size, int is_usb_f
  * list applies them before any command runs. */
 int pops_compat_mode_write(void *staged_core, size_t core_size, uint8_t mode);
 
+/* $RESET_WARMBOOT: POPStarter r13's pass at 0x8795f0..0x879cf4, run after
+ * the region pass when gp+0x3894 is set. It walks POPS's embedded PS1 BIOS
+ * ROM copy downward from POPS_WARMBOOT_SCAN_TOP to (not including)
+ * POPS_WARMBOOT_ROM_BASE looking for the BIOS call stubs
+ *   addiu $t2, $zero, 0xA0|0xB0|0xC0 ; jr $t2 ; addiu $t1, $zero, func
+ * and rewrites a fixed list of them to A0:A0 (_boot, a warm boot): A0
+ * stubs get the function byte, B0/C0 stubs the table byte and the function
+ * byte. For each A0:3A (SystemErrorExit) stub it also records the stub's
+ * address, the last one found (lowest address) winning; that address
+ * becomes what the in-game reset combo makes the PS1 jump to
+ * (PopsResidentConfig.reset_vector), in place of the BIOS reset vector.
+ * The original computes the stub's PS1 ROM address (p - 0x24bc20 +
+ * 0xbfc00000) and then stores p, the EE address inside POPS's ROM copy;
+ * *exit_vector is that p, as there (quirk 26).
+ * Returns 1 with *exit_vector set when such a stub was found, 0 with
+ * *exit_vector = 0 when not, -ERANGE when the core does not reach the ROM
+ * copy. The stub bytes are rewritten exactly as the original's pokes. */
+#define POPS_WARMBOOT_ROM_BASE  UINT32_C(0x0024bc20)
+#define POPS_WARMBOOT_SCAN_TOP  UINT32_C(0x002cbb4c)
+int pops_apply_reset_warmboot(void *staged_core, size_t core_size, uint32_t *exit_vector);
+
 /* pops_fix_context_init_video after built-in entry `builtin_id` (0: none)
  * was applied to the staged core: the entry's compatibility modes and core
  * writes are replayed over the expected site values, in the entry's order,

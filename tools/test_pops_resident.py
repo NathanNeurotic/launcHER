@@ -46,6 +46,7 @@ class ResidentConfig(c.Structure):
         ("timings_ready", c.c_uint8),
         ("reserved", c.c_uint8 * 3),
         ("libcrypt2_code", c.c_uint32 * 23),
+        ("reset_vector", c.c_uint32),
     ]
 
 
@@ -751,7 +752,7 @@ class HookGp1(unittest.TestCase):
 
 def image(file_size=0x60, image_size=0x2000, entry=BASE + 0x40, config=BASE + 0x60, magic=0x5352484C):
     img = bytearray(file_size)
-    struct.pack_into("<IHHIIIIIIIIIIII", img, 0, magic, 10, 56, file_size, image_size, entry, config,
+    struct.pack_into("<IHHIIIIIIIIIIII", img, 0, magic, 11, 56, file_size, image_size, entry, config,
                      BASE + 0x44, BASE + 0x48, BASE + 0x4C, BASE + 0x50, BASE + 0x54, BASE + 0x58,
                      BASE + 0x5C, BASE + 0x40)
     img[0x40:0x44] = b"\x08\x00\xe0\x03"

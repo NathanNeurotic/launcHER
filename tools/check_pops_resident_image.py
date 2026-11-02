@@ -24,7 +24,7 @@ BASE = 0x0143A000
  pad_read_entry, pad_read_exit, gte_scale, gte_divide, gte_ultra,
  gp1_entry) = struct.unpack_from('<IHHIIIIIIIIIIII', img, 0)
 assert magic == 0x5352484C and fsz == len(img), (hex(magic), fsz, len(img))
-assert ver == 10 and hs == 56
+assert ver == 11 and hs == 56
 
 mu = Uc(UC_ARCH_MIPS, UC_MODE_MIPS64 + UC_MODE_LITTLE_ENDIAN)
 # The R5900 has MIPS IV's movz/movn, which unicorn's default R4000 model
@@ -462,3 +462,22 @@ config([(0x30000010, 0x5A)])
 gp1()
 assert u32(0x1204) == 0
 print('resident built-in chain calls: PASS (break, LibCrypt 2, fix, then cheats; gp kept)')
+
+# 7. The in-game reset (the original's block at 0x232ce8, always live):
+# while port 0's buttons read exactly 0xbcfe (SELECT+L2+R2+CROSS), the EE
+# scratchpad word 0 is set to reset_vector; any other reading leaves it.
+# $RESET_WARMBOOT only changes the vector (pops_apply_reset_warmboot).
+RESET_VECTOR = LC2 + 23 * 4
+config([(0x30000010, 0x5A)])
+mu.mem_write(RESET_VECTOR, struct.pack('<I', 0xBFC0D8D0))
+mu.mem_write(0x70000000, b'\0' * 4)
+mu.mem_write(PAD + 2, struct.pack('<H', 0xBCFE))
+gp1()
+assert u32(0x70000000) == 0xBFC0D8D0, hex(u32(0x70000000))
+mu.mem_write(0x70000000, b'\0' * 4)
+for other in (0xBCFF, 0xFFFF, 0x3CFE, 0x0000):
+    mu.mem_write(PAD + 2, struct.pack('<H', other))
+    gp1()
+    assert u32(0x70000000) == 0, hex(other)
+mu.mem_write(PAD + 2, struct.pack('<H', 0xFFFF))
+print('resident in-game reset: PASS (combo stores the vector to scratchpad 0, nothing else does)')

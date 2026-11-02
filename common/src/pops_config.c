@@ -361,6 +361,13 @@ static int parse_single_directive(PopsConfig *cfg, const char *token) {
       }
     }
   }
+  /* $RESET_WARMBOOT (0x8923a4): a flag, gp+0x3894, read by the launch
+   * function after the region pass (pops_apply_reset_warmboot). The
+   * original accepts the name followed by a space, CR, LF, NUL or '$'. */
+  if (!strcasecmp(token, "$RESET_WARMBOOT")) {
+    cfg->reset_warmboot = 1;
+    return 1;
+  }
   /* Cheat gates (pops_modes_patches.h). The original keeps one flag per
    * command; $NOSAFEMODE clears both. */
   if (!strcasecmp(token, "$SAFEMODE")) {

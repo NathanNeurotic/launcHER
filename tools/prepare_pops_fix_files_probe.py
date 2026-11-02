@@ -39,7 +39,9 @@ def prepare(out):
     files = ['tools/fixtures/pops_fix_files_ee.c', 'common/src/pops_modes_patches.c',
              'common/src/pops_resident_engine.c', 'common/include/pops_resident.h',
              'common/src/pops_external.c', 'common/include/pops_modes_patches.h',
-             'common/include/pops_config.h', 'common/include/pops_external.h']
+             'common/include/pops_config.h', 'common/include/pops_external.h',
+             'common/src/pops_builtin_db.c', 'common/src/pops_builtin_db_data.c',
+             'common/include/pops_builtin_db.h']
     hashes = {}
     for filename in files:
         path = ROOT / filename
@@ -51,7 +53,7 @@ def prepare(out):
     config = {'project': 'pops-fix-files-probe', 'targets': [{
         'name': 'pops_fix_files', 'type': 'ee',
         'sources': ['pops_fix_files_ee.c', 'pops_modes_patches.c', 'pops_resident_engine.c',
-                    'pops_external.c'],
+                    'pops_external.c', 'pops_builtin_db.c', 'pops_builtin_db_data.c'],
         'include_dirs': ['.'], 'libs': ['kernel', 'debug'], 'debug': True, 'opt': '-O2'}]}
     (out / 'ps2.yaml').write_text(json.dumps(config, indent=2) + '\n')
     (out / 'provenance.json').write_text(json.dumps(hashes, indent=2) + '\n')

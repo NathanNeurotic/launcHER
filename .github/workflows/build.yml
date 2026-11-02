@@ -44,6 +44,10 @@ jobs:
         run: python tools/test_pops_fix_files.py
       - name: Test POPS resident code (cheat engine, hook and install)
         run: python tools/test_pops_resident.py
+      - name: Test POPS display commands
+        run: python tools/test_pops_display.py
+      - name: Test POPS $RESET_WARMBOOT
+        run: python tools/test_pops_warmboot.py
 
   build:
     runs-on: ubuntu-latest

@@ -70,6 +70,9 @@ class PopsConfig(c.Structure):
         ("builtin_break_call", c.c_uint8),
         ("builtin_libcrypt2", c.c_uint8),
         ("builtin_libcrypt2_code", c.c_uint8 * 84),
+        ("reset_warmboot", c.c_uint8),
+        ("reset_pad", c.c_uint8 * 3),
+        ("reset_vector", c.c_uint32),
     ]
 
 class PopsCompatEntry(c.Structure):

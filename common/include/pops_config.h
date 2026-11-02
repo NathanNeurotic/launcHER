@@ -202,6 +202,13 @@ typedef struct {
   uint8_t builtin_break_call;
   uint8_t builtin_libcrypt2;
   uint8_t builtin_libcrypt2_code[84];
+  /* $RESET_WARMBOOT (the original's gp+0x3894): pops_apply_reset_warmboot
+   * runs after the region pass. reset_vector is what the in-game reset
+   * combo makes the PS1 jump to: 0 for the BIOS reset vector, or the ROM
+   * address of the SystemErrorExit stub the pass found. */
+  uint8_t reset_warmboot;
+  uint8_t reset_pad[3];
+  uint32_t reset_vector;
 } PopsConfig;
 
 /* $WIDESCREEN, $ULTRA_WIDESCREEN, $EYEFINITY: the last one in the files wins,
