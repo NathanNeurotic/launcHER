@@ -1352,6 +1352,17 @@ int launchPOPS(int argc, char *argv[]) {
     }
   }
 
+  /* $LOAD_PADMAN / $KILL_PADMAN: remove POPS's own padman_hsync start, as
+   * the original's pokes after its reset (it pokes the loaded core; the
+   * staged core is the same bytes). */
+  if (cfg.load_padman || cfg.kill_padman) {
+    res = pops_apply_padman((void *)stagedCore, plan.core_size);
+    if (res) {
+      msg("POPS: $LOAD_PADMAN/$KILL_PADMAN failed: %d\n", res);
+      return res;
+    }
+  }
+
   /* Apply SLBB-00001 VCD check bypass (FUN_008dbcdc) after fix-file staging
    * so compat site invariants in PopsFixContext remain pristine during staging. */
   if (plan.core_size >= (size_t)(0x0020085c - POPS_CORE_ADDR + 4)) {
@@ -1475,6 +1486,23 @@ int launchPOPS(int argc, char *argv[]) {
   if (res) {
     msg("POPS: Failed initializing services: %d\n", res);
     return res;
+  }
+
+  /* $LOAD_PADMAN: the original starts POPS's embedded padman_hsync itself
+   * right after its post-reset modules, before the XX. USB pair. */
+  if (cfg.load_padman) {
+    if (plan.core_size < (size_t)(POPS_PADMAN_IRX_ADDR + POPS_PADMAN_IRX_SIZE - POPS_CORE_ADDR)) {
+      msg("POPS: $LOAD_PADMAN: core too small\n");
+      return -ERANGE;
+    }
+    int padId = SifExecModuleBuffer((void *)((const unsigned char *)stagedCore +
+                                             (POPS_PADMAN_IRX_ADDR - POPS_CORE_ADDR)),
+                                    POPS_PADMAN_IRX_SIZE, 0, NULL, NULL);
+    DPRINTF("POPS: $LOAD_PADMAN: padman_hsync started (%d)\n", padId);
+    if (padId <= 0) {
+      msg("POPS: $LOAD_PADMAN: padman_hsync failed to start: %d\n", padId);
+      return padId < 0 ? padId : -EIO;
+    }
   }
 
   /* POPStarter starts its XX. USB pair a second time after the reset. */

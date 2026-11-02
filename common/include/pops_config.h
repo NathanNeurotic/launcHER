@@ -209,6 +209,13 @@ typedef struct {
   uint8_t reset_warmboot;
   uint8_t reset_pad[3];
   uint32_t reset_vector;
+  /* $LOAD_PADMAN (gp+0x38a8) and $KILL_PADMAN (gp+0x3870): POPS's own
+   * start of its embedded padman_hsync is removed (pops_apply_padman);
+   * with $LOAD_PADMAN the launcher starts that module itself after the
+   * IOP reset instead. */
+  uint8_t load_padman;
+  uint8_t kill_padman;
+  uint8_t padman_pad[2];
 } PopsConfig;
 
 /* $WIDESCREEN, $ULTRA_WIDESCREEN, $EYEFINITY: the last one in the files wins,

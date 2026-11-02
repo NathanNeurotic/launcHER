@@ -73,6 +73,9 @@ class PopsConfig(c.Structure):
         ("reset_warmboot", c.c_uint8),
         ("reset_pad", c.c_uint8 * 3),
         ("reset_vector", c.c_uint32),
+        ("load_padman", c.c_uint8),
+        ("kill_padman", c.c_uint8),
+        ("padman_pad", c.c_uint8 * 2),
     ]
 
 class PopsCompatEntry(c.Structure):

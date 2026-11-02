@@ -95,7 +95,7 @@ below need their behavior worked out and added to it.
 | `$SAFEMODE` | cheat gate: skip codes while PS1 RAM `0x1ffea0` reads `"STEM"` (`0x4d455453`) | **PRESENT**: same address and value as the original's emitted gate (0x89e954); host + unicorn checked; no console run |
 | `$SAFEMODE2`, `$NOSAFEMODE` | `$SAFEMODE2`: skip codes while PS1 RAM `0x1ffdf4 == 2`; `$NOSAFEMODE` clears both (`$SAFEMODE` is tested first) | **PRESENT**: same gate and order as the original; no console run |
 | `$HDTVFIX` / `$NOHDTVFIX` | `0x23acb0/0x23ad0c` = `li a0,1` / pristine | **PRESENT**; `$HDTVFIX` was writing an invented site |
-| `$LOAD_PADMAN`, `$KILL_PADMAN` | IOP module choice | **MISSING** |
+| `$LOAD_PADMAN`, `$KILL_PADMAN` | flags `gp+0x38a8` / `gp+0x3870`; after the IOP reset both poke `0x200358=0` and `0x200362=0x1000` (POPS no longer starts its embedded padman_hsync); `$LOAD_PADMAN` starts it itself first (`0x2cd560`, `0xadf0` bytes, fatal on failure) | **PRESENT**: same pokes, same module start; the `MODULE_n.IRX` "padman" skip (`gp+0x3824`) waits on MODULE_n parity. See [POPSTARTER_PADMAN.md](POPSTARTER_PADMAN.md). No console run |
 | `$USBDELAY_n` | config byte `0x100017` | **PARTIAL** (parsed) |
 | `$COMPATIBILITY_0x01..0x07` | FUN_008dc2c4 modes | **PRESENT** (Mode 8 has no branch in the original either) |
 
@@ -144,7 +144,7 @@ record 60 original region-control-flow combinations. **No console test.**
 | MODULE_0..9.IRX resident modules | **PARTIAL** (see audit) |
 | Physical PS1 disc boot | **MISSING** |
 | Built-in per-game DB (LibCrypt list, breakpoint killer, compat modes, VMC1-off for some titles) | **PRESENT**: the original's list (607 fingerprints as hashes, 625 entries) generated from MAIN by `tools/gen_pops_builtin_db.py`; every entry's core/EE writes and flags equal the original's `FUN_008e00d0` (`tools/test_pops_builtin_db.py`); game-fix code, breakpoint handler and second LibCrypt code run from the resident chain in the original's order. launcHER's own serial DB still runs beside it. See [POPSTARTER_BUILTIN_DB.md](POPSTARTER_BUILTIN_DB.md). No console run |
-| padman_hsync | **MISSING** |
+| padman_hsync | **PRESENT** with `$LOAD_PADMAN` / `$KILL_PADMAN` above; otherwise POPS starts it itself, as under POPStarter |
 | XX. external USB pair (`mc?:/POPSTARTER/usbd.irx`, `usbhdfsd.irx`), started before and after the IOP reset | **PRESENT**: same paths, order, 12-byte rule and fatal start check; built-in stand-ins are launcHER's USB modules; EE-RAM handoff at `0x140000` not copied. See [POPSTARTER_XX_USB_DRIVERS.md](POPSTARTER_XX_USB_DRIVERS.md). No console run |
 
 ## Remaining work, in order

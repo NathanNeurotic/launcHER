@@ -233,6 +233,22 @@ int pops_compat_mode_write(void *staged_core, size_t core_size, uint8_t mode);
 #define POPS_WARMBOOT_SCAN_TOP  UINT32_C(0x002cbb4c)
 int pops_apply_reset_warmboot(void *staged_core, size_t core_size, uint32_t *exit_vector);
 
+/* $LOAD_PADMAN / $KILL_PADMAN: POPStarter r13 after its IOP reset
+ * (0x87aba8..0x87ac64). POPS starts its embedded padman_hsync (ELF image at
+ * POPS_PADMAN_IRX_ADDR) with `jal 0x2001d8` at 0x200358; both commands make
+ * that word 0 and the high half of the `bgezl` after it (0x200362) 0x1000,
+ * so the error branch becomes an unconditional branch past it. The original
+ * pokes without checking what is there. $LOAD_PADMAN additionally starts
+ * the module from the core image itself, POPS_PADMAN_IRX_SIZE bytes (the
+ * original's length, 11 bytes past the ELF's end), no arguments, fatal on
+ * an ID <= 0; it does both only while no MODULE_n.IRX named "padman" has
+ * already done the same (gp+0x3824, set by the original's MODULE_n.IRX
+ * scan, which launcHER does not have yet). Returns 0, -EINVAL, -ERANGE. */
+#define POPS_PADMAN_CALL_SITE  UINT32_C(0x00200358)
+#define POPS_PADMAN_IRX_ADDR   UINT32_C(0x002cd560)
+#define POPS_PADMAN_IRX_SIZE   UINT32_C(0x0000adf0)
+int pops_apply_padman(void *staged_core, size_t core_size);
+
 /* pops_fix_context_init_video after built-in entry `builtin_id` (0: none)
  * was applied to the staged core: the entry's compatibility modes and core
  * writes are replayed over the expected site values, in the entry's order,

@@ -531,6 +531,19 @@ static uint32_t warmboot_word(const uint8_t *at) {
   return (uint32_t)at[0] | ((uint32_t)at[1] << 8) | ((uint32_t)at[2] << 16) | ((uint32_t)at[3] << 24);
 }
 
+int pops_apply_padman(void *staged_core, size_t core_size) {
+  uint8_t *at;
+  if (!staged_core)
+    return -EINVAL;
+  if (core_size < (size_t)(POPS_PADMAN_CALL_SITE + 12 - POPS_CORE_BASE_ADDR))
+    return -ERANGE;
+  at = (uint8_t *)staged_core + (POPS_PADMAN_CALL_SITE - POPS_CORE_BASE_ADDR);
+  at[0] = at[1] = at[2] = at[3] = 0;   /* sw 0 at 0x200358 */
+  at[10] = 0x00;                        /* sh 0x1000 at 0x200362 */
+  at[11] = 0x10;
+  return 0;
+}
+
 int pops_apply_reset_warmboot(void *staged_core, size_t core_size, uint32_t *exit_vector) {
   uint8_t *bytes = staged_core;
   uint32_t p;

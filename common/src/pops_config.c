@@ -368,6 +368,16 @@ static int parse_single_directive(PopsConfig *cfg, const char *token) {
     cfg->reset_warmboot = 1;
     return 1;
   }
+  /* $LOAD_PADMAN (0x89d770) and $KILL_PADMAN (0x89d9a8): flags only
+   * (gp+0x38a8, gp+0x3870), read after the IOP reset. */
+  if (!strcasecmp(token, "$LOAD_PADMAN")) {
+    cfg->load_padman = 1;
+    return 1;
+  }
+  if (!strcasecmp(token, "$KILL_PADMAN")) {
+    cfg->kill_padman = 1;
+    return 1;
+  }
   /* Cheat gates (pops_modes_patches.h). The original keeps one flag per
    * command; $NOSAFEMODE clears both. */
   if (!strcasecmp(token, "$SAFEMODE")) {
