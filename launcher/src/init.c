@@ -378,8 +378,11 @@ static int loadModuleList(DeviceType device, int tolerant, int sonySio2, int def
      * installed on the newly rebooted IOP. Preserve the normal USB stack
      * unless this is an explicit XX./BDMA opt-in; otherwise POPFS can start
      * with no live mass: device at all. Experimental XX behavior is retained. */
+    /* With either POPStarter XX. file on the card, the USB pair starts after
+     * these services in the original's order, usbd then the mass-storage
+     * driver, each from its file or else built in (pops_start_xx_usb). */
     if (sonySio2 && (device & Device_USB) && pops_get_active_xx_launch() &&
-        pops_has_external_usb_modules() &&
+        (pops_xx_usb_present(POPS_XX_USBD) || pops_xx_usb_present(POPS_XX_USBHDFSD)) &&
         (!strcmp(moduleList[i].name, "usbd_mini") || !strcmp(moduleList[i].name, "usbmass_bd_mini"))) {
       DPRINTF("POPS: XX. USB opt-in: external driver override for %s\n", moduleList[i].name);
       continue;
@@ -508,6 +511,24 @@ int initPopsServices(DeviceType devices, const void *core, size_t coreSize,
   if (ret < 0 || moduleResult != 0)
     return ret < 0 ? ret : -EIO;
   return 0;
+}
+
+int initStartBuiltinXxUsb(int which) {
+#ifdef USB
+  int result = 0, id;
+  if (which == POPS_XX_USBD)
+    id = SifExecModuleBuffer(usbd_mini_irx, size_usbd_mini_irx, 0, NULL, &result);
+  else if (which == POPS_XX_USBHDFSD)
+    id = SifExecModuleBuffer(usbmass_bd_mini_irx, size_usbmass_bd_mini_irx, 0, NULL, &result);
+  else
+    return -EINVAL;
+  if (id > 0 && result == 1)
+    return -EIO; /* the module refused to stay resident */
+  return id;
+#else
+  (void)which;
+  return -ENODEV;
+#endif
 }
 
 // Reboots the IOP and executes a path from ROM via LoadExecPS2

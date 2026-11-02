@@ -31,6 +31,21 @@ PopsBdmaMode pops_detect_bdma_mode(void);
 /* Checks if external USB drivers (USBD.IRX / USBHDFSD.IRX) exist in memory card directories */
 int pops_has_external_usb_modules(void);
 
+/* POPStarter r13's XX. external USB driver pair (measured on the original,
+ * MAIN 0x871d24..0x8721c4 before its IOP reset and 0x87ac64..0x87ade8 after
+ * it; see docs/POPSTARTER_XX_USB_DRIVERS.md). On an XX. launch it reads
+ * mc0:/POPSTARTER/usbd.irx, else mc1:/POPSTARTER/usbd.irx, into EE RAM once
+ * (likewise usbhdfsd.irx), then starts the same buffers before and again
+ * after the IOP reset. A file under 12 bytes counts as absent and, when it
+ * is the mc0: one, mc1: is not tried. A failed start is fatal. */
+enum { POPS_XX_USBD = 0, POPS_XX_USBHDFSD = 1, POPS_XX_USB_COUNT = 2 };
+/* Reads both files; returns a bitmask of present modules, or -errno. */
+int pops_xx_usb_read(void);
+/* Buffered module (NULL when absent); *size receives its length. */
+const void *pops_xx_usb_data(int which, size_t *size);
+int pops_xx_usb_present(int which);
+void pops_xx_usb_release(void);
+
 /* Checks if path or title filename contains the XX. prefix */
 int pops_is_xx_prefix(const char *path);
 

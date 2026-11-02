@@ -28,4 +28,9 @@ int initModulesAny(DeviceType devices);
 int initPopsServices(DeviceType devices, const void *core, size_t coreSize,
                      const char *proxyArguments, uint32_t argumentSize);
 
+/* Built-in stand-in for a POPStarter XX. driver that has no file on the card
+ * (POPS_XX_USBD: usbd_mini, POPS_XX_USBHDFSD: usbmass_bd_mini). Returns the
+ * module ID, or a value <= 0 on failure. */
+int initStartBuiltinXxUsb(int which);
+
 #endif

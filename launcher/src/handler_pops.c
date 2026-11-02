@@ -354,6 +354,34 @@ static int pops_load_bdma_group(const char *role, const char *const *names,
   return 0;
 }
 
+/* POPStarter's XX. driver pair: start each buffered file, usbd.irx first,
+ * with no arguments. The original treats a start returning <= 0 as fatal
+ * (0x8709f8), before and after the reset alike. Absent files fall back to
+ * the built-in stack (launcHER's usbd_mini/usbmass_bd_mini; the original's
+ * own usbd/usbhdfsd). */
+static int pops_start_xx_usb(const char *stage, int builtinFallback) {
+  static const char *const names[POPS_XX_USB_COUNT] = {"usbd.irx", "usbhdfsd.irx"};
+  int anyFile = pops_xx_usb_present(POPS_XX_USBD) || pops_xx_usb_present(POPS_XX_USBHDFSD);
+  for (int which = 0; which < POPS_XX_USB_COUNT; ++which) {
+    size_t size = 0;
+    const void *data = pops_xx_usb_data(which, &size);
+    int id;
+    if (data)
+      id = SifExecModuleBuffer((void *)data, size, 0, NULL, NULL);
+    else if (builtinFallback && anyFile)
+      id = initStartBuiltinXxUsb(which);
+    else
+      continue;
+    DPRINTF("POPS: XX. %s %s%s started (%d)\n", stage, data ? "" : "built-in stand-in for ",
+            names[which], id);
+    if (id <= 0) {
+      msg("POPS: XX. %s failed to start %s: %d\n", stage, names[which], id);
+      return id < 0 ? id : -EIO;
+    }
+  }
+  return 0;
+}
+
 #define POPS_BDMA_NAMES(array) (sizeof(array) / sizeof((array)[0]))
 
 static int pops_load_bdma_drivers(const char *vcdDir, const char *vmcDir, PopsBdmaMode mode) {
@@ -391,11 +419,9 @@ static int pops_load_bdma_drivers(const char *vcdDir, const char *vmcDir, PopsBd
     loaded += pops_load_bdma_group("MMCE", mmce, POPS_BDMA_NAMES(mmce), dirs, dirCount);
   }
   if (mode == POPS_BDMA_USB || mode == POPS_BDMA_GENERIC) {
-    static const char *const usbCore[] = {"USBD.IRX", "usbd.irx"};
-    static const char *const usbFs[] = {"USBHDFSD.IRX", "usbhdfsd.irx"};
+    /* usbd.irx and usbhdfsd.irx are POPStarter's XX. pair, started from
+     * their buffers by pops_start_xx_usb() before and after the reset. */
     static const char *const usbBd[] = {"usbd_bd_assault.irx"};
-    loaded += pops_load_bdma_group("USBD", usbCore, POPS_BDMA_NAMES(usbCore), dirs, dirCount);
-    loaded += pops_load_bdma_group("USB filesystem", usbFs, POPS_BDMA_NAMES(usbFs), dirs, dirCount);
     loaded += pops_load_bdma_group("USB BD bridge", usbBd, POPS_BDMA_NAMES(usbBd), dirs, dirCount);
   }
   static const char *const bridge[] = {
@@ -689,6 +715,22 @@ int launchPOPS(int argc, char *argv[]) {
   int useBdma = pops_get_active_xx_launch() && (bdmaMode != POPS_BDMA_NONE);
   if (useBdma) {
     DPRINTF("POPS: Active XX. launch with BDMA detected (mode %d)\n", bdmaMode);
+  }
+
+  /* POPStarter reads its XX. USB pair into EE RAM once and starts it now,
+   * before the IOP reset (it starts the same buffers again after it). */
+  pops_xx_usb_release();
+  if (pops_get_active_xx_launch()) {
+    res = pops_xx_usb_read();
+    if (res < 0) {
+      msg("POPS: XX. cannot read mc?:/POPSTARTER/ USB drivers: %d\n", res);
+      return res;
+    }
+    res = pops_start_xx_usb("pre-reset", 0);
+    if (res) {
+      pops_xx_usb_release();
+      return res;
+    }
   }
 
   DPRINTF("POPS: Target disc %s (device %d)\n", vcdPath, device);
@@ -1433,6 +1475,14 @@ int launchPOPS(int argc, char *argv[]) {
   if (res) {
     msg("POPS: Failed initializing services: %d\n", res);
     return res;
+  }
+
+  /* POPStarter starts its XX. USB pair a second time after the reset. */
+  if (pops_get_active_xx_launch()) {
+    res = pops_start_xx_usb("post-reset", 1);
+    pops_xx_usb_release();
+    if (res)
+      return res;
   }
 
   /* If this is an XX. launch with BDMA present, load and utilize the BDMA modules */

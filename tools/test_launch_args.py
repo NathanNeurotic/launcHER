@@ -205,6 +205,47 @@ with tempfile.TemporaryDirectory() as tmpdir:
     assert lib.pops_has_smb_stack() == 1
     smb_file.unlink()
 
+    # POPStarter's XX. USB pair: mc0:/POPSTARTER/ then mc1:/POPSTARTER/,
+    # lower-case names only, a file under 12 bytes is absent and on mc0:
+    # hides mc1: (MAIN 0x871d68..0x872088).
+    lib.pops_xx_usb_read.argtypes = []
+    lib.pops_xx_usb_read.restype = c.c_int
+    lib.pops_xx_usb_present.argtypes = [c.c_int]
+    lib.pops_xx_usb_present.restype = c.c_int
+    lib.pops_xx_usb_data.argtypes = [c.c_int, c.POINTER(c.c_size_t)]
+    lib.pops_xx_usb_data.restype = c.c_void_p
+    lib.pops_xx_usb_release.argtypes = []
+    lib.pops_xx_usb_release.restype = None
+
+    def xx_data(which):
+        size = c.c_size_t(0)
+        ptr = lib.pops_xx_usb_data(which, c.byref(size))
+        return None if not ptr else c.string_at(ptr, size.value)
+
+    mc0 = td / "mc0" / "POPSTARTER"
+    mc1 = td / "mc1" / "POPSTARTER"
+    mc0.mkdir(parents=True)
+    mc1.mkdir(parents=True)
+    assert lib.pops_xx_usb_read() == 0
+    assert xx_data(0) is None and xx_data(1) is None
+    (mc1 / "usbhdfsd.irx").write_bytes(b"H" * 40)
+    assert lib.pops_xx_usb_read() == 2
+    assert xx_data(1) == b"H" * 40 and not lib.pops_xx_usb_present(0)
+    (mc0 / "usbd.irx").write_bytes(b"\x7fELF" + b"U" * 8)
+    assert lib.pops_xx_usb_read() == 3
+    assert xx_data(0) == b"\x7fELF" + b"U" * 8
+    (mc1 / "usbd.irx").write_bytes(b"V" * 64)
+    (mc0 / "usbd.irx").write_bytes(b"x" * 11)  # under 12 bytes on mc0:
+    assert lib.pops_xx_usb_read() == 2, "mc0 stub must hide mc1 like the original"
+    (mc0 / "usbd.irx").unlink()
+    assert lib.pops_xx_usb_read() == 3
+    assert xx_data(0) == b"V" * 64
+    (mc0 / "USBHDFSD.IRX").write_bytes(b"W" * 64)  # other spellings are not read
+    assert xx_data(1) == b"H" * 40 or os.name == "nt"
+    lib.pops_xx_usb_release()
+    assert not lib.pops_xx_usb_present(0) and not lib.pops_xx_usb_present(1)
+    assert xx_data(0) is None
+
     # Reset test root
     lib.pops_set_bdma_test_root(None)
 

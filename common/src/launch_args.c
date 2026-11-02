@@ -1,6 +1,11 @@
 #include "launch_args.h"
+#include <errno.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#ifdef _EE
+#include <malloc.h>
+#endif
 
 static int path_equal(const char *a, const char *b) {
   while (*a && *b) {
@@ -395,6 +400,99 @@ int pops_has_external_usb_modules(void) {
   }
 
   return 0;
+}
+
+static struct {
+  void *data;
+  size_t size;
+} s_xx_usb[POPS_XX_USB_COUNT];
+
+static void xx_usb_path(char *out, size_t size, int slot, const char *name) {
+  if (s_bdma_test_root[0])
+    snprintf(out, size, "%s/mc%d/POPSTARTER/%s", s_bdma_test_root, slot, name);
+  else
+    snprintf(out, size, "mc%d:/POPSTARTER/%s", slot, name);
+}
+
+/* 0: absent, 1: buffered, <0: I/O or memory failure. */
+static int xx_usb_read_one(int which, const char *name) {
+  char path[1024];
+  int slot;
+  for (slot = 0; slot < 2; ++slot) {
+    FILE *f;
+    long length;
+    void *data;
+    xx_usb_path(path, sizeof(path), slot, name);
+    f = fopen(path, "rb");
+    if (!f)
+      continue; /* the original tries mc1: only when mc0: will not open */
+    if (fseek(f, 0, SEEK_END) || (length = ftell(f)) < 0) {
+      fclose(f);
+      return -EIO;
+    }
+    if (length < 12) {
+      /* Quirk: a stub under 12 bytes on mc0: hides a real file on mc1:. */
+      fclose(f);
+      return 0;
+    }
+#ifdef _EE
+    data = memalign(64, (size_t)length);
+#else
+    data = malloc((size_t)length);
+#endif
+    if (!data) {
+      fclose(f);
+      return -ENOMEM;
+    }
+    if (fseek(f, 0, SEEK_SET) || fread(data, 1, (size_t)length, f) != (size_t)length) {
+      free(data);
+      fclose(f);
+      return -EIO;
+    }
+    fclose(f);
+    s_xx_usb[which].data = data;
+    s_xx_usb[which].size = (size_t)length;
+    return 1;
+  }
+  return 0;
+}
+
+int pops_xx_usb_read(void) {
+  static const char *const names[POPS_XX_USB_COUNT] = {"usbd.irx", "usbhdfsd.irx"};
+  int which, mask = 0;
+  pops_xx_usb_release();
+  for (which = 0; which < POPS_XX_USB_COUNT; ++which) {
+    int res = xx_usb_read_one(which, names[which]);
+    if (res < 0) {
+      pops_xx_usb_release();
+      return res;
+    }
+    if (res)
+      mask |= 1 << which;
+  }
+  return mask;
+}
+
+const void *pops_xx_usb_data(int which, size_t *size) {
+  if (which < 0 || which >= POPS_XX_USB_COUNT || !s_xx_usb[which].data) {
+    if (size) *size = 0;
+    return NULL;
+  }
+  if (size) *size = s_xx_usb[which].size;
+  return s_xx_usb[which].data;
+}
+
+int pops_xx_usb_present(int which) {
+  return which >= 0 && which < POPS_XX_USB_COUNT && s_xx_usb[which].data != NULL;
+}
+
+void pops_xx_usb_release(void) {
+  int which;
+  for (which = 0; which < POPS_XX_USB_COUNT; ++which) {
+    free(s_xx_usb[which].data);
+    s_xx_usb[which].data = NULL;
+    s_xx_usb[which].size = 0;
+  }
 }
 
 int pops_has_smb_stack(void) {

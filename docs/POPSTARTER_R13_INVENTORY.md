@@ -145,6 +145,7 @@ record 60 original region-control-flow combinations. **No console test.**
 | Physical PS1 disc boot | **MISSING** |
 | Built-in per-game DB (LibCrypt list, breakpoint killer, compat modes, VMC1-off for some titles) | **PRESENT**: the original's list (607 fingerprints as hashes, 625 entries) generated from MAIN by `tools/gen_pops_builtin_db.py`; every entry's core/EE writes and flags equal the original's `FUN_008e00d0` (`tools/test_pops_builtin_db.py`); game-fix code, breakpoint handler and second LibCrypt code run from the resident chain in the original's order. launcHER's own serial DB still runs beside it. See [POPSTARTER_BUILTIN_DB.md](POPSTARTER_BUILTIN_DB.md). No console run |
 | padman_hsync | **MISSING** |
+| XX. external USB pair (`mc?:/POPSTARTER/usbd.irx`, `usbhdfsd.irx`), started before and after the IOP reset | **PRESENT**: same paths, order, 12-byte rule and fatal start check; built-in stand-ins are launcHER's USB modules; EE-RAM handoff at `0x140000` not copied. See [POPSTARTER_XX_USB_DRIVERS.md](POPSTARTER_XX_USB_DRIVERS.md). No console run |
 
 ## Remaining work, in order
 

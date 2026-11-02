@@ -984,7 +984,7 @@ class InspectorTests(unittest.TestCase):
 
     def test_plain_usb_does_not_skip_built_in_driver_for_external_irx_file(self):
         init = (ROOT / "launcher/src/init.c").read_text()
-        point = init.index("pops_has_external_usb_modules()")
+        point = init.index("pops_xx_usb_present(POPS_XX_USBD)")
         start = init.rfind("if (sonySio2", 0, point)
         end = init.index("continue;", point)
         expr = init[start:end]
@@ -992,9 +992,32 @@ class InspectorTests(unittest.TestCase):
         self.assertIn("pops_get_active_xx_launch()", expr)
         self.assertIn("usbd_mini", expr)
         self.assertIn("usbmass_bd_mini", expr)
-        # A filename on MC alone must never suppress both built-in drivers.
+        # A filename on MC alone must never suppress the built-in drivers:
+        # only an XX. launch with a buffered POPStarter file does.
         self.assertLess(expr.index("pops_get_active_xx_launch()"),
-                        expr.index("pops_has_external_usb_modules()"))
+                        expr.index("pops_xx_usb_present(POPS_XX_USBD)"))
+
+    def test_xx_usb_pair_starts_before_and_after_reset_xx_only(self):
+        source = (ROOT / "launcher/src/handler_pops.c").read_text()
+        pre = source.index('pops_start_xx_usb("pre-reset", 0)')
+        reboot = source.index("res = SifIopRebootBuffer(")
+        services = source.index("res = initPopsServices(")
+        post = source.index('pops_start_xx_usb("post-reset", 1)')
+        self.assertLess(pre, reboot)
+        self.assertLess(services, post)
+        read = source.rfind("res = pops_xx_usb_read();", 0, pre)
+        self.assertGreater(read, 0)
+        gate = source.rfind("if (pops_get_active_xx_launch())", 0, read)
+        self.assertGreater(gate, source.rfind("}", 0, read) - 400)
+        self.assertIn("if (pops_get_active_xx_launch())", source[services:post])
+        # usbd.irx/usbhdfsd.irx are no longer searched by the BDMA groups.
+        bdma = source[source.index("static int pops_load_bdma_drivers("):
+                      source.index("#undef POPS_BDMA_NAMES")]
+        self.assertNotIn('"usbd.irx"', bdma)
+        self.assertNotIn('"usbhdfsd.irx"', bdma)
+        starter = source[source.index("static int pops_start_xx_usb("):
+                         source.index("#define POPS_BDMA_NAMES")]
+        self.assertIn("if (id <= 0)", starter)
 
     def test_manifest_reader_never_executes_truncated_paths(self):
         source = (ROOT / "launcher/src/handler_pops.c").read_text()
@@ -1023,8 +1046,8 @@ class InspectorTests(unittest.TestCase):
         selection = source[source.index("static int pops_load_bdma_drivers("):
                            source.index("#undef POPS_BDMA_NAMES")]
         # Different modules within one backend stack are separate roles.
-        for role in ('"DEV9"', '"ATA"', '"USBD"', '"USB filesystem"',
-                     '"USB BD bridge"', '"BDMA bridge"'):
+        # usbd.irx/usbhdfsd.irx moved to POPStarter's XX. pair (pops_start_xx_usb).
+        for role in ('"DEV9"', '"ATA"', '"USB BD bridge"', '"BDMA bridge"'):
             self.assertIn(role, selection)
         self.assertIn("pops_load_bdma_group(", selection)
         self.assertIn("loadedBdma = pops_load_bdma_drivers(", source)
