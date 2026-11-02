@@ -279,6 +279,20 @@ int pops_module_irx_name_apply(void *staged_core, size_t core_size,
                                const void *irx, size_t irx_size, unsigned *flags);
 int pops_module_irx_args(const void *irx, size_t irx_size, const char **args);
 
+/* POPStarter r13's opcode pass (0x87c4a0), run before the IOP reset on every
+ * launch unless $ORIGINAL_OPCODES (gp+0x38c4, checked at 0x87a64c). It walks
+ * seven ranges of POPS (POPS_OPCODE_PASS_RANGES, inclusive ends) in steps of
+ * 4, reading the 16-bit value at each address: a value 0x8c00..0x8fff or
+ * 0xac00..0xafff (the upper half of lw / sw) gets 0xc00 added (lwr / swr);
+ * otherwise a value 0x3c01..0x3c1f (lui rt, with rs 0) has the same test and
+ * change applied to the 16 bits just before it (the lui's immediate: POPS's
+ * recompiler builds lw/sw from such templates). The first range starts at
+ * an odd halfword (0x200c62), the other six at word boundaries, as in the
+ * original. Returns the number of halfwords changed, or -EINVAL / -ERANGE
+ * when the core does not reach the last range. */
+#define POPS_OPCODE_PASS_LAST UINT32_C(0x004f677f)
+int pops_apply_opcode_pass(void *staged_core, size_t core_size);
+
 /* pops_fix_context_init_video after built-in entry `builtin_id` (0: none)
  * was applied to the staged core: the entry's compatibility modes and core
  * writes are replayed over the expected site values, in the entry's order,

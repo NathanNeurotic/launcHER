@@ -617,6 +617,44 @@ int pops_module_irx_args(const void *irx, size_t irx_size, const char **args) {
   return 0;
 }
 
+static const uint32_t opcode_pass_ranges[][2] = {
+  {0x00200c62, 0x0024bc1f}, {0x004ede20, 0x004f320f}, {0x004f3a48, 0x004f40c7},
+  {0x004f4210, 0x004f4c97}, {0x004f5260, 0x004f5537}, {0x004f58d0, 0x004f5f4b},
+  {0x004f6098, 0x004f677f},
+};
+
+static int opcode_pass_hit(uint16_t value) {
+  return (value >= 0x8c00 && value <= 0x8fff) || (value >= 0xac00 && value <= 0xafff);
+}
+
+int pops_apply_opcode_pass(void *staged_core, size_t core_size) {
+  uint8_t *bytes = staged_core;
+  int changed = 0;
+  if (!bytes)
+    return -EINVAL;
+  if (core_size < (size_t)(POPS_OPCODE_PASS_LAST + 2 - POPS_CORE_BASE_ADDR))
+    return -ERANGE;
+  for (size_t r = 0; r < sizeof(opcode_pass_ranges) / sizeof(opcode_pass_ranges[0]); ++r) {
+    for (uint32_t a = opcode_pass_ranges[r][0]; a <= opcode_pass_ranges[r][1]; a += 4) {
+      uint8_t *at = bytes + (a - POPS_CORE_BASE_ADDR);
+      uint16_t value = (uint16_t)(at[0] | (at[1] << 8));
+      if (!opcode_pass_hit(value)) {
+        if (value < 0x3c01 || value > 0x3c1f)
+          continue;
+        at -= 2;
+        value = (uint16_t)(at[0] | (at[1] << 8));
+        if (!opcode_pass_hit(value))
+          continue;
+      }
+      value = (uint16_t)(value + 0xc00);
+      at[0] = (uint8_t)value;
+      at[1] = (uint8_t)(value >> 8);
+      ++changed;
+    }
+  }
+  return changed;
+}
+
 int pops_apply_reset_warmboot(void *staged_core, size_t core_size, uint32_t *exit_vector) {
   uint8_t *bytes = staged_core;
   uint32_t p;

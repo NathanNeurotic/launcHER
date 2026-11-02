@@ -378,6 +378,11 @@ static int parse_single_directive(PopsConfig *cfg, const char *token) {
     cfg->kill_padman = 1;
     return 1;
   }
+  /* $ORIGINAL_OPCODES (0x894254): flag only (gp+0x38c4). */
+  if (!strcasecmp(token, "$ORIGINAL_OPCODES")) {
+    cfg->original_opcodes = 1;
+    return 1;
+  }
   /* Cheat gates (pops_modes_patches.h). The original keeps one flag per
    * command; $NOSAFEMODE clears both. */
   if (!strcasecmp(token, "$SAFEMODE")) {

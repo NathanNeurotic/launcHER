@@ -1525,6 +1525,19 @@ int launchPOPS(int argc, char *argv[]) {
             (unsigned)residentCfg.cheat_count);
   }
 
+  /* POPStarter's opcode pass runs on every launch unless $ORIGINAL_OPCODES,
+   * late, after every other change to the core (0x87a64c, before the IOP
+   * reset): it turns POPS's lw/sw (and its recompiler's lw/sw templates)
+   * into lwr/swr. Last core change here too, so no guard sees its result. */
+  if (!cfg.original_opcodes) {
+    res = pops_apply_opcode_pass((void *)stagedCore, plan.core_size);
+    if (res < 0) {
+      msg("POPS: Opcode pass failed: %d\n", res);
+      return res;
+    }
+    DPRINTF("POPS: Opcode pass changed %d instructions\n", res);
+  }
+
   /* Check the unreturnable trampoline before touching save images or
    * rebooting the IOP. Keep the actual low-RAM argument write immediately
    * before handoff, because it must remain valid through the foreign reset. */

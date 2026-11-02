@@ -215,7 +215,10 @@ typedef struct {
    * IOP reset instead. */
   uint8_t load_padman;
   uint8_t kill_padman;
-  uint8_t padman_pad[2];
+  /* $ORIGINAL_OPCODES (gp+0x38c4): skips POPStarter's opcode pass
+   * (pops_apply_opcode_pass), which otherwise runs on every launch. */
+  uint8_t original_opcodes;
+  uint8_t padman_pad[1];
 } PopsConfig;
 
 /* $WIDESCREEN, $ULTRA_WIDESCREEN, $EYEFINITY: the last one in the files wins,
