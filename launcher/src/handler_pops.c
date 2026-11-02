@@ -1342,13 +1342,14 @@ int launchPOPS(int argc, char *argv[]) {
     return res;
   }
 
-  /* POPStarter's always-on changes (its launch function, 0x874790 and
-   * 0x874864..0x874a18): no command skips them, and they come before the
-   * built-in entry and the user's commands. Its GP1 hook (0x21a63c; the
-   * reset combo, the built-in entry's calls and the cheats run from it), its
-   * nine misaligned-read guards and the exit/pad-copy pokes. The hook and
-   * the guards jump into the resident image, so it is installed on every
-   * POPStarter-mode launch (just before handoff). */
+  /* POPStarter's always-on changes (its launch function, 0x874790..
+   * 0x874a18): no command skips them, and they come before the built-in
+   * entry and the user's commands. Its GP1 hook (0x21a63c; the reset combo,
+   * the built-in entry's calls and the cheats run from it), its recompiler
+   * hook (0x2075e8; the $RECOMPILER_ADDON_0/1/2 work runs from it), its
+   * nine misaligned-read guards and the exit/pad-copy pokes. These jump
+   * into the resident image, so it is installed on every POPStarter-mode
+   * launch (just before handoff). */
   PopsResidentHeader residentHdr;
   res = pops_resident_check_image(pops_resident_bin, size_pops_resident_bin, &residentHdr);
   if (res) {
@@ -1360,6 +1361,9 @@ int launchPOPS(int argc, char *argv[]) {
     return -ERANGE; /* the trampoline still reads the staged core from there */
   }
   res = pops_resident_hook_gp1((void *)stagedCore, plan.core_size, residentHdr.gp1_entry);
+  if (!res)
+    res = pops_resident_hook_recompiler((void *)stagedCore, plan.core_size,
+                                        residentHdr.recompiler_entry);
   if (!res)
     res = pops_resident_hook_guards((void *)stagedCore, plan.core_size, &residentHdr);
   if (!res)
@@ -1406,6 +1410,16 @@ int launchPOPS(int argc, char *argv[]) {
   res = pops_apply_all_config_patches((void *)stagedCore, plan.core_size, &cfg);
   if (res) {
     msg("POPS: Applying config patches failed: %d\n", res);
+    return res;
+  }
+
+  /* $RECOMPILER_ADDON_3/4: the original's handlers write these jumps into
+   * POPS's two emit points while the user's files are read, so here, with
+   * the other command writes. */
+  res = pops_resident_hook_recompiler_emit((void *)stagedCore, plan.core_size,
+                                           cfg.recompiler_addons, &residentHdr);
+  if (res) {
+    msg("POPS: $RECOMPILER_ADDON_3/4 failed: %d\n", res);
     return res;
   }
 

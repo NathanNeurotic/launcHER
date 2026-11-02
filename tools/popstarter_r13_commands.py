@@ -14,7 +14,8 @@ every static write. Values the scan cannot resolve print as '?'.
 
 Writes into 0x232790..0x232ec8 and 0x238a90..0x2397f0 land in code that the
 original copies from its own image into POPS at launch; 0x143xxxx is
-POPStarter's resident area. Neither exists under launcHER.
+POPStarter's resident area. Under launcHER neither holds POPStarter's code:
+launcHER's own resident image sits at 0x143a000 and does that work itself.
 
 Requires capstone (pip install capstone).
 

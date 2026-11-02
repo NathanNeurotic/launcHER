@@ -176,6 +176,9 @@ int pops_resident_check_image(const void *image, size_t image_len, PopsResidentH
   h.gp1_entry = get_u32(b + 52);
   for (unsigned i = 0; i < POPS_GUARD_COUNT; ++i)
     h.guard_entry[i] = get_u32(b + 56 + 4 * i);
+  h.recompiler_entry = get_u32(b + 92);
+  for (unsigned i = 0; i < POPS_EMIT_COUNT; ++i)
+    h.recompiler_emit[i] = get_u32(b + 96 + 4 * i);
 
   if (h.magic != POPS_RESIDENT_MAGIC || h.version != POPS_RESIDENT_VERSION ||
       h.header_size != sizeof(PopsResidentHeader))
@@ -208,6 +211,11 @@ int pops_resident_check_image(const void *image, size_t image_len, PopsResidentH
   for (unsigned i = 0; i < POPS_GUARD_COUNT; ++i) {
     if ((h.guard_entry[i] & 3) || h.guard_entry[i] < POPS_RESIDENT_BASE + h.header_size ||
         h.guard_entry[i] >= POPS_RESIDENT_BASE + h.file_size)
+      return -ERANGE;
+  }
+  for (unsigned i = 0; i <= POPS_EMIT_COUNT; ++i) {
+    uint32_t e = i < POPS_EMIT_COUNT ? h.recompiler_emit[i] : h.recompiler_entry;
+    if ((e & 3) || e < POPS_RESIDENT_BASE + h.header_size || e >= POPS_RESIDENT_BASE + h.file_size)
       return -ERANGE;
   }
   /* The configuration must fit inside the image, in its zeroed part or not,
@@ -267,6 +275,16 @@ int pops_resident_build_config(PopsResidentConfig *out, const PopsConfig *cfg) {
     out->libcrypt2_code[POPS_BUILTIN_LIBCRYPT2_SIZE / 4] = 0x03e00008; /* jr ra */
     out->libcrypt2_code[POPS_BUILTIN_LIBCRYPT2_SIZE / 4 + 1] = 0;      /* nop */
   }
+  /* $RECOMPILER_ADDON_0/1/2: what the recompiler hook runs. 3 and 4 are
+   * jumps written into POPS (pops_resident_hook_recompiler_emit). */
+  if (cfg->recompiler_addons & ~0x1fu)
+    return -EINVAL;
+  if (cfg->recompiler_addons & POPS_RECOMPILER_ADDON_0)
+    out->flags |= POPS_RES_F_RECOMPILER_0;
+  if (cfg->recompiler_addons & POPS_RECOMPILER_ADDON_1)
+    out->flags |= POPS_RES_F_RECOMPILER_1;
+  if (cfg->recompiler_addons & POPS_RECOMPILER_ADDON_2)
+    out->flags |= POPS_RES_F_RECOMPILER_2;
   /* The in-game reset's jump word: the BIOS reset vector, or the stub
    * $RESET_WARMBOOT found (pops_apply_reset_warmboot). */
   out->reset_vector = cfg->reset_vector ? cfg->reset_vector : POPS_RESET_VECTOR_DEFAULT;
@@ -408,6 +426,95 @@ int pops_resident_hook_guards(void *staged_core, size_t core_size,
     put_u32(site, 0x08000000u | ((hdr->guard_entry[i] >> 2) & 0x03ffffffu));
     if (!guard_sites[i].keep_next)
       put_u32(site + 4, 0);
+  }
+  return 0;
+}
+
+/* POPS's recompiler epilogue around the hook (0x2075c4..0x2075f8): the
+ * words the hook's code depends on. It returns to the $ra load, having
+ * reloaded $s0..$s5 from the slots these loads read, and $a2 is where POPS
+ * stores the block's last instruction. */
+static const uint32_t recompiler_context[][2] = {
+  {0x002075c4, 0xdfb50038}, /* ld    $s5, 0x38($sp) */
+  {0x002075d8, 0xdfb00010}, /* ld    $s0, 0x10($sp) */
+  {0x002075e0, 0xdfb10018}, /* ld    $s1, 0x18($sp) */
+  {0x002075e4, 0x24c20004}, /* addiu $v0, $a2, 4 */
+  {0x002075f0, 0xdfb40030}, /* ld    $s4, 0x30($sp) */
+  {0x002075f4, 0xdfbf0040}, /* ld    $ra, 0x40($sp) (the hook returns here) */
+  {0x002075f8, 0xacc30000}, /* sw    $v1, 0($a2) */
+};
+
+int pops_resident_hook_recompiler(void *staged_core, size_t core_size, uint32_t entry) {
+  uint8_t *core = staged_core;
+  if (!core)
+    return -EINVAL;
+  if ((entry & 3) || entry < POPS_RESIDENT_BASE || entry >= POPS_RESIDENT_LIMIT)
+    return -EINVAL;
+  if (core_size < 0x002075f8 + 4 - POPS_CORE_BASE)
+    return -ERANGE;
+  for (unsigned i = 0; i < sizeof(recompiler_context) / sizeof(recompiler_context[0]); ++i) {
+    if (get_u32(core + recompiler_context[i][0] - POPS_CORE_BASE) != recompiler_context[i][1])
+      return -EILSEQ;
+  }
+  uint8_t *site = core + POPS_RECOMPILER_HOOK_ADDR - POPS_CORE_BASE;
+  uint32_t jump = 0x08000000u | ((entry >> 2) & 0x03ffffffu);
+  uint32_t cur = get_u32(site), cur_next = get_u32(site + 4);
+  if (!(cur == 0xdfb20020 && cur_next == 0xdfb30028) && /* ld $s2, 0x20 / ld $s3, 0x28 */
+      !(cur == jump && cur_next == 0))
+    return -EILSEQ;
+  put_u32(site, jump);
+  put_u32(site + 4, 0);
+  return 0;
+}
+
+/* POPS's two emit points ($RECOMPILER_ADDON_3/4): the two words replaced,
+ * and the words their code resumes with. */
+static const struct {
+  uint32_t site, pristine, next;
+  uint32_t context[2][2];
+} emit_sites[2] = {
+  {POPS_EMIT_206318_ADDR, 0xae220000, 0x26310004, /* sw $v0,0($s1) / addiu $s1,$s1,4 */
+   {{0x00206314, 0x00431025},   /* or    $v0, $v0, $v1 (the word) */
+    {0x00206320, 0x8cc20000}}}, /* lw    $v0, 0($a2) (resume) */
+  {POPS_EMIT_205D1C_ADDR, 0x00822025, 0xad840000, /* or $a0,$a0,$v0 / sw $a0,0($t4) */
+   {{0x00205d24, 0x12cb0008},   /* beq   $s6, $t3, 0x205d48 (resume) */
+    {0x00205d28, 0x258c0004}}}, /* addiu $t4, $t4, 4 (its delay slot) */
+};
+
+int pops_resident_hook_recompiler_emit(void *staged_core, size_t core_size,
+                                       uint8_t addons, const PopsResidentHeader *hdr) {
+  uint8_t *core = staged_core;
+  if (!core || !hdr || (addons & ~0x1fu))
+    return -EINVAL;
+  if (!(addons & (POPS_RECOMPILER_ADDON_3 | POPS_RECOMPILER_ADDON_4)))
+    return 0;
+  for (unsigned i = 0; i < POPS_EMIT_COUNT; ++i) {
+    uint32_t e = hdr->recompiler_emit[i];
+    if ((e & 3) || e < POPS_RESIDENT_BASE || e >= POPS_RESIDENT_LIMIT)
+      return -EINVAL;
+  }
+  if (core_size < 0x00206320 + 4 - POPS_CORE_BASE)
+    return -ERANGE;
+  /* ADDON_4 is ADDON_3's jumps plus changes to its code, so it wins. */
+  unsigned pick = (addons & POPS_RECOMPILER_ADDON_4) ? POPS_EMIT_ADDON4_206318
+                                                     : POPS_EMIT_ADDON3_206318;
+  for (unsigned i = 0; i < 2; ++i) {
+    const uint8_t *site = core + emit_sites[i].site - POPS_CORE_BASE;
+    uint32_t cur = get_u32(site), cur_next = get_u32(site + 4);
+    uint32_t j3 = 0x08000000u | ((hdr->recompiler_emit[POPS_EMIT_ADDON3_206318 + i] >> 2) & 0x03ffffffu);
+    uint32_t j4 = 0x08000000u | ((hdr->recompiler_emit[POPS_EMIT_ADDON4_206318 + i] >> 2) & 0x03ffffffu);
+    for (unsigned k = 0; k < 2; ++k) {
+      if (get_u32(core + emit_sites[i].context[k][0] - POPS_CORE_BASE) != emit_sites[i].context[k][1])
+        return -EILSEQ;
+    }
+    if (!(cur == emit_sites[i].pristine && cur_next == emit_sites[i].next) &&
+        !((cur == j3 || cur == j4) && cur_next == 0))
+      return -EILSEQ;
+  }
+  for (unsigned i = 0; i < 2; ++i) {
+    uint8_t *site = core + emit_sites[i].site - POPS_CORE_BASE;
+    put_u32(site, 0x08000000u | ((hdr->recompiler_emit[pick + i] >> 2) & 0x03ffffffu));
+    put_u32(site + 4, 0);
   }
   return 0;
 }

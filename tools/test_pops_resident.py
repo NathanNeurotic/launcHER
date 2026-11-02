@@ -73,6 +73,8 @@ class Header(c.Structure):
         ("gte_ultra_entry", c.c_uint32),
         ("gp1_entry", c.c_uint32),
         ("guard_entry", c.c_uint32 * 9),
+        ("recompiler_entry", c.c_uint32),
+        ("recompiler_emit", c.c_uint32 * 4),
     ]
 
 
@@ -646,6 +648,18 @@ class BuildConfig(unittest.TestCase):
         cfg = self.parsed()
         self.assertEqual(L.pops_resident_build_config(c.byref(out), c.addressof(cfg)), 0)
 
+    def test_recompiler_addons_set_the_hooks_flags(self):
+        # $RECOMPILER_ADDON_0/1/2 are flags the resident recompiler hook reads
+        # (bits 11..13); 3 and 4 are jumps written into POPS, no flag.
+        for lines, flags in ((["$RECOMPILER_ADDON_0"], 0x0800), (["$RECOMPILER_ADDON_1"], 0x1000),
+                             (["$RECOMPILER_ADDON_2"], 0x2000),
+                             (["$RECOMPILER_ADDON_0 $RECOMPILER_ADDON_1 $RECOMPILER_ADDON_2"], 0x3800),
+                             (["$RECOMPILER_ADDON_3", "$RECOMPILER_ADDON_4"], 0)):
+            out = ResidentConfig()
+            cfg = self.parsed(*lines)
+            self.assertEqual(L.pops_resident_build_config(c.byref(out), c.addressof(cfg)), 1 if flags else 0, lines)
+            self.assertEqual(out.flags, flags, lines)
+
     def test_cheats_and_safe_mode(self):
         out = ResidentConfig()
         cfg = self.parsed("$80012345 00FF", "$D0001000 0001", "$30001001 0002", "$SAFEMODE")
@@ -786,12 +800,13 @@ class HookGp1(unittest.TestCase):
             self.assertEqual(struct.unpack_from("<I", data, 0x1000 + addr - 0x200000)[0], word, hex(addr))
 
 
-def image(file_size=0xC0, image_size=0x2000, entry=BASE + 0x60, config=BASE + 0xC0, magic=0x5352484C):
+def image(file_size=0xC0, image_size=0x2000, entry=BASE + 0x70, config=BASE + 0xC0, magic=0x5352484C):
     img = bytearray(file_size)
-    struct.pack_into("<IHHIIIIIIIIIIII9I", img, 0, magic, 13, 92, file_size, image_size, entry, config,
-                     BASE + 0x64, BASE + 0x68, BASE + 0x6C, BASE + 0x70, BASE + 0x74, BASE + 0x78,
-                     BASE + 0x7C, BASE + 0x60, *[BASE + 0x80 + 4 * i for i in range(9)])
-    img[0x60:0x64] = b"\x08\x00\xe0\x03"
+    struct.pack_into("<IHHIIIIIIIIIIII9II4I", img, 0, magic, 14, 112, file_size, image_size, entry, config,
+                     BASE + 0x74, BASE + 0x78, BASE + 0x7C, BASE + 0x80, BASE + 0x84, BASE + 0x88,
+                     BASE + 0x8C, BASE + 0x70, *[BASE + 0x90 + 4 * i for i in range(9)],
+                     BASE + 0xB4, BASE + 0xB8, BASE + 0xBC, BASE + 0x70, BASE + 0x74)
+    img[0x70:0x74] = b"\x08\x00\xe0\x03"
     return img
 
 
@@ -804,28 +819,31 @@ class Install(unittest.TestCase):
     def test_valid_image(self):
         res, h = self.check(image())
         self.assertEqual(res, 0)
-        self.assertEqual((h.file_size, h.image_size, h.vblank_entry), (0xC0, 0x2000, BASE + 0x60))
-        self.assertEqual(list(h.guard_entry), [BASE + 0x80 + 4 * i for i in range(9)])
+        self.assertEqual((h.file_size, h.image_size, h.vblank_entry), (0xC0, 0x2000, BASE + 0x70))
+        self.assertEqual(list(h.guard_entry), [BASE + 0x90 + 4 * i for i in range(9)])
+        self.assertEqual((h.recompiler_entry, list(h.recompiler_emit)),
+                         (BASE + 0xB4, [BASE + 0xB8, BASE + 0xBC, BASE + 0x70, BASE + 0x74]))
 
     def test_rejects_bad_images(self):
         self.assertEqual(self.check(image(magic=0))[0], -errno.EINVAL)
         self.assertEqual(self.check(image(image_size=0xB0))[0], -errno.ERANGE)
         self.assertEqual(self.check(image(image_size=LIMIT - BASE + 4))[0], -errno.ERANGE)
         self.assertEqual(self.check(image(entry=BASE + 0xC0))[0], -errno.ERANGE)
-        self.assertEqual(self.check(image(entry=BASE + 0x62))[0], -errno.ERANGE)
+        self.assertEqual(self.check(image(entry=BASE + 0x72))[0], -errno.ERANGE)
         self.assertEqual(self.check(image(entry=BASE + 0x10))[0], -errno.ERANGE)
         self.assertEqual(self.check(image(config=BASE + 0x2000 - 8))[0], -errno.ERANGE)
         self.assertEqual(self.check(image(config=BASE + 0xC4))[0], -errno.ERANGE)
         # 16-byte aligned: POPS DMAs the disc names straight from the slots.
         self.assertEqual(self.check(image(config=BASE + 0xC8))[0], -errno.ERANGE)
-        # Every entry, the nine guard stubs included, must be code in the image.
-        for offset in range(24, 92, 4):
-            for bad in (BASE + len(img_ok := image()), BASE + 0x58, BASE + 0x62):
+        # Every entry, the nine guard stubs and the recompiler code included,
+        # must be code in the image (after the header).
+        for offset in range(24, 112, 4):
+            for bad in (BASE + len(img_ok := image()), BASE + 0x6C, BASE + 0x72):
                 img = image()
                 struct.pack_into('<I', img, offset, bad)
                 self.assertEqual(self.check(img)[0], -errno.ERANGE, (offset, hex(bad)))
             self.assertEqual(self.check(img_ok)[0], 0)
-        for version in (11, 12, 14):
+        for version in (12, 13, 15):
             img = image()
             struct.pack_into('<H', img, 4, version)
             self.assertEqual(self.check(img)[0], -errno.EINVAL, version)
@@ -1700,8 +1718,9 @@ class Hotkeys(unittest.TestCase):
 
 class Layout(unittest.TestCase):
     def test_config_fits_in_the_reserved_range(self):
-        self.assertEqual(c.sizeof(Header), 92)
+        self.assertEqual(c.sizeof(Header), 112)
         self.assertEqual(Header.guard_entry.offset, 56)
+        self.assertEqual((Header.recompiler_entry.offset, Header.recompiler_emit.offset), (92, 96))
         self.assertEqual(ResidentConfig.cheats.offset, 32)
         self.assertLess(c.sizeof(ResidentConfig) + 0x1000, LIMIT - BASE)
 

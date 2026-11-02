@@ -534,6 +534,22 @@ __asm__(".set push\n.set noreorder\n.text\n.align 2\n"
         "sw $8, 0x64($a0)\n"
         ".set pop\n");
 
+/* POPStarter's recompiler hook and $RECOMPILER_ADDON_0..4,
+ * pops_resident_recompiler.S. It reads the flags by their offset. */
+void pops_resident_recompiler(void);
+void pops_resident_recompiler_addon3_206318(void);
+void pops_resident_recompiler_addon3_205d1c(void);
+void pops_resident_recompiler_addon4_206318(void);
+void pops_resident_recompiler_addon4_205d1c(void);
+_Static_assert(offsetof(PopsResidentConfig, flags) == POPS_RESIDENT_FLAGS_OFFSET,
+               "recompiler hook ABI");
+_Static_assert(sizeof(((PopsResidentConfig *)0)->flags) == 4, "recompiler hook ABI");
+/* Where the ADDON_3/4 code keeps $k0, $k1 and $at (shared) and the $gp the
+ * 0x205d1c code finds, 16 bytes each for sq/lq. Zero at install, so $gp is
+ * zero after the 0x206318 code until the 0x205d1c code has run once, as in
+ * the original. */
+uint64_t pops_resident_recompiler_save[8] __attribute__((aligned(16)));
+
 /* POPStarter's always-on guards, pops_resident_guards.S. */
 void pops_resident_guard_21c58c(void);
 void pops_resident_guard_21c768(void);
@@ -572,6 +588,13 @@ const PopsResidentHeader pops_resident_header = {
     (uint32_t)pops_resident_guard_202250,
     (uint32_t)pops_resident_guard_21c5dc,
     (uint32_t)pops_resident_guard_21c5a8,
+  },
+  (uint32_t)pops_resident_recompiler,
+  {
+    (uint32_t)pops_resident_recompiler_addon3_206318,
+    (uint32_t)pops_resident_recompiler_addon3_205d1c,
+    (uint32_t)pops_resident_recompiler_addon4_206318,
+    (uint32_t)pops_resident_recompiler_addon4_205d1c,
   },
 };
 

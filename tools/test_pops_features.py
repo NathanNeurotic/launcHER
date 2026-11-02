@@ -78,6 +78,7 @@ class PopsConfig(c.Structure):
         ("kill_padman", c.c_uint8),
         ("original_opcodes", c.c_uint8),
         ("breakpoint", c.c_uint8),
+        ("recompiler_addons", c.c_uint8),
     ]
 
 class PopsCompatEntry(c.Structure):

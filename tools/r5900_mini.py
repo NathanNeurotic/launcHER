@@ -7,10 +7,15 @@ run (tools/test_pops_resident.py, tools/test_pops_features.py).
 128-bit GPRs, where an instruction that is not MMI/LQ writes bits 0..63 only
 and keeps bits 64..127 (as the R5900 does); branch delay slots; branch-likely;
 an address error on a misaligned halfword, word or doubleword access (LQ/SQ
-ignore the low four bits, as on the console); SYSCALL stops the run with a
-Syscall exception (pc left on it, $v1 holds the number). Any other
-instruction raises, so a test never runs something this model does not
-cover. Pure Python, no third-party packages. Not a console test."""
+ignore the low four bits, as on the console; SWR stores the bytes from the
+address to the end of its word); SYSCALL stops the run with a Syscall
+exception (pc left on it, $v1 holds the number). With `kseg` set,
+0x80000000..0xbfffffff reach the same memory as their low 29 bits (kseg0
+and kseg1, as main RAM is mapped in kernel mode); off, every address is its
+own. Any other instruction raises, so a test never runs something this
+model does not cover. Pure Python, no third-party packages. Not a console
+test. Also used by POPStarter's recompiler hook tests
+(tools/test_pops_launch_hooks.py)."""
 
 M32 = (1 << 32) - 1
 M64 = (1 << 64) - 1
@@ -45,14 +50,21 @@ class Machine:
         self.stores = []        # (address, bytes) in program order
         self.natives = {}       # address -> function(machine); returns to $ra
         self.record = True      # False: do not keep self.stores (long loops)
+        self.kseg = False       # True: kseg0/kseg1 reach the low 512 MiB
         self.pc = 0
         self.steps = 0
+
+    def _phys(self, addr):
+        a = addr & M32
+        if self.kseg and 0x80000000 <= a < 0xC0000000:
+            return a & 0x1FFFFFFF
+        return a
 
     # Memory: sparse 4 KiB pages, 32-bit addresses, zero when never written.
     def read(self, addr, n):
         out = bytearray()
         while n > 0:
-            a = addr & M32
+            a = self._phys(addr)
             off = a & 0xFFF
             take = min(n, 4096 - off)
             page = self.pages.get(a >> 12)
@@ -66,7 +78,7 @@ class Machine:
             self.stores.append((addr & M32, data))
         pos = 0
         while pos < len(data):
-            a = (addr + pos) & M32
+            a = self._phys(addr + pos)
             off = a & 0xFFF
             take = min(len(data) - pos, 4096 - off)
             page = self.pages.setdefault(a >> 12, bytearray(4096))
@@ -229,6 +241,9 @@ class Machine:
             self.write(self._ea(rs, imm, 4), (self.lo(rt) & M32).to_bytes(4, "little"), True)
         elif op == 0x3F:     # sd
             self.write(self._ea(rs, imm, 8), self.lo(rt).to_bytes(8, "little"), True)
+        elif op == 0x2E:     # swr: the register's low bytes from the address to the word's end
+            addr = (self.lo(rs) + sext16(imm)) & M32
+            self.write(addr, (self.lo(rt) & M32).to_bytes(4, "little")[:4 - (addr & 3)], True)
         else:
             raise NotImplementedError("opcode 0x%02x (0x%08x) at 0x%08x" % (op, word, pc))
         return None
@@ -278,10 +293,19 @@ THREE = {"or": 0x25, "and": 0x24, "addu": 0x21, "daddu": 0x2D, "xor": 0x26, "nor
          "slt": 0x2A, "sltu": 0x2B, "movz": 0x0A, "movn": 0x0B}
 IMM = {"addiu": 9, "daddiu": 0x19, "andi": 0x0C, "ori": 0x0D, "xori": 0x0E}
 MEM = {"lw": 0x23, "sw": 0x2B, "lb": 0x20, "lbu": 0x24, "lh": 0x21, "lhu": 0x25,
-       "sb": 0x28, "sh": 0x29, "ld": 0x37, "sd": 0x3F, "lq": 0x1E, "sq": 0x1F}
+       "sb": 0x28, "sh": 0x29, "ld": 0x37, "sd": 0x3F, "lq": 0x1E, "sq": 0x1F,
+       "swr": 0x2E}
+
+_EXTERNS = {}
 
 
 def _num(text):
+    """A number, or %hi(sym)/%lo(sym) of a symbol given to assemble()."""
+    text = text.strip()
+    for part, shift in (("%hi(", 16), ("%lo(", 0)):
+        if text.startswith(part) and text.endswith(")"):
+            value = _EXTERNS[text[4:-1].strip()]
+            return ((value + 0x8000) >> 16) & 0xFFFF if shift else value & 0xFFFF
     return int(text, 0)
 
 
@@ -318,12 +342,20 @@ def _expand(mnem, args):
     return [(mnem, args)]
 
 
-def assemble(source, base):
+def assemble(source, base, externs=None, defines=None):
     """Assemble the stub file's subset at `base`: (words, symbols).
-    Two passes; numeric labels ("1:", "1f"/"1b") as in GNU as."""
+    Two passes; numeric labels ("1:", "1f"/"1b") as in GNU as. `externs`
+    gives the addresses of symbols defined elsewhere (for %hi()/%lo()),
+    `defines` the values of #define names the source uses (whole words)."""
+    import re
+    _EXTERNS.clear()
+    _EXTERNS.update(externs or {})
+    names = re.compile(r"\b(%s)\b" % "|".join(map(re.escape, defines))) if defines else None
     lines = []
     for raw in strip_comments(source).splitlines():
         line = raw.strip()
+        if names:
+            line = names.sub(lambda m: str(defines[m.group(1)]), line)
         while True:
             head = line.split(None, 1)[0] if line else ""
             if head.endswith(":"):
@@ -357,7 +389,7 @@ def assemble(source, base):
         return max(a for a in cands if a <= here)
 
     def mem_operand(text):
-        off, _, reg = text.partition("(")
+        off, _, reg = text.rpartition("(")
         return REG[reg.rstrip(")")], _num(off or "0") & 0xFFFF
 
     for kind, value in lines:

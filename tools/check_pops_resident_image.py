@@ -16,7 +16,10 @@ misaligned-read guard stubs (common/src/pops_resident_guards.S) must be the
 words tools/r5900_mini.py assembles from that source and do what
 tools/pops_guard_model.py says each POPS site did (2700 random runs; with
 POPSTARTER_TEST_ELF the original's stubs run against the same model in
-tools/test_pops_launch_hooks.py). Passing here is not a console test."""
+tools/test_pops_launch_hooks.py). The recompiler hook and the
+$RECOMPILER_ADDON_3/4 emit code (common/src/pops_resident_recompiler.S) must
+likewise be the assembled words and do what tools/pops_recompiler_model.py
+says the original's code does. Passing here is not a console test."""
 import os, struct, sys
 from unicorn import *
 from unicorn.mips_const import *
@@ -28,8 +31,9 @@ BASE = 0x0143A000
  pad_read_entry, pad_read_exit, gte_scale, gte_divide, gte_ultra,
  gp1_entry) = struct.unpack_from('<IHHIIIIIIIIIIII', img, 0)
 guard_entries = list(struct.unpack_from('<9I', img, 56))
+recompiler_entry, *recompiler_emit = struct.unpack_from('<5I', img, 92)
 assert magic == 0x5352484C and fsz == len(img), (hex(magic), fsz, len(img))
-assert ver == 13 and hs == 92
+assert ver == 14 and hs == 112, (ver, hs)
 
 mu = Uc(UC_ARCH_MIPS, UC_MODE_MIPS64 + UC_MODE_LITTLE_ENDIAN)
 # The R5900 has MIPS IV's movz/movn, which unicorn's default R4000 model
@@ -562,3 +566,37 @@ assert img[_at:_at + 4 * len(_words)] == b''.join(w.to_bytes(4, 'little') for w 
 _runs = _G.check_stubs(_G.hooked_words(guard_entries), img, BASE, _random.Random(0x4255494C))
 print('resident misaligned-read guards: PASS (%d stub words as assembled, %d runs vs the model)'
       % (len(_words), _runs))
+
+# 9. POPStarter's recompiler hook (0x2075e8) and the $RECOMPILER_ADDON_3/4
+# emit code. The built code must be the words assembled from
+# common/src/pops_resident_recompiler.S, and run from POPS's hook and emit
+# points through the jumps pops_resident_hook_recompiler(_emit) write, it
+# must do what tools/pops_recompiler_model.py says (with POPSTARTER_TEST_ELF,
+# tools/test_pops_launch_hooks.py runs the original's own code against the
+# same model).
+import pops_recompiler_model as _RC
+_hi, _lo = struct.unpack_from('<II', img, recompiler_emit[0] - BASE)
+assert (_hi >> 16, _lo >> 16) == (0x3C1F, 0x27FF), (hex(_hi), hex(_lo))
+_save = ((_hi & 0xFFFF) << 16) + ((_lo & 0xFFFF) ^ 0x8000) - 0x8000
+assert _save % 16 == 0 and BASE + hs <= _save and _save + 0x40 <= BASE + isz, hex(_save)
+_words, _symbols = _RC.assembled(recompiler_entry, cfga, _save)
+assert [_symbols[s] for s in _RC.EMIT_SYMBOLS] == recompiler_emit, [hex(e) for e in recompiler_emit]
+_at = recompiler_entry - BASE
+assert img[_at:_at + 4 * len(_words)] == b''.join(w.to_bytes(4, 'little') for w in _words), \
+    'built recompiler code differs from the source'
+_installed = img + bytes(isz - fsz)
+def _recompiler_load(addons):
+    pre = {BASE: _installed,
+           cfga + _RC.FLAGS_OFFSET: _RC.config_flags(addons).to_bytes(4, 'little'),
+           _RC.HOOK: _RC.jump(recompiler_entry).to_bytes(4, 'little') + bytes(4)}
+    if addons & 24:
+        pick = 2 if addons & 16 else 0
+        for i, site in enumerate(_RC.EMITS):
+            pre[site] = _RC.jump(recompiler_emit[pick + i]).to_bytes(4, 'little') + bytes(4)
+    return pre
+_runs, _skipped = _RC.check_block(_recompiler_load, _random.Random(0x52454350), 20)
+assert _runs >= 8 * 20 - 8, (_runs, _skipped)
+_emits = _RC.check_emit(_recompiler_load, _save + 0x30, ((_save, _save + 0x40),),
+                        _random.Random(0x454D4954), 40)
+print('resident recompiler hook: PASS (%d words as assembled, %d block passes vs the model, '
+      '%d runaway cases skipped, %d emits)' % (len(_words), _runs, _skipped, _emits))

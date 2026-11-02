@@ -77,9 +77,9 @@ stay external. No merge or release was performed.
    compare US/European video, FORCEPAL, NOPAL and PATCH PAL/disable-auto on
    hardware. Host/emulated checks do not establish picture or gameplay results.
 2. Extend independently implemented resident services for progressive output,
-   pads, timings, widescreen and the remaining cheat commands. The three
-   `$RECOMPILER_ADDON_0/1/2` helpers also copy original code into `0x143xxxx`
-   (helpers at `0x8d6f64/0x8d6fa4/0x8d6fe4`); they are not direct fixed patches.
+   pads, timings, widescreen and the remaining cheat commands. The
+   `$RECOMPILER_ADDON_0..4` commands now run from launcHER's own resident
+   recompiler hook (2026-11-02; see `docs/POPSTARTER_LAUNCH_HOOKS.md`).
 3. Recover the built-in per-game DB and remaining BIOS/OSD/IGR-skin/module and
    physical-disc behavior from original contracts. Do not infer completion
    from annotation coverage or an archive build.

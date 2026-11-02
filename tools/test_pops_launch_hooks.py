@@ -39,6 +39,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import pops_guard_model as G  # noqa: E402
+import pops_recompiler_model as RC  # noqa: E402
+import test_pops_features as F  # noqa: E402  (its PopsConfig; the module builds nothing on import)
 import r5900_mini as R  # noqa: E402
 from r5900_mini import Machine  # noqa: E402
 
@@ -57,6 +59,13 @@ POKE_CONTEXT = {0x0020C0A4: 0x0C08B44C, 0x0020C0A8: 0x24A59708, 0x0020C0C8: 0x00
 IGR_EXIT_FIX = 0x0C08D8AE
 GP1_CONTEXT = {0x0021A630: 0x5060000B, 0x0021A638: 0x3C030001, 0x0021A640: 0x42000039,
                0x0021A644: 0x0000040F, 0x0021A648: 0x40026000, 0x0021A64C: 0x00431024}
+# POPS's recompiler epilogue around the hook, and the words around its two
+# emit points (pops_resident_hook_recompiler / _emit check them).
+RECOMPILER_CONTEXT = {0x002075C4: 0xDFB50038, 0x002075D8: 0xDFB00010, 0x002075E0: 0xDFB10018,
+                      0x002075E4: 0x24C20004, 0x002075F0: 0xDFB40030, 0x002075F4: 0xDFBF0040,
+                      0x002075F8: 0xACC30000}
+EMIT_CONTEXT = {0x00206314: 0x00431025, 0x00206320: 0x8CC20000, 0x00205D24: 0x12CB0008,
+                0x00205D28: 0x258C0004}
 
 
 class Header(c.Structure):
@@ -69,6 +78,7 @@ class Header(c.Structure):
         ("gte_scale_entry", c.c_uint32), ("gte_divide_entry", c.c_uint32),
         ("gte_ultra_entry", c.c_uint32), ("gp1_entry", c.c_uint32),
         ("guard_entry", c.c_uint32 * 9),
+        ("recompiler_entry", c.c_uint32), ("recompiler_emit", c.c_uint32 * 4),
     ]
 
 
@@ -91,11 +101,16 @@ def build():
     lib = c.CDLL(str(lib))
     lib.pops_resident_hook_guards.argtypes = [c.c_void_p, c.c_size_t, c.POINTER(Header)]
     lib.pops_resident_hook_gp1.argtypes = [c.c_void_p, c.c_size_t, c.c_uint32]
+    lib.pops_resident_hook_recompiler.argtypes = [c.c_void_p, c.c_size_t, c.c_uint32]
+    lib.pops_resident_hook_recompiler_emit.argtypes = [c.c_void_p, c.c_size_t, c.c_uint8,
+                                                       c.POINTER(Header)]
     lib.pops_apply_always_on_pokes.argtypes = [c.c_void_p, c.c_size_t]
     lib.pops_apply_bios_shell_edits.argtypes = [c.c_void_p, c.c_size_t]
     lib.pops_apply_opcode_pass.argtypes = [c.c_void_p, c.c_size_t]
     lib.pops_core_patches_stage.argtypes = [c.c_uint32, c.c_void_p, c.c_size_t, c.c_uint32]
     lib.pops_resident_check_image.argtypes = [c.c_void_p, c.c_size_t, c.POINTER(Header)]
+    lib.pops_config_init.argtypes = [c.c_void_p]
+    lib.pops_config_parse_line.argtypes = [c.c_void_p, c.c_char_p]
     return lib
 
 
@@ -130,9 +145,14 @@ def synthetic_core():
     for site, pristine, nxt, _, _ in G.SITES:
         put32(core, site, pristine)
         put32(core, site + 4, nxt)
-    for table in (G.CONTEXT, POKE_CONTEXT, GP1_CONTEXT):
+    for table in (G.CONTEXT, POKE_CONTEXT, GP1_CONTEXT, RECOMPILER_CONTEXT, EMIT_CONTEXT):
         for a, w in table.items():
             put32(core, a, w)
+    put32(core, RC.HOOK, RC.HOOK_PRISTINE[0])
+    put32(core, RC.HOOK + 4, RC.HOOK_PRISTINE[1])
+    for site, (_, _, _, words) in RC.EMITS.items():
+        put32(core, site, words[0])
+        put32(core, site + 4, words[1])
     for a, (pops, _) in POKES.items():
         put32(core, a, pops)
     put32(core, GP1_SITE, 0)
@@ -143,7 +163,11 @@ ENTRIES = [BASE + 0x100 + 0x20 * i for i in range(9)]
 
 
 def changed(before, after):
-    return {CORE + i for i in range(len(before)) if before[i] != after[i]}
+    out = set()
+    for off in range(0, len(before), 4096):
+        if before[off:off + 4096] != after[off:off + 4096]:
+            out.update(CORE + i for i in range(off, min(off + 4096, len(before))) if before[i] != after[i])
+    return out
 
 
 def words_at(addrs):
@@ -271,6 +295,274 @@ class Pokes(unittest.TestCase):
         self.assertEqual({a: u32(core, a) for a in hooks}, before)
 
 
+RC_CODE, RC_CONFIG, RC_SAVE = BASE + 0x400, BASE + 0x2000, BASE + 0x3000
+EMIT_ENTRIES = [BASE + 0x800 + 0x40 * i for i in range(4)]
+RECOMPILER_ENTRY = BASE + 0x700
+
+
+def emit_header(entries=EMIT_ENTRIES):
+    h = Header()
+    for i, e in enumerate(entries):
+        h.recompiler_emit[i] = e
+    return h
+
+
+def launcher_loader(image, image_base, entry, emits, config):
+    """load(addons) for the recompiler model's runners: launcHER's code
+    (`image` at `image_base`), the flags the commands set in its
+    configuration (at `config`), and the POPS words launcHER's two
+    installers write for those commands on a synthetic core."""
+    hooked = {}
+    for addons in (0, 8, 16, 24):
+        core = synthetic_core()
+        assert L.pops_resident_hook_recompiler(buf(core), len(core), entry) == 0
+        assert L.pops_resident_hook_recompiler_emit(buf(core), len(core), addons, emit_header(emits)) == 0
+        hooked[addons] = {a: bytes(core[a - CORE:a - CORE + 8]) for a in [RC.HOOK] + list(RC.EMITS)}
+
+    def load(addons):
+        pre = {image_base: image, config + RC.FLAGS_OFFSET: RC.config_flags(addons).to_bytes(4, "little")}
+        pre.update(hooked[addons & 24])
+        return pre
+    return load
+
+
+def assembled_recompiler():
+    """launcHER's recompiler code assembled from its source: (load, gp slot, scratch)."""
+    words, symbols = RC.assembled(RC_CODE, RC_CONFIG, RC_SAVE)
+    image = b"".join(w.to_bytes(4, "little") for w in words)
+    load = launcher_loader(image, RC_CODE, symbols["pops_resident_recompiler"],
+                           [symbols[s] for s in RC.EMIT_SYMBOLS], RC_CONFIG)
+    return load, RC_SAVE + 0x30, ((RC_SAVE, RC_SAVE + 0x40),)
+
+
+class Recompiler(unittest.TestCase):
+    """pops_resident_hook_recompiler / _emit, and launcHER's code
+    (common/src/pops_resident_recompiler.S) against the model."""
+
+    def test_hook_writes_a_jump_and_a_nop(self):
+        core = synthetic_core()
+        before = bytes(core)
+        self.assertEqual(L.pops_resident_hook_recompiler(buf(core), len(core), RECOMPILER_ENTRY), 0)
+        self.assertEqual((u32(core, RC.HOOK), u32(core, RC.HOOK + 4)), (RC.jump(RECOMPILER_ENTRY), 0))
+        self.assertEqual(words_at(changed(before, core)), {RC.HOOK, RC.HOOK + 4})
+        once = bytes(core)
+        self.assertEqual(L.pops_resident_hook_recompiler(buf(core), len(core), RECOMPILER_ENTRY), 0)
+        self.assertEqual(bytes(core), once)
+        self.assertEqual(L.pops_resident_hook_recompiler(buf(core), len(core), RECOMPILER_ENTRY + 4),
+                         -errno.EILSEQ)
+        self.assertEqual(bytes(core), once)
+
+    def test_hook_checks_every_word_before_writing(self):
+        for addr in list(RECOMPILER_CONTEXT) + [RC.HOOK, RC.HOOK + 4]:
+            core = synthetic_core()
+            put32(core, addr, u32(core, addr) ^ 0x00010000)
+            before = bytes(core)
+            self.assertEqual(L.pops_resident_hook_recompiler(buf(core), len(core), RECOMPILER_ENTRY),
+                             -errno.EILSEQ, hex(addr))
+            self.assertEqual(bytes(core), before, hex(addr))
+
+    def test_hook_rejects_bad_entries_and_short_cores(self):
+        core = synthetic_core()
+        before = bytes(core)
+        for bad in (RECOMPILER_ENTRY + 2, BASE - 4, LIMIT, 0x00200000):
+            self.assertEqual(L.pops_resident_hook_recompiler(buf(core), len(core), bad), -errno.EINVAL, hex(bad))
+        self.assertEqual(L.pops_resident_hook_recompiler(None, len(core), RECOMPILER_ENTRY), -errno.EINVAL)
+        need = 0x002075F8 + 4 - CORE
+        self.assertEqual(L.pops_resident_hook_recompiler(buf(core), need - 1, RECOMPILER_ENTRY), -errno.ERANGE)
+        self.assertEqual(bytes(core), before)
+        self.assertEqual(L.pops_resident_hook_recompiler(buf(core), need, RECOMPILER_ENTRY), 0)
+
+    def test_emit_hook_writes_what_the_commands_ask_for(self):
+        sites = list(RC.EMITS)
+        for addons in range(32):
+            core = synthetic_core()
+            before = bytes(core)
+            self.assertEqual(L.pops_resident_hook_recompiler_emit(buf(core), len(core), addons, emit_header()),
+                             0, addons)
+            if not addons & 24:
+                self.assertEqual(bytes(core), before, addons)
+                continue
+            pick = 2 if addons & 16 else 0      # ADDON_4 is ADDON_3 plus changes to its code
+            for i, site in enumerate(sites):
+                self.assertEqual((u32(core, site), u32(core, site + 4)),
+                                 (RC.jump(EMIT_ENTRIES[pick + i]), 0), (addons, hex(site)))
+            self.assertEqual(words_at(changed(before, core)), {a + k for a in sites for k in (0, 4)}, addons)
+
+    def test_emit_hook_takes_either_commands_jumps_and_nothing_else(self):
+        core = synthetic_core()
+        self.assertEqual(L.pops_resident_hook_recompiler_emit(buf(core), len(core), 8, emit_header()), 0)
+        once = bytes(core)
+        self.assertEqual(L.pops_resident_hook_recompiler_emit(buf(core), len(core), 8, emit_header()), 0)
+        self.assertEqual(bytes(core), once)
+        self.assertEqual(L.pops_resident_hook_recompiler_emit(buf(core), len(core), 16, emit_header()), 0)
+        self.assertEqual(u32(core, 0x00206318), RC.jump(EMIT_ENTRIES[2]))
+        other = [e + 0x100 for e in EMIT_ENTRIES]
+        hooked = bytes(core)
+        self.assertEqual(L.pops_resident_hook_recompiler_emit(buf(core), len(core), 8, emit_header(other)),
+                         -errno.EILSEQ)
+        self.assertEqual(bytes(core), hooked)
+
+    def test_emit_hook_checks_every_word_before_writing(self):
+        targets = list(EMIT_CONTEXT) + [a + k for a in RC.EMITS for k in (0, 4)]
+        for addr in targets:
+            core = synthetic_core()
+            put32(core, addr, u32(core, addr) ^ 0x00010000)
+            before = bytes(core)
+            self.assertEqual(L.pops_resident_hook_recompiler_emit(buf(core), len(core), 8, emit_header()),
+                             -errno.EILSEQ, hex(addr))
+            self.assertEqual(bytes(core), before, hex(addr))
+
+    def test_emit_hook_rejects_bad_arguments(self):
+        core = synthetic_core()
+        before = bytes(core)
+        for i in range(4):
+            for bad in (EMIT_ENTRIES[i] + 2, BASE - 4, LIMIT, 0x00200000):
+                e = list(EMIT_ENTRIES)
+                e[i] = bad
+                self.assertEqual(L.pops_resident_hook_recompiler_emit(buf(core), len(core), 8, emit_header(e)),
+                                 -errno.EINVAL, (i, hex(bad)))
+        self.assertEqual(L.pops_resident_hook_recompiler_emit(buf(core), len(core), 0x20, emit_header()),
+                         -errno.EINVAL)
+        self.assertEqual(L.pops_resident_hook_recompiler_emit(None, len(core), 8, emit_header()), -errno.EINVAL)
+        self.assertEqual(L.pops_resident_hook_recompiler_emit(buf(core), len(core), 8, None), -errno.EINVAL)
+        need = 0x00206320 + 4 - CORE
+        self.assertEqual(L.pops_resident_hook_recompiler_emit(buf(core), need - 1, 8, emit_header()),
+                         -errno.ERANGE)
+        self.assertEqual(bytes(core), before)
+        self.assertEqual(L.pops_resident_hook_recompiler_emit(buf(core), need, 8, emit_header()), 0)
+
+    def test_opcode_pass_keeps_the_hooks(self):
+        core = synthetic_core()
+        self.assertEqual(L.pops_resident_hook_recompiler(buf(core), len(core), RECOMPILER_ENTRY), 0)
+        self.assertEqual(L.pops_resident_hook_recompiler_emit(buf(core), len(core), 8, emit_header()), 0)
+        hooks = [RC.HOOK, RC.HOOK + 4] + [a + k for a in RC.EMITS for k in (0, 4)]
+        before = {a: u32(core, a) for a in hooks}
+        self.assertGreaterEqual(L.pops_apply_opcode_pass(buf(core), len(core)), 0)
+        self.assertEqual({a: u32(core, a) for a in hooks}, before)
+
+    def test_assembled_code_does_what_the_model_says(self):
+        load, slot, scratch = assembled_recompiler()
+        runs, skipped = RC.check_block(load, random.Random(0x52435452), 30)
+        self.assertGreaterEqual(runs, 8 * 30 - 8)
+        self.assertGreater(RC.check_emit(load, slot, scratch, random.Random(0x454D4954), 60), 3 * 60)
+
+    def test_commands_parse(self):
+        def parse(*lines):
+            cfg = F.PopsConfig()
+            L.pops_config_init(c.addressof(cfg))
+            for line in lines:
+                L.pops_config_parse_line(c.addressof(cfg), line.encode())
+            return cfg.recompiler_addons
+        self.assertEqual(parse(), 0)
+        for n in range(5):
+            self.assertEqual(parse("$RECOMPILER_ADDON_%d" % n), 1 << n, n)
+        self.assertEqual(parse("$recompiler_addon_2"), 4)
+        self.assertEqual(parse("$RECOMPILER_ADDON_0 $RECOMPILER_ADDON_3", "$RECOMPILER_ADDON_4"), 0x19)
+        # Whole tokens, as the original's handlers want a space, CR, LF, NUL
+        # or "$" after the digit (0x8936f4..0x893780).
+        for bad in ("$RECOMPILER_ADDON_5", "$RECOMPILER_ADDON_", "$RECOMPILER_ADDON_10",
+                    "$RECOMPILER_ADDON_1X", "$RECOMPILER_ADDON", "RECOMPILER_ADDON_1"):
+            self.assertEqual(parse(bad), 0, bad)
+
+    def test_source_is_built_and_named_in_the_header(self):
+        cmake = (ROOT / "launcher/CMakeLists.txt").read_text()
+        self.assertIn('set(POPS_RESIDENT_RECOMPILER "${CMAKE_SOURCE_DIR}/common/src/pops_resident_recompiler.S")',
+                      cmake)
+        self.assertGreaterEqual(cmake.count("${POPS_RESIDENT_RECOMPILER}"), 2)
+        engine = (ROOT / "common/src/pops_resident_engine.c").read_text()
+        order = [engine.index("(uint32_t)" + s) for s in ["pops_resident_recompiler,"] + RC.EMIT_SYMBOLS]
+        self.assertEqual(order, sorted(order), "header entries in POPS_EMIT_* order")
+
+
+class RecompilerQuirks:
+    """What the original does that a fix would change, kept on purpose
+    (docs/POPSTARTER_QUIRKS_TO_FIX_LATER.md). Run on launcHER's code, and
+    on the original's with POPSTARTER_TEST_ELF."""
+    A2 = 0x00600800                     # $a2: ADDON_0 looks at the 0x800 bytes before it
+
+    def code(self):
+        raise NotImplementedError
+
+    def block(self, addons, words, flag=1, length=0, v1=0x5A5A5A5A_00000000_11111111_22222222,
+              runs_on=False):
+        """One pass of the hook; with `runs_on`, it must not come back
+        (stopped after 3000 instructions)."""
+        load, _, _ = self.code()
+        m = RC.machine(load(addons))
+        m.set_lo(29, RC.STACK)
+        m.set_lo(6, self.A2)
+        m.set_full(3, v1)
+        m.put32(RC.FLAG, flag)
+        m.put32(RC.START, 0x00010000)
+        m.put32(RC.LENGTH, length)
+        for addr, w in words.items():
+            m.put32(addr, w)
+        m.steps = 0
+        if runs_on:
+            with self.assertRaisesRegex(RuntimeError, "step limit"):
+                m.run(RC.HOOK, RC.RESUME, limit=3000)
+        else:
+            m.run(RC.HOOK, RC.RESUME, limit=200000)
+        return m
+
+    def test_addon0_waits_for_addon2_while_the_flag_is_set(self):
+        lw = {self.A2 - 4: 0x8C820000}
+        for addons, flag, converted in ((1, 1, False), (3, 1, False), (5, 1, True), (7, 1, True),
+                                        (1, 0, True), (3, 0, True)):
+            m = self.block(addons, lw, flag=flag, length=4)
+            self.assertEqual(m.u32(self.A2 - 4), 0x98820000 if converted else 0x8C820000, (addons, flag))
+
+    def test_addon1_runs_on_after_a_zeroed_break_7_at_its_end(self):
+        words = {0x01010000: 0xFF000000, 0x01010008: RC.BREAK7, 0x01010018: 0xFF000000, 0x01010020: RC.BREAK6}
+        m = self.block(2, words, length=8, runs_on=True)
+        self.assertEqual((m.u32(0x01010008), m.u32(0x01010020)), (0, 0))     # past its end
+        m = self.block(2, words, length=12)       # the break 7 one word earlier: it stops
+        self.assertEqual((m.u32(0x01010008), m.u32(0x01010020)), (0, RC.BREAK6))
+
+    def test_addon2_with_length_0_runs_on(self):
+        stub = {0x01010010: RC.LI_T2_B0, 0x01010014: RC.JR_T2, 0x01010018: RC.li_t1(0x38)}
+        m = self.block(4, stub, length=0, runs_on=True)
+        self.assertEqual(m.u32(0x01010010), RC.JR_RA)
+        m = self.block(4, stub, length=4)
+        self.assertEqual(m.u32(0x01010010), RC.LI_T2_B0)
+
+    def test_addon2_b0_stubs_leave_v1_at_their_third_word(self):
+        v1 = 0x5A5A5A5A_00000000_11111111_22222222
+        hi = v1 & ~R.M64
+        for words, patched, want_v1 in (
+                ((RC.LI_T2_B0, RC.li_t1(0x52), RC.JR_T2), False, RC.JR_T2),   # never matches
+                ((RC.LI_T2_B0, RC.JR_T2, RC.li_t1(0x3D)), False, RC.li_t1(0x3D)),
+                ((RC.LI_T2_B0, RC.li_t1(0x5A), RC.JR_T2), True, RC.JR_T2),
+                ((RC.LI_T2_B0, RC.JR_T2, RC.li_t1(0x38)), True, None),
+                ((RC.LI_T2_B0, RC.li_t1(0x38), RC.JR_T2), True, None),
+                ((RC.LI_T2_A0, RC.li_t1(0x3A), RC.JR_T2), True, None)):
+            m = self.block(4, {0x01010000 + 4 * i: w for i, w in enumerate(words)}, length=4, v1=v1)
+            self.assertEqual(m.u32(0x01010000) == RC.JR_RA, patched, [hex(w) for w in words])
+            self.assertEqual(m.gpr[3], v1 if want_v1 is None else hi | R.sext32(want_v1), [hex(w) for w in words])
+
+    def test_206318_takes_gp_from_the_205d1c_slot(self):
+        load, slot, _ = self.code()
+        m = RC.machine(load(8))
+        gps = [0x1111 << 100 | 0x22, 0x3333 << 100 | 0x44, 0x5555 << 100 | 0x66]
+        m.set_lo(17, 0x00700000)
+        m.set_lo(12, 0x00700100)
+        m.set_full(28, gps[0])
+        m.run(0x00206318, 0x00206320, limit=200)
+        self.assertEqual(m.gpr[28], 0)     # nothing kept yet
+        m.set_full(28, gps[1])
+        m.run(0x00205D1C, 0x00205D24, limit=200)
+        self.assertEqual(m.gpr[28], gps[1])
+        m.set_full(28, gps[2])
+        m.run(0x00206318, 0x00206320, limit=200)
+        self.assertEqual(m.gpr[28], gps[1])
+        self.assertEqual(m.lo(31), 0x01440000)
+
+
+class LauncherRecompilerQuirks(RecompilerQuirks, unittest.TestCase):
+    def code(self):
+        return assembled_recompiler()
+
+
 def main_image():
     from trace_original_pops_io import decode_main
     return decode_main(Path(os.environ["POPSTARTER_TEST_ELF"]).read_bytes())
@@ -284,8 +576,9 @@ def real_core():
 
 def run_original_blocks(core):
     """The original's always-on writes over `core`, in its order: the
-    0x20c0c4 poke (0x8744a0), the GP1 hook (0x874780) and the guard stubs,
-    guards and pokes (0x874850..0x874a20), then the BIOS edits (0x878f94).
+    0x20c0c4 poke (0x8744a0), the GP1 hook (0x874780), the recompiler block
+    and its hook (0x8747e0), the guard stubs, guards and pokes
+    (0x874850..0x874a20), then the BIOS edits (0x878f94).
     Returns the machine (POPS core at 0x200000, its stubs at 0x143a000)."""
     m = Machine()
     m.write(MAIN_BASE, main_image())
@@ -297,8 +590,8 @@ def run_original_blocks(core):
         mm.set_lo(2, dst)
     m.natives[MEMCPY] = memcpy
     m.set_lo(28, GP)
-    for start, stop in ((0x8744A0, 0x8744B0), (0x874780, 0x874798), (0x874850, 0x874A20),
-                        (0x878F94, 0x878FC4)):
+    for start, stop in ((0x8744A0, 0x8744B0), (0x874780, 0x874798), (0x8747E0, 0x874830),
+                        (0x874850, 0x874A20), (0x878F94, 0x878FC4)):
         m.set_lo(29, 0x01FF0000)
         m.set_lo(30, 0x01FF0000)
         m.run(start, stop)
@@ -331,32 +624,77 @@ class Original(unittest.TestCase):
         theirs = bytearray(m.read(CORE, CORE_SIZE))
         ours = bytearray(pristine)
         self.assertEqual(L.pops_resident_hook_gp1(buf(ours), len(ours), BASE + 0x80), 0)
+        self.assertEqual(L.pops_resident_hook_recompiler(buf(ours), len(ours), RECOMPILER_ENTRY), 0)
         self.assertEqual(L.pops_resident_hook_guards(buf(ours), len(ours), header(ENTRIES)), 0)
         self.assertEqual(L.pops_apply_always_on_pokes(buf(ours), len(ours)), 0)
         self.assertEqual(L.pops_apply_bios_shell_edits(buf(ours), len(ours)), 0)
-        jumps = {GP1_SITE: 3, **{s[0]: 2 for s in G.SITES}}
+        jumps = {GP1_SITE: 3, RC.HOOK: 2, **{s[0]: 2 for s in G.SITES}}
         diff_t, diff_o = changed(pristine, theirs), changed(pristine, ours)
         self.assertEqual(words_at(diff_t), words_at(diff_o))
         for a in sorted(words_at(diff_t)):
             if a in jumps:   # each side jumps to its own code
                 self.assertEqual((u32(theirs, a) >> 26, u32(ours, a) >> 26), (jumps[a], jumps[a]), hex(a))
                 target = (u32(theirs, a) & 0x03FFFFFF) << 2
-                self.assertTrue(BASE <= target < BASE + 0x160 or a == GP1_SITE, hex(a))
+                self.assertTrue(BASE <= target < BASE + 0x160 or a == GP1_SITE or
+                                (a == RC.HOOK and target == RC.ORIGINAL_ENTRY), hex(a))
             else:
                 self.assertEqual(u32(theirs, a), u32(ours, a), hex(a))
-        self.assertEqual(len(words_at(diff_t)), 1 + 9 + 8 + 7 + 3)
+        self.assertEqual(len(words_at(diff_t)), 1 + 2 + 9 + 8 + 7 + 3)
 
     @unittest.skipUnless(os.environ.get("POPS_TEST_ELF"), "POPS_TEST_ELF not set")
     def test_real_core_takes_the_hooks_after_launchers_core_patches(self):
         core = real_core()
         self.assertEqual(L.pops_core_patches_stage(CORE, buf(core), len(core), (1 << 7) - 1), 0)
         self.assertEqual(L.pops_resident_hook_gp1(buf(core), len(core), BASE + 0x80), 0)
+        self.assertEqual(L.pops_resident_hook_recompiler(buf(core), len(core), RECOMPILER_ENTRY), 0)
         self.assertEqual(L.pops_resident_hook_guards(buf(core), len(core), header(ENTRIES)), 0)
         self.assertEqual(L.pops_apply_always_on_pokes(buf(core), len(core)), 0)
+        self.assertEqual(L.pops_resident_hook_recompiler_emit(buf(core), len(core), 16, emit_header()), 0)
         self.assertEqual(L.pops_apply_bios_shell_edits(buf(core), len(core)), 0)
-        hooks = {a: u32(core, a) for a in [GP1_SITE] + [s[0] for s in G.SITES] + list(POKES)}
+        hooks = {a: u32(core, a) for a in [GP1_SITE, RC.HOOK, RC.HOOK + 4] + [s[0] for s in G.SITES] +
+                 list(POKES) + [a + k for a in RC.EMITS for k in (0, 4)]}
         self.assertGreater(L.pops_apply_opcode_pass(buf(core), len(core)), 0)
         self.assertEqual({a: u32(core, a) for a in hooks}, hooks)
+
+    @unittest.skipUnless(HAVE_MAIN, "POPSTARTER_TEST_ELF not set")
+    def test_original_recompiler_code_does_what_the_model_says(self):
+        load = RC.original_loader(main_image())
+        self.assertEqual(load(0)[RC.HOOK], RC.jump(RC.ORIGINAL_ENTRY).to_bytes(4, "little") + bytes(4))
+        for n in (3, 4):
+            for site, entry in zip(RC.EMITS, RC.ORIGINAL_EMITS[n]):
+                self.assertEqual(load(1 << n)[site], RC.jump(entry).to_bytes(4, "little") + bytes(4))
+        runs, skipped = RC.check_block(load, random.Random(0x4F524352), 30)
+        self.assertGreaterEqual(runs, 8 * 30 - 8)
+        self.assertGreater(RC.check_emit(load, RC.ORIGINAL_GP_SLOT, RC.ORIGINAL_SCRATCH,
+                                         random.Random(0x4F454D54), 60), 3 * 60)
+        print("Original recompiler block PASS: %d passes (%d that run on skipped)" % (runs, skipped))
+
+    @unittest.skipUnless(HAVE_MAIN, "POPSTARTER_TEST_ELF not set")
+    def test_launcher_writes_the_original_recompiler_words(self):
+        # Given the original's code addresses, launcHER's two installers write
+        # the very POPS words the original's own install does, per command set.
+        main = main_image()
+        emits = RC.ORIGINAL_EMITS[3] + RC.ORIGINAL_EMITS[4]
+        for addons in (0, 1, 2, 4, 7, 8, 16, 24, 31):
+            core = synthetic_core()
+            theirs = bytearray(RC.original_install(main, addons, bytes(core)).read(CORE, CORE_SIZE))
+            ours = bytearray(core)
+            self.assertEqual(L.pops_resident_hook_recompiler(buf(ours), len(ours), RC.ORIGINAL_ENTRY), 0)
+            self.assertEqual(L.pops_resident_hook_recompiler_emit(buf(ours), len(ours), addons,
+                                                                  emit_header(emits)), 0)
+            want = {RC.HOOK, RC.HOOK + 4} | ({a + k for a in RC.EMITS for k in (0, 4)} if addons & 24 else set())
+            self.assertEqual(words_at(changed(core, theirs)), want, addons)
+            self.assertEqual(theirs, ours, addons)
+
+
+@unittest.skipUnless(HAVE_MAIN, "POPSTARTER_TEST_ELF not set")
+class OriginalRecompilerQuirks(RecompilerQuirks, unittest.TestCase):
+    loaded = None
+
+    def code(self):
+        if OriginalRecompilerQuirks.loaded is None:
+            OriginalRecompilerQuirks.loaded = RC.original_loader(main_image())
+        return OriginalRecompilerQuirks.loaded, RC.ORIGINAL_GP_SLOT, RC.ORIGINAL_SCRATCH
 
 
 class BuiltImage(unittest.TestCase):
@@ -373,6 +711,30 @@ class BuiltImage(unittest.TestCase):
                          b"".join(w.to_bytes(4, "little") for w in words))
         runs = G.check_stubs(G.hooked_words(entries), bytes(image), BASE, random.Random(0x4255494C))
         self.assertEqual(runs, 9 * 300)
+
+    @unittest.skipUnless(os.environ.get("POPS_RESIDENT_BIN"), "POPS_RESIDENT_BIN not set")
+    def test_built_recompiler_code_is_the_assembled_code(self):
+        image = bytearray(Path(os.environ["POPS_RESIDENT_BIN"]).read_bytes())
+        h = Header()
+        self.assertEqual(L.pops_resident_check_image(buf(image), len(image), c.byref(h)), 0)
+        entry, emits = h.recompiler_entry, list(h.recompiler_emit)
+        # pops_resident_recompiler_save, from the first emit code's lui/addiu.
+        hi, lo = struct.unpack_from("<II", image, emits[0] - BASE)
+        self.assertEqual((hi >> 16, lo >> 16), (0x3C1F, 0x27FF))
+        save = ((hi & 0xFFFF) << 16) + R.sext16(lo)
+        self.assertEqual(save % 16, 0)
+        self.assertTrue(BASE + h.header_size <= save and save + 0x40 <= BASE + h.image_size, hex(save))
+        words, symbols = RC.assembled(entry, h.config_addr, save)
+        self.assertEqual([symbols[s] for s in RC.EMIT_SYMBOLS], emits)
+        start = entry - BASE
+        self.assertEqual(bytes(image[start:start + 4 * len(words)]),
+                         b"".join(w.to_bytes(4, "little") for w in words))
+        full = bytes(image) + bytes(h.image_size - len(image))      # installed: the rest zeroed
+        load = launcher_loader(full, BASE, entry, emits, h.config_addr)
+        runs, _ = RC.check_block(load, random.Random(0x42524352), 20)
+        self.assertGreaterEqual(runs, 8 * 20 - 8)
+        self.assertGreater(RC.check_emit(load, save + 0x30, ((save, save + 0x40),),
+                                         random.Random(0x42454D54), 40), 3 * 40)
 
 
 TRAMPOLINE = ROOT / "launcher/src/pops_trampoline.S"
@@ -478,10 +840,12 @@ class Source(unittest.TestCase):
         order = ["res = pops_core_patches_stage(",
                  "res = pops_resident_check_image(",
                  "res = pops_resident_hook_gp1(",
+                 "res = pops_resident_hook_recompiler(",
                  "res = pops_resident_hook_guards(",
                  "res = pops_apply_always_on_pokes(",
                  "res = pops_builtin_apply(builtinId, (void *)stagedCore",
                  "res = pops_apply_all_config_patches(",
+                 "res = pops_resident_hook_recompiler_emit(",
                  "res = pops_stage_fix_files(",
                  "res = pops_fix_finalize_video(",
                  "res = pops_apply_bios_shell_edits(",
@@ -493,10 +857,11 @@ class Source(unittest.TestCase):
                  "memcpy((void *)POPS_TRAMPOLINE_ADDR"]
         at = [body.index(s) for s in order]
         self.assertEqual(at, sorted(at), [s for s, _ in sorted(zip(order, at), key=lambda x: x[1])])
-        for s in order[:5] + order[9:10]:
+        for s in order[:6] + order[8:9] + order[11:12]:
             self.assertEqual(body.count(s), 1, s)
         # Every POPStarter-mode launch: no flag gates the hooks or the install.
-        for s in ("res = pops_resident_hook_gp1(", "res = pops_resident_hook_guards(",
+        for s in ("res = pops_resident_hook_gp1(", "res = pops_resident_hook_recompiler(",
+                  "res = pops_resident_hook_guards(", "res = pops_resident_hook_recompiler_emit(",
                   "res = pops_apply_always_on_pokes(", "res = pops_apply_bios_shell_edits(",
                   "res = pops_resident_install("):
             line = body[body.rindex("\n", 0, body.index(s)) + 1:body.index(s)]

@@ -26,11 +26,14 @@
  * (the in-game reset and the built-in list's chain calls live there), plus
  * nine guards around misaligned loads and stores (pops_resident_guards.S,
  * pops_resident_hook_guards), so launcHER installs its image, the GP1 hook
- * and the guards on every POPStarter-mode launch too. */
+ * and the guards on every POPStarter-mode launch too. The same goes for its
+ * recompiler hook (pops_resident_recompiler.S, pops_resident_hook_recompiler),
+ * which the $RECOMPILER_ADDON_n commands give work to. */
 
 #include <stddef.h>
 #include <stdint.h>
 #include "pops_config.h"
+#include "pops_resident_abi.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -39,7 +42,7 @@ extern "C" {
 #define POPS_RESIDENT_BASE        UINT32_C(0x0143a000)
 #define POPS_RESIDENT_LIMIT       UINT32_C(0x01460000)
 #define POPS_RESIDENT_MAGIC       UINT32_C(0x5352484c) /* "LHRS" */
-#define POPS_RESIDENT_VERSION     13
+#define POPS_RESIDENT_VERSION     14
 
 /* POPStarter's always-on guards (pops_resident_guards.S): the POPS words
  * that become "j stub", in the order the original writes them
@@ -57,6 +60,35 @@ enum {
   POPS_GUARD_21C5A8,
   POPS_GUARD_COUNT
 };
+
+/* $RECOMPILER_ADDON_3/4: the code POPS's two emit points jump to
+ * (pops_resident_recompiler.S), one pair per command. */
+enum {
+  POPS_EMIT_ADDON3_206318 = 0,
+  POPS_EMIT_ADDON3_205D1C,
+  POPS_EMIT_ADDON4_206318,
+  POPS_EMIT_ADDON4_205D1C,
+  POPS_EMIT_COUNT
+};
+
+/* POPS's recompiler finishes a block at 0x2075c4..0x207600: it restores
+ * $s5, $s0, $s1, $s2, $s3, $s4 and $ra from its frame (0x10..0x40($sp)),
+ * stores the block's last instruction ($v1) at $a2 (0x2075f8) and returns.
+ * POPStarter writes "j <block>; nop" over the $s2/$s3 loads at 0x2075e8 on
+ * every launch; its block returns to the $ra load at 0x2075f4. */
+#define POPS_RECOMPILER_HOOK_ADDR   UINT32_C(0x002075e8)
+#define POPS_RECOMPILER_RESUME_ADDR UINT32_C(0x002075f4)
+/* The PS1 kernel words the $RECOMPILER_ADDON_1/2 scans read: the loaded
+ * code's start (its top byte is cleared) and length, and the flag that
+ * says new code is there (cleared). EE addresses: PS1 RAM is at 0x01000000. */
+#define POPS_RECOMPILER_START_ADDR  UINT32_C(0x0100b878)
+#define POPS_RECOMPILER_LENGTH_ADDR UINT32_C(0x0100b87c)
+#define POPS_RECOMPILER_FLAG_ADDR   UINT32_C(0x0100b890)
+/* The emit points $RECOMPILER_ADDON_3/4 take over: "sw $v0,0($s1) / addiu
+ * $s1,$s1,4" resuming at 0x206320, and "or $a0,$a0,$v0 / sw $a0,0($t4)"
+ * resuming at 0x205d24 (whose delay slot adds 4 to $t4). */
+#define POPS_EMIT_206318_ADDR       UINT32_C(0x00206318)
+#define POPS_EMIT_205D1C_ADDR       UINT32_C(0x00205d1c)
 
 /* POPS's VBLANK_START registration and handler (verified on the pinned core) */
 #define POPS_VBLANK_LUI_ADDR      UINT32_C(0x0021b184)
@@ -97,6 +129,8 @@ typedef struct {
   uint32_t gte_ultra_entry;  /* $ULTRA_WIDESCREEN: IR1 store at 0x208a2c */
   uint32_t gp1_entry;        /* cheats/$SET_TIMINGS: jal'd from 0x21a63c */
   uint32_t guard_entry[POPS_GUARD_COUNT]; /* always-on guards, no C call ABI */
+  uint32_t recompiler_entry; /* jumped to from 0x2075e8, no C call ABI */
+  uint32_t recompiler_emit[POPS_EMIT_COUNT]; /* POPS_EMIT_*, no C call ABI */
 } PopsResidentHeader;
 
 #define POPS_RES_F_CHEATS         (1u << 0)
@@ -114,6 +148,8 @@ typedef struct {
 #define POPS_RES_F_BREAK_CALL     (1u << 8)  /* call POPS_BUILTIN_BREAK_ADDR */
 #define POPS_RES_F_LIBCRYPT2      (1u << 9)  /* run libcrypt2_code */
 #define POPS_RES_F_FIX_CALL       (1u << 10) /* call POPS_BUILTIN_FIX_ADDR */
+/* POPS_RES_F_RECOMPILER_0/1/2 (bits 11..13, pops_resident_abi.h): what the
+ * recompiler hook runs, $RECOMPILER_ADDON_0/1/2. */
 #define POPS_RESIDENT_LIBCRYPT2_WORDS 23     /* 84 bytes of code, jr ra, nop */
 
 /* $SET_TIMINGS: three POPS timing words, adjusted live with L1/L2/R1/R2.
@@ -349,6 +385,23 @@ int pops_resident_hook_gp1(void *staged_core, size_t core_size, uint32_t entry);
  * any is written. Idempotent; anything else is -EILSEQ. */
 int pops_resident_hook_guards(void *staged_core, size_t core_size,
                               const PopsResidentHeader *hdr);
+
+/* POPStarter's recompiler hook: "j entry" plus a nop over the $s2/$s3 loads
+ * at POPS_RECOMPILER_HOOK_ADDR, after checking the rest of that epilogue
+ * (the loads of $s5, $s0, $s1, $s4 and $ra, the addiu that reads $a2 and
+ * the store of $v1 at $a2). Idempotent; anything else is -EILSEQ. Made on
+ * every POPStarter launch, as the original does; what the code behind it
+ * runs is in the resident configuration's POPS_RES_F_RECOMPILER_* flags. */
+int pops_resident_hook_recompiler(void *staged_core, size_t core_size, uint32_t entry);
+
+/* $RECOMPILER_ADDON_3/4 (PopsConfig.recompiler_addons): "j stub" plus a nop
+ * over each of POPS's two emit points, to the image's ADDON_4 code when
+ * that command came, else its ADDON_3 code; neither: nothing checked or
+ * written. Both sites and the words their code resumes with are checked
+ * first; a site may already jump to either command's code (the original's
+ * two commands write the same words). Anything else is -EILSEQ. */
+int pops_resident_hook_recompiler_emit(void *staged_core, size_t core_size,
+                                       uint8_t addons, const PopsResidentHeader *hdr);
 
 /* Manual DISPLAY override at 0x21a094. Guard the displaced load, delay slot
  * and both interlace argument sites before writing the hook. The image

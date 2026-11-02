@@ -231,7 +231,21 @@ typedef struct {
    * came last, and whether a $BREAKPOINT0 came at all (POPS_BREAKPOINT_*,
    * pops_breakpoint_build). */
   uint8_t breakpoint;
+  /* $RECOMPILER_ADDON_0..4 (handlers 0x89316c..0x893e4c): bit n set when
+   * $RECOMPILER_ADDON_n came (POPS_RECOMPILER_ADDON_*). The original's
+   * handlers copy code into its resident block (0..2) or poke POPS's two
+   * emit points (3, 4); launcHER's resident code does the same work
+   * (pops_resident_recompiler.S). The order does not matter: no two of
+   * them change the same thing, and 4 is 3 plus changes to its code. */
+  uint8_t recompiler_addons;
 } PopsConfig;
+
+/* PopsConfig.recompiler_addons */
+#define POPS_RECOMPILER_ADDON_0 0x01
+#define POPS_RECOMPILER_ADDON_1 0x02
+#define POPS_RECOMPILER_ADDON_2 0x04
+#define POPS_RECOMPILER_ADDON_3 0x08
+#define POPS_RECOMPILER_ADDON_4 0x10
 
 /* PopsConfig.breakpoint */
 #define POPS_BREAKPOINT_0      0x01 /* the last one was $BREAKPOINT0 */

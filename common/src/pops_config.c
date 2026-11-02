@@ -383,6 +383,13 @@ static int parse_single_directive(PopsConfig *cfg, const char *token) {
     cfg->original_opcodes = 1;
     return 1;
   }
+  /* $RECOMPILER_ADDON_0..4 (0x89316c, 0x893494, 0x8937bc, 0x893ae4,
+   * 0x893e4c): flags; the resident code does their work (pops_config.h). */
+  if (!strncasecmp(token, "$RECOMPILER_ADDON_", 18) && token[18] >= '0' &&
+      token[18] <= '4' && !token[19]) {
+    cfg->recompiler_addons |= (uint8_t)(1u << (token[18] - '0'));
+    return 1;
+  }
   /* $BREAKPOINT0 (0x8960c4) and $BREAKPOINT1 (0x896310): each one, where
    * it stands in the file, calls FUN_008d6da4(0, 0) or (1, 1), which
    * copies the breakpoint handler afresh and edits it; so the last one

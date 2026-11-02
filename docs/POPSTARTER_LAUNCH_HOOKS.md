@@ -39,8 +39,8 @@ POPSTARTER.ELF MAIN.
 | `0x874764` | copies `0x738` bytes of its own code to `0x232790`: the always-live block the GP1 hook runs (pad hotkeys, slot copies, `$NOVMC0/1` and controller ID stores, the reset combo, the chain slots) | launcHER's own resident GP1 work: the pad hotkeys and in-game disc swap (below), the controller ID stores, the reset combo and the chain calls. The `$NOVMC0/1` stores are not (below) |
 | `0x87477c` | copies `0xd60` bytes to `0x238a90`: its `$SET_TIMINGS`, LibCrypt 2 and cheat code area, entered at `0x239490` | launcHER's own resident code |
 | `0x874790` | `0x21a63c = jal 0x239490`: the GP1 hook | `pops_resident_hook_gp1`, **now on every launch** (it was only with cheats, controller IDs or `$SET_TIMINGS`) |
-| `0x8747ec` | `0x2075e8..0x2075ef = j 0x143a160; nop` (over two `ld`s near the end of a POPS routine that builds an instruction word and stores it, `sw $v1, 0($a2)` at `0x2075f8`), into the code copied at `0x874808` | **not copied yet** (below) |
-| `0x874808` | copies `0x5ea0` bytes to `0x143a160`, the code `0x2075e8` jumps to; the `$RECOMPILER_ADDON_n` commands change it | **not copied yet** |
+| `0x8747ec` | `0x2075e8..0x2075ef = j 0x143a160; nop` (over two `ld`s at the end of POPS's recompiler routine, which then stores the block's last instruction, `sw $v1, 0($a2)` at `0x2075f8`), into the code copied at `0x874808` | `pops_resident_hook_recompiler`, to launcHER's own code, on every launch (below) |
+| `0x874808` | copies `0x5ea0` bytes to `0x143a160`, the code `0x2075e8` jumps to; the `$RECOMPILER_ADDON_n` commands change it | launcHER's own code for the same behaviour, `common/src/pops_resident_recompiler.S` (below) |
 | `0x874864` | copies `0x160` bytes to `0x143a000`: the nine guard stubs | launcHER's own stubs, `common/src/pops_resident_guards.S` |
 | `0x874878..0x874998` | the nine misaligned-read guards (below) | `pops_resident_hook_guards` |
 | `0x8749ac..0x874a18` | the exit and byte-copy pokes (below) | `pops_apply_always_on_pokes` |
@@ -51,9 +51,25 @@ POPSTARTER.ELF MAIN.
 | `0x87c140` | `memset(0x100000, 0, 0x100000)` | the trampoline, step 3 (already the same) |
 
 The three writes gated by `gp+0x3884` (`0x8747b0`, `0x874828`, `0x874848`)
-never run in a shipped build: that flag only ever holds the build preset
-byte `0x100008`, which is 0 in all five r13 builds (MAIN, DEBUG, USBDELAY,
-USBDELAY_DEBUG, USBDELAY_LONGER_DEBUG).
+run on every launch of a shipped build: the code skips them only when that
+word is nonzero, and it only ever holds the build preset byte `0x100008`,
+which is 0 in all five r13 builds (MAIN, DEBUG, USBDELAY, USBDELAY_DEBUG,
+USBDELAY_LONGER_DEBUG). This note used to say they never run; it read the
+test the wrong way round (corrected 2026-11-02). Each turns one slot of a
+chain of `b`-to-the-next-slot into a jump:
+
+- `0x232d30 = j 0x238a90`: the always-live block goes on to the
+  `$SET_TIMINGS` check at the start of the `0x238a90` area;
+- `0x238d00 = j 0x2397d8`: the second LibCrypt code's slot goes straight
+  on to the game-fix slot (the built-in list's `LIBCRYPT2_ON` writes its
+  own jump there);
+- `0x143a720 = j 0x143ffdc`: the recompiler block jumps past the rest of
+  its slots, all empty `b`s, to its exit, so with no command it takes 22
+  instructions instead of about 5,700 (below).
+
+launcHER's resident code runs in the order these jumps make
+(`pops_resident_gp1_work`, `pops_resident_recompiler.S`), so there is
+nothing more to copy for them.
 
 ### The nine guards
 
@@ -188,6 +204,63 @@ runs, so in game it never switched. It was removed on 2026-11-02 at the
 owner's request: popfs no longer touches controller reads, and POPStarter's
 combos above are the only disc swap.
 
+## The recompiler hook and `$RECOMPILER_ADDON_0..4`
+
+POPS turns PS1 code into EE code a block at a time. When it has finished a
+block, its routine ends at `0x2075c4..0x207600`: it reloads `$s5`, `$s0`,
+`$s1`, `$s2`, `$s3`, `$s4` and `$ra` from its frame and stores the block's
+last instruction, `$v1` (`addiu $k1, $k1, -n`, the block's cycle count),
+at `$a2` (`0x2075f8`). On every launch POPStarter writes
+`j 0x143a160; nop` over the `$s2`/`$s3` loads (`0x8747ec`) and copies its
+block there (`0x874808`, MAIN `0x96c070`). The block reads the word at PS1
+`0xb890` (EE `0x0100b890`), runs what the commands copied into it, reloads
+`$s0..$s5` from the frame (the two replaced `ld`s, plus four that POPS
+makes or already made with the same values) and returns to `0x2075f4`
+with `$ra = 0x2075f4`, where POPS reloads `$ra`. With no command it changes
+nothing and takes 22 or 23 instructions, thanks to the launch's own
+`j 0x143ffdc` at `0x143a720` (above). Before 2026-11-02 this note said 2,847
+branches (about 5,700 instructions, through a block larger than the EE's
+16 KB instruction cache): that is the path without that jump, which no
+shipped build takes.
+
+The commands are `$RECOMPILER_ADDON_0` to `_4` (handlers `0x89316c`,
+`0x893494`, `0x8937bc`, `0x893ae4`, `0x893e4c`). `_0`, `_1` and `_2` copy
+code into the block (`0x8d6f64`, `0x8d6fa4`, `0x8d6fe4`), which runs it in
+this order:
+
+- word at `0xb890` nonzero: `_1`, then `_2`, then `_0`, but `_0` only after
+  `_2`: without `_2` it is skipped on that pass (quirk 54);
+- word zero: `_0`.
+
+| Command | What the original's code does |
+|---|---|
+| `$RECOMPILER_ADDON_0` | the `0x800` bytes before `$a2`, the code POPS emitted last: every word in `0x8bff0001..0x8fffffff` or `0xabff0001..0xafffffff` gets `0x0c000000` added and is stored back with `swr`, so `lw` becomes `lwr` and `sw` becomes `swr` (quirks 52, 53) |
+| `$RECOMPILER_ADDON_1` | clears the top byte of PS1 `0xb878` (the start of the code the PS1 side loaded), reads it and the length at `0xb87c`, zeroes `0xb890`, then scans that code, both ends included: a `break 7` (`0x0007000d`) or `break 6` (`0x0006000d`) becomes 0 when the top byte of the word two before it is nonzero (quirks 55, 56) |
+| `$RECOMPILER_ADDON_2` | reads the start (its top byte as it is) and the length, clears that byte and `0xb890`, then scans the code, the end excluded, for PS1 BIOS calls: `li $t2, 0xa0` / `jr $t2` / `li $t1, 0x3a`, and `li $t2, 0xb0` / `jr $t2` / `li $t1, 0x38`, `0x52` or `0x5a`, plus the forms with the `li $t1` before the `jr` for A0:3A, B0:38 and B0:5A. Each becomes `jr $ra` / `nop` / `nop` (quirks 56 to 58) |
+| `$RECOMPILER_ADDON_3` | POPS's two emit points jump to its code instead: `0x206318` (`sw $v0, 0($s1)` / `addiu $s1, $s1, 4`) and `0x205d1c` (`or $a0, $a0, $v0` / `sw $a0, 0($t4)`). The word POPS emits there is converted as `_0` does it and stored as 0, the word, 0, 0 with `swr`, so it takes 16 bytes instead of 4 (quirks 52, 59, 60) |
+| `$RECOMPILER_ADDON_4` | the same jumps, storing the converted word alone. Both commands write the same jumps and `_4` also changes the code they reach, so with both, `_4`'s code runs |
+
+launcHER, POPStarter launches only (Ember launches never reach it):
+
+- `pops_resident_hook_recompiler` writes `j pops_resident_recompiler; nop`
+  at `0x2075e8` on every launch, right after the GP1 hook, after checking
+  the rest of the epilogue. It is idempotent, and anything else there
+  stops the launch.
+- `common/src/pops_resident_recompiler.S` is launcHER's own code, written
+  from the behaviour above, not POPStarter's bytes. The commands set bits
+  in the resident configuration (`POPS_RES_F_RECOMPILER_0/1/2`, resident
+  image v14) instead of copying code. On every path it leaves the same
+  registers and memory as the original's, the leftovers included. It
+  takes fewer instructions (with no command 17 to 19 against the
+  original's 22 or 23; with `_0`, about 4,100 per block against about
+  9,200), so it is quicker, not slower; the time is not copied.
+- `$RECOMPILER_ADDON_3/4`: `pops_resident_hook_recompiler_emit` writes `j`
+  and a `nop` at both emit points, to launcHER's `_4` code when that
+  command came, else its `_3` code, with the user's other command writes
+  (before the opcode pass, as in the original). It checks POPS's words
+  first, which the original does not, and a mismatch stops the launch.
+- The command names are matched as whole words in any case (quirk 22).
+
 ## Not copied yet
 
 - **The `$NOVMC0/1` stores in the always-live block**: `0x232c90` and
@@ -195,20 +268,6 @@ combos above are the only disc swap.
   `0x527930`. The commands' handlers write byte 1 into the branch's offset
   (`0x8d6b9c`), so the store runs on every pass. launcHER handles the
   commands at launch only (see the inventory).
-- **The recompiler hook** at `0x2075e8` and the `0x5ea0` bytes behind it,
-  which the `$RECOMPILER_ADDON_0..4` commands change. It runs on every
-  launch in the original. Followed through the copied block (MAIN
-  `0x96c070`, run at `0x143a160`): it reads the word at `0x0100b890`, and
-  when that is 0 it takes 2,847 branches through the block (all delay
-  slots `nop`), reloads `$s0..$s5` from POPS's stack frame (the two
-  replaced `ld`s, plus four that POPS makes or already made with the same
-  values) and returns to `0x2075f4`, where POPS reloads `$ra`. So without
-  an addon it leaves every register and memory word as POPS's own code
-  would, and costs only time: about 5,700 instructions, through a block
-  larger than the EE's 16 KB instruction cache, on each call of that POPS
-  routine. When the word is not 0 it takes another path (`0x143a274`),
-  not worked out yet; the only stores to that word found in MAIN write 0.
-  Next, with the `$RECOMPILER_ADDON` commands.
 
 ## Verification
 
@@ -240,6 +299,32 @@ builds), the built stubs are the assembled words and pass the model;
 `tools/check_pops_resident_image.py` checks the same. With
 `POPS_TRAMPOLINE_BIN` (the `.text` of the built `pops_trampoline.S`
 object), the built trampoline is the assembled one.
+
+The recompiler hook, in CI (`tools/test_pops_launch_hooks.py`):
+
+- `tools/pops_recompiler_model.py` models the block and the emit code,
+  quirks included. launcHER's `pops_resident_recompiler.S`, assembled by
+  `tools/r5900_mini.py`, runs from `0x2075e8` on 240 random states of
+  registers and memory, 30 for each set of `_0`, `_1` and `_2` (236 run;
+  the 4 where the scan would never stop, as the original's would not, are
+  left out and have checks of their own), and from both emit points with
+  `_3`, `_4` and both, 180 times one to four emits in a row (436 emits).
+  All 128 bits of every register and every byte of memory must be the
+  model's.
+- The C hooks on synthetic cores: the exact words, every word checked
+  before anything is written, idempotent, either command's jumps accepted,
+  and the opcode pass leaves them alone. The command parser and the
+  configuration bits, and the five quirk checks (quirks 54, 56, 57, 58,
+  59) on launcHER's code.
+
+With `POPSTARTER_TEST_ELF`, the original's own launch code
+(`0x8747e0..0x874830`) and command code install its block on a machine,
+and that code passes the same model (238 of 240 random states, the
+other 2 never stop; 444 emits) and the same five quirk checks;
+launcHER's installers write the same POPS words as the original's for
+nine command combinations. With `POPS_RESIDENT_BIN`, the built code is the
+assembled code and passes the model; `tools/check_pops_resident_image.py`
+(section 9) checks the same.
 
 The pad hotkeys and the disc swap, in CI:
 
