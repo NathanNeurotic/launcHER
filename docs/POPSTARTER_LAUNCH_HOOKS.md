@@ -36,7 +36,7 @@ POPSTARTER.ELF MAIN.
 | Original | What it does | launcHER |
 |---|---|---|
 | `0x8744a8` | `0x20c0c4 = 0` (later replaced by `0x874a04`) | same end result, `pops_apply_always_on_pokes` |
-| `0x874764` | copies `0x738` bytes of its own code to `0x232790`: the always-live block the GP1 hook runs (pad hotkeys, slot copies, `$NOVMC0/1` and controller ID stores, the reset combo, the chain slots) | launcHER's own resident GP1 work: the pad hotkeys and in-game disc swap (below), the controller ID stores, the reset combo and the chain calls. The `$NOVMC0/1` stores are not (below) |
+| `0x874764` | copies `0x738` bytes of its own code to `0x232790`: the always-live block the GP1 hook runs (pad hotkeys, slot copies, `$NOVMC0/1` and controller ID stores, the reset combo, the chain slots) | launcHER's own resident GP1 work: the pad hotkeys and in-game disc swap (below), the `$NOVMC0/1` card stores, the controller ID stores, the reset combo and the chain calls |
 | `0x87477c` | copies `0xd60` bytes to `0x238a90`: its `$SET_TIMINGS`, LibCrypt 2 and cheat code area, entered at `0x239490` | launcHER's own resident code |
 | `0x874790` | `0x21a63c = jal 0x239490`: the GP1 hook | `pops_resident_hook_gp1`, **now on every launch** (it was only with cheats, controller IDs or `$SET_TIMINGS`) |
 | `0x8747ec` | `0x2075e8..0x2075ef = j 0x143a160; nop` (over two `ld`s at the end of POPS's recompiler routine, which then stores the block's last instruction, `sw $v1, 0($a2)` at `0x2075f8`), into the code copied at `0x874808` | `pops_resident_hook_recompiler`, to launcHER's own code, on every launch (below) |
@@ -263,11 +263,12 @@ launcHER, POPStarter launches only (Ember launches never reach it):
 
 ## Not copied yet
 
-- **The `$NOVMC0/1` stores in the always-live block**: `0x232c90` and
-  `0x232ca0` are branches over a store of 0 to byte `0x507920` and to byte
-  `0x527930`. The commands' handlers write byte 1 into the branch's offset
-  (`0x8d6b9c`), so the store runs on every pass. launcHER handles the
-  commands at launch only (see the inventory).
+- Nothing from the always-live block any more: its `$NOVMC0/1` stores
+  (`0x232c90` and `0x232ca0`, branches over a store of 0 to byte `0x507920`
+  and to byte `0x527930`, turned on by the handlers writing byte 1 into the
+  branch's offset) are copied since 2026-11-02, right after the slot copies
+  in `pops_resident_hotkeys`, and checked against the original's block
+  through `0x232cb0` (`test_pops_resident.py`). See the inventory.
 
 ## Verification
 

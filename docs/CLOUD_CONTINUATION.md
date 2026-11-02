@@ -81,8 +81,11 @@ stay external. No merge or release was performed.
    `$RECOMPILER_ADDON_0..4` commands now run from launcHER's own resident
    recompiler hook (2026-11-02; see `docs/POPSTARTER_LAUNCH_HOOKS.md`), and
    `$FAKELC` is copied, with the built-in list entries it cuts (2026-11-02;
-   see `docs/POPSTARTER_BUILTIN_DB.md`). Next: the always-live block's
-   `$NOVMC0/1` per-pass stores.
+   see `docs/POPSTARTER_BUILTIN_DB.md`), and the always-live block's
+   `$NOVMC0/1` per-pass stores (2026-11-02; `$NOVMC0` no longer turns off
+   both cards; `check_pops_resident_image.py` checks the two stores).
+   Paused there on 2026-11-02 to save tokens; next is a hardware check
+   that a `$NOVMC0` game finds no card in slot 1 and still saves to slot 2.
 3. Recover the built-in per-game DB and remaining BIOS/OSD/IGR-skin/module and
    physical-disc behavior from original contracts. Do not infer completion
    from annotation coverage or an archive build.

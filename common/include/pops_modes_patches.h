@@ -182,10 +182,11 @@ int pops_apply_iopcd_stack_size(void *staged_core, size_t core_size, uint8_t sta
 /* Patch HddInit failure exit (FUN_008dc0c0): rewires 0x00200766 from 0x1040 to 0x1000 */
 int pops_apply_hdd_init_exit(void *staged_core, size_t core_size);
 
-/* Disable Memory Card 0 emulation ($NOVMC0 / FUN_008dc12c(1)): rewires 0x002007b4 from 0x01 to 0x00 */
-int pops_apply_vmc0_disable(void *staged_core, size_t core_size);
-
-/* Disable Memory Card 1 emulation ($NOVMC1 / FUN_008dc12c(2)): rewires 0x0020d0e0 from 0x1480ffc1 to 0x24040000 */
+/* Memory card 1 off ($NOVMC1, and a built-in entry's FUN_008dc12c(2)):
+ * rewires 0x0020d0e0 from 0x1480ffc1 to 0x24040000, so POPS's card setup
+ * stops after card 0 and never opens card 1. (The original's other helper,
+ * FUN_008dc12c(1), would make that setup skip both cards through
+ * 0x002007b4; r13 never calls it, and $NOVMC0 does not use it.) */
 int pops_apply_vmc1_disable(void *staged_core, size_t core_size);
 
 /* Bypass SLBB-00001 VCD check (FUN_008dbcdc):

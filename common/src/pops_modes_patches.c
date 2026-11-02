@@ -1354,18 +1354,6 @@ int pops_apply_hdd_init_exit(void *staged_core, size_t core_size) {
   return write_u16(staged_core, core_size, 0x00200766, 0x1000);
 }
 
-int pops_apply_vmc0_disable(void *staged_core, size_t core_size) {
-  uint8_t *bytes = (uint8_t *)staged_core;
-  if (!bytes)
-    return -EINVAL;
-  if (core_size < (size_t)(0x002007b4 - POPS_CORE_BASE_ADDR + 1))
-    return -ERANGE;
-  size_t off = 0x002007b4 - POPS_CORE_BASE_ADDR;
-  if (bytes[off] != 0x01)
-    return -EINVAL;
-  return write_u8(staged_core, core_size, 0x002007b4, 0x00);
-}
-
 int pops_apply_vmc1_disable(void *staged_core, size_t core_size) {
   uint8_t *bytes = (uint8_t *)staged_core;
   if (!bytes)
@@ -1539,11 +1527,10 @@ int pops_apply_all_config_patches(void *staged_core, size_t core_size, const Pop
   }
   result = pops_apply_display_config(staged_core, core_size, cfg);
   if (result) return result;
-  if (cfg->no_vmc0) {
-    result = pops_apply_vmc0_disable(staged_core, core_size);
-    if (result) return result;
-  }
-  if (cfg->no_vmc1) {
+  /* $NOVMC0 writes nothing here: POPS still opens card 0, and the resident
+   * code hides it from the game (POPS_RES_F_NOVMC0). $NOVMC1 and a built-in
+   * entry's card 1 off keep POPS from opening card 1. */
+  if (cfg->no_vmc1 || cfg->builtin_no_vmc1) {
     result = pops_apply_vmc1_disable(staged_core, core_size);
     if (result) return result;
   }

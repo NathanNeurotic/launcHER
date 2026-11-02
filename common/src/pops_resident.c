@@ -285,6 +285,15 @@ int pops_resident_build_config(PopsResidentConfig *out, const PopsConfig *cfg) {
     out->flags |= POPS_RES_F_RECOMPILER_1;
   if (cfg->recompiler_addons & POPS_RECOMPILER_ADDON_2)
     out->flags |= POPS_RES_F_RECOMPILER_2;
+  /* $NOVMC0 / $NOVMC1: the always-live block's per-pass card stores. A
+   * built-in entry's card 1 off (builtin_no_vmc1) is only its core write,
+   * as in the original, whose helper leaves the block's branch alone. */
+  if (cfg->no_vmc0 > 1 || cfg->no_vmc1 > 1)
+    return -EINVAL;
+  if (cfg->no_vmc0)
+    out->flags |= POPS_RES_F_NOVMC0;
+  if (cfg->no_vmc1)
+    out->flags |= POPS_RES_F_NOVMC1;
   /* The in-game reset's jump word: the BIOS reset vector, or the stub
    * $RESET_WARMBOOT found (pops_apply_reset_warmboot). */
   out->reset_vector = cfg->reset_vector ? cfg->reset_vector : POPS_RESET_VECTOR_DEFAULT;

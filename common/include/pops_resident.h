@@ -42,7 +42,7 @@ extern "C" {
 #define POPS_RESIDENT_BASE        UINT32_C(0x0143a000)
 #define POPS_RESIDENT_LIMIT       UINT32_C(0x01460000)
 #define POPS_RESIDENT_MAGIC       UINT32_C(0x5352484c) /* "LHRS" */
-#define POPS_RESIDENT_VERSION     14
+#define POPS_RESIDENT_VERSION     15
 
 /* POPStarter's always-on guards (pops_resident_guards.S): the POPS words
  * that become "j stub", in the order the original writes them
@@ -150,6 +150,12 @@ typedef struct {
 #define POPS_RES_F_FIX_CALL       (1u << 10) /* call POPS_BUILTIN_FIX_ADDR */
 /* POPS_RES_F_RECOMPILER_0/1/2 (bits 11..13, pops_resident_abi.h): what the
  * recompiler hook runs, $RECOMPILER_ADDON_0/1/2. */
+/* $NOVMC0 / $NOVMC1: the always-live block's stores right after the slot
+ * copies (the original's 0x232c90 and 0x232ca0): every pass, the low byte of
+ * POPS's card 0 / card 1 state word becomes 0 (pops_resident_hotkeys). A
+ * built-in entry's card 1 off is a core write only and sets neither. */
+#define POPS_RES_F_NOVMC0         (1u << 14)
+#define POPS_RES_F_NOVMC1         (1u << 15)
 #define POPS_RESIDENT_LIBCRYPT2_WORDS 23     /* 84 bytes of code, jr ra, nop */
 
 /* $SET_TIMINGS: three POPS timing words, adjusted live with L1/L2/R1/R2.
@@ -239,7 +245,7 @@ typedef struct {
 #define POPS_RESET_COMBO          0xbcfeu
 #define POPS_RESET_VECTOR_DEFAULT UINT32_C(0xbfc00000)
 
-/* POPStarter's always-live block (0x232790..0x232c90), the first thing its
+/* POPStarter's always-live block (0x232790..0x232cb0), the first thing its
  * GP1 hook runs. Port 0 buttons (active low), each compared for exactly
  * that value: */
 #define POPS_COMBO_EMODE_0        0xf6feu /* SELECT+L2+R1: emode byte = 0 */
@@ -268,6 +274,14 @@ typedef struct {
 #define POPS_PAD_STATE_FLAG       0x28u
 #define POPS_CD_INIT_ADDR         UINT32_C(0x00210540)
 #define POPS_BOOT_PATH_ADDR       UINT32_C(0x01ffecb0)
+/* POPS's memory card state, which its card setup (0x20cf00) clears, 0x40020
+ * bytes: for each card a word whose bit 0 says the card is there (set once
+ * its VMC file is read; without it POPS's SIO code answers that no card is
+ * inserted and its card writer leaves the card alone) and whose bit 1 says
+ * it needs writing, then the 128 KiB card image; card 1's follows card 0's.
+ * $NOVMC0 / $NOVMC1 clear the low byte of that word. */
+#define POPS_CARD_STATE_ADDR      UINT32_C(0x00507920)
+#define POPS_CARD_STATE_STRIDE    0x20010u
 
 /* Where the always-live block reads and writes: on the console the
  * addresses above, POPS_PAD_STATE_ADDR and POPS's disc init. */
@@ -277,6 +291,7 @@ typedef struct {
   uintptr_t lid;       /* halfword */
   uintptr_t scanlines; /* word */
   uintptr_t boot_path; /* POPS_DISC_SLOT_SIZE bytes */
+  uintptr_t card_state; /* card 0's state byte; card 1's at +POPS_CARD_STATE_STRIDE */
   int (*cd_init)(const char *path);
 } PopsHotkeyMemory;
 
@@ -287,8 +302,9 @@ typedef struct {
  * flush, as in the original); SELECT+L2+R2+SQUARE with the lid open closes
  * it and calls the disc init with the selected slot; SELECT+L2+R2 and a
  * direction selects slot 0..3 for the next close; then each slot whose
- * first word is zero gets the boot path. Every check reads the buttons
- * again, as the original does. */
+ * first word is zero gets the boot path; then, with POPS_RES_F_NOVMC0 /
+ * POPS_RES_F_NOVMC1, the low byte of card 0's / card 1's state word becomes
+ * 0. Every check reads the buttons again, as the original does. */
 void pops_resident_hotkeys(PopsResidentConfig *cfg, const PopsHotkeyMemory *mem);
 
 /* Where the codes write. ps1 is PS1 RAM (2 MiB); ee is EE address 0 and

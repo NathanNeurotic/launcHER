@@ -311,7 +311,7 @@ void pops_resident_d2ls(uint8_t *pad, uint32_t bytes) {
   pad[7] = d2ls_axis(up, down);
 }
 
-/* POPStarter's always-live block (0x232790..0x232c90), statement for
+/* POPStarter's always-live block (0x232790..0x232cb0), statement for
  * statement; its five empty slots between the emode checks and the lid
  * (0x2327d0..0x2327f0) do nothing in r13 and have no counterpart here. */
 #define HOTKEY_BUTTONS(mem) (*(volatile uint16_t *)((mem)->pad + 2))
@@ -359,6 +359,13 @@ void pops_resident_hotkeys(PopsResidentConfig *cfg, const PopsHotkeyMemory *mem)
     for (unsigned word = 0; word < POPS_DISC_SLOT_SIZE / 4; ++word)
       to[word] = from[word];
   }
+
+  /* $NOVMC0 / $NOVMC1 (0x232c90 / 0x232ca0, branches their handlers turn
+   * on): a byte store, so the rest of the state word stays. */
+  if (cfg->flags & POPS_RES_F_NOVMC0)
+    *(volatile uint8_t *)mem->card_state = 0;
+  if (cfg->flags & POPS_RES_F_NOVMC1)
+    *(volatile uint8_t *)(mem->card_state + POPS_CARD_STATE_STRIDE) = 0;
 }
 
 #define TIMING_WORD(addr) (*(volatile uint32_t *)(addr))
@@ -665,12 +672,12 @@ __asm__(".set push\n.set noreorder\n.set noat\n.text\n.align 2\n"
         "addiu $sp, $sp, 0xa0\n"
         ".set pop\n");
 
-/* In POPStarter's chain order: its always-live block (0x232790..0x232c90:
- * pad hotkeys, in-game disc swap, slot copies), the controller ID stores
- * (0x232cb0..), the built-in list's breakpoint handler (slot 0x232d08), the
- * $SET_TIMINGS
- * check (0x238a90), the second LibCrypt code (slot 0x238d00, code at
- * 0x239780), the game-fix code (slot 0x2397d8), then the cheat code
+/* In POPStarter's chain order: its always-live block (0x232790..0x232cb0:
+ * pad hotkeys, in-game disc swap, slot copies, the $NOVMC0/1 stores), the
+ * controller ID stores (0x232cb0..), the built-in list's breakpoint handler
+ * (slot 0x232d08), the $SET_TIMINGS check (0x238a90), the second LibCrypt
+ * code (slot 0x238d00, code at 0x239780), the game-fix code (slot
+ * 0x2397d8), then the cheat code
  * (0x2397e8). The three built-in pieces are the original's own MIPS,
  * copied by the launcher; they use k0/k1 (two of them t6) and return with
  * jr ra, and gp is still POPS's, as in the original, since nothing here
@@ -680,7 +687,7 @@ void pops_resident_gp1_work(void) {
   PopsResidentConfig *cfg = &pops_resident_config;
   uint32_t base = *(volatile uint32_t *)cfg->ram_base_ptr;
   PopsHotkeyMemory keys = {POPS_PAD_STATE_ADDR, POPS_EMODE_ADDR, POPS_LID_ADDR,
-                           POPS_SCANLINES_ADDR, POPS_BOOT_PATH_ADDR,
+                           POPS_SCANLINES_ADDR, POPS_BOOT_PATH_ADDR, POPS_CARD_STATE_ADDR,
                            (int (*)(const char *))POPS_CD_INIT_ADDR};
   pops_resident_hotkeys(cfg, &keys);
   if (cfg->flags & POPS_RES_F_PAD_ID)

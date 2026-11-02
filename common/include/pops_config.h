@@ -139,8 +139,13 @@ typedef struct {
   uint8_t igr_type;     /* 0 = launcHER direct exit, 1..6 = $IGR0..$IGR5 */
   uint8_t safe_mode;    /* POPS_SAFE_MODE_* bits: $SAFEMODE, $SAFEMODE2; $NOSAFEMODE clears */
   uint8_t usb_delay;    /* $USBDELAY_# seconds */
-  uint8_t no_vmc0;      /* $NOVMC0 disables Memory Card 0 emulation */
-  uint8_t no_vmc1;      /* $NOVMC1 disables Memory Card 1 emulation */
+  /* $NOVMC0 / $NOVMC1 (handlers 0x896568 / 0x896718): every pass, the
+   * resident code clears the low byte of POPS's card 0 / card 1 state word,
+   * so the game finds no card there (POPS_RES_F_NOVMC0/1); $NOVMC1 also
+   * keeps POPS from opening card 1 (pops_apply_vmc1_disable). POPS still
+   * opens card 0 after $NOVMC0. */
+  uint8_t no_vmc0;
+  uint8_t no_vmc1;
 
   /* Compatibility modes bitmask: (1 << (mode - 1)) for Modes 1..8 */
   uint8_t compat_modes;
@@ -245,6 +250,10 @@ typedef struct {
    * gp+0x3424, which makes the built-in entry a later $VCDID_n runs skip
    * part of itself (POPS_BUILTIN_AFTER_FAKELC). */
   uint8_t fakelc;
+  /* Set by the launcher from the built-in entry it applied: card 1 off
+   * (the entry's FUN_008dc12c(2), gp+0x38bc = 2). Only the core write of
+   * $NOVMC1, no per-pass store, and no SLOT1.VMC is made. */
+  uint8_t builtin_no_vmc1;
 } PopsConfig;
 
 /* PopsConfig.fakelc */

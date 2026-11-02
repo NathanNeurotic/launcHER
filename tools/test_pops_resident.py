@@ -125,7 +125,8 @@ HOTKEY_CD_INIT = c.CFUNCTYPE(c.c_int, c.c_void_p)
 
 class HotkeyMemory(c.Structure):
     _fields_ = [("pad", c.c_size_t), ("emode", c.c_size_t), ("lid", c.c_size_t),
-                ("scanlines", c.c_size_t), ("boot_path", c.c_size_t), ("cd_init", HOTKEY_CD_INIT)]
+                ("scanlines", c.c_size_t), ("boot_path", c.c_size_t), ("card_state", c.c_size_t),
+                ("cd_init", HOTKEY_CD_INIT)]
 
 
 L.pops_resident_hotkeys.argtypes = [c.POINTER(ResidentConfig), c.POINTER(HotkeyMemory)]
@@ -660,6 +661,25 @@ class BuildConfig(unittest.TestCase):
             self.assertEqual(L.pops_resident_build_config(c.byref(out), c.addressof(cfg)), 1 if flags else 0, lines)
             self.assertEqual(out.flags, flags, lines)
 
+    def test_novmc_sets_the_block_flags(self):
+        # $NOVMC0 / $NOVMC1 arm the always-live block's card stores (bits 14
+        # and 15); a built-in entry's card 1 off (builtin_no_vmc1) is a core
+        # write only, as in the original, and is not read here.
+        for lines, flags in ((["$NOVMC0"], NOVMC0), (["$NOVMC1"], NOVMC1),
+                             (["$NOVMC1 $NOVMC0"], NOVMC0 | NOVMC1), (["$novmc0"], NOVMC0),
+                             (["$NOVMC0X", "$NOVMC2"], 0)):
+            out = ResidentConfig()
+            cfg = self.parsed(*lines)
+            self.assertEqual(L.pops_resident_build_config(c.byref(out), c.addressof(cfg)),
+                             1 if flags else 0, lines)
+            self.assertEqual(out.flags, flags, lines)
+        src = (ROOT / "common/src/pops_resident.c").read_text()
+        body = src[src.index("int pops_resident_build_config("):]
+        body = body[:body.index("\n}\n")]
+        code = "".join(part.split("*/", 1)[-1] for part in body.split("/*"))
+        self.assertIn("cfg->no_vmc0", code)
+        self.assertNotIn("builtin_no_vmc1", code)
+
     def test_cheats_and_safe_mode(self):
         out = ResidentConfig()
         cfg = self.parsed("$80012345 00FF", "$D0001000 0001", "$30001001 0002", "$SAFEMODE")
@@ -802,7 +822,7 @@ class HookGp1(unittest.TestCase):
 
 def image(file_size=0xC0, image_size=0x2000, entry=BASE + 0x70, config=BASE + 0xC0, magic=0x5352484C):
     img = bytearray(file_size)
-    struct.pack_into("<IHHIIIIIIIIIIII9II4I", img, 0, magic, 14, 112, file_size, image_size, entry, config,
+    struct.pack_into("<IHHIIIIIIIIIIII9II4I", img, 0, magic, 15, 112, file_size, image_size, entry, config,
                      BASE + 0x74, BASE + 0x78, BASE + 0x7C, BASE + 0x80, BASE + 0x84, BASE + 0x88,
                      BASE + 0x8C, BASE + 0x70, *[BASE + 0x90 + 4 * i for i in range(9)],
                      BASE + 0xB4, BASE + 0xB8, BASE + 0xBC, BASE + 0x70, BASE + 0x74)
@@ -843,7 +863,7 @@ class Install(unittest.TestCase):
                 struct.pack_into('<I', img, offset, bad)
                 self.assertEqual(self.check(img)[0], -errno.ERANGE, (offset, hex(bad)))
             self.assertEqual(self.check(img_ok)[0], 0)
-        for version in (12, 13, 15):
+        for version in (13, 14, 16):
             img = image()
             struct.pack_into('<H', img, 4, version)
             self.assertEqual(self.check(img)[0], -errno.EINVAL, version)
@@ -1462,6 +1482,9 @@ COMBO_DISC = (0xFCEE, 0xFCDE, 0xFCBE, 0xFC7E)
 LID_OPEN, LID_CLOSED = 0x1000, 0x0200
 SCANLINES_ON, SCANLINES_OFF = 0x22B50006, 0x8CA42158
 SLOT = 0x60
+# POPS's card state: card 0's word, card 1's POPS_CARD_STATE_STRIDE later.
+CARD_STATE, CARD_STRIDE = 0x00507920, 0x20010
+NOVMC0, NOVMC1 = 1 << 14, 1 << 15
 
 
 def disc_slots(*names):
@@ -1479,18 +1502,29 @@ class _HotkeyMachine:
     $SCANLINES word, main's boot path and the disc init (recorded)."""
 
     def __init__(self, slots=bytes(4 * SLOT), lid=LID_CLOSED, boot=bytes(SLOT), emode=0x55,
-                 scanlines=SCANLINES_OFF):
+                 scanlines=SCANLINES_OFF, flags=0, cards=(0, 0)):
         self.cfg = ResidentConfig()
+        self.cfg.flags = flags
         c.memmove(c.addressof(self.cfg.disc_slot), slots, 4 * SLOT)
         self.pad = (c.c_uint8 * (2 * 0x90))()
         self.emode = c.c_uint8(emode)
         self.lid = c.c_uint16(lid)
         self.scanlines = c.c_uint32(scanlines)
         self.boot = (c.c_uint8 * SLOT).from_buffer_copy(boot)
+        self.card = (c.c_uint8 * (CARD_STRIDE + 4))()
+        self.set_cards(cards)
         self.calls = []
         self._cd_init = HOTKEY_CD_INIT(self.cd_init)
         self.mem = HotkeyMemory(c.addressof(self.pad), c.addressof(self.emode), c.addressof(self.lid),
-                                c.addressof(self.scanlines), c.addressof(self.boot), self._cd_init)
+                                c.addressof(self.scanlines), c.addressof(self.boot),
+                                c.addressof(self.card), self._cd_init)
+
+    def set_cards(self, words):
+        for n, word in enumerate(words):
+            struct.pack_into("<I", self.card, n * CARD_STRIDE, word)
+
+    def cards(self):
+        return tuple(struct.unpack_from("<I", self.card, n * CARD_STRIDE)[0] for n in range(2))
 
     def cd_init(self, path):
         slot, rest = divmod(path - c.addressof(self.cfg.disc_slot), SLOT)
@@ -1511,19 +1545,21 @@ class _HotkeyMachine:
 
     def state(self):
         return (self.emode.value, self.lid.value, self.pad[0x28], self.pad[0x90 + 0x28],
-                self.scanlines.value, self.cfg.disc_selected, self.slots())
+                self.scanlines.value, self.cfg.disc_selected, self.slots(), self.cards())
 
 
 class _OriginalHotkeys:
     """POPStarter's always-live block as shipped (its resident blob, MAIN
     0x983150, which the launch copies to 0x232790), from 0x232790 to the
-    $NOVMC0 slot at 0x232c90, on tools/r5900_mini.py. The selected slot
-    lives in the immediate of the ori at 0x2328bc."""
-    SRC, RUN, END = 0x983150, 0x232790, 0x232C90
+    controller ID stores at 0x232cb0, on tools/r5900_mini.py. The selected
+    slot lives in the immediate of the ori at 0x2328bc. $NOVMC0 / $NOVMC1
+    are set the way their handlers set them: byte 1 into the branches at
+    0x232c90 / 0x232ca0."""
+    SRC, RUN, END = 0x983150, 0x232790, 0x232CB0
     SLOTS, ORI = 0x232950, 0x2328BC
 
     def __init__(self, image, slots=bytes(4 * SLOT), lid=LID_CLOSED, boot=bytes(SLOT), emode=0x55,
-                 scanlines=SCANLINES_OFF):
+                 scanlines=SCANLINES_OFF, flags=0, cards=(0, 0)):
         sys.path.insert(0, str(Path(__file__).resolve().parent))
         from r5900_mini import M32, Machine
         self.m = m = Machine()
@@ -1534,6 +1570,11 @@ class _OriginalHotkeys:
         m.write(0x0059C200, struct.pack("<H", lid))
         m.put32(0x0021E454, scanlines)
         m.write(0x01FFECB0, boot)
+        if flags & NOVMC0:
+            m.write(0x232C90, b"\x01")
+        if flags & NOVMC1:
+            m.write(0x232CA0, b"\x01")
+        self.set_cards(cards)
         self.calls = []
 
         def cd_init(mm):
@@ -1550,6 +1591,13 @@ class _OriginalHotkeys:
         self.m.steps = 0
         self.m.run(self.RUN, self.END, limit=5000)
 
+    def set_cards(self, words):
+        for n, word in enumerate(words):
+            self.m.put32(CARD_STATE + n * CARD_STRIDE, word)
+
+    def cards(self):
+        return tuple(self.m.u32(CARD_STATE + n * CARD_STRIDE) for n in range(2))
+
     def slots(self):
         return self.m.read(self.SLOTS, 4 * SLOT)
 
@@ -1559,12 +1607,13 @@ class _OriginalHotkeys:
         assert rest == 0 and 0 <= selected < 4
         return (m.read(0x70003390, 1)[0], struct.unpack("<H", m.read(0x0059C200, 2))[0],
                 m.read(0x00507028, 1)[0], m.read(0x005070B8, 1)[0], m.u32(0x0021E454), selected,
-                self.slots())
+                self.slots(), self.cards())
 
 
 class Hotkeys(unittest.TestCase):
-    """POPStarter's always-live block: emode, lid, $SCANLINES and the
-    in-game disc swap (pops_resident_hotkeys). Host memory, no console."""
+    """POPStarter's always-live block: emode, lid, $SCANLINES, the in-game
+    disc swap and the $NOVMC0/1 card stores (pops_resident_hotkeys). Host
+    memory, no console."""
 
     def test_emode_scanlines_lid_and_pad_flags(self):
         m = _HotkeyMachine(emode=0x55)
@@ -1644,6 +1693,25 @@ class Hotkeys(unittest.TestCase):
         m.frame(COMBO_LID_CLOSE)
         self.assertEqual(m.calls[-1], (0, boot))
 
+    def test_novmc_clears_the_card_state_bytes_every_pass(self):
+        """$NOVMC0 / $NOVMC1: the low byte of card 0's / card 1's state word
+        becomes 0 on every pass, whatever the buttons; the other three bytes
+        and the other card stay. POPS sets bit 0 again only when it reads
+        the card's file, but the store does not depend on that."""
+        for flags in (0, NOVMC0, NOVMC1, NOVMC0 | NOVMC1):
+            m = _HotkeyMachine(flags=flags, cards=(0xA5A5A503, 0x5A5A5A03))
+            for buttons in (0xFFFF, COMBO_LID_OPEN, 0x0000):
+                m.set_cards((0xA5A5A503, 0x5A5A5A03))
+                m.frame(buttons)
+                want = (0xA5A5A500 if flags & NOVMC0 else 0xA5A5A503,
+                        0x5A5A5A00 if flags & NOVMC1 else 0x5A5A5A03)
+                self.assertEqual(m.cards(), want, (hex(flags), hex(buttons)))
+            # Nothing else in the block depends on them.
+            plain = _HotkeyMachine(cards=(0xA5A5A503, 0x5A5A5A03))
+            for buttons in (0xFFFF, COMBO_LID_OPEN, 0x0000):
+                plain.frame(buttons)
+            self.assertEqual(m.state()[:7], plain.state()[:7], hex(flags))
+
     def test_build_config_carries_the_slots(self):
         cfg = BuildConfig.parsed(self)
         text = b"A.VCD\nB.VCD"
@@ -1694,26 +1762,38 @@ class Hotkeys(unittest.TestCase):
                 return b"\0" + bytes(rng.randint(1, 255) for _ in range(3)) + bytes(SLOT - 4)
             return bytes(rng.getrandbits(8) for _ in range(SLOT))
 
-        frames = swaps = 0
+        frames = swaps = cleared = 0
+        seen_flags = set()
         for case in range(150):
             setup = dict(slots=b"".join(slot() for _ in range(4)),
                          lid=rng.choice([LID_OPEN, LID_CLOSED, 0, rng.getrandbits(16)]),
                          boot=rng.choice([b"pops:/disc/disc0".ljust(SLOT, b"\0"), bytes(SLOT),
                                           bytes(rng.getrandbits(8) for _ in range(SLOT))]),
                          emode=rng.getrandbits(8),
-                         scanlines=rng.choice([SCANLINES_ON, SCANLINES_OFF, rng.getrandbits(32)]))
+                         scanlines=rng.choice([SCANLINES_ON, SCANLINES_OFF, rng.getrandbits(32)]),
+                         flags=(NOVMC0 if case % 4 & 1 else 0) | (NOVMC1 if case % 4 & 2 else 0),
+                         cards=(rng.getrandbits(32), rng.getrandbits(32)))
+            seen_flags.add(setup["flags"])
             ours, theirs = _HotkeyMachine(**setup), _OriginalHotkeys(image, **setup)
             for frame in range(rng.randint(1, 40)):
                 buttons = rng.choice(combos) if rng.random() < 0.85 else rng.getrandbits(16)
+                if rng.random() < 0.3:  # POPS changed the card words since the last pass
+                    cards = (rng.getrandbits(32), rng.getrandbits(32))
+                    ours.set_cards(cards)
+                    theirs.set_cards(cards)
+                    cleared += bool(setup["flags"]) and any(w & 0xFF for w in cards)
                 ours.frame(buttons)
                 theirs.frame(buttons)
-                where = (case, frame, hex(buttons))
+                where = (case, frame, hex(buttons), hex(setup["flags"]))
                 self.assertEqual(ours.state(), theirs.state(), where)
                 self.assertEqual(ours.calls, theirs.calls, where)
                 frames += 1
             swaps += len(ours.calls)
         self.assertGreater(swaps, 50)
-        print("Original always-live block PASS: %d passes, %d swaps" % (frames, swaps))
+        self.assertEqual(seen_flags, {0, NOVMC0, NOVMC1, NOVMC0 | NOVMC1})
+        self.assertGreater(cleared, 100)
+        print("Original always-live block PASS: %d passes, %d swaps, %d card stores checked"
+              % (frames, swaps, cleared))
 
 
 class Layout(unittest.TestCase):

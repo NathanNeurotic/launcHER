@@ -33,7 +33,7 @@ BASE = 0x0143A000
 guard_entries = list(struct.unpack_from('<9I', img, 56))
 recompiler_entry, *recompiler_emit = struct.unpack_from('<5I', img, 92)
 assert magic == 0x5352484C and fsz == len(img), (hex(magic), fsz, len(img))
-assert ver == 14 and hs == 112, (ver, hs)
+assert ver == 15 and hs == 112, (ver, hs)
 
 mu = Uc(UC_ARCH_MIPS, UC_MODE_MIPS64 + UC_MODE_LITTLE_ENDIAN)
 # The R5900 has MIPS IV's movz/movn, which unicorn's default R4000 model
@@ -550,6 +550,20 @@ assert u32(0x1304) == 4
 mu.mem_write(PAD + 2, struct.pack('<H', 0xFFFF))
 print('resident always-live block: PASS (emode, lid, scanlines, pad flags, boot path, 4 swaps '
       'from aligned slots with POPS\'s gp)')
+
+# 7c. The block's $NOVMC0 / $NOVMC1 stores (0x232c90 / 0x232ca0): with bit 14
+# / 15 every pass zeroes the low byte of POPS's card 0 / card 1 state word
+# (0x507920, 0x527930); the other bytes and the other card stay.
+CARDS = (0x00507920, 0x00527930)
+for flags, want in ((0, (0x5A5A5A03, 0xA5A5A503)), (1 << 14, (0x5A5A5A00, 0xA5A5A503)),
+                    (1 << 15, (0x5A5A5A03, 0xA5A5A500)), (3 << 14, (0x5A5A5A00, 0xA5A5A500))):
+    config([], flags=flags)
+    for _ in range(2):  # again after POPS sets the words once more
+        mu.mem_write(CARDS[0], struct.pack('<I', 0x5A5A5A03))
+        mu.mem_write(CARDS[1], struct.pack('<I', 0xA5A5A503))
+        gp1()
+        assert (u32(CARDS[0]), u32(CARDS[1])) == want, (hex(flags), hex(u32(CARDS[0])), hex(u32(CARDS[1])))
+print('resident $NOVMC0/1 card stores: PASS (4 flag sets, every pass, low byte only)')
 
 # 8. POPStarter's nine always-on misaligned-read guards. The built stubs must
 # be the words assembled from common/src/pops_resident_guards.S, and must do

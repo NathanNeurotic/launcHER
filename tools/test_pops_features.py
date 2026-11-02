@@ -80,6 +80,7 @@ class PopsConfig(c.Structure):
         ("breakpoint", c.c_uint8),
         ("recompiler_addons", c.c_uint8),
         ("fakelc", c.c_uint8),
+        ("builtin_no_vmc1", c.c_uint8),
     ]
 
 class PopsCompatEntry(c.Structure):
@@ -248,8 +249,6 @@ class FeatureTests(unittest.TestCase):
         LIB.pops_apply_iopcd_stack_size.restype = c.c_int
         LIB.pops_apply_hdd_init_exit.argtypes = [c.c_void_p, c.c_size_t]
         LIB.pops_apply_hdd_init_exit.restype = c.c_int
-        LIB.pops_apply_vmc0_disable.argtypes = [c.c_void_p, c.c_size_t]
-        LIB.pops_apply_vmc0_disable.restype = c.c_int
         LIB.pops_apply_vmc1_disable.argtypes = [c.c_void_p, c.c_size_t]
         LIB.pops_apply_vmc1_disable.restype = c.c_int
         LIB.pops_apply_slbb_vcd_check_bypass.argtypes = [c.c_void_p, c.c_size_t]
@@ -1266,6 +1265,36 @@ class FeatureTests(unittest.TestCase):
         self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), line), 0)
         self.assertEqual(cfg.no_vmc1, 1)
 
+    def test_novmc_in_the_config_pass(self):
+        # $NOVMC0 writes nothing into POPS: its card setup is still called
+        # with a0 = 1 (0x2007b4) and opens card 0; the resident code hides
+        # the card (POPS_RES_F_NOVMC0). $NOVMC1 and a built-in entry's card 1
+        # off write only the card loop's branch at 0x20d0e0.
+        size = 0x303000
+        base = bytearray(size)
+        struct.pack_into("<I", base, 0x002007B4 - 0x00200000, 0x24040001)
+        struct.pack_into("<I", base, 0x0020D0E0 - 0x00200000, 0x1480FFC1)
+
+        def after(**fields):
+            cfg = PopsConfig()
+            LIB.pops_config_init(c.byref(cfg))
+            for name, value in fields.items():
+                setattr(cfg, name, value)
+            b = bytearray(base)
+            bp = (c.c_uint8 * size).from_buffer(b)
+            self.assertEqual(LIB.pops_apply_all_config_patches(bp, size, c.byref(cfg)), 0, fields)
+            del bp
+            return bytes(b)
+
+        plain = after()
+        self.assertEqual(struct.unpack_from("<I", plain, 0x002007B4 - 0x00200000)[0], 0x24040001)
+        self.assertEqual(after(no_vmc0=1), plain)
+        card1_off = bytearray(plain)
+        struct.pack_into("<I", card1_off, 0x0020D0E0 - 0x00200000, 0x24040000)
+        for fields in (dict(no_vmc1=1), dict(builtin_no_vmc1=1), dict(no_vmc0=1, no_vmc1=1),
+                       dict(no_vmc1=1, builtin_no_vmc1=1)):
+            self.assertEqual(after(**fields), bytes(card1_off), fields)
+
     def test_igr_exit_patch(self):
         buf_size = 0x100000
         buf = bytearray(buf_size)
@@ -1373,13 +1402,9 @@ class FeatureTests(unittest.TestCase):
         buf_size = 0x20000
         buf = bytearray(buf_size)
         ptr = (c.c_uint8 * buf_size).from_buffer(buf)
-
-        # VMC0 disable: 0x002007b4 has 0x01
-        off0 = 0x002007b4 - 0x00200000
-        self.assertEqual(LIB.pops_apply_vmc0_disable(ptr, buf_size), -errno.EINVAL)
-        buf[off0] = 0x01
-        self.assertEqual(LIB.pops_apply_vmc0_disable(ptr, buf_size), 0)
-        self.assertEqual(buf[off0], 0x00)
+        # No core write for $NOVMC0 any more (it made POPS's card setup skip
+        # both cards); the original's $NOVMC0 only arms a per-pass store.
+        self.assertFalse(hasattr(LIB, "pops_apply_vmc0_disable"))
 
         # VMC1 disable: 0x0020d0e0 has 0x1480ffc1
         off1 = 0x0020d0e0 - 0x00200000

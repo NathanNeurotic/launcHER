@@ -956,8 +956,9 @@ int launchPOPS(int argc, char *argv[]) {
     cfg.builtin_break_call = builtinPlan.break_call;
     cfg.builtin_libcrypt2 = builtinPlan.libcrypt2;
     memcpy(cfg.builtin_libcrypt2_code, builtinPlan.libcrypt2_code, POPS_BUILTIN_LIBCRYPT2_SIZE);
-    if (builtinPlan.no_vmc1)
-      cfg.no_vmc1 = 1; /* the entry's gp+0x38bc=2, the same helper as $NOVMC1 */
+    /* The entry's gp+0x38bc = 2: $NOVMC1's core write, not its per-pass
+     * store, and POPStarter then makes no SLOT1.VMC. */
+    cfg.builtin_no_vmc1 = builtinPlan.no_vmc1;
     DPRINTF("POPS: Built-in entry %u: compat=0x%02X subcd=%u novmc1=%u fix=%u break=%u "
             "libcrypt2=%u nopal=%u\n", (unsigned)POPS_BUILTIN_ID(builtinId), builtinPlan.compat_modes,
             builtinPlan.subcd, builtinPlan.no_vmc1, builtinPlan.fix_call,
@@ -1632,20 +1633,31 @@ int launchPOPS(int argc, char *argv[]) {
     }
   }
 
-  /* Ensure backing save images exist before handoff */
-  if (!cfg.no_vmc0) {
-    res = pops_vmc_ensure(card0Path);
-    if (res) {
-      msg("POPS: Cannot prepare card %s: %d\n", card0Path, res);
-      return res;
-    }
+  /* Ensure backing save images exist before handoff. POPS opens card 0 on
+   * every launch, $NOVMC0 or not (that command only hides the card from the
+   * game, in the resident code), so SLOT0 is always prepared. */
+  res = pops_vmc_ensure(card0Path);
+  if (res) {
+    msg("POPS: Cannot prepare card %s: %d\n", card0Path, res);
+    return res;
   }
-  if (!cfg.no_vmc1) {
+  /* POPS never opens card 1 after $NOVMC1 or a built-in entry's card 1 off.
+   * POPStarter itself makes SLOT1.VMC before POPS runs on its USB and SMB
+   * launches unless a built-in entry turned card 1 off, and ignores a
+   * failure (0x8d8050); on the HDD it leaves the file to POPS. launcHER's
+   * launches from anything but the HDD stand in for USB and SMB, so after
+   * $NOVMC1 alone the file is made there too, a failure ignored: the card
+   * is never used. */
+  if (!cfg.no_vmc1 && !cfg.builtin_no_vmc1) {
     res = pops_vmc_ensure(card1Path);
     if (res) {
       msg("POPS: Cannot prepare card %s: %d\n", card1Path, res);
       return res;
     }
+  } else if (!cfg.builtin_no_vmc1 && device != Device_APA) {
+    res = pops_vmc_ensure(card1Path);
+    if (res)
+      DPRINTF("POPS: $NOVMC1: card %s not prepared (%d), not used\n", card1Path, res);
   }
 
   /* Reboot IOP with verified external IOPRP image */
