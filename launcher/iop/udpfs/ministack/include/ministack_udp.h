@@ -38,6 +38,8 @@ typedef struct udp_socket
  * Bind to UDP port, and start receiving UDP messages.
  */
 udp_socket_t *udp_bind(uint16_t port_src, udp_port_handler handler, void *handler_arg);
+/* Release the callback before its owning IRX can be unloaded. */
+void udp_unbind(udp_socket_t *socket);
 
 /**
  * Initialize UDP packet

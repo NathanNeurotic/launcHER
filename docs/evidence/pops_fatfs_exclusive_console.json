@@ -1,0 +1,23 @@
+{
+  "run_id": "20261014T122201-0037",
+  "outcome": "pass",
+  "exit_code": 0,
+  "elf_sha256": "1006a61565d47b4ad13c327fb4f971e1f215945b7a2ad624ac7e7bdcda5f8c1a",
+  "args": [
+    "--verify-fatfs",
+    "ata0:/LAUNCHER-TEST-20261013-A/FATFS-EXCL-20261014-A.BIN"
+  ],
+  "bdmfs_fatfs_sha256": "20e659bdb4ab14b821105c165b9a453d5d351a36cbd3ee9bc8c168bb75f90ed1",
+  "stdout": [
+    "POPS_FATFS create=3 path=ata0:/LAUNCHER-TEST-20261013-A/FATFS-EXCL-20261014-A.BIN",
+    "POPS_FATFS collision=-17 expected=-17",
+    "POPS_FATFS readback=8192 eof=0 close=3",
+    "POPS_FATFS PASS exclusive-create close-reopen byte-compare",
+    "[ps2rig] exit=0"
+  ],
+  "acceptance": "Physical ATA exclusive create preserved existing bytes with TRUNC/APPEND flags; 8192-byte close/reopen comparison passed.",
+  "limits": [
+    "Not a full Sony POPS game boot or in-game VMC test.",
+    "Power-cycle persistence remains unverified."
+  ]
+}

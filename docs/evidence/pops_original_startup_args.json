@@ -1,0 +1,60 @@
+{
+  "provenance": {
+    "original_elf_sha256": "59df3389c4df88a572daa720b05507c52c34eddfa0031a6fbeec55e0c2d0fcb1",
+    "regions": [
+      {
+        "start": 2098416,
+        "end": 2098940,
+        "sha256": "977b502095cd775ff36556fd9908cbd60bfbb6f3f77a6bda8cc7d158179ad84a"
+      },
+      {
+        "start": 2364576,
+        "end": 2364976,
+        "sha256": "4b6bcc81db42350bcf9ea793346ae55ab7ba892e4df37d6151a10bf00d6c74b1"
+      },
+      {
+        "start": 5250816,
+        "end": 5251120,
+        "sha256": "7c585cc7c139b1cf6ff0eef8324af3ddc08accf616a2d752abd03de5c86e57fc"
+      }
+    ],
+    "services": {
+      "0x23dae0": "modeled no-op",
+      "0x22faf0": "stop before runtime initialization"
+    },
+    "limits": "Original parser prefix and original R5900 string routine; no Sony CRT, IOP, game or save acceptance."
+  },
+  "hardware": {
+    "run_id": "20261014T205627-0043",
+    "outcome": "pass",
+    "exit_code": 0,
+    "elf_sha256": "39a7909fb257cfb8900730901fb573fb74aac4513d76b27902e059ec81a414d0",
+    "stdout": "loadelf: fname host:program.elf secname all\r\nInput ELF format filename = host:program.elf\r\n1 00100000 00027704 ...\r\nLoaded, host:program.elf\r\nstart address 0x11baa8\r\ngp address 00000000\r\nread/write allocate memory 4000\r\nPOPS_STARTUP_ARGS input=pops0:IMAGE.VCD name=VCD route=pops0:IMAGE.VCD\nPOPS_STARTUP_ARGS input=pfs0:IMAGE.VCD name=VCD route=pfs0:IMAGE.VCD\nPOPS_STARTUP_ARGS input=hdd0:PART:pfs0:/POPS/Tekken.VCD name=VCD route=hdd0:PART\nPOPS_STARTUP_ARGS input=pops0:IMAGE name= route=\nPOPS_STARTUP_ARGS input=IMAGE.VCD name= route=\nPOPS_STARTUP_ARGS_PASS bounded parser prefix, runtime init not executed\n[ps2rig] exit=0\n",
+    "artifacts": [
+      "program.elf",
+      "stdout.txt"
+    ],
+    "timings": {
+      "queue_ms": 0,
+      "upload_ms": 4,
+      "run_ms": 140
+    },
+    "started": "2026-10-14T20:56:27.0632048Z"
+  },
+  "emulator": {
+    "passed": true,
+    "elf_sha256": "39a7909fb257cfb8900730901fb573fb74aac4513d76b27902e059ec81a414d0",
+    "pcsx2_version": "2.9.52.0",
+    "bios_sha256": "f4c948e61a291d4b3f92a141e550cf8357204287a31ff784caccbedaef910c9d",
+    "observations": [
+      "POPS_STARTUP_ARGS input=pops0:IMAGE.VCD name=VCD route=pops0:IMAGE.VCD",
+      "POPS_STARTUP_ARGS input=pfs0:IMAGE.VCD name=VCD route=pfs0:IMAGE.VCD",
+      "POPS_STARTUP_ARGS input=hdd0:PART:pfs0:/POPS/Tekken.VCD name=VCD route=hdd0:PART",
+      "POPS_STARTUP_ARGS input=pops0:IMAGE name= route=",
+      "POPS_STARTUP_ARGS input=IMAGE.VCD name= route=",
+      "POPS_STARTUP_ARGS_PASS bounded parser prefix, runtime init not executed"
+    ]
+  },
+  "interpretation": "The current virtual filename enters Sony's nonempty-name route and is retained as route text. HDD-style arguments are split differently. This measures parsing only; it does not establish that every subsequent runtime service accepts this route.",
+  "limits": "Original parser prefix and string search, with modeled initial helper and stop before runtime init. No full Sony CRT, IOP initialization, game or save execution."
+}

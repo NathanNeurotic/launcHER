@@ -1,0 +1,31 @@
+{
+  "date": "2026-10-31",
+  "status": "original-address live adapter candidate; no installed bridge",
+  "original_checkpoint": "460e5ff",
+  "original_packed_sha256": "734c813e8e8ec2c6729ec5e15dd46ab696e90deeade8d0b2ca3ad03782781aa1",
+  "source_sha256": "1ab824c064710a47166773559f8fbc026ed66b3b50350c8de6a003853d3dfdd8",
+  "header_sha256": "885e9f6577cb027d6d2af7f86e871ae6806a55a3d1a5e975b04cc8d9138554a3",
+  "functions": {
+    "pops_progressive_live": {
+      "entry": "0x1401f8",
+      "size": 536,
+      "code_sha256": "9357c3e423dcf2fa70c0be2b0f7787f6bb64b1717e7719079098b5fafb561458"
+    },
+    "pops_progressive_update": {
+      "entry": "0x140000",
+      "size": 500,
+      "code_sha256": "29cb31dd321bcfef7c42cc268fda376e0a08b6b037c660446f170f18a0af7f8e"
+    }
+  },
+  "native_ordered_write_cases": 428,
+  "compiled_ee_final_memory_cases": 428,
+  "compiled_ee_audit": "32 MiB RAM + 16 KiB scratchpad, excluding 0x400-byte C working stack; C ABI saved GPR/SP/return checks",
+  "aggregate_tests": 118,
+  "aggregate_default_skips": 10,
+  "limits": [
+    "Native memory callbacks verify exact write addresses, values, widths and order; original memory reads are stable inputs.",
+    "Compiled EE uses real original-address volatile loads/stores; final memory and return compared, not independently traced write ordering.",
+    "Bounded original interpreter observes low 64 bits of LQ; upper EE lanes excluded.",
+    "No installed resident bridge, text/PATCH enablement, GS scanout or console acceptance."
+  ]
+}

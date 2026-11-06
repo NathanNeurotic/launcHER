@@ -1,0 +1,50 @@
+{
+  "provenance": {
+    "original_elf_sha256": "59df3389c4df88a572daa720b05507c52c34eddfa0031a6fbeec55e0c2d0fcb1",
+    "function_start": 2162832,
+    "function_end": 2163228,
+    "function_sha256": "4a38bbb0dc66fa28825f9765d03d62b6318dd657032ddf7d8489611c22a1f0d0",
+    "modeled_service_entries": {
+      "0x20fde0": "pops_probe_track",
+      "0x22e860": "pops_probe_wait",
+      "0x22e840": "pops_probe_signal",
+      "0x230330": "pops_probe_rpc",
+      "0x240f60": "pops_probe_log"
+    },
+    "limits": "Single original R5900 function, synthetic TOC/RPC/semaphore state; no console or save acceptance."
+  },
+  "gcc": {
+    "passed": true,
+    "elf_sha256": "bcc8fd6f27cd8c1e27ae181155253defafc57a24b3cfbfa02e0d49afe6689b3c",
+    "pcsx2_version": "2.9.52.0",
+    "bios_sha256": "f4c948e61a291d4b3f92a141e550cf8357204287a31ff784caccbedaef910c9d",
+    "observations": [
+      "[    3.2160] POPS_EE_IO_REQUEST lba=0 count=16 byte_offset=1048576",
+      "[    3.2162] POPS_EE_IO_REQUEST lba=16 count=16 byte_offset=1086208",
+      "[    3.2162] POPS_EE_IO_REQUEST lba=1234 count=16 byte_offset=3950944",
+      "[    3.2162] POPS_EE_IO_REQUEST lba=4999 count=2 byte_offset=12806224",
+      "[    3.2162] POPS_EE_IO_REQUEST lba=5000 count=1 byte_offset=12808576",
+      "[    3.2163] POPS_EE_IO_REQUEST lba=1234 count=16 byte_offset=3950944",
+      "[    3.2163] POPS_EE_IO_REQUEST lba=1234 count=16 byte_offset=3950944",
+      "[    3.2164] POPS_EE_IO_REQUEST_PASS cases=7 original_R5900=1 services=modeled"
+    ],
+    "scope": "Original R5900 FUN_00210090; track/RPC/semaphore/log services are doubles; no physical-console or save result"
+  },
+  "llvm": {
+    "passed": true,
+    "elf_sha256": "041da925de7edb302a4907c2ed8dc9f934813f24b22866353e535861e01aec0d",
+    "pcsx2_version": "2.9.52.0",
+    "bios_sha256": "f4c948e61a291d4b3f92a141e550cf8357204287a31ff784caccbedaef910c9d",
+    "observations": [
+      "[    2.8840] POPS_EE_IO_REQUEST lba=0 count=16 byte_offset=1048576",
+      "[    2.8842] POPS_EE_IO_REQUEST lba=16 count=16 byte_offset=1086208",
+      "[    2.8842] POPS_EE_IO_REQUEST lba=1234 count=16 byte_offset=3950944",
+      "[    2.8843] POPS_EE_IO_REQUEST lba=4999 count=2 byte_offset=12806224",
+      "[    2.8843] POPS_EE_IO_REQUEST lba=5000 count=1 byte_offset=12808576",
+      "[    2.8843] POPS_EE_IO_REQUEST lba=1234 count=16 byte_offset=3950944",
+      "[    2.8844] POPS_EE_IO_REQUEST lba=1234 count=16 byte_offset=3950944",
+      "[    2.8844] POPS_EE_IO_REQUEST_PASS cases=7 original_R5900=1 services=modeled"
+    ],
+    "scope": "Original R5900 FUN_00210090; track/RPC/semaphore/log services are doubles; no physical-console or save result"
+  }
+}

@@ -11,5 +11,6 @@
 #define I_udp_bind            DECLARE_IMPORT(4, udp_bind)
 #define I_udp_packet_init     DECLARE_IMPORT(5, udp_packet_init)
 #define I_udp_packet_send_ll  DECLARE_IMPORT(6, udp_packet_send_ll)
+#define I_udp_unbind          DECLARE_IMPORT(7, udp_unbind)
 
 #endif

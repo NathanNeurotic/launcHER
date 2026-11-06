@@ -1,0 +1,10 @@
+iomanX_IMPORTS_start
+I_iomanX_AddDrv
+iomanX_IMPORTS_end
+sysclib_IMPORTS_start
+I_strcmp
+I_memcpy
+sysclib_IMPORTS_end
+stdio_IMPORTS_start
+I_printf
+stdio_IMPORTS_end

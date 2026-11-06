@@ -1,3 +1,6 @@
 [submodule "launcher/iop/mmceman"]
 	path = launcher/iop/mmceman
 	url = https://github.com/ps2-mmce/mmceman.git
+[submodule "third_party/psxcore"]
+	path = third_party/psxcore
+	url = https://github.com/dnunezx/PSXCore.git

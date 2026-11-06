@@ -1,0 +1,29 @@
+{
+  "run": {
+    "run_id": "20261014T010845-0017",
+    "outcome": "no_result",
+    "detail": "read tcp 192.168.1.100:8608->192.168.1.10:18193: wsarecv: A connection attempt failed because the connected party did not properly respond after a period of time, or established connection failed because connected host has failed to respond.",
+    "elf_sha256": "381796abf437db41779a4a75caac05cf8e614635c1a2db75e475d7e0149d4776",
+    "stdout": "unmounting\r\nunmounted\r\nloadelf: fname host:program.elf secname all\r\nInput ELF format filename = host:program.elf\r\n1 00100000 00079284 ........\r\nLoaded, host:program.elf\r\nstart address 0x11cbc8\r\ngp address 00000000\r\n",
+    "artifacts": [
+      "program.elf",
+      "stdout.txt"
+    ],
+    "timings": {
+      "queue_ms": 0,
+      "upload_ms": 4,
+      "run_ms": 24452
+    },
+    "started": "2026-10-14T01:08:45.5061097Z"
+  },
+  "screen_observations": [
+    "foreign-reset-complete",
+    "production-iomanX id=25 start=0",
+    "production-fileXio id=26 start=0",
+    "controlled-backend id=27 start=0",
+    "executing diagnostic POPFS record address=0x000a4454 stage=100 value=0x00000003 repeated",
+    "uploaded IRX record address=0x00054eb4 stage=0"
+  ],
+  "interpretation": "The executing POPFS copy reached driver_name_in_use index 0. iomanX's first device pointer is the invalid value 3. Independent selected Sony IOMAN disassembly confirms a linked-list layout where the SDK hook assumes a flat pointer array.",
+  "full_bridge_acceptance": false
+}

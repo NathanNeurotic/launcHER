@@ -1,0 +1,28 @@
+{
+  "run": {
+    "run_id": "20261014T122341-0038",
+    "outcome": "hang",
+    "elf_sha256": "08d3e6afa2ec4185d0112cc214f32a009098d6d20989fd21a23ac852ef21d359",
+    "args": [
+      "ata0:/LAUNCHER-TEST-20261013-A/TEST.VCD"
+    ],
+    "stdout": "unmounting\r\nunmounted\r\nloadelf: fname host:program.elf secname all\r\nInput ELF format filename = host:program.elf\r\n0 01ccb2c0 0003a544 ....\r\nLoaded, host:program.elf\r\nstart address 0x1d0001c\r\ngp address 00000000\r\nread/write allocate memory 4000\r\npath: ata0:/LAUNCHER-TEST-20261013-A/TEST.VCD\n",
+    "artifacts": [
+      "program.elf",
+      "stdout.txt"
+    ],
+    "timings": {
+      "queue_ms": 0,
+      "upload_ms": 3,
+      "run_ms": 30000
+    },
+    "started": "2026-10-14T12:23:41.6915324Z"
+  },
+  "screen_observations": [
+    "Sony external IOP reset completed.",
+    "iomanX id=26 start=0; fileXio id=27 start=0.",
+    "mcman id=-200 start=0; service initialization failed -200."
+  ],
+  "limits": "Persistent GS trace confirms failure before Sony EE entry.",
+  "full_game_boot_verified": false
+}

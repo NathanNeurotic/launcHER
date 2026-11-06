@@ -1,0 +1,27 @@
+{
+  "date": "2026-10-31",
+  "status": "owned bridge verified under explicit EE-only adapters; launcher does not select it yet",
+  "image_sha256": "675fbd149defe7470f8d11d21fad1f89aef8fbd09fb92a74045439af97a8faf2",
+  "image_version": 3,
+  "header_size": 32,
+  "file_size": 1856,
+  "resident_size": 3936,
+  "entry": "0x143a5d8",
+  "bridge_size": 344,
+  "bridge_sha256": "66ece3baa1f6830756f1347f6170bf47940349854b57a41f6994623c3a733706",
+  "source_sha256": "8e9504159ec62be3ede0e46b57751991d5465bdaa6551e60a9e6d466e8b10844",
+  "cases": 428,
+  "negative_check": "wrong GP restore offset rejected",
+  "checks": [
+    "Opaque 128-bit GPR lane save/restore (a1 upper is dead); SP and all saved low GPRs.",
+    "Both HI/LO banks restored after adversarial C-entry clobbering.",
+    "Return to 0x21a098, a1=original DISPLAY, v0=0x12000000.",
+    "Original-address final fields, immutable owned image/config and stack boundary guards."
+  ],
+  "limits": [
+    "LQ/SQ and secondary HI1/LO1 transfers use private NOP translation slots and explicit semantics outside Unicorn hooks.",
+    "Ordinary compiled C/branch/load/store instructions execute in Unicorn.",
+    "Opaque upper lanes model preservation across C; this is not a complete EE/MMI emulator or hardware proof.",
+    "No selected progressive hook, text/PATCH state enablement or console/GS acceptance."
+  ]
+}

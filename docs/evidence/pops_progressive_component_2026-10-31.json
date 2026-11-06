@@ -1,0 +1,30 @@
+{
+  "date": "2026-10-31",
+  "status": "arithmetic/state component candidate; not wired to production",
+  "original_packed_sha256": "734c813e8e8ec2c6729ec5e15dd46ab696e90deeade8d0b2ca3ad03782781aa1",
+  "original_unpacked_sha256": "185177c28aaef30ad1e00697ad7b6de22b55bd855253ab4ede8b1ab2dfb08aee",
+  "original_source_window": [
+    "0x9842f0",
+    "0x984558"
+  ],
+  "original_runtime_entry": "0x2394f0",
+  "source_sha256": "1d294744b54bf792cfbf9089ab388a5fb899ce000c581ce822428a229373149b",
+  "header_sha256": "4436aaa39312c059632dc0bb5da953c52c167222e5d1135b2f453be02a04a4c0",
+  "compiled_entry": "0x140000",
+  "compiled_function_size": 500,
+  "compiled_code_sha256": "29cb31dd321bcfef7c42cc268fda376e0a08b6b037c660446f170f18a0af7f8e",
+  "state_size": 80,
+  "native_original_cases": 428,
+  "compiled_ee_original_cases": 428,
+  "aggregate_tests": 115,
+  "failures": 0,
+  "errors": 0,
+  "limits": [
+    "Original executes in fail-closed bounded integer interpreter, not independent full EE emulator.",
+    "Only low 64-bit view of original LQ observed; upper EE lanes excluded.",
+    "Comparison covers final state, not original transient write ordering.",
+    "Compiled EE executes in Unicorn; every mapped byte outside 80-byte state must remain unchanged.",
+    "Memory-write hooks excluded after isolated Unicorn 2.1.4 taken-branch/SD-delay fault; code hook used only for diagnostics.",
+    "No live hook, kernel/GS scanout, console acceptance or PATCH 6/7 support."
+  ]
+}

@@ -3,6 +3,7 @@
 #include "dprintf.h"
 #include "game_id.h"
 #include "handlers.h"
+#include "handler_pops.h"
 #include "init.h"
 #include "loader.h"
 #include <ctype.h>
@@ -40,7 +41,11 @@ void msg(const char *str, ...) {
 
   initScreen();
 
+#ifdef LAUNCHER_BOOT_TRACE
+  boot_trace_vprintf(str, args);
+#else
   scr_vprintf(str, args);
+#endif
 
   va_end(args);
 }
@@ -52,18 +57,36 @@ void fail(const char *str, ...) {
 
   initScreen();
 
+#ifdef LAUNCHER_BOOT_TRACE
+  boot_trace_vprintf(str, args);
+#else
   scr_vprintf(str, args);
+#endif
 
   va_end(args);
 
+#ifdef LAUNCHER_BOOT_TRACE
+  /* Diagnostic builds retain the error for physical capture after IOP reset. */
+#ifdef LAUNCHER_BOOT_TRACE_RECOVERY_ELF
+  scr_printf("\nDiagnostic recovery in 15 seconds: %s\n", LAUNCHER_BOOT_TRACE_RECOVERY_ELF);
+  sleep(15);
+  char *recoveryArgs[] = {(char *)LAUNCHER_BOOT_TRACE_RECOVERY_ELF};
+  LoadExecPS2(LAUNCHER_BOOT_TRACE_RECOVERY_ELF, 1, recoveryArgs);
+#endif
+  printf("[ps2rig] exit=1\n");
+  fflush(stdout);
+  SleepThread();
+  return;
+#else
   sleep(10);
 
   char *argv[1] = {"BootIllegal"};
   ExecOSD(1, argv);
+#endif
 }
 
 // Tests if file exists by opening it
-int tryFile(char *filepath) {
+int tryFile(const char *filepath) {
   int fd = open(filepath, O_RDONLY);
   if (fd < 0) {
     return fd;
@@ -83,6 +106,9 @@ int handleGenericPath(DeviceType device, int argc, char *argv[]) {
   int res = initModules(device);
   if (res)
     return res;
+
+  if (device == Device_SMB)
+    settings.dev9ShutdownType = ShutdownType_None;
 
   if (tryFile(argv[0]))
     return -ENOENT;
@@ -150,6 +176,9 @@ int launchPath(int argc, char *argv[]) {
     ret = handleGenericPath(Device_XFROM, argc, argv);
     break;
 #endif
+  case Device_SMB:
+    ret = handleGenericPath(Device_SMB, argc, argv);
+    break;
   case Device_ROM:
     ret = execROMPath(argc, argv);
     break;
@@ -239,8 +268,13 @@ int parseAPAPath(const char *path, char *mountPart, size_t partSize, const char 
   if (pfsToken && (!partEnd || pfsToken < partEnd))
     partEnd = pfsToken;
 
-  if (!partEnd)
+  if (!partEnd) {
     partEnd = partStart + strlen(partStart);
+    const char *ext = strrchr(partStart, '.');
+    if (ext && (!strcasecmp(ext, ".elf") || !strcasecmp(ext, ".vcd"))) {
+      partEnd = ext;
+    }
+  }
 
   size_t partLen = (size_t)(partEnd - partStart);
   if (partLen == 0)
@@ -271,7 +305,7 @@ int parseAPAPath(const char *path, char *mountPart, size_t partSize, const char 
 }
 
 // Attempts to guess device type from path
-DeviceType guessDeviceType(char *path) {
+DeviceType guessDeviceType(const char *path) {
   if (!strncmp("mc", path, 2)) {
     return Device_MemoryCard;
 #ifdef MMCE
@@ -303,7 +337,7 @@ DeviceType guessDeviceType(char *path) {
     return Device_UDPFS;
 #endif
 #ifdef APA
-  } else if (!strncmp("hdd", path, 3) || path[0] == '+' || !strncmp("pfs", path, 3) || !strncmp("__", path, 2) || strstr(path, ":pfs")) {
+  } else if (!strncmp("hdd", path, 3) || path[0] == '+' || !strncmp("pfs", path, 3) || !strncmp("__", path, 2) || !strncasecmp("pp.", path, 3) || strstr(path, ":pfs")) {
     return Device_APA;
 #endif
 #ifdef CDROM
@@ -314,6 +348,8 @@ DeviceType guessDeviceType(char *path) {
   } else if (!strncmp("xfrom", path, 5)) {
     return Device_XFROM;
 #endif
+  } else if (!strncmp("smb", path, 3)) {
+    return Device_SMB;
   } else if (!strncmp("rom", path, 3))
     return Device_ROM;
 
@@ -344,16 +380,57 @@ char *normalizePath(char *path, DeviceType type) {
     break;
   }
   case Device_MemoryCard:
-  case Device_MMCE:
   case Device_CDROM:
   case Device_UDPFS:
-  case Device_ATA:
   case Device_XFROM:
-  case Device_MX4SIO:
-  case Device_iLink:
   case Device_UDPBD:
     strncat(pathbuffer, path, PATH_MAX - 6);
     break;
+  case Device_MMCE: {
+    const char *colon = strchr(path, ':');
+    if (colon && colon == path + 4) {
+      snprintf(pathbuffer, sizeof(pathbuffer), "mmce0:%s", colon + 1);
+    } else {
+      strncat(pathbuffer, path, PATH_MAX - 6);
+    }
+    break;
+  }
+  case Device_ATA: {
+    const char *colon = strchr(path, ':');
+    if (colon && colon == path + 3) {
+      snprintf(pathbuffer, sizeof(pathbuffer), "ata0:%s", colon + 1);
+    } else {
+      strncat(pathbuffer, path, PATH_MAX - 6);
+    }
+    break;
+  }
+  case Device_MX4SIO: {
+    const char *colon = strchr(path, ':');
+    if (colon && colon == path + 6) {
+      snprintf(pathbuffer, sizeof(pathbuffer), "mx4sio0:%s", colon + 1);
+    } else {
+      strncat(pathbuffer, path, PATH_MAX - 6);
+    }
+    break;
+  }
+  case Device_iLink: {
+    const char *colon = strchr(path, ':');
+    if (colon && colon == path + 5) {
+      snprintf(pathbuffer, sizeof(pathbuffer), "ilink0:%s", colon + 1);
+    } else {
+      strncat(pathbuffer, path, PATH_MAX - 6);
+    }
+    break;
+  }
+  case Device_SMB: {
+    const char *colon = strchr(path, ':');
+    if (colon && colon == path + 3) {
+      snprintf(pathbuffer, sizeof(pathbuffer), "smb0:%s", colon + 1);
+    } else {
+      strncat(pathbuffer, path, PATH_MAX - 6);
+    }
+    break;
+  }
   // BDM USB
   case Device_USB:
     char devNumber = path[3]; // usb
@@ -380,23 +457,42 @@ char *normalizePath(char *path, DeviceType type) {
   return pathbuffer;
 }
 
-// Mounts the partition specified in path
-int mountPFS(char *path) {
+/* The normal ELF loader mounts read-only. POPS needs write access to
+ * memory-card images on the selected APA partition after its IOP reset. */
+static int mountPFSMode(char *path, int flags) {
 #ifndef APA
+  (void)path;
+  (void)flags;
   return -ENODEV;
 #else
   char mountPart[256];
-  if (parseAPAPath(path, mountPart, sizeof(mountPart), NULL) != 0 || mountPart[0] == '\0') {
+  if (!path || parseAPAPath(path, mountPart, sizeof(mountPart), NULL) != 0 ||
+      mountPart[0] == '\0')
     return -ENODEV;
-  }
+  DPRINTF("Mounting %s to %s (flags %d)\n", mountPart, PFS_MOUNTPOINT, flags);
+  int res = fileXioMount(PFS_MOUNTPOINT, mountPart, flags);
+  /* The old helper treated every nonzero mount result as failure. Preserve
+   * that rule, while forwarding the IOP error code when it is negative. */
+  return res == 0 ? 0 : (res < 0 ? res : -ENODEV);
+#endif
+}
 
-  // Mount the partition
-  DPRINTF("Mounting %s to %s\n", mountPart, PFS_MOUNTPOINT);
-  int res = fileXioMount(PFS_MOUNTPOINT, mountPart, FIO_MT_RDONLY);
+int mountPFS(char *path) { return mountPFSMode(path, FIO_MT_RDONLY); }
+int mountPFSWritable(char *path) { return mountPFSMode(path, FIO_MT_RDWR); }
+
+/* POPS first needs the normal read-only mount for dependency verification,
+ * then a writable mount to create absent VMC images before the IOP reboot.
+ * The unmount result must not be discarded: a busy partition cannot be
+ * safely remounted over the same pfs0: mountpoint. */
+int remountPFSWritable(char *path) {
+#ifndef APA
+  (void)path;
+  return -ENODEV;
+#else
+  int res = fileXioUmount(PFS_MOUNTPOINT);
   if (res)
-    return -ENODEV;
-
-  return 0;
+    return res < 0 ? res : -ENODEV;
+  return mountPFSWritable(path);
 #endif
 }
 
@@ -523,6 +619,9 @@ int parseGlobalFlags(int argc, char *argv[]) {
 }
 
 int LoadELFFromFile(int argc, char *argv[]) {
+  if (isPopsTarget(argv[0]))
+    return launchPOPS(argc, argv);
+
   if (settings.titleID || (settings.flags & FLAG_APP_GAMEID)) {
     char *titleID = settings.titleID;
     if (!titleID)

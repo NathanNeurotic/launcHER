@@ -1,0 +1,43 @@
+{
+  "run_id": "20261014T121822-0034",
+  "outcome": "pass",
+  "exit_code": 0,
+  "elf_sha256": "cf5c1340cd4e22cba384255bf65295d7ac25edeca38d998ae8c3bcf368ba0124",
+  "args": [
+    "--inspect-config",
+    "ata0:/LAUNCHER-TEST-20261013-A/",
+    "TEST"
+  ],
+  "bdmfs_fatfs_sha256": "20e659bdb4ab14b821105c165b9a453d5d351a36cbd3ee9bc8c168bb75f90ed1",
+  "stdout": [
+    "POPS config: mc0:/POPSTARTER/PATCHES.TXT open=0 errno=2",
+    "POPS config: mc0:/POPSTARTER/MODES.TXT open=0 errno=2",
+    "POPS config: mc0:/POPSTARTER/CHEATS.TXT open=0 errno=2",
+    "POPS config: mc1:/POPSTARTER/PATCHES.TXT open=0 errno=6",
+    "POPS config: mc1:/POPSTARTER/MODES.TXT open=0 errno=6",
+    "POPS config: mc1:/POPSTARTER/CHEATS.TXT open=0 errno=6",
+    "POPS config: mc0:/POPS/PATCHES.TXT open=0 errno=2",
+    "POPS config: mc0:/POPS/MODES.TXT open=0 errno=2",
+    "POPS config: mc0:/POPS/CHEATS.TXT open=0 errno=2",
+    "POPS config: mc1:/POPS/PATCHES.TXT open=0 errno=6",
+    "POPS config: mc1:/POPS/MODES.TXT open=0 errno=6",
+    "POPS config: mc1:/POPS/CHEATS.TXT open=0 errno=6",
+    "POPS config: ata0:/LAUNCHER-TEST-20261013-A/PATCHES.TXT open=0 errno=2",
+    "POPS config: ata0:/LAUNCHER-TEST-20261013-A/MODES.TXT open=0 errno=2",
+    "POPS config: ata0:/LAUNCHER-TEST-20261013-A/CHEATS.TXT open=0 errno=2",
+    "POPS config: ata0:/LAUNCHER-TEST-20261013-A/DISCS.TXT open=0 errno=2",
+    "POPS config: ata0:/LAUNCHER-TEST-20261013-A/VMCDIR.TXT open=0 errno=2",
+    "POPS config: ata0:/LAUNCHER-TEST-20261013-A/TEST/VMCDIR.TXT open=0 errno=2",
+    "POPS config: ata0:/LAUNCHER-TEST-20261013-A/TEST/PATCHES.TXT open=0 errno=2",
+    "POPS config: ata0:/LAUNCHER-TEST-20261013-A/TEST/MODES.TXT open=0 errno=2",
+    "POPS config: ata0:/LAUNCHER-TEST-20261013-A/TEST/CHEATS.TXT open=0 errno=2",
+    "POPS config: ata0:/LAUNCHER-TEST-20261013-A/TEST/DISCS.TXT open=0 errno=2",
+    "POPS_CONFIG result=0 vmcdir= modes=0 cheats=0 discs=0",
+    "[ps2rig] exit=0"
+  ],
+  "acceptance": "Physical ATA configuration discovery passed.",
+  "limits": [
+    "Not a full Sony POPS game boot or in-game VMC test.",
+    "Power-cycle persistence remains unverified."
+  ]
+}

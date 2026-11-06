@@ -142,10 +142,9 @@ static int udpfs_close(iomanX_iop_file_t *f)
         return -EBADF;
 
     /* Call core close */
-    udpfs_core_close(g_fds[fd_idx].server_handle);
-
+    int result = udpfs_core_close(g_fds[fd_idx].server_handle);
     _free_fd(fd_idx);
-    return 0;
+    return result;
 }
 
 static int udpfs_read(iomanX_iop_file_t *f, void *buffer, int size)
@@ -402,7 +401,5 @@ int udpfs_init(void)
     M_DEBUG("UDPFS over UDPRDMA by Maximus32\n");
 
     /* Register iomanX device */
-    AddDrv(&udpfs_device);
-
-    return 0;
+    return AddDrv(&udpfs_device);
 }

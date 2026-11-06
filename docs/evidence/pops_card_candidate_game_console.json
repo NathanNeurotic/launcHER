@@ -1,0 +1,27 @@
+{
+  "run": {
+    "run_id": "20261014T123524-0039",
+    "outcome": "hang",
+    "elf_sha256": "a6429d70a8ac0fbe9fd940d1aa879a2ca4fa1ac9be94aaa07345dc1ea691451b",
+    "args": [
+      "ata0:/LAUNCHER-TEST-20261013-A/TEST.VCD"
+    ],
+    "stdout": "loadelf: fname host:program.elf secname all\r\nInput ELF format filename = host:program.elf\r\n0 01cca590 0003b274 ....\r\nLoaded, host:program.elf\r\nstart address 0x1d0001c\r\ngp address 00000000\r\nread/write allocate memory 4000\r\npath: ata0:/LAUNCHER-TEST-20261013-A/TEST.VCD\n",
+    "artifacts": [
+      "program.elf",
+      "stdout.txt"
+    ],
+    "timings": {
+      "queue_ms": 0,
+      "upload_ms": 3,
+      "run_ms": 30000
+    },
+    "started": "2026-10-14T12:35:24.7727177Z"
+  },
+  "screen_observations": [
+    "Program upload and launch confirmed through ps2link stdout.",
+    "Final OBS console capture was black; no explicit success/error marker observed."
+  ],
+  "limits": "No game-boot or card-service acceptance. Rig hang is expected after removing ps2link but cannot establish success.",
+  "full_game_boot_verified": false
+}

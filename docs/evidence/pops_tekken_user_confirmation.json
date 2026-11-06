@@ -1,0 +1,30 @@
+{
+  "audit_date": "2026-10-28",
+  "run_id": "20261028T012047-0126",
+  "elf_sha256": "b1227bb14d645237ceeca330d3c45864e3c3aa37731a816f0433b3b0ab04155d",
+  "target": "ata0:/POPS/Tekken.VCD",
+  "rig_outcome": "hang",
+  "observation_type": "user confirmation",
+  "confirmation_utc": "2026-10-28T02:28:13Z",
+  "user_response": "It worked!",
+  "test_request": [
+    "Verify gameplay controls",
+    "Trigger IGR",
+    "Check clean return to PS2 browser/dashboard"
+  ],
+  "source_conversation": "86297c85-867f-4578-8dd5-381e2b25ad59",
+  "source_steps": {
+    "request": 8473,
+    "confirmation": 8474
+  },
+  "interpretation": "Limited user-observed acceptance of the requested Tekken gameplay-controls/IGR/browser-return test. The rig log independently establishes ELF delivery, not those gameplay results.",
+  "not_measured": [
+    "frame rate",
+    "audio/CDDA fidelity",
+    "input latency",
+    "VMC durability",
+    "disc change",
+    "other games/devices"
+  ],
+  "audit": "../POPS_PARITY_AUDIT_2026-10-28.md"
+}
