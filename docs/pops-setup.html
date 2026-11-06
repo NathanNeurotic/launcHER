@@ -58,7 +58,7 @@
 
 <h1>Sony POPS &amp; <span class="g">PS1 Setup</span></h1>
 <p class="lead">
-  launcHER replaces POPStarter. It loads Sony's official PlayStation 1 emulator (POPS), mounts your storage, applies runtime patches, and boots your <code>.VCD</code> game images across all supported PS2 storage devices.
+  Draft PR #23 implements substantial independent POPStarter-r13 command, configuration, storage and resident-runtime functionality around user-supplied Sony POPS. It is not a completed drop-in replacement or a claim of compatibility across all storage devices. Current host and component evidence does not establish console behavior.
 </p>
 
 <div class="callout info">
@@ -210,7 +210,7 @@ arg=-dev9=NIC</code></pre>
   </table>
 </div>
 
-<h3>Method B: Direct Binary Quickboot (POPStarter Drop-in Replacement)</h3>
+<h3>Method B: Direct Binary Quickboot (draft PR #23)</h3>
 <p>
   When running without a <code>launcHER.CNF</code> file, launcHER discovers game images based on its executable filename:
 </p>
@@ -286,7 +286,7 @@ arg=-dev9=NIC</code></pre>
       </tr>
       <tr>
         <td><code>$480p</code></td>
-        <td>Only turns off the automatic PAL switch for now. The progressive mode itself needs POPStarter's resident code, which launcHER does not have yet.</td>
+        <td>Selects launcHER's independent guarded progressive bridge. Host and component checks pass; progressive picture output on a physical console remains unverified.</td>
       </tr>
     </tbody>
   </table>

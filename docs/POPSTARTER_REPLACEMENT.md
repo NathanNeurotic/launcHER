@@ -60,7 +60,7 @@ runtime-correction identity with the same complete baseline (`POPS_CORE_ALL`)
 used by the launcher, after its separate original-only write comparison.
 
 A rebuildable R5900 probe uses synthetic core data, no IOP reset and no game
-or save file access:
+or save file access. Build the diagnostic probe with [ps2build](https://ps2build.dev/):
 
 ```sh
 python tools/prepare_pops_fix_files_probe.py --out build/fix-files-FRESH

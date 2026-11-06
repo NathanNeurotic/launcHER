@@ -65,7 +65,7 @@ What follows is the record of the removed mechanism.
   untouched; unconfigured bridge intercepts nothing.
 - **Host evidence:** `tools/test_subq_bridge.py` — policy matching, popfs
   GET_SUBQ forwarding, and error propagation. IOP syntax check of the iomanX
-  hook against ps2build headers.
+  hook against [ps2build](https://ps2build.dev/) headers.
 - **Open gate (explicit):** the intercepted pair `devctl("cdrom0:", 0x05)` is a
   documented hypothesis — the evidence docs leave Sony IOPCD's actual
   subchannel request path unconfirmed ("Open evidence gates", launcHER

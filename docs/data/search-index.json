@@ -230,7 +230,7 @@
   {
     "title": "Sony POPS & PS1 Setup Guide",
     "cat": "pops",
-    "text": "Run PlayStation 1 VCD games using Sony POPS with launcHER: replaces POPStarter, launches .VCD images directly, and mounts storage without BDMAssault.",
+    "text": "Draft PR #23: independent POPStarter-r13 command, configuration, storage and resident-runtime work around user-supplied Sony POPS. In progress, not a completed drop-in replacement; host and component evidence does not establish console compatibility.",
     "url": "pops-setup.html"
   },
   {

@@ -140,7 +140,7 @@ Its complete function SHA256 is
 `4a38bbb0dc66fa28825f9765d03d62b6318dd657032ddf7d8489611c22a1f0d0`.
 It is **not** translated to a MIPS32 or x64 surrogate.
 
-Both GCC and LLVM probe harnesses built with local ps2build v2026.10.13 and
+Both GCC and LLVM probe harnesses built with local [ps2build](https://ps2build.dev/) v2026.10.13 and
 passed seven cases in PCSX2 2.9.52.0. The same original function bytes execute
 at their original address with original GP `0x0050a670`. Track lookup,
 semaphore services, SIF RPC delivery and error logging are explicit doubles.

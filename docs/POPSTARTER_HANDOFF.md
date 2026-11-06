@@ -140,7 +140,7 @@ Sony startup or reproduce every post-reset EE lifetime condition. No speculative
 interrupt change was made. See `docs/evidence/pops_owned_trampoline_probe.json`.
 
 Reproduce with `prepare_pops_trampoline_probe.py --out build/FRESH --linkfile
-SDK_STARTUP_EE_LINKFILE`, then ps2build GCC. Validate `--verify-parent` before
+SDK_STARTUP_EE_LINKFILE`, then [ps2build](https://ps2build.dev/) GCC. Validate `--verify-parent` before
 running: its full load/BSS must fit 0x100000..0x200000, disjoint from destination
 and staging. The embedded child is stripped to avoid spilling the parent into
 the child destination. The isolated runner accepts `-ResultPrefix POPS_TRAMPOLINE`.

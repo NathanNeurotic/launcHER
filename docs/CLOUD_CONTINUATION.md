@@ -1,6 +1,6 @@
 # Continuation checkpoint — 2026-10-31
 
-Continue [draft launcHER PR #23](https://github.com/NathanNeurotic/launcHER/pull/23) on `codex/popstarter-replacement`. Fetch before editing, preserve newer work, publish validated incremental commits on this same PR, and include `Co-authored-by: ChatGPT <chatgpt@openai.com>`. Keep the PR draft and unmerged.
+Continue [draft launcHER PR #23](https://github.com/NathanNeurotic/launcHER/pull/23) on `codex/popstarter-replacement`. Fetch before editing, preserve newer work, publish validated incremental commits on this same PR, and keep the PR draft and unmerged.
 
 ## Current continuation — R27, 2026-10-31
 
@@ -24,7 +24,7 @@ Continue [draft launcHER PR #23](https://github.com/NathanNeurotic/launcHER/pull
   states. Ordered PAL/region retains 60 original combinations. Read the linked
   contracts; these are component proofs, not gameplay or picture acceptance.
 - Current validation: **121 aggregate external tests**, default 12 optional
-  skips; **19 host entry points**; normal and trace/debug target builds.
+  skips; **23 host entry points**; normal and trace/debug target builds.
   Existing VBLANK/manual image checks and the built progressive bridge pass.
   No new console run occurred. Latest published bridge checkpoint `9bf4fc6`
   has green build/host/argv CI; check current-head CI after publishing R27.
@@ -111,7 +111,7 @@ Recovered remote heads: launcHER `8c27b0c72091708103f820c2edda97ba764b3b90`; REP
 - For Tekken run `20261028T012047-0126`, the user confirmed “It worked!” after a specific gameplay-controls/IGR/browser-return test request. Retain that limited user-observed result. It does not establish a measured frame rate, CDDA quality, latency or broad compatibility.
 - VMC runs `20261028T063429-0127` and `20261028T063634-0128` contain no save/reload, card digest, cold-power-cycle or disc-change evidence. Their durability/multi-disc completion claim is withdrawn. A rig `hang` after Sony reset is neither independent failure proof nor success proof.
 - Cheat evaluation, disc swapping and SubQ EE helpers have host tests, but no production caller installs/invokes them during Sony execution. Their presence does not establish resident runtime support. Current cheat-file acceptance can therefore be silent even though its parser succeeds.
-- All 15 launcHER host entry points pass. Recovered-head GitHub normal/diagnostic builds, packaging and argument checks passed. Check later-head CI separately. No new hardware run occurred during this audit.
+- All 23 launcHER host entry points pass. Recovered-head GitHub normal/diagnostic builds, packaging and argument checks passed. Check later-head CI separately. No new hardware run occurred during this audit.
 - REPOP's later size snapshot was manually assigned expected values and is invalidated. Its interrupted EE build fails with 59 errors; committed checkpoint syntax checks reproduce 50 errors across two reconstruction files. Passing Python tests do not compile those files. The exact unfinished Batch 15 diff is preserved as a recovery patch in REPOP, rather than silently discarded or promoted as implemented code.
 
 ## Next implementation steps
