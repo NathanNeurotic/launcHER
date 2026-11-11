@@ -276,25 +276,130 @@ typedef struct {
 int pops_trojan_verdict(const void *file, size_t size, unsigned slot,
                         unsigned fingerprint_builtin_id, PopsTrojanInfo *out);
 
+/* Where POPStarter r13 keeps things a TROJAN payload can depend on. It
+ * overwrites two parts of the POPS core with code of its own: 0x232790..
+ * 0x232ec8 (reached from POPS's GP1 path) and 0x238a90..0x2397f0. Ten
+ * two-word slots in the first part are what TROJAN files hook: five from
+ * 0x2327d0 and five from 0x232d08, each "beq zero,zero,+1; nop" until a
+ * file writes "jal entry" over it; the two words after each five are where
+ * its code goes on. launcHER has none of that code in the POPS core. */
+#define POPS_TROJAN_BLOCK1_BASE  UINT32_C(0x00232790)
+#define POPS_TROJAN_BLOCK1_LIMIT UINT32_C(0x00232ec8)
+#define POPS_TROJAN_BLOCK2_BASE  UINT32_C(0x00238a90)
+#define POPS_TROJAN_BLOCK2_LIMIT UINT32_C(0x002397f0)
+#define POPS_TROJAN_480P_BASE    UINT32_C(0x002394f0) /* its 480p handler, inside the second part */
+#define POPS_TROJAN_480P_LIMIT   UINT32_C(0x00239758)
+#define POPS_TROJAN_SLOTS_A      UINT32_C(0x002327d0)
+#define POPS_TROJAN_SLOTS_B      UINT32_C(0x00232d08)
+#define POPS_TROJAN_SLOTS_SPAN   0x30u /* five slots and the two words after them */
+#define POPS_TROJAN_SLOTS_HOOKS  0x28u /* the five slots */
+#define POPS_TROJAN_MAIN_BASE    UINT32_C(0x00870000) /* POPStarter's own program */
+#define POPS_TROJAN_MAIN_LIMIT   UINT32_C(0x00b00000)
+#define POPS_TROJAN_BUILTIN_BASE UINT32_C(0x01410000) /* a built-in entry's fix code */
+/* Memory above the POPS image where every TROJAN payload of the examined
+ * files loads (0x01431000..0x0152c3c0). launcHER hosts a payload anywhere
+ * in the arena except its own resident image and the breakpoint handler
+ * after it (the "owned" part). */
+#define POPS_TROJAN_ARENA_BASE   UINT32_C(0x01420000)
+#define POPS_TROJAN_ARENA_LIMIT  UINT32_C(0x01600000)
+#define POPS_TROJAN_OWNED_BASE   UINT32_C(0x0143a000)
+#define POPS_TROJAN_OWNED_LIMIT  UINT32_C(0x01460200)
+
+/* What a payload's code refers to, from pops_trojan_scan. */
+#define POPS_TROJAN_REF_SLOT     0x01u /* the slot words, or a jump to the words after them */
+#define POPS_TROJAN_REF_BLOCK1   0x02u /* anything else in POPStarter's first part */
+#define POPS_TROJAN_REF_480P     0x04u
+#define POPS_TROJAN_REF_BLOCK2   0x08u /* the second part outside the 480p handler */
+#define POPS_TROJAN_REF_BUILTIN  0x10u
+#define POPS_TROJAN_REF_OWNED    0x20u /* POPStarter's code where launcHER's resident image is */
+#define POPS_TROJAN_REF_MAIN     0x40u /* a jump, load or store into POPStarter's program */
+
+/* Bytes of work memory pops_trojan_scan needs for a payload of `size` bytes. */
+#define POPS_TROJAN_SCAN_WORK(size) ((((size) / 4u + 7u) / 8u) * 2u)
+
+/* Follows the payload's code from `entry` and from every address in the
+ * payload that a jump it contains or builds can reach, and reports which of
+ * the places above it names: direct j/jal, constants made by lui with
+ * ori/addiu/addi/daddiu/daddi (a constant that is itself a j/jal word counts
+ * as that jump: payloads install such words into POPS), loads and stores
+ * through such a constant or through gp (POPS's 0x50a670), and jr/jalr of
+ * one. Constants are forgotten at every branch and call. This is a static
+ * reading: an address the payload computes any other way is not seen, so a
+ * clean result is not proof that a payload needs nothing of POPStarter's.
+ * The payload's own range never counts. Returns 0 with *flags set, or
+ * POPS_FILE_INVALID for a bad argument, a size or address that is not a
+ * multiple of 4, an entry outside the payload or too little work memory. */
+int pops_trojan_scan(const void *payload, uint32_t size, uint32_t load, uint32_t entry,
+                     void *work, size_t work_size, uint32_t *flags);
+
 /* Why launcHER does not load a file POPStarter would apply. POPStarter
  * copies any payload to any address and writes any hook; launcHER loads
- * only what it can place without damaging POPS or itself. */
+ * only what it can place without damaging POPS or itself, and only when
+ * nothing the payload names is missing. */
 enum {
   POPS_TROJAN_HOSTED = 0,
   POPS_TROJAN_NO_UNALIGNED, /* load, entry, hook or size not a multiple of 4 */
   POPS_TROJAN_NO_ENTRY,     /* entry outside the payload */
-  POPS_TROJAN_NO_RANGE,     /* payload outside what launcHER can host */
-  POPS_TROJAN_NO_HOOK       /* hook outside the POPS core, or inside the payload */
+  POPS_TROJAN_NO_RANGE,     /* payload not wholly in the core or in the arena, or over POPStarter's parts */
+  POPS_TROJAN_NO_HOOK,      /* hook outside the POPS core, inside the payload, or in POPStarter's parts but not a slot */
+  POPS_TROJAN_NO_SPACE,     /* more payloads or payload bytes than one launch can hold */
+  POPS_TROJAN_NO_SLOT,      /* needs the slot chain and it cannot be offered */
+  POPS_TROJAN_NO_480P,      /* names POPStarter's 480p handler */
+  POPS_TROJAN_NO_BLOCK2,    /* names POPStarter's second part */
+  POPS_TROJAN_NO_BUILTIN,   /* names a built-in entry's fix code */
+  POPS_TROJAN_NO_OWNED,     /* names POPStarter's code at 0x0143a000..0x014601ff */
+  POPS_TROJAN_NO_BLOCK1,    /* names POPStarter's first part outside the slots */
+  POPS_TROJAN_NO_MAIN       /* names POPStarter's program */
 };
 
 /* A short English clause for a POPS_TROJAN_NO_* value, for the launch log. */
 const char *pops_trojan_reason_text(unsigned reason);
 
-/* One launch's TROJAN state, shared by every TROJAN_n.BIN of both scopes. */
+/* A payload that loads above the POPS image. Its bytes wait in the set's
+ * holding memory until the launch hands over (pops_trojan_copy_out). */
+#define POPS_TROJAN_MAX_PAYLOADS 20u /* ten root files and ten of the game */
+typedef struct {
+  uint32_t address;
+  uint32_t size;
+  uint32_t hold; /* offset in the holding memory */
+} PopsTrojanPayload;
+
+/* One launch's TROJAN state, shared by every TROJAN_n.BIN of both scopes.
+ * Zero it, then set fingerprint_id, the holding memory and the work
+ * memory. Without holding memory no payload above the image is hosted;
+ * without work memory (POPS_TROJAN_SCAN_WORK of the payload) no file is. */
 typedef struct {
   uint16_t fingerprint_id; /* built-in entry picked by the disc's fingerprint, 0: none */
   uint8_t reason;          /* POPS_TROJAN_NO_* of the last unhosted file */
+  uint8_t payload_count;
+  uint32_t refs;           /* POPS_TROJAN_REF_* of the last scanned file */
+  uint8_t *hold;
+  uint32_t hold_size;
+  uint32_t hold_used;
+  void *work;
+  uint32_t work_size;
+  PopsTrojanPayload payload[POPS_TROJAN_MAX_PAYLOADS];
 } PopsTrojanSet;
+
+/* Whether [address, address + size) is arena memory launcHER can give a payload. */
+int pops_trojan_in_arena(uint32_t address, uint32_t size);
+
+/* A range the copy must leave alone, [start, end). */
+typedef struct {
+  uint32_t start;
+  uint32_t end;
+} PopsTrojanKeep;
+
+/* Copies every held payload to its address, in the order the files were
+ * read (a later file wins where two overlap, as with the original's
+ * memcpy). `ram` is the memory at address `ram_base`, valid up to
+ * `ram_limit`. Before the first byte is written every record is checked
+ * again: inside the arena, inside the given memory, off every `keep`
+ * range, and inside the holding memory, which no destination may touch.
+ * Returns the number of payloads copied, or POPS_FILE_INVALID with nothing
+ * written. */
+int pops_trojan_copy_out(const PopsTrojanSet *set, uint8_t *ram, uint32_t ram_base,
+                         uint32_t ram_limit, const PopsTrojanKeep *keep, unsigned keep_count);
 
 typedef enum {
   POPS_PATCH_VIDEO_NONE,

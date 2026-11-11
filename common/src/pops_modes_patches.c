@@ -388,6 +388,28 @@ static int fix_in_core(uint32_t address, uint32_t length, size_t core_size) {
          length <= core_size - (address - POPS_CORE_BASE_ADDR);
 }
 
+static int fix_ranges_meet(uint32_t address, uint32_t length, uint32_t base, uint32_t limit) {
+  return length && address < limit && (uint64_t)address + length > base;
+}
+
+/* One of POPStarter's ten TROJAN slots: the first word of a pair. */
+static int fix_slot_hook(uint32_t hook) {
+  for (unsigned i = 0; i < 2; ++i) {
+    uint32_t base = i ? POPS_TROJAN_SLOTS_B : POPS_TROJAN_SLOTS_A;
+    if (hook >= base && hook - base < POPS_TROJAN_SLOTS_HOOKS && !((hook - base) & 7))
+      return 1;
+  }
+  return 0;
+}
+
+/* pops_external.h cannot see these headers; the numbers must agree. */
+_Static_assert(POPS_TROJAN_BUILTIN_BASE == POPS_BUILTIN_FIX_ADDR &&
+               POPS_TROJAN_ARENA_BASE == POPS_BUILTIN_FIX_LIMIT &&
+               POPS_TROJAN_OWNED_BASE == POPS_RESIDENT_BASE &&
+               POPS_RESIDENT_LIMIT == POPS_BUILTIN_BREAK_ADDR &&
+               POPS_TROJAN_OWNED_LIMIT == POPS_BUILTIN_BREAK_LIMIT,
+               "TROJAN arena constants");
+
 int pops_fix_stage_trojan(PopsFixContext *context, PopsTrojanSet *set, void *staged_core,
                           size_t core_size, const void *file, size_t file_size,
                           unsigned slot) {
@@ -399,7 +421,13 @@ int pops_fix_stage_trojan(PopsFixContext *context, PopsTrojanSet *set, void *sta
       fix_alias(context, sizeof(*context), file, file_size) ||
       fix_alias(file, file_size, bytes, core_size) ||
       (set && (fix_alias(set, sizeof(*set), bytes, core_size) ||
-               fix_alias(set, sizeof(*set), file, file_size))))
+               fix_alias(set, sizeof(*set), file, file_size) ||
+               (set->hold && (fix_alias(set->hold, set->hold_size, bytes, core_size) ||
+                              fix_alias(set->hold, set->hold_size, file, file_size))) ||
+               (set->work && (fix_alias(set->work, set->work_size, bytes, core_size) ||
+                              fix_alias(set->work, set->work_size, file, file_size) ||
+                              (set->hold && fix_alias(set->work, set->work_size, set->hold,
+                                                      set->hold_size)))))))
     return -EINVAL;
   /* POPStarter's verdict first: nothing of an Invalid or outdated file is
    * looked at further, and neither stops the files after it. */
@@ -411,19 +439,68 @@ int pops_fix_stage_trojan(PopsFixContext *context, PopsTrojanSet *set, void *sta
   if (verdict == POPS_TROJAN_OUTDATED)
     return POPS_FIX_SKIP_OUTDATED;
   /* The original copies the payload and writes the hook wherever the header
-   * says. launcHER hosts a payload that lies inside the POPS core image, is
-   * entered inside itself and hooks a core word outside itself. */
+   * says. launcHER hosts a payload that lies inside the POPS core image or
+   * in the arena above it, is entered inside itself, hooks a core word
+   * outside itself, and names nothing of POPStarter's that launcHER lacks. */
+  const uint8_t *payload = (const uint8_t *)file + POPS_CONTAINER_HEADER_SIZE;
   uint32_t hook_bytes = (uint32_t)info.hook_words * 4;
+  int in_core = 0, slot_hook = 0;
   if ((info.load | info.entry | info.hook | info.size) & 3)
     reason = POPS_TROJAN_NO_UNALIGNED;
   else if (info.entry < info.load || info.entry - info.load >= info.size)
     reason = POPS_TROJAN_NO_ENTRY;
-  else if (!fix_in_core(info.load, info.size, core_size))
+  else if (fix_in_core(info.load, info.size, core_size))
+    in_core = 1;
+  else if (!set || !set->hold || !pops_trojan_in_arena(info.load, info.size))
     reason = POPS_TROJAN_NO_RANGE;
-  else if (!fix_in_core(info.hook, hook_bytes, core_size) ||
-           (info.load < (uint64_t)info.hook + hook_bytes &&
-            info.hook < (uint64_t)info.load + info.size))
-    reason = POPS_TROJAN_NO_HOOK;
+  if (reason == POPS_TROJAN_HOSTED && in_core &&
+      (fix_ranges_meet(info.load, info.size, POPS_TROJAN_BLOCK1_BASE, POPS_TROJAN_BLOCK1_LIMIT) ||
+       fix_ranges_meet(info.load, info.size, POPS_TROJAN_BLOCK2_BASE, POPS_TROJAN_BLOCK2_LIMIT)))
+    reason = POPS_TROJAN_NO_RANGE;
+  if (reason == POPS_TROJAN_HOSTED) {
+    if (!fix_in_core(info.hook, hook_bytes, core_size) ||
+        fix_ranges_meet(info.hook, hook_bytes, info.load, info.load + info.size))
+      reason = POPS_TROJAN_NO_HOOK;
+    else if (fix_ranges_meet(info.hook, hook_bytes, POPS_TROJAN_BLOCK1_BASE,
+                             POPS_TROJAN_BLOCK1_LIMIT) ||
+             fix_ranges_meet(info.hook, hook_bytes, POPS_TROJAN_BLOCK2_BASE,
+                             POPS_TROJAN_BLOCK2_LIMIT)) {
+      /* POPStarter's own code is there, and none of launcHER's: a word
+       * written there would never run. Only its ten slots are hooks. */
+      slot_hook = fix_slot_hook(info.hook);
+      if (!slot_hook)
+        reason = POPS_TROJAN_NO_HOOK;
+    }
+  }
+  if (reason == POPS_TROJAN_HOSTED) {
+    /* What the payload's code names. No work memory: nothing is hosted. */
+    uint32_t refs = 0;
+    if (!set || !set->work ||
+        pops_trojan_scan(payload, info.size, info.load, info.entry, set->work,
+                         set->work_size, &refs))
+      reason = POPS_TROJAN_NO_SPACE;
+    else {
+      set->refs = refs;
+      if (refs & POPS_TROJAN_REF_480P)
+        reason = POPS_TROJAN_NO_480P;
+      else if (refs & POPS_TROJAN_REF_BLOCK2)
+        reason = POPS_TROJAN_NO_BLOCK2;
+      else if (refs & POPS_TROJAN_REF_BUILTIN)
+        reason = POPS_TROJAN_NO_BUILTIN;
+      else if (refs & POPS_TROJAN_REF_OWNED)
+        reason = POPS_TROJAN_NO_OWNED;
+      else if (refs & POPS_TROJAN_REF_BLOCK1)
+        reason = POPS_TROJAN_NO_BLOCK1;
+      else if (refs & POPS_TROJAN_REF_MAIN)
+        reason = POPS_TROJAN_NO_MAIN;
+      else if (slot_hook || (refs & POPS_TROJAN_REF_SLOT))
+        reason = POPS_TROJAN_NO_SLOT;
+    }
+  }
+  if (reason == POPS_TROJAN_HOSTED && !in_core &&
+      (set->payload_count >= POPS_TROJAN_MAX_PAYLOADS || set->hold_used > set->hold_size ||
+       info.size > set->hold_size - set->hold_used))
+    reason = POPS_TROJAN_NO_SPACE;
   if (reason != POPS_TROJAN_HOSTED) {
     if (set)
       set->reason = reason;
@@ -433,9 +510,18 @@ int pops_fix_stage_trojan(PopsFixContext *context, PopsTrojanSet *set, void *sta
   if (result)
     return result;
   /* Every check is done. The hook words have no profile of their own: the
-   * session's tracked sites are the guard, as before. */
-  memcpy(bytes + (info.load - POPS_CORE_BASE_ADDR),
-         (const uint8_t *)file + POPS_CONTAINER_HEADER_SIZE, info.size);
+   * session's tracked sites are the guard, as before. A payload above the
+   * image waits in the holding memory; pops_trojan_copy_out places it. */
+  if (in_core) {
+    memcpy(bytes + (info.load - POPS_CORE_BASE_ADDR), payload, info.size);
+  } else {
+    PopsTrojanPayload *held = &set->payload[set->payload_count++];
+    held->address = info.load;
+    held->size = info.size;
+    held->hold = set->hold_used;
+    memcpy(set->hold + set->hold_used, payload, info.size);
+    set->hold_used += info.size;
+  }
   for (unsigned i = 0; i < info.hook_words; ++i)
     write_u32(bytes, core_size, info.hook + 4 * i, info.hook_word[i]);
   fix_context_refresh(context, bytes);
@@ -449,7 +535,7 @@ int pops_fix_stage(PopsFixContext *context, void *staged_core, size_t core_size,
   PopsPatchOptions options = {{0}, POPS_PATCH_VIDEO_NONE};
   uint8_t *bytes = staged_core;
   if (expected_trojan)
-    return pops_fix_stage_trojan(context, NULL, staged_core, core_size, file, file_size, slot);
+    return -EINVAL;
   if (!context || !bytes || !file || slot > 9 ||
       fix_alias(context, sizeof(*context), bytes, core_size) ||
       fix_alias(context, sizeof(*context), file, file_size) ||

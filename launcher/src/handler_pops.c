@@ -46,6 +46,14 @@ static PopsResidentConfig residentCfg;
 #define POPS_IOP_MAX_SIZE   0x00080000
 #define POPS_STAGE_BUF      ((void *)POPS_STAGING_BASE)
 #define POPS_LOAD_MAX_SIZE  (8 * 1024 * 1024)
+/* TROJAN payloads that load above the POPS image wait here until handoff,
+ * in what was the raw POPS.ELF input: nothing reads that once the image is
+ * staged, and fix files are read later, at 0x01f00000. The last 64 KB are
+ * the work memory of the payload scan (POPS_TROJAN_SCAN_WORK of 1 MiB). */
+#define POPS_TROJAN_HOLD_BUF  ((uint8_t *)0x01800000)
+#define POPS_TROJAN_HOLD_SIZE 0x006f0000u
+#define POPS_TROJAN_WORK_BUF  ((void *)0x01ef0000)
+#define POPS_TROJAN_WORK_SIZE 0x00010000u
 
 int isPopsTarget(const char *path) {
   if (!path)
@@ -1474,6 +1482,10 @@ int launchPOPS(int argc, char *argv[]) {
   PopsTrojanSet trojanSet;
   memset(&trojanSet, 0, sizeof(trojanSet));
   trojanSet.fingerprint_id = POPS_BUILTIN_ID(fingerprintId);
+  trojanSet.hold = POPS_TROJAN_HOLD_BUF;
+  trojanSet.hold_size = POPS_TROJAN_HOLD_SIZE;
+  trojanSet.work = POPS_TROJAN_WORK_BUF;
+  trojanSet.work_size = POPS_TROJAN_WORK_SIZE;
   res = pops_stage_fix_files((void *)stagedCore, plan.core_size, vcdDir,
                               gameConfigDir, builtinId, cfg.compat_modes,
                               cfg.progressive_requested ? POPS_VMODE_480P : cfg.video_mode,
@@ -1853,6 +1865,27 @@ int launchPOPS(int argc, char *argv[]) {
       msg("POPS: $BREAKPOINT handler install failed: %d\n", res);
       return res ? res : -EINVAL;
     }
+  }
+
+  /* TROJAN payloads that load above the image, where the original's memcpy
+   * puts them. Checked again against everything this launch still needs,
+   * and nothing is written unless every payload passes. */
+  if (trojanSet.payload_count) {
+    const PopsTrojanKeep keep[] = {
+        {(uint32_t)(uintptr_t)stagedCore, (uint32_t)(uintptr_t)stagedCore + plan.core_size},
+        {POPS_BUILTIN_FIX_ADDR, POPS_BUILTIN_FIX_LIMIT},
+        {POPS_RESIDENT_BASE, POPS_BUILTIN_BREAK_LIMIT},
+        {(uint32_t)(uintptr_t)POPS_TROJAN_HOLD_BUF, 0x02000000u},
+        {0, 0x00200000u}};
+    res = pops_trojan_copy_out(&trojanSet, (uint8_t *)0, 0, 0x02000000u, keep,
+                               sizeof(keep) / sizeof(keep[0]));
+    if (res < 0) {
+      msg("POPS: TROJAN payload install failed: %d
+", res);
+      return -EFAULT;
+    }
+    DPRINTF("POPS: %d TROJAN payload(s) placed above the image
+", res);
   }
 
   /* Last write before handoff: nothing of launcHER's lives at the resident
