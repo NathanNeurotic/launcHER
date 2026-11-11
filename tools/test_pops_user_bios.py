@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """POPStarter r13's user BIOS.BIN and the gates its loader flags drive.
 
-Native checks need nothing; Reader runs the launcher's own file code from
-handler_pops.c on the host, on files it makes up. The Original checks need
+Native checks need nothing; Reader and Launch run the launcher's own file
+code from handler_pops.c on the host, on files they make up (Launch: the
+part of the launch that runs the user's commands and reads the user's files,
+as one sequence). The Original checks need
 POPSTARTER_TEST_ELF, POPS_TEST_ELF and unicorn: the original's own code is run
 on the real core (tools/trace_original_pops_user_bios.py) and launcHER's
 functions must leave the same bytes and the same loader flags. Source checks
@@ -217,8 +219,54 @@ def patch_file(slot, modes=(), payload=b"", address=0):
     return bytes(header) + payload
 
 
+MODE_6_LINE = b"$COMPATIBILITY_0x06"
+UNDO_LINES = (b"$UNDO_COMPATIBILITY_CODES", b"$UNDO_GAME_FIXES", b"$UNDO_LIBCRYPT_FIX")
+# POPS's words at its two recompiler emit points and around them
+# (pops_resident_hook_recompiler_emit checks them), and four made-up entries
+# inside the resident area.
+EMIT_WORDS = ((0x206314, 0x00431025), (0x206318, 0xAE220000), (0x20631C, 0x26310004),
+              (0x206320, 0x8CC20000), (0x205D1C, 0x00822025), (0x205D20, 0xAD840000),
+              (0x205D24, 0x12CB0008), (0x205D28, 0x258C0004))
+EMIT_ENTRIES = tuple(0x0143A800 + 0x40 * i for i in range(4))
+# The four sites a progressive entry is bound to (pops_fix_bind_progressive).
+RESIDENT_WORDS = ((0x21A094, 0xDE050010), (0x21A098, 0x3C031200), (0x23ACB0, 0x32240001),
+                  (0x23AD0C, 0x32240001))
+PROGRESSIVE_ENTRY = 0x0143A5D8
+
+
+def config(*lines):
+    """A PopsConfig after these command lines."""
+    cfg = F.PopsConfig()
+    LIB.pops_config_init(c.byref(cfg))
+    for line in lines:
+        if LIB.pops_config_parse_line(c.byref(cfg), line):
+            raise ValueError(line)
+    return cfg
+
+
+_ENTRY = []
+
+
+def mode_6_entry():
+    """The id of a built-in entry that runs compatibility mode 6."""
+    if not _ENTRY:
+        plan = (c.c_uint8 * 4096)()
+        for entry in range(1, 2000):
+            core = pristine_sites()
+            if LIB.pops_builtin_apply(entry, buf(core), SIZE, None, 0, 0, plan):
+                continue
+            if get(core, OSD_SITE, 2) == 0x0648:
+                _ENTRY.append(entry)
+                break
+        else:
+            raise AssertionError("no built-in entry runs mode 6")
+    return _ENTRY[0]
+
+
 READER_WRAPPER = r'''
+#include "pops_builtin_db.h"
 #include "pops_modes_patches.h"
+#include "pops_resident.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <stdint.h>
@@ -235,10 +283,17 @@ static char host_fix_buffer[0x100000];
 static int open_fails, read_fails, seek_set;
 static unsigned read_limit;
 static long long seek_value;
-static int opens, reads, closes;
+static int opens, reads, closes, bios_opens;
 static unsigned bytes_read;
+typedef void (*bios_open_hook)(const char *path, int number);
+static bios_open_hook on_bios_open;
 static int test_open(const char *path, int flags) {
+  size_t length = strlen(path);
   ++opens;
+  if (length >= 8 && !strcmp(path + length - 8, "BIOS.BIN")) {
+    ++bios_opens;
+    if (on_bios_open) on_bios_open(path, bios_opens);
+  }
   if (open_fails) { errno = EIO; return -1; }
   return open(path, flags | O_BINARY);
 }
@@ -270,11 +325,36 @@ int test_load(void *core, size_t size, const char *dir, int per_game, PopsUserRo
 int test_dependency(const char *path, void *buffer, size_t size, size_t *read_size) {
   return readPopsDependency(path, buffer, size, read_size);
 }
+/* pops_stage_user_files as launchPOPS calls it. The resident header is made
+ * here: its four emit entries and its progressive entry are all it reads. */
+int test_launch(void *core, size_t size, const char *root, const char *title,
+                unsigned builtin_id, unsigned builtin_modes, const PopsConfig *cfg,
+                const uint32_t *emit, uint32_t progressive, PopsUserRomState *rom,
+                PopsFixContext *context) {
+  PopsResidentHeader header;
+  PopsFixContext local;
+  memset(&header, 0, sizeof(header));
+  for (unsigned i = 0; emit && i < POPS_EMIT_COUNT; ++i) header.recompiler_emit[i] = emit[i];
+  header.progressive_entry = progressive;
+  return pops_stage_user_files(core, size, root, title, (uint16_t)builtin_id,
+                               (uint8_t)builtin_modes, cfg, &header, rom,
+                               context ? context : &local);
+}
+/* The built-in entry as launchPOPS applies it; returns its
+ * PopsBuiltinPlan.compat_modes, what the launch hands to the helper. */
+int test_builtin(unsigned id, void *core, size_t size) {
+  PopsBuiltinPlan plan;
+  memset(&plan, 0, sizeof(plan));
+  int result = pops_builtin_apply((uint16_t)id, core, size, NULL, 0, 0, &plan);
+  return result ? (result < 0 ? result : -result) : plan.compat_modes;
+}
 void test_io(int fail_open, int fail_read, unsigned limit, int set_seek, long long seek) {
   open_fails = fail_open; read_fails = fail_read; read_limit = limit;
   seek_set = set_seek; seek_value = seek;
-  opens = reads = closes = 0; bytes_read = 0;
+  opens = reads = closes = bios_opens = 0; bytes_read = 0;
 }
+void test_on_bios_open(bios_open_hook hook) { on_bios_open = hook; }
+unsigned test_config_size(void) { return (unsigned)sizeof(PopsConfig); }
 void test_counts(unsigned *out) {
   out[0] = (unsigned)opens; out[1] = (unsigned)reads; out[2] = (unsigned)closes; out[3] = bytes_read;
 }
@@ -293,11 +373,17 @@ def _reader_close():
         temp.cleanup()
 
 
+LAUNCH_HELPER = "/* The user's commands and files in the launch, as one sequence"
+BIOS_OPEN_HOOK = c.CFUNCTYPE(None, c.c_char_p, c.c_int)
+
+
 def reader_library():
     """The launcher's own file code, handler_pops.c from readFullFile to the
-    end of pops_stage_fix_files, built for the host the way
-    tools/test_pops_fix_files.py builds it. Only the EE scratch address is
-    replaced; open, lseek, read and close go through counters and switches."""
+    end of pops_stage_fix_files and pops_stage_user_files (the part of the
+    launch that runs the user's commands and reads the user's files), built
+    for the host the way tools/test_pops_fix_files.py builds it. Only the EE
+    scratch address is replaced; open, lseek, read and close go through
+    counters and switches, and a callback is told of every BIOS.BIN open."""
     if "lib" in _READER:
         return _READER["lib"]
     temp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
@@ -307,7 +393,8 @@ def reader_library():
     source = (ROOT / "launcher/src/handler_pops.c").read_text()
     start = source.index("static int readFullFile(")
     end = source.index("/* Driver names within one role", start)
-    functions = source[start:end].replace("(void *)0x01f00000", "host_fix_buffer")
+    helper = source[source.index(LAUNCH_HELPER):source.index("int launchPOPS(")]
+    functions = (source[start:end] + helper).replace("(void *)0x01f00000", "host_fix_buffer")
     wrapper = directory / "reader.c"
     wrapper.write_text(READER_WRAPPER % functions)
     library = directory / ("reader.dll" if os.name == "nt" else "reader.so")
@@ -315,11 +402,18 @@ def reader_library():
                     "-I", str(ROOT / "common/include"), str(wrapper),
                     str(ROOT / "common/src/pops_modes_patches.c"),
                     str(ROOT / "common/src/pops_resident_engine.c"),
+                    str(ROOT / "common/src/pops_resident.c"),
                     str(ROOT / "common/src/pops_builtin_db.c"),
                     str(ROOT / "common/src/pops_builtin_db_data.c"),
                     str(ROOT / "common/src/pops_external.c"), "-o", str(library)], check=True)
     lib = c.CDLL(str(library))
     lib.test_stage.argtypes = [P, Z, c.c_char_p, c.c_char_p, ROMP]
+    lib.test_launch.argtypes = [P, Z, c.c_char_p, c.c_char_p, c.c_uint, c.c_uint,
+                                c.POINTER(F.PopsConfig), c.POINTER(c.c_uint32), c.c_uint32,
+                                ROMP, CTXP]
+    lib.test_builtin.argtypes = [c.c_uint, P, Z]
+    lib.test_on_bios_open.argtypes = [c.c_void_p]  # a BIOS_OPEN_HOOK, or None
+    lib.test_on_bios_open.restype = None
     lib.test_load.argtypes = [P, Z, c.c_char_p, c.c_int, ROMP]
     lib.test_io.argtypes = [c.c_int, c.c_int, c.c_uint, c.c_int, c.c_longlong]
     lib.test_io.restype = None
@@ -525,11 +619,7 @@ class Native(unittest.TestCase):
         self.assertEqual(bytes(one), bytes(two))
 
     def config(self, *lines):
-        cfg = F.PopsConfig()
-        LIB.pops_config_init(c.byref(cfg))
-        for line in lines:
-            self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), line), 0, line)
-        return cfg
+        return config(*lines)
 
     def test_config_pass_with_the_state(self):
         base = pristine_sites()
@@ -577,15 +667,44 @@ class Native(unittest.TestCase):
         self.assertEqual(get(core, OSD_SITE, 2), 0x1BFC)
 
     def mode_6_entry(self):
-        """The id of a built-in entry that runs compatibility mode 6."""
+        return mode_6_entry()
+
+    def test_fix_context_takes_pops_own_word_at_the_osd_site_only(self):
+        """A mask or a built-in entry that says a mode ran is checked against
+        the core at every site. 0x2525b0 may also still hold POPS's own word
+        (the test below); no other site may."""
+        context = Context()
+        sentinel = bytes(context)
+
+        def init(core, entry, mask):
+            return LIB.pops_fix_context_init_builtin(c.byref(context), buf(core), SIZE, entry, mask, 0)
+
+        for mode in (1, 2, 3, 4, 5, 7):
+            mask = 1 << (mode - 1)
+            applied = pristine_sites()
+            self.assertEqual(LIB.pops_apply_compat_modes(buf(applied), SIZE, mask), 0, mode)
+            self.assertNotEqual(applied, pristine_sites(), mode)
+            for extra in (0, 1 << 5):
+                # The mask names the mode and its sites are as POPS has them.
+                self.assertEqual(init(pristine_sites(), 0, mask | extra), -errno.EINVAL, (mode, extra))
+                self.assertEqual(bytes(context), sentinel, mode)  # nothing accepted
+                # The mode was applied: accepted, with mode 6's word either way.
+                self.assertEqual(init(applied, 0, mask | extra), 0, (mode, extra))
+                context = Context()
+        # The same through a built-in entry: entry 58's mode 4 site put back
+        # is refused, its mode 6 site put back is accepted.
+        entry = mode_6_entry()
         plan = (c.c_uint8 * 4096)()
-        for entry in range(1, 2000):
-            core = pristine_sites()
-            if LIB.pops_builtin_apply(entry, buf(core), SIZE, None, 0, 0, plan):
-                continue
-            if get(core, OSD_SITE, 2) == 0x0648:
-                return entry
-        self.fail("no built-in entry runs mode 6")
+        core = pristine_sites()
+        self.assertEqual(LIB.pops_builtin_apply(entry, buf(core), SIZE, None, 0, 0, plan), 0)
+        self.assertEqual((get(core, 0x21AF70, 1), get(core, OSD_SITE, 2)), (0, 0x0648))
+        self.assertEqual(init(core, entry, 0), 0)
+        put(core, OSD_SITE, 0x1BFC, 2)
+        self.assertEqual(init(core, entry, 0), 0)
+        put(core, 0x21AF70, 0x64, 1)
+        context = Context()
+        self.assertEqual(init(core, entry, 0), -errno.EINVAL)
+        self.assertEqual(bytes(context), sentinel)
 
     def test_fix_context_accepts_the_osd_word_put_back(self):
         """The fix-file session starts after the user's commands: 0x2525b0 may
@@ -632,6 +751,19 @@ class Native(unittest.TestCase):
                              any(flags.get(n) for n in GATE_ALL), flags)
             self.assertEqual(bool(LIB.pops_user_bios_skipped(1, c.byref(state))),
                              any(flags.get(n) for n in GATE_GAME), flags)
+        # The launch function tests its words with bnez and the loader compares
+        # its own with 1; gp+0x344c for the all-games folder is the loader's
+        # alone, so a value there that is neither 0 nor 1 does not skip the file.
+        for value in (2, 0x80, 0xFF):
+            for scope, name, skipped in ((0, "osd_all_a", 1), (0, "osd_all_b", 1), (0, "osd_game_b", 0),
+                                         (0, "osd_game_a", 0), (1, "osd_game_a", 1), (1, "osd_game_b", 1),
+                                         (1, "osd_all_a", 0), (1, "osd_all_b", 0)):
+                state = rom(**{name: value})
+                self.assertEqual(bool(LIB.pops_user_bios_skipped(scope, c.byref(state))), bool(skipped),
+                                 (scope, name, value))
+        core, state = synthetic(), rom(osd_game_b=2)
+        self.assertEqual(stage(core, bios_file(ROM_MIN), ROM_MIN, 0, state), 1)
+        self.assertEqual(stage(core, bios_file(ROM_MIN), ROM_MIN, 1, state), 0)
 
     def test_user_bios_stage_sizes(self):
         for scope, size in itertools.product((0, 1), SIZES):
@@ -766,8 +898,9 @@ class Native(unittest.TestCase):
         self.assertEqual(LIB.pops_apply_reset_warmboot(buf(core), SIZE, c.byref(vector)), 0)
 
 
-class Reader(unittest.TestCase):
-    """handler_pops.c's reader and its place among the fix files, on the host."""
+class Files(unittest.TestCase):
+    """A made-up all-games folder with one game's folder in it, and the host
+    build of handler_pops.c's file code."""
 
     @classmethod
     def setUpClass(cls):
@@ -775,6 +908,8 @@ class Reader(unittest.TestCase):
 
     def setUp(self):
         self.lib.test_io(0, 0, 0x3001, 0, 0)
+        self.lib.test_on_bios_open(None)
+        self.addCleanup(self.lib.test_on_bios_open, None)
         temp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.addCleanup(temp.cleanup)
         self.root = Path(temp.name)
@@ -797,6 +932,10 @@ class Reader(unittest.TestCase):
         values = (c.c_uint * 4)()
         self.lib.test_counts(values)
         return tuple(values)
+
+
+class Reader(Files):
+    """handler_pops.c's reader and its place among the fix files, on the host."""
 
     def load(self, core, scope, state, probe=False):
         if probe:
@@ -957,6 +1096,331 @@ class Reader(unittest.TestCase):
                 self.assertEqual((get(core, OSD_SITE, 2), state.osd_off), (user_word, 1))
             else:
                 self.assertEqual((get(core, OSD_SITE, 2), state.osd_off), (0x0648, 1))
+
+
+class Launch(Files):
+    """pops_stage_user_files, the part of launchPOPS that runs the user's
+    commands and reads the user's files, executed on the host on files: the
+    look at both BIOS.BIN files, the commands with the flags the loads will
+    set, the $RECOMPILER_ADDON_3/4 jumps, each folder's BIOS.BIN and fix
+    files, and the check that the loads did what the look said."""
+
+    COMMANDS = ((), (MODE_6_LINE,), (UNDO_LINES[1],), (UNDO_LINES[2], MODE_6_LINE),
+                (MODE_6_LINE, UNDO_LINES[1]))
+    # $UNDO_COMPATIBILITY_CODES only without a built-in entry: see
+    # test_undo_compatibility_codes_after_a_built_in_entry.
+    COMMANDS_NO_ENTRY = ((UNDO_LINES[0],), (UNDO_LINES[0], MODE_6_LINE))
+
+    def test_config_layout(self):
+        self.assertEqual(self.lib.test_config_size(), c.sizeof(F.PopsConfig))
+
+    def launch(self, core, lines=(), builtin=0, modes=0, state=None, emit=None, progressive=0,
+               context=None, cfg=None, folders=None):
+        cfg = config(*lines) if cfg is None else cfg
+        state = rom() if state is None else state
+        table = (c.c_uint32 * 4)(*emit) if emit else None
+        root, game = folders or (self.folder(0), self.folder(1))
+        rc = self.lib.test_launch(buf(core), SIZE, root, game, builtin, modes, c.byref(cfg), table,
+                                  progressive, c.byref(state),
+                                  None if context is None else c.byref(context))
+        return rc, state
+
+    def start(self, builtin6):
+        """The core as the launch has it when the helper is called: after the
+        built-in entry. Returns it with the entry's id and its mode mask."""
+        core = pristine_sites()
+        if not builtin6:
+            return core, 0, 0
+        entry = mode_6_entry()
+        modes = self.lib.test_builtin(entry, buf(core), SIZE)
+        self.assertEqual((modes & 0x20, get(core, OSD_SITE, 2)), (0x20, 0x0648))
+        return core, entry, modes
+
+    def put_patch(self, scope, wanted):
+        path = (self.game if scope else self.root) / ("PATCH_%d.BIN" % (7 if scope else 3))
+        if wanted:
+            path.write_bytes(patch_file(7 if scope else 3, modes=(6,)))
+        elif path.exists():
+            path.unlink()
+
+    def watch(self, function):
+        """Call function(path, number) at every BIOS.BIN open; number counts
+        them from 1 since the last test_io."""
+        hook = BIOS_OPEN_HOOK(function)
+        self.addCleanup(lambda: hook)  # keep the callback alive until the test ends
+        self.lib.test_on_bios_open(c.cast(hook, c.c_void_p))
+
+    def expected(self, start, lines, builtin6, files, patch6):
+        """What the helper must leave, from its documented order and the
+        functions the classes above test: the commands with the two flags
+        the files will set (worked out here from the sizes), then per folder
+        the BIOS.BIN and a PATCH file's mode 6."""
+        loads = [data is not None and len(data) >= ROM_MIN for data in files]
+        at = rom(bios_all=loads[0], bios_game=loads[1], osd_off=builtin6)
+        core = bytearray(start)
+        self.assertGreaterEqual(LIB.pops_apply_all_config_patches_rom(
+            buf(core), SIZE, c.byref(config(*lines)), c.byref(at)), 0)
+        off, replaced = at.osd_off, False
+        for scope in (0, 1):
+            if loads[scope]:
+                core, replaced = after_load(core, files[scope]), True
+            if patch6[scope] and not replaced and not off:
+                put(core, OSD_SITE, 0x0648, 2)
+                off = 1
+        return core, dict(flags_of(rom()), bios_all=int(loads[0]), bios_game=int(loads[1]), osd_off=off)
+
+    def test_commands_and_files_in_every_combination(self):
+        """Built-in mode 6 x each folder's BIOS.BIN (none, one byte too small,
+        loaded) x a PATCH file asking for mode 6 in either folder x the
+        commands. The caller's state is filled with 0xff first: it must be
+        set by the helper, not read."""
+        small = bios_file(ROM_MIN - 1, 3)
+        count = 0
+        for root_bios, game_bios in itertools.product((None, small, bios_file(0x80000, 1)),
+                                                      (None, small, bios_file(ROM_MIN, 2))):
+            self.put_bios(0, root_bios)
+            self.put_bios(1, game_bios)
+            for patch6 in ((0, 0), (1, 0), (0, 1), (1, 1)):
+                self.put_patch(0, patch6[0])
+                self.put_patch(1, patch6[1])
+                for builtin6, lines in (list(itertools.product((0, 1), self.COMMANDS)) +
+                                        [(0, lines) for lines in self.COMMANDS_NO_ENTRY]):
+                    start, entry, modes = self.start(builtin6)
+                    expected, flags = self.expected(start, lines, builtin6, (root_bios, game_bios), patch6)
+                    core = bytearray(start)
+                    state = rom(**{name: 0xFF for name in FLAG_NAMES})
+                    rc, state = self.launch(core, lines, entry, modes, state)
+                    case = (root_bios and len(root_bios), game_bios and len(game_bios), patch6, builtin6, lines)
+                    self.assertEqual(rc, 0, case)
+                    self.assertEqual(flags_of(state), flags, case)
+                    self.assertEqual(core, expected, case)
+                    count += 1
+        self.assertEqual(count, 432)
+
+    @unittest.expectedFailure
+    def test_undo_compatibility_codes_after_a_built_in_entry(self):
+        """KNOWN GAP, older than the BIOS.BIN work and not the original's
+        behaviour: the original runs a built-in entry's compatibility modes
+        and lets $UNDO_COMPATIBILITY_CODES put POPS's words back. launcHER's
+        fix-file session (pops_fix_context_init_builtin) still expects the
+        entry's words at those sites and refuses the launch with -EINVAL.
+        This asserts what should happen; take the decorator away with the fix."""
+        core, entry, modes = self.start(1)
+        self.assertEqual(get(core, 0x21AF70, 1), 0)  # the entry's mode 4
+        rc, state = self.launch(core, (UNDO_LINES[0],), entry, modes)
+        self.assertEqual((rc, get(core, 0x21AF70, 1), get(core, OSD_SITE, 2), state.osd_off),
+                         (0, 0x64, 0x1BFC, 1))
+
+    def test_what_the_commands_see(self):
+        """Literal results. The commands run before the files are loaded, and
+        must still see a BIOS.BIN that only one folder has."""
+        data = bios_file(0x80000)
+        user_word, = struct.unpack_from("<H", data, OSD_SITE - ROM)
+        small = data[:ROM_MIN - 1]
+        both = (UNDO_LINES[1], MODE_6_LINE)
+        for files, builtin6, lines, word, flags in (
+                ((None, None), 0, (MODE_6_LINE,), 0x0648, {"osd_off": 1}),
+                ((None, None), 0, (UNDO_LINES[0],), 0x1BFC, {}),
+                ((None, None), 1, (), 0x0648, {"osd_off": 1}),
+                ((None, None), 1, (UNDO_LINES[2],), 0x1BFC, {"osd_off": 1}),
+                ((None, None), 1, both, 0x1BFC, {"osd_off": 1}),   # mode 6 already ran: not again
+                ((None, None), 0, both, 0x0648, {"osd_off": 1}),
+                ((small, small), 0, (MODE_6_LINE,), 0x0648, {"osd_off": 1}),
+                ((data, None), 0, (MODE_6_LINE,), user_word, {"bios_all": 1}),
+                ((None, data), 0, (MODE_6_LINE,), user_word, {"bios_game": 1}),
+                ((small, data), 0, (MODE_6_LINE,), user_word, {"bios_game": 1}),
+                ((data, small), 0, both, user_word, {"bios_all": 1}),
+                ((data, data), 0, (MODE_6_LINE,), user_word, {"bios_all": 1, "bios_game": 1}),
+                ((None, data), 1, (UNDO_LINES[1],), user_word, {"bios_game": 1, "osd_off": 1}),
+                ((data, None), 1, both, user_word, {"bios_all": 1, "osd_off": 1})):
+            self.put_bios(0, files[0])
+            self.put_bios(1, files[1])
+            core, entry, modes = self.start(builtin6)
+            rc, state = self.launch(core, lines, entry, modes)
+            case = ([data and len(data) for data in files], builtin6, lines)
+            self.assertEqual(rc, 0, case)
+            self.assertEqual(get(core, OSD_SITE, 2), word, case)
+            self.assertEqual(flags_of(state), dict(flags_of(rom()), **flags), case)
+            loaded = files[1] if flags.get("bios_game") else files[0] if flags.get("bios_all") else None
+            if loaded:
+                self.assertEqual(bytes(core[ROM - BASE:ROM - BASE + ROM_READ]), loaded[:ROM_READ], case)
+                self.assertEqual(get(core, BRANCH, 2), 0x1000, case)
+
+    def test_the_state_passed_in_is_not_read(self):
+        data = bios_file(0x80000)
+        for files, lines in (((None, None), (MODE_6_LINE,)), ((data, None), ()), ((None, data), (MODE_6_LINE,))):
+            self.put_bios(0, files[0])
+            self.put_bios(1, files[1])
+            results = []
+            for fill in (0, 1, 0xFF):
+                core = pristine_sites()
+                rc, state = self.launch(core, lines, state=rom(**{name: fill for name in FLAG_NAMES}))
+                results.append((rc, bytes(core), flags_of(state)))
+            self.assertEqual(results[0][0], 0)
+            self.assertEqual(results[0], results[1])
+            self.assertEqual(results[0], results[2])
+            self.assertEqual(results[0][2]["osd_all_a"], 0)
+
+    def test_files_are_looked_at_then_the_commands_then_the_loads(self):
+        """Four BIOS.BIN opens: both folders looked at (nothing read), the
+        commands, then both loads."""
+        data = bios_file(0x80000)
+        self.put_bios(0, data)
+        self.put_bios(1, data)
+        core = pristine_sites()
+        seen = []
+
+        def note(path, number):
+            seen.append((number, os.fsdecode(path), get(core, 0x21AF70, 1), self.counts()[1:],
+                         bytes(core[ROM - BASE:ROM - BASE + 4])))
+
+        self.lib.test_io(0, 0, 0, 0, 0)
+        self.watch(note)
+        rc, state = self.launch(core, (b"$COMPATIBILITY_0x04",))
+        self.assertEqual((rc, state.bios_all, state.bios_game), (0, 1, 1))
+        root, game = (os.fsdecode(self.folder(scope)) + "BIOS.BIN" for scope in (0, 1))
+        self.assertEqual([(number, path) for number, path, *_ in seen],
+                         [(1, root), (2, game), (3, root), (4, game)])
+        # Mode 4's byte: POPS's at both looks, the command's by the first load.
+        self.assertEqual([word for _, _, word, *_ in seen], [0x64, 0x64, 0, 0])
+        # (reads, closes, bytes) at each open: the looks read nothing.
+        self.assertEqual([counts for *_, counts, _ in seen][:3], [(0, 0, 0), (0, 1, 0), (0, 2, 0)])
+        # The ROM is still POPS's at the first load and the file's at the second.
+        self.assertEqual([rom_bytes for *_, rom_bytes in seen], [bytes(4)] * 3 + [data[:4]])
+
+    def test_a_file_that_changes_under_the_launch(self):
+        """The commands ran with the flags the look gave. A load that then
+        does something else stops the launch with -EIO; the caller discards
+        the staged core."""
+        ok, other, small = bios_file(0x80000, 1), bios_file(0x80000, 2), bios_file(ROM_MIN - 1, 1)
+        for name, files, at, scope, becomes, expected in (
+                ("all-games file gone", (ok, None), 3, 0, None, -errno.EIO),
+                ("all-games file appears", (None, None), 3, 0, ok, -errno.EIO),
+                ("all-games file grows", (small, ok), 3, 0, ok, -errno.EIO),
+                ("all-games file shrinks", (ok, ok), 3, 0, small, -errno.EIO),
+                ("game file gone", (None, ok), 4, 1, None, -errno.EIO),
+                ("game file gone, other kept", (ok, ok), 4, 1, None, -errno.EIO),
+                ("game file appears", (None, None), 4, 1, ok, -errno.EIO),
+                ("game file appears, other kept", (ok, None), 4, 1, ok, -errno.EIO),
+                ("game file shrinks", (None, ok), 4, 1, small, -errno.EIO),
+                ("game file grows", (ok, small), 4, 1, ok, -errno.EIO),
+                # A change that leaves the answer as it was is not an error.
+                ("other bytes, same answer", (None, ok), 4, 1, other, 0),
+                ("still too small", (small, None), 3, 0, small[:5], 0),
+                ("no change", (ok, ok), 4, 1, ok, 0)):
+            self.put_bios(0, files[0])
+            self.put_bios(1, files[1])
+            self.lib.test_io(0, 0, 0, 0, 0)
+            opens = []
+
+            def change(path, number):
+                opens.append(number)
+                if number == at:
+                    self.put_bios(scope, becomes)
+
+            self.watch(change)
+            core = pristine_sites()
+            rc, state = self.launch(core, (MODE_6_LINE,))
+            self.assertEqual(rc, expected, name)
+            self.assertEqual(opens, [1, 2, 3, 4], name)
+            if name.startswith("other bytes"):
+                self.assertEqual(bytes(core[ROM - BASE:ROM - BASE + ROM_READ]), other[:ROM_READ])
+                self.assertEqual((state.bios_all, state.bios_game, state.osd_off), (0, 1, 0))
+
+    def test_an_error_stops_the_launch_where_it_happens(self):
+        data = bios_file(0x80000)
+        self.put_bios(0, data)
+        opens = []
+        self.watch(lambda path, number: opens.append(number))
+
+        def run(core, lines, **more):
+            del opens[:]
+            self.lib.test_io(0, 0, 0, 0, 0)
+            before = bytes(core)
+            rc, _ = self.launch(core, lines, **more)
+            return rc, list(opens), bytes(core) == before
+
+        # A folder name too long for a path: found at the look, nothing done.
+        long_folder = b"x" * 1016 + b"/"
+        for folders in ((long_folder, self.folder(1)), (self.folder(0), long_folder)):
+            rc, seen, untouched = run(pristine_sites(), (MODE_6_LINE,), folders=folders)
+            self.assertEqual((rc, untouched), (-errno.ENAMETOOLONG, True), folders[0][:4])
+            self.assertLessEqual(len(seen), 1)
+        # A command that cannot be applied (mode 4's byte is not POPS's): the
+        # files were looked at and are not loaded.
+        core = pristine_sites()
+        put(core, 0x21AF70, 0x77, 1)
+        self.assertEqual(run(core, (b"$COMPATIBILITY_0x04",)), (-errno.EINVAL, [1, 2], True))
+        # $RECOMPILER_ADDON_3 on a core without POPS's emit points: the
+        # commands were applied, the files are not loaded.
+        core = pristine_sites()
+        rc, seen, _ = run(core, (b"$RECOMPILER_ADDON_3", b"$COMPATIBILITY_0x04"), emit=EMIT_ENTRIES)
+        self.assertEqual((rc, seen, get(core, 0x21AF70, 1)), (-errno.EILSEQ, [1, 2], 0))
+        self.assertEqual(bytes(core[ROM - BASE:ROM - BASE + 4]), bytes(4))
+        # A fix file that is refused: after the all-games BIOS.BIN was loaded.
+        (self.root / "PATCH_1.BIN").write_bytes(b"not a patch file" * 8)
+        core = pristine_sites()
+        rc, seen, _ = run(core, ())
+        self.assertLess(rc, 0)
+        self.assertEqual((seen, bytes(core[ROM - BASE:ROM - BASE + 4])), ([1, 2, 3], data[:4]))
+
+    def test_recompiler_addon_jumps_are_written_with_the_commands(self):
+        def emit_core():
+            core = pristine_sites()
+            for address, value in EMIT_WORDS:
+                put(core, address, value, 4)
+            return core
+
+        def jump(entry):
+            return 0x08000000 | (entry >> 2)
+
+        for lines, pick in (((), None), ((b"$RECOMPILER_ADDON_3",), 0), ((b"$RECOMPILER_ADDON_4",), 2),
+                            ((b"$RECOMPILER_ADDON_3", b"$RECOMPILER_ADDON_4"), 2)):
+            core = emit_core()
+            rc, _ = self.launch(core, lines, emit=EMIT_ENTRIES)
+            self.assertEqual(rc, 0, lines)
+            words = [get(core, address, 4) for address in (0x206318, 0x20631C, 0x205D1C, 0x205D20)]
+            if pick is None:
+                self.assertEqual(words, [0xAE220000, 0x26310004, 0x00822025, 0xAD840000])
+            else:
+                self.assertEqual(words, [jump(EMIT_ENTRIES[pick]), 0, jump(EMIT_ENTRIES[pick + 1]), 0], lines)
+
+    def test_fix_session_gets_the_commands_and_the_resident_entry(self):
+        """What the helper hands to pops_stage_fix_files: the built-in id, the
+        commands' mode mask and video mode, the progressive entry and the
+        interlace word $HDTVFIX leaves."""
+        # The mode mask: without it the session would refuse mode 4's byte.
+        core, context = pristine_sites(), Context()
+        rc, _ = self.launch(core, (b"$COMPATIBILITY_0x04",), context=context)
+        self.assertEqual((rc, get(core, 0x21AF70, 1)), (0, 0))
+        self.assertEqual((context.video_auto_disabled, context.video_custom_set, context.resident_entry),
+                         (0, 0, 0))
+        # The built-in id: the entry's writes are refused under another id.
+        core, entry, modes = self.start(1)
+        self.assertEqual(self.launch(bytearray(core), (), entry, modes)[0], 0)
+        self.assertEqual(self.launch(bytearray(core), (), 0, modes)[0], -errno.EINVAL)
+        # The video mode; a progressive request counts as $480p whatever it is.
+        for lines, requested, auto, custom in (((b"$FORCEPAL",), 0, 0, 1), ((b"$NOPAL",), 0, 0, 0),
+                                               ((b"$480p",), 1, 1, 1), ((), 1, 1, 1),
+                                               ((b"$FORCEPAL",), 1, 1, 1)):
+            cfg = config(*lines)
+            cfg.progressive_requested = requested
+            context = Context()
+            rc, _ = self.launch(pristine_sites(), cfg=cfg, context=context)
+            self.assertEqual((rc, context.video_auto_disabled, context.video_custom_set),
+                             (0, auto, custom), (lines, requested))
+        # The progressive entry and the interlace word.
+        for lines, word in (((), 0x32240001), ((b"$HDTVFIX",), 0x24040001)):
+            core, context = pristine_sites(), Context()
+            for address, value in RESIDENT_WORDS:
+                put(core, address, value, 4)
+            rc, _ = self.launch(core, lines, progressive=PROGRESSIVE_ENTRY, context=context)
+            self.assertEqual(rc, 0, lines)
+            self.assertEqual((context.resident_entry, list(context.resident_expected)),
+                             (PROGRESSIVE_ENTRY, [0xDE050010, 0x3C031200, word, word]), lines)
+            self.assertEqual((get(core, 0x23ACB0, 4), get(core, 0x23AD0C, 4)), (word, word), lines)
+        # A core without the four sites cannot be bound: the entry was passed on.
+        self.assertEqual(self.launch(pristine_sites(), progressive=PROGRESSIVE_ENTRY)[0], -errno.EINVAL)
 
 
 @unittest.skipUnless(HAVE, "POPSTARTER_TEST_ELF, POPS_TEST_ELF and unicorn are needed")
@@ -1292,28 +1756,200 @@ class Original(unittest.TestCase):
         self.assertEqual(vector.value, ROM + 0x100)
         self.assertNotEqual(bytes(ours), bytes(loaded["core"]))  # the stubs were rewritten
 
+    # -- the launch sequence ---------------------------------------------------
+
+    def original_chain(self, start, flags, files, patch6, lines):
+        """The original's pieces in its launch function's order, each started
+        with the loader words the one before left: per folder its BIOS.BIN
+        loader and, for a PATCH file's mode byte 6, the dispatcher that
+        byte reaches (FUN_008dc2c4; its PATCH loader itself is not run);
+        then the commands through its own command reader, as written."""
+        core, flags = bytearray(start), dict(flags)
+        for scope in (0, 1):
+            result = U.handler(core, scope, 0, files[scope], flags)
+            core, flags = result["core"], result["flags"]
+            if patch6[scope]:
+                core, flags, _ = U.mode(core, 6, flags)
+        if lines:
+            before = bytearray(core)
+            core, flags = U.parser("".join(line.decode() + "\n" for line in lines), core, flags)
+            for address in self.BLOB_SITES:
+                put(core, address, get(before, address, 4), 4)
+        return core, flags
+
+    def test_launch_sequence_against_the_original_chain(self):
+        """pops_stage_user_files on files (handler_pops.c built for the host)
+        against the original's chain, on the real core: a built-in entry's
+        mode 6 x each folder's BIOS.BIN (none, one byte too small, loaded) x
+        a PATCH file asking for mode 6 x the commands.
+
+        With a BIOS.BIN loaded the whole core and the loader words must be
+        equal. Without one, launcHER's older order (commands before the
+        files, $UNDO_ before the modes) leaves 0x0648 at 0x2525b0 where the
+        original leaves 0x1bfc in exactly these cases: a $UNDO_ command, no
+        mode 6 from the built-in entry, and mode 6 from a PATCH file or from
+        a $COMPATIBILITY_0x06 written before the $UNDO_ command. Nothing
+        else may differ.
+
+        launcHER's pass makes its own launch writes; they are taken from a
+        run of the helper with no command and no file, must not touch the
+        ROM range, and must not overlap what the original's chain changed."""
+        lib = reader_library()
+        lib.test_on_bios_open(None)
+        lib.test_io(0, 0, 0, 0, 0)
+        lo, hi = ROM - BASE, ROM - BASE + ROM_READ
+        entry = mode_6_entry()
+        small, big, exact = bios_file(ROM_MIN - 1, 3), bios_file(0x80000, 1), bios_file(ROM_MIN, 2)
+        # $UNDO_COMPATIBILITY_CODES is left out after a built-in entry: see
+        # Launch.test_undo_compatibility_codes_after_a_built_in_entry.
+        commands = {0: ((), (MODE_6_LINE,), (UNDO_LINES[0],), (UNDO_LINES[1], MODE_6_LINE),
+                        (MODE_6_LINE, UNDO_LINES[2])),
+                    1: ((), (MODE_6_LINE,), (UNDO_LINES[1],), (UNDO_LINES[2], MODE_6_LINE),
+                        (MODE_6_LINE, UNDO_LINES[1]))}
+        loaded_count = plain = older_count = 0
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp:
+            root, empty = Path(temp) / "POPS", Path(temp) / "EMPTY"
+            game = root / "GAME"
+            game.mkdir(parents=True)
+            (empty / "GAME").mkdir(parents=True)
+            used = [os.fsencode(str(root) + "/"), os.fsencode(str(game) + "/")]
+            unused = [os.fsencode(str(empty) + "/"), os.fsencode(str(empty / "GAME") + "/")]
+
+            def ours(start, lines, folders, builtin, modes):
+                core, state = bytearray(start), rom(**{name: 0xFF for name in FLAG_NAMES})
+                rc = lib.test_launch(buf(core), SIZE, folders[0], folders[1], builtin, modes,
+                                     c.byref(config(*lines)), None, 0, c.byref(state), None)
+                return rc, core, state
+
+            def put_file(path, data):
+                if data is not None:
+                    path.write_bytes(data)
+                elif path.exists():
+                    path.unlink()
+
+            for builtin6 in (0, 1):
+                start, builtin, modes, flags = bytearray(self.core), 0, 0, {}
+                if builtin6:
+                    builtin = entry
+                    modes = lib.test_builtin(entry, buf(start), SIZE)
+                    self.assertEqual((modes & 0x20, get(start, OSD_SITE, 2)), (0x20, 0x0648))
+                    flags = {"osd_off": 1}  # what FUN_008db97c set when the entry's mode 6 wrote
+                rc, base, _ = ours(start, (), unused, builtin, modes)
+                self.assertEqual(rc, 0)
+                self.assertEqual(base[lo:hi], start[lo:hi])
+                for root_bios, game_bios in itertools.product((None, small, big), (None, small, exact)):
+                    put_file(root / "BIOS.BIN", root_bios)
+                    put_file(game / "BIOS.BIN", game_bios)
+                    for patch6 in ((0, 0), (1, 0), (0, 1)):
+                        put_file(root / "PATCH_3.BIN", patch_file(3, modes=(6,)) if patch6[0] else None)
+                        put_file(game / "PATCH_7.BIN", patch_file(7, modes=(6,)) if patch6[1] else None)
+                        for lines in commands[builtin6]:
+                            case = (builtin6, root_bios and len(root_bios), game_bios and len(game_bios),
+                                    patch6, lines)
+                            theirs, their_flags = self.original_chain(start, flags, (root_bios, game_bios),
+                                                                      patch6, lines)
+                            rc, mine, state = ours(start, lines, used, builtin, modes)
+                            self.assertEqual(rc, 0, case)
+                            expected = bytearray(base)
+                            expected[lo:hi] = theirs[lo:hi]
+                            rest = bytearray(theirs)
+                            rest[lo:hi] = start[lo:hi]
+                            for i in changed(rest, start):
+                                self.assertEqual(base[i], start[i], (hex(BASE + i), case))
+                                expected[i] = theirs[i]
+                            loaded = bool(their_flags["bios_all"] or their_flags["bios_game"])
+                            self.assertEqual(loaded, (root_bios is big) or (game_bios is exact), case)
+                            undo = [n for n, line in enumerate(lines) if line in UNDO_LINES]
+                            mode_6_first = bool(undo) and MODE_6_LINE in lines[:undo[0]]
+                            older = (not loaded and bool(undo) and not builtin6 and
+                                     (any(patch6) or mode_6_first))
+                            if older:
+                                self.assertEqual((get(theirs, OSD_SITE, 2), get(mine, OSD_SITE, 2)),
+                                                 (0x1BFC, 0x0648), case)
+                                put(expected, OSD_SITE, 0x0648, 2)
+                                older_count += 1
+                            elif loaded:
+                                loaded_count += 1
+                            else:
+                                plain += 1
+                            self.assertEqual(mine, expected, case)
+                            self.assertEqual(self.truth(flags_of(state)), self.truth(their_flags), case)
+        self.assertEqual((loaded_count, plain, older_count), (150, 92, 28))
+        print("Original launch chain against pops_stage_user_files on files: %d scenarios; %d with a "
+              "BIOS.BIN loaded, whole core and loader words equal; %d without, equal; %d without, "
+              "0x2525b0 alone differs (launcHER's older command order)"
+              % (loaded_count + plain + older_count, loaded_count, plain, older_count))
+
+    def test_gate_words_holding_other_values(self):
+        """Every store to the loader words in the original is of 0 or 1.
+        Were one to hold something else: the launch function's tests and the
+        later readers are bnez, the loader's own entry tests compare with 1."""
+        data = bios_file(ROM_MIN)
+        count = 0
+        for scope, name, value in itertools.product((0, 1), FLAG_NAMES, (1, 2, 0x80, 0xFF)):
+            called = U.main_gate(scope, {name: value}) is not None
+            loaded = U.handler(self.core, scope, 0, data, {name: value})["ret"] == 1
+            state = rom(**{name: value})
+            self.assertEqual(called and loaded, not LIB.pops_user_bios_skipped(scope, c.byref(state)),
+                             (scope, name, value))
+            # On its own the loader only stops for a 1.
+            gate = name in (GATE_GAME if scope else GATE_ALL)
+            self.assertEqual(loaded, not (gate and value == 1), (scope, name, value))
+            count += 1
+        for name, value in itertools.product(FLAG_NAMES, (2, 0x80, 0xFF)):
+            flags = {name: value}
+            ours, state = bytearray(self.core), rom(**flags)
+            self.assertEqual(LIB.pops_apply_bios_shell_edits_rom(buf(ours), SIZE, c.byref(state)), 0)
+            self.assertEqual(ours, U.shell(self.core, flags), flags)
+            expected, after, messages = U.mode(self.core, 6, flags, quiet=0)
+            ours, state = bytearray(self.core), rom(**flags)
+            rc = LIB.pops_apply_compat_modes_rom(buf(ours), SIZE, 1 << 5, c.byref(state))
+            self.assertEqual(ours, expected, flags)
+            self.assertEqual(rc, SKIPPED if any(b"BIOS.BIN" in line for line in messages) else 0, flags)
+            self.assertEqual(bool(state.osd_off), bool(after["osd_off"]), flags)
+            for licence, region in ((b"Euro", 1), (b"????", 0)):
+                ours, state = bytearray(self.core), rom(**flags)
+                self.assertEqual(LIB.pops_apply_region_rom(buf(ours), SIZE, region, 0, 0, c.byref(state)), 0)
+                self.assertEqual(ours, U.region(self.core, licence, 0, 0, 1, flags), (licence, flags))
+            count += 4
+        print("Original gates with loader words holding 1, 2, 0x80, 0xff: %d cases equal" % count)
+
 
 class Source(unittest.TestCase):
     def setUp(self):
         self.src = (ROOT / "launcher/src/handler_pops.c").read_text()
         self.body = self.src[self.src.index("int launchPOPS("):]
 
+    def helper(self):
+        """pops_stage_user_files, as the Launch class builds and runs it."""
+        return self.src[self.src.index(LAUNCH_HELPER):self.src.index("int launchPOPS(")]
+
     def test_one_state_reaches_every_gated_stage(self):
+        """launchPOPS hands the built-in entry's id and mode mask, the
+        commands and one state to the helper the Launch class runs, and that
+        state to the shell edits and the region pass. What the helper does
+        with them is executed there, not pinned here."""
         body = self.body
         declared = body.index("PopsUserRomState romState;")
-        seeded = body.index("romState.osd_off = (builtinPlan.compat_modes & (1 << 5)) != 0;")
-        calls = ["res = pops_apply_all_config_patches_rom((void *)stagedCore, plan.core_size, &cfg,\n"
-                 "                                          &romAtCommands);",
-                 "romState.osd_off = romAtCommands.osd_off;",
-                 "&romState, &fixContext);",
+        calls = ["res = pops_stage_user_files((void *)stagedCore, plan.core_size, vcdDir, gameConfigDir,\n"
+                 "                              builtinId, builtinPlan.compat_modes, &cfg, &residentHdr,\n"
+                 "                              &romState, &fixContext);\n  if (res)\n    return res;",
                  "res = pops_apply_bios_shell_edits_rom((void *)stagedCore, plan.core_size, &romState);",
                  "&romState)\n                   : 0;"]
         at = [body.index(text) for text in calls]
         self.assertEqual(at, sorted(at))
         self.assertLess(body.index("res = pops_builtin_apply(builtinId, (void *)stagedCore"), declared)
-        self.assertLess(declared, seeded)
-        self.assertLess(seeded, at[0])
+        self.assertLess(declared, at[0])
         self.assertEqual(body.count("PopsUserRomState romState;"), 1)
+        self.assertEqual((body.count("pops_stage_user_files("), self.src.count("pops_stage_user_files(")),
+                         (1, 2))
+        # The sequence lives in the helper only.
+        for text in ("pops_user_bios_load(", "pops_apply_all_config_patches_rom(", "pops_stage_fix_files(",
+                     "pops_resident_hook_recompiler_emit("):
+            self.assertNotIn(text, body, text)
+            self.assertIn(text, self.helper(), text)
+        self.assertTrue(self.helper().startswith(LAUNCH_HELPER))
+        self.assertIn("static int pops_stage_user_files(void *stagedCore, size_t coreSize,", self.helper())
         # The fix files are staged with the same state.
         self.assertIn("result = pops_fix_stage_rom(&context, stagedCore, coreSize, buffer, size,\n"
                       "                                       slot, !kind, rom);", self.src)
@@ -1323,7 +1959,8 @@ class Source(unittest.TestCase):
         """Per folder, before that folder's TROJAN and PATCH files; the
         all-games folder (vcdDir) first, then the game's (gameConfigDir);
         after the built-in entry. The commands, which launcHER runs earlier
-        than the original, get the two flags from a look at the files."""
+        than the original, get the two flags from a look at the files: that
+        sequence is pops_stage_user_files."""
         src, body = self.src, self.body
         stage = src[src.index("static int pops_stage_fix_files("):src.index("/* Driver names within one role")]
         order = ["pops_fix_context_init_builtin(&context, stagedCore, coreSize, builtinId,",
@@ -1338,22 +1975,31 @@ class Source(unittest.TestCase):
         self.assertEqual(at, sorted(at))
         self.assertEqual(stage.count("pops_user_bios_load("), 1)
         launch = ["res = pops_builtin_apply(builtinId, (void *)stagedCore",
-                  "PopsUserRomState romAtCommands = romState;",
-                  "res = pops_user_bios_load(NULL, 0, vcdDir, 0, &romAtCommands);",
-                  "romAtCommands.bios_all = res > 0;",
-                  "res = pops_user_bios_load(NULL, 0, gameConfigDir, 1, &romAtCommands);",
-                  "romAtCommands.bios_game = res > 0;",
-                  "res = pops_apply_all_config_patches_rom(",
-                  "res = pops_stage_fix_files((void *)stagedCore, plan.core_size, vcdDir,\n"
-                  "                              gameConfigDir, builtinId, cfg.compat_modes,",
-                  "if (romState.bios_all != romAtCommands.bios_all ||\n"
-                  "      romState.bios_game != romAtCommands.bios_game) {",
+                  "res = pops_stage_user_files(",
                   "res = pops_apply_bios_shell_edits_rom(",
                   "res = regionRead ? pops_apply_region_rom(",
                   "if (cfg.reset_warmboot) {"]
         at = [body.index(text) for text in launch]
         self.assertEqual(at, sorted(at))
-        self.assertEqual(body.count("pops_user_bios_load("), 2)
+        # The helper's own order (the Launch class runs it; this is its text).
+        helper = self.helper()
+        order = ["memset(rom, 0, sizeof(*rom));",
+                 "rom->osd_off = (builtinModes & (1 << 5)) != 0;",
+                 "atCommands = *rom;",
+                 "res = pops_user_bios_load(NULL, 0, vcdDir, 0, &atCommands);",
+                 "atCommands.bios_all = res > 0;",
+                 "res = pops_user_bios_load(NULL, 0, titleDir, 1, &atCommands);",
+                 "atCommands.bios_game = res > 0;",
+                 "res = pops_apply_all_config_patches_rom(stagedCore, coreSize, cfg, &atCommands);",
+                 "rom->osd_off = atCommands.osd_off;",
+                 "res = pops_resident_hook_recompiler_emit(stagedCore, coreSize, cfg->recompiler_addons,",
+                 "res = pops_stage_fix_files(stagedCore, coreSize, vcdDir, titleDir, builtinId,",
+                 "if (rom->bios_all != atCommands.bios_all ||\n"
+                 "      rom->bios_game != atCommands.bios_game) {",
+                 "return -EIO;"]
+        at = [helper.index(text) for text in order]
+        self.assertEqual(at, sorted(at))
+        self.assertEqual(helper.count("pops_user_bios_load("), 2)
         self.assertEqual(src.count("pops_user_bios_load("), 4)  # the definition and three calls
 
     def test_reader_asks_for_the_first_0x7ff90_bytes_only(self):

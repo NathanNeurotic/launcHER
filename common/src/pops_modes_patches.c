@@ -72,7 +72,8 @@ typedef struct {
   uint32_t address, expected, replacement;
   uint8_t width;
 } CompatPatch;
-/* Loader state tests, as the original makes them (`bnez` on each word). */
+/* Loader state tests, as the original's launch function makes them (`bnez`
+ * on each word). Every store to these words is of 0 or 1. */
 int pops_user_rom_replaced(const PopsUserRomState *rom) {
   return rom && (rom->bios_game || rom->bios_all);
 }
@@ -81,12 +82,16 @@ int pops_user_rom_keeps_shell(const PopsUserRomState *rom) {
   return rom && (rom->bios_game || rom->bios_all || rom->osd_game_b || rom->osd_all_b);
 }
 
+/* The launch function's tests in front of each call (`bnez`) and the
+ * loader's own entry tests (0x8801b4..0x8802ac, which compare with 1)
+ * together. Only gp+0x344c for the all-games folder is left to the loader
+ * alone, so only there does a value other than 0 or 1 not skip the file. */
 int pops_user_bios_skipped(int per_game, const PopsUserRomState *state) {
   if (!state)
     return 0;
   if (per_game)
     return state->osd_game_a || state->osd_game_b;
-  return state->osd_all_a || state->osd_game_b || state->osd_all_b;
+  return state->osd_all_a || state->osd_all_b || state->osd_game_b == 1;
 }
 
 int pops_user_bios_size_ok(int64_t file_size) {

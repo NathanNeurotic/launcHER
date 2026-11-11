@@ -40,9 +40,10 @@ int pops_user_rom_keeps_shell(const PopsUserRomState *rom);
 #define POPS_USER_BIOS_READ 0x0007ff90
 #define POPS_USER_BIOS_MIN_SIZE 0x0007ff8f
 
-/* The loader's own entry gates: 1 = it returns without opening the file.
- * per_game 0 is the all-games folder (gp+0x343c, 0x344c, 0x3430), 1 the
- * game's folder (gp+0x3878, 0x344c). */
+/* The entry gates, the launch function's and the loader's own together:
+ * nonzero = the file is not opened. per_game 0 is the all-games folder
+ * (gp+0x343c, 0x3430 set; gp+0x344c equal to 1), 1 the game's folder
+ * (gp+0x3878, 0x344c set). */
 int pops_user_bios_skipped(int per_game, const PopsUserRomState *state);
 
 /* The size test (0x8803d0): the size as a signed 32-bit value must be more

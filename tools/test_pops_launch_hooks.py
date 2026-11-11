@@ -844,9 +844,7 @@ class Source(unittest.TestCase):
                  "res = pops_resident_hook_guards(",
                  "res = pops_apply_always_on_pokes(",
                  "res = pops_builtin_apply(builtinId, (void *)stagedCore",
-                 "res = pops_apply_all_config_patches_rom(",
-                 "res = pops_resident_hook_recompiler_emit(",
-                 "res = pops_stage_fix_files(",
+                 "res = pops_stage_user_files(",
                  "res = pops_fix_finalize_video(",
                  "res = pops_apply_bios_shell_edits_rom(",
                  "res = regionRead ? pops_apply_region_rom(",
@@ -857,16 +855,29 @@ class Source(unittest.TestCase):
                  "memcpy((void *)POPS_TRAMPOLINE_ADDR"]
         at = [body.index(s) for s in order]
         self.assertEqual(at, sorted(at), [s for s, _ in sorted(zip(order, at), key=lambda x: x[1])])
-        for s in order[:6] + order[8:9] + order[11:12]:
+        for s in order[:6] + order[7:8] + order[9:10]:
             self.assertEqual(body.count(s), 1, s)
+        # The user's commands, the $RECOMPILER_ADDON_3/4 jumps and the fix
+        # files are one helper, called once (tools/test_pops_user_bios.py
+        # builds and runs it on the host); this is its order.
+        helper = src[src.index("static int pops_stage_user_files("):src.index("int launchPOPS(")]
+        inner = ["res = pops_apply_all_config_patches_rom(",
+                 "res = pops_resident_hook_recompiler_emit(",
+                 "res = pops_stage_fix_files("]
+        at = [helper.index(s) for s in inner]
+        self.assertEqual(at, sorted(at))
+        for s in inner:
+            self.assertEqual((helper.count(s), body.count(s)), (1, 0), s)
         # Every POPStarter-mode launch: no flag gates the hooks or the install.
-        for s in ("res = pops_resident_hook_gp1(", "res = pops_resident_hook_recompiler(",
-                  "res = pops_resident_hook_guards(", "res = pops_resident_hook_recompiler_emit(",
-                  "res = pops_apply_always_on_pokes(", "res = pops_apply_bios_shell_edits_rom(",
-                  "res = pops_resident_install("):
-            line = body[body.rindex("\n", 0, body.index(s)) + 1:body.index(s)]
+        for text, s in ((body, "res = pops_resident_hook_gp1("), (body, "res = pops_resident_hook_recompiler("),
+                        (body, "res = pops_resident_hook_guards("), (body, "res = pops_stage_user_files("),
+                        (helper, "res = pops_resident_hook_recompiler_emit("),
+                        (body, "res = pops_apply_always_on_pokes("),
+                        (body, "res = pops_apply_bios_shell_edits_rom("),
+                        (body, "res = pops_resident_install(")):
+            line = text[text.rindex("\n", 0, text.index(s)) + 1:text.index(s)]
             self.assertIn(line, ("  ", "    "), s)
-            prev = body[:body.index(s)].rstrip().splitlines()[-1].strip()
+            prev = text[:text.index(s)].rstrip().splitlines()[-1].strip()
             self.assertFalse(prev.startswith("if (residentNeeded") or "flags &" in prev, (s, prev))
         # The shell edits, the region pass and the user's commands are called on
         # every launch too, but with POPStarter's loader state: what they skip
