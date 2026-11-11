@@ -5,6 +5,19 @@ with the addresses needed to continue. Written so the next person does not
 have to rediscover it. Base commits: launcHER `cfebe01`, REPOP main
 `bc258e48`.
 
+**Brought up to launcHER `ef663b2` (second correction pass, section 2b).**
+Five pieces merged after `cfebe01`: `CHEATS.TXT` command recognition with
+`$USBDELAY_n` and `VMCDIR.TXT` (`95ba812`), the IGR skin (`173d5de`), the
+user `BIOS.BIN` and its loader state (`0945127`), the `SB.` network files
+(`21c3476`) and the drive-free part of the physical disc (`f22a69f`). The
+launcHER paragraphs of sections 3, 4, 5a, 6, 8, 9, 11, 13, 14 and 16 say
+what those merges changed, only as far as the merged code and its tests
+show it. Three areas are being changed on side branches while this is
+written and are marked "in progress on a side branch": the handoff defect
+(`pr23/handoff`), TROJAN files (`pr23/trojan`) and the answers to the first
+review of the `CHEATS.TXT` pass (`pr23/cfg`). What those branches will end
+with is not described here.
+
 **Nothing in this document was run on a console or in an emulator of the
 whole machine.** "Measured" means: the named block of the original was run on
 a host under Unicorn (or the in-repo R5900 interpreter) with its library
@@ -37,12 +50,16 @@ Confidence labels, used on every statement:
 | `read` | read from disassembly or source, not executed |
 | `inferred` | a conclusion drawn from the above, not observed |
 
-`S1`..`S29` after a label refers to the spot checks in sections 2 and 2a.
+`S1`..`S33` after a label refers to the spot checks in sections 2, 2a and
+2b.
 "Host" in a table says whether the statement, or the launcHER code that
 would implement it, can be checked on a host without a console: `yes`,
 `partly`, or `no`.
 
-launcHER line numbers are for commit `cfebe01`.
+launcHER line numbers are for commit `cfebe01`. Rows changed by the second
+correction pass name launcHER functions instead of lines; the `cfebe01`
+line numbers that remain in other rows were not re-checked at `ef663b2`
+and many have moved.
 
 `S1`..`S19` were made for the first version of this document. An
 independent review of that version re-derived most of it with its own
@@ -94,7 +111,7 @@ TESTED on a console.
 | # | Check | Result |
 |---|---|---|
 | S20 | REPOP heads again | `origin/main` is still `bc258e48`. The worktree `REPOP.worktrees/pr23` is not at that commit. It is on a local working branch (not in `main`), created from `origin/main` at 04:26:42 (-0800) on 2026-11-11; the branch's reflog shows it at `bc258e48` until its first local commit at 06:25:53 (the first version of this document was committed at 06:28:19). When looked at again it was six commits past `bc258e48`, head `0a440b01`, with one uncommitted change. `python tools/parity_report.py popstarter` on a `git archive` export of `bc258e48`: 466 / 138,664 / 434 / 93.1% / 90.2% |
-| S21 | every `jal 0x915708` (the print call) classed by a pattern: is there, in the 12 instructions before it, a `lw v1,0x38b0(gp)` / `li v0,1` / `beq v1,v0` that jumps past the call. A pattern scan, not a flow analysis | BIOS handler: 14 call sites, 2 without the test (`0x8805b4`, format `DONE\n`; `0x880984`, format `\n`). OSD handler: 41, 3 without (`0x87eee0`, `0x87f27c`, `0x87f3a8`). IGR skin function: 15, 0 without. TROJAN loader: 20, 1 without (`0x881cec`). `main`: 295, 21 without. Whole code area `0x870000..0x915000`: 2,031, 145 without |
+| S21 | every `jal 0x915708` (the print call) classed by a pattern: is there, in the 12 instructions before it, a `lw v1,0x38b0(gp)` / `li v0,1` / `beq v1,v0` that jumps past the call. A pattern scan, not a flow analysis. Call sites and the number without the test, per range | BIOS handler: 14, 2 without (`0x8805b4`, format `DONE\n`; `0x880984`, format `\n`). OSD handler: 41, 3 without (`0x87eee0`, `0x87f27c`, `0x87f3a8`). IGR skin function: 15, 0 without. TROJAN loader: 20, 1 without (`0x881cec`). `main` (`0x870b78..0x87c214`): 295, 21 without. Whole code area `0x870000..0x915000`: 2,031, 145 without |
 | S22 | BIOS handler `0x88019c` emulated: 20 inputs (scope x `pfs1`/`mass` x no file and four sizes), each with `gp+0x38b0` 1 and 0; 8 more with the game folder present or missing; 4 more with `gp+0x38e0` already 1 | With `gp+0x38b0 = 1`: 18 print calls, in 14 of the 20 inputs, all from the two sites S21 names. With 0: 84 calls. Every game-scope run changes `gp+0x38e0` from 0 to 1 (10 of 10); no all-games run does (0 of 10). Game folder missing: return -666, `gp+0x3460 = 1`, nothing opened, POPS unchanged (4 of 4, both backends). With `gp+0x38e0` already 1 the folder is not checked and the file loads (4 of 4) |
 | S23 | IGR skin function `0x87e464` emulated: 32 runs with `gp+0x3868 = 1` (backend x `gp+0x38dc` x four file sets x in-limit/oversize), 16 runs with `gp+0x3868 = 0` and the folder check `FUN_008d8958` forced to return 1, 0, 2 or -1, 2 runs with preset byte `0x10002d` 0 and 2 | `gp+0x38dc = 1`: return 0, nothing opened, POPS unchanged (24 of 24). `gp+0x38dc = 0`, `gp+0x3868 = 1`: return 1 (16 of 16, whatever the files). `gp+0x38dc = 0`, `gp+0x3868 = 0`: folder check 1 gives the normal load and return 1 (2 of 2); any other result gives return -666, `gp+0x38dc = 1`, nothing opened (6 of 6). The preset byte does not matter inside the function (2 of 2 still open the three files). Instructions: `0x87e474..0x87e488`, `0x87e48c..0x87e4c4`, `0x87eb04..0x87eb0c` |
 | S24 | `main` `0x8712c8..0x8712ec` and `0x876a84..0x876b24` | preset `0x10002d` equal to 1 sets the frame word `0x1108(fp)` (its only writers are `0x870ce8`, zero, and `0x8712ec`). The call at `0x876b18` is skipped when `gp+0x38dc` is nonzero (`0x876a84`) or that word is not 1 (`0x876a90`, its only reader). After the call `main` reads `gp+0x38dc` (`0x876b20`), not the return value |
@@ -104,22 +121,79 @@ TESTED on a console.
 | S28 | the embedded PFS wrapper IRX at `0x91f680`: first read statically (import tables and `.text`), then its callbacks run on a host | the routine at `.text` 0 calls `thsemap` import 8, tests a flag word at `0x540`, reads the word at `0x420` (the only `DLAY` in the image), uses 5 instead if it still reads `DLAY`, multiplies by 1,000,000 (shifts and adds), calls `thbase` import 33, clears the flag, calls `thsemap` import 6. Its only caller is `.text` `0x124`, inside the function at `0xd4`, which is the fourth pointer of the 17-pointer table at `0x544`. The five words after the table are `0x430`, `0x10`, `1`, `0x410`, `0x544`: the shape of an ioman device record whose last word points back at the table. Then the wrapper's own callbacks were run under Unicorn through the classes of `tools/trace_original_pops_io.py`, every import call recorded in order. Word left as `DLAY`: the first call of table entry 3 makes the import calls `sysclib` 23, `thsemap` 8, `thbase` 33 with argument 5,000,000, `thsemap` 6, then `ioman` 4 (open of `mass:/POPS/IMAGE.VCD`); the following read, seek, close, second open and close make no `thbase` call. Word replaced by `n, 0, 0, 0` for n = 0..9: the same sequence with argument n x 1,000,000, once, before the first backend open, and none in six later callbacks (10 of 10). Read, seek and close called before any open make no `thbase` call; the first open after them does (1 of 1) |
 | S29 | `.github/workflows/*.yml` against `tools/test_*.py` at `cfebe01` | 26 test files. `build.yml` job `host-tests` runs 23. `launch-args.yml` runs `test_launch_args.py` on push and pull request. `test_pops_builtin_db.py` and `test_pops_progressive.py` are named in no workflow |
 
-Part of this is now repeated by a test, `tools/test_pops_doc_claims.py`,
-added with the correction. Without the reference inputs (as in CI) it
-checks S29 against the list in `CLOUD_CONTINUATION.md`, that the documents
-cite one address for the `$USBDELAY_` handler, that every `S` number cited
-here is defined, and that six withdrawn sentences are gone. With
-`POPSTARTER_TEST_ELF` it also recomputes S21, S25, S26, the static parts of
-S23, S24 and the `gp+0x38e0` sites from the original's bytes, repeats the
-wrapper run of S28, and compares each with the wording of this document.
-It does not repeat the emulated runs S22, S23 and S27. Thirteen deliberate
-changes to the documents or the workflow were tried against it: with the
-reference inputs it failed for 13 of 13, without them for 7 of 13 (the
-other six contradict only the original's bytes).
+### 2b. Checks added by the second correction pass (`ef663b2`)
+
+Made on 2026-11-11 after the second review of this document, with scratch
+scripts (not in the repository) built on the in-repo tracers
+`tools/trace_original_pops_user_bios.py` and
+`tools/trace_original_pops_igr_skin.py`. Unlike those tracers as committed,
+both runs let the POPS folder check `FUN_008d8958` (`0x8d8958..0x8d8b10`)
+execute; only its callees are models: `0x8d7e78` (the `pfs1:` folder
+check), `0x91bf80` (the `mass:` stat call), `0x91be68` (called on
+`mass0:/POPS` after a failed stat) and the print routine. Host work only.
+NOT TESTED on a console.
+
+| # | Check | Result |
+|---|---|---|
+| S30 | BIOS handler `0x88019c` with `gp+0x3868 = 0`: scope (all games, game) x backend x POPS folder present or missing x game folder present or missing x file absent or `0x80000` bytes x `gp+0x38b0` 1 and 0 (64 runs), plus 4 runs with `gp+0x3868 = 1` and the POPS folder missing | All games, POPS folder missing: return -666, nothing opened, core unchanged, `gp+0x38dc`, `gp+0x3460` and `gp+0x3868` each 0 to 1 (16 of 16). Game, POPS folder missing: the failed check is ignored and the handler goes on. Game folder and file present: the file loads, return 1, and `gp+0x38dc`, `gp+0x3460`, `gp+0x3868`, `gp+0x38e0`, `gp+0x3b98` are all 1 afterwards (4 of 4). Game folder present, no file: return 0 (4 of 4). Game folder missing: -666 from the game-folder exit (8 of 8). POPS folder present: the results of S22, and `gp+0x3868` goes 0 to 1 (32 of 32). On `mass:` a failed check also calls `0x91be68` on `mass0:/POPS`. With `gp+0x3868 = 1` the check is not made and the file loads although the folder model says missing (4 of 4) |
+| S31 | IGR skin function `0x87e464` with `gp+0x3868 = 0`: backend x POPS folder present or missing x `gp+0x38b0` 1 and 0 (8 runs) | Folder missing: return -666, nothing opened, core unchanged, `gp+0x38dc`, `gp+0x3460`, `gp+0x3868` each 0 to 1 (4 of 4); on `mass:` also the call of `0x91be68` on `mass0:/POPS`. Folder present: return 1, three opens, of those words only `gp+0x3868` changes (4 of 4) |
+| S32 | static: every `jal 0x8d8958` in `0x870000..0x915000`, and every `li v0,-666` inside the five file loaders | Callers: `0x873f9c` (`main`), `0x87e49c` (IGR skin), `0x87ec38` (OSD), `0x880348` (BIOS), `0x880aac` (TROJAN), `0x881e70` (PATCH), `0x8d4fac` (the `VMCDIR.TXT` reader). `-666` stores: IGR `0x87e4bc`; OSD `0x87ec68`, `0x87ee84`, `0x87eed0`; BIOS `0x880378`, `0x880558`, `0x8805a4`; TROJAN `0x880adc`, `0x880d18`, `0x880d64`; PATCH `0x881ea0`, `0x8820d8`, `0x882124`. Disassembly of `0x8d8958..0x8d8b10`: it returns 0 only when `gp+0x38dc` or `gp+0x3868` is 1 on entry; otherwise it sets `gp+0x3868 = 1` first and returns 1, or -666 with `gp+0x38dc = 1` and `gp+0x3460 = 1` (a `gp+0x3448` other than 0 or 1, which no store writes, S11, also returns 1) |
+| S33 | `.github/workflows/*.yml` against `tools/test_*.py` at `ef663b2`, read by the step parser of `tools/test_pops_doc_claims.py` | 32 test files. `build.yml` job `host-tests` runs 29, each as an unconditional step of its own. `launch-args.yml` runs `test_launch_args.py`. `test_pops_builtin_db.py` and `test_pops_progressive.py` are run by no workflow |
+
+### What `tools/test_pops_doc_claims.py` checks
+
+The test was added by the first correction pass and extended by the second
+after a review showed that it pinned less than this section used to say.
+It now checks exactly the following; nothing else in this document is read
+by a test.
+
+Without the reference inputs (as in CI):
+
+- The `ci-coverage` list in `CLOUD_CONTINUATION.md` against the workflows.
+  A test file counts as run only when an uncommented `run:` line of a step
+  starts a command `python tools/<file>` (or `python3`), the step and its
+  job have no `if:` other than `always()` or `success()` and no
+  `continue-on-error`, and the workflow runs on push or pull request. The
+  parser is itself tested on texts with a commented-out step, an
+  `if: false`, a mention inside `echo`, a job-level `if:` and a manual-only
+  trigger.
+- One address for the `$USBDELAY_` handler in every document; every `S`
+  number cited here is defined; six withdrawn sentences are gone.
+
+With `POPSTARTER_TEST_ELF` (a value that is set but cannot be decoded is a
+failure, not a skip), from the original's bytes, each compared with whole
+phrases of this document:
+
+- the S21 census, one exact phrase per range (count, number without the
+  test, and the sites when there are one to three), and the two counts in
+  the `gp+0x38b0` row;
+- S25 and the `$USBDELAY_` citations;
+- the BIOS handler's three `-666` exits and their gates (section 4, S32):
+  the POPS folder exit and its scope test, the game-folder exit and the
+  store of `gp+0x38e0` before it;
+- `FUN_008d8958`'s return values and stores (S32) and the seven callers;
+- the IGR skin function's return values 1, 0 and -666 and the instructions
+  that decide them (section 6, S23); the matching phrases of the inventory's
+  IGR row;
+- S24: the gates in `main` and that `main` overwrites `v0` with
+  `gp+0x38dc` right after the call;
+- the `gp+0x38e0` sites (section 3a);
+- S26 and the slot table of section 12, entry by entry, against a list kept
+  in the test; with `POPS_TROJAN_CORPUS` also against the corpus headers,
+  with the file counts of S15;
+- the wrapper run of S28, with the section 9 sentence on when the delay is
+  called and the inventory's `$USBDELAY_n` figures.
+
+It does not repeat the emulated runs S22, S23, S27, S30 and S31, and it
+does not read README.md or `docs/pops-setup.html` beyond the withdrawn
+sentences. The results of the deliberate changes tried against it are in
+section 19.
 
 ## 3. Order of the original's launch function, and launcHER's
 
-The original's `main` is `0x870b78..0x87c218` (frame `0x1630`). It is
+The original's `main` is `0x870b78..0x87c214` (frame `0x1630`; an earlier
+version of this sentence gave `0x87c218`, which is the first instruction of
+the next function). It is
 unoptimised straight-line code. The critic listed every backward branch and
 every `j` in it: 33 backward branches, none spanning a loader call site
 between `0x876a40` and `0x879d04`, and one `j` (the jump into POPS at
