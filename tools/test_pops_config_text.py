@@ -252,6 +252,27 @@ FIXED = [
     "$USBDELAY_5$SMOOTH", "$usbdelay_9\r\n", "$USBDELAY5 ", "$USBDELAY_0 ", "$USBDELAY_3 $USBDELAY_8 ",
     "$LEFTADJ_12 $USBDELAY_7 $XPOS_Q ", "$USBDELAY_7 $XPOS_Q ", "$USBDELAY_ 5 ", "$USBDELAY_05 ",
     "x$USBDELAY_4\n", "#$USBDELAY_6\n", "$USBDELAY_-1 ", "$USBDELAY_9\0", "$USBDELAY_2 $USBDELAY_44 ",
+    # $FORCEPAL is taken but does nothing once a $480P was taken; $NOPAL
+    # does not undo a $FORCEPAL (Native.test_video_commands has the state).
+    "$480P $FORCEPAL ", "$480P $NOPAL $FORCEPAL ", "$FORCEPAL $480P $FORCEPAL ", "$FORCEPAL $NOPAL ",
+    "$NOPAL $FORCEPAL ", "$480p\r\n$forcepal\r\n", "$FORCEPAL\t$480P $FORCEPAL$FORCEPAL",
+    # Each condition of the five code tests, from both sides. A command in
+    # the columns of a code is not seen; where the columns are no code, it is.
+    "$500$480P 1234 ", "$50002345 1234 $NOPAL ", "$50012345 1234 $NOPAL ", "$50102345 1234 $NOPAL ",
+    "$50010000 0000$NOPAL ", "$51002345 1234 $NOPAL ", "$3A012345 1234 $NOPAL ",
+    "$80112345 1234 $NOPAL ", "$D0212345 1234 $NOPAL ", "$80012345$1234 $NOPAL ",
+    "$S0003000 $SMOOTH $NOPAL ", "$S0004000 $SMOOTH $NOPAL ", "$S2203000 $SMOOTH $NOPAL ",
+    "$S3000000 $SMOOTH $NOPAL ", "$S0300000 $SMOOTH $NOPAL ", "$S0010000 $SMOOTH $NOPAL ",
+    "$S0003000 12345678$NOPAL ", "$S0004000 12345678$NOPAL ", "$S0000400 12345678$NOPAL ",
+    "$T0000300 $SMOOTH $NOPAL ", "$T0000400 $SMOOTH $NOPAL ", "$T2200300 $SMOOTH $NOPAL ",
+    "$T0001000 $SMOOTH $NOPAL ", "$T3000000 $SMOOTH $NOPAL ", "$T0300000 $SMOOTH $NOPAL ",
+    "$T0010000 $SMOOTH $NOPAL ", "$T0000300 12345678$NOPAL ", "$T0000400 12345678$NOPAL ",
+    "$=1012345 $SMOOTH $NOPAL ", "$=2012345 $SMOOTH $NOPAL ", "$!0012345 $SMOOTH $NOPAL ",
+    "$!2012345 $SMOOTH $NOPAL ", "$20012345 $SMOOTH $NOPAL ", "$30012345 $SMOOTH $NOPAL ",
+    "$00012345 $SMOOTH $NOPAL ", "$20012345\t$SMOOTH $NOPAL ",
+    # launcHER's own tokens next to a 63-byte cut or a byte above 0x7f: still
+    # nothing to the original, and no stray mode in launcHER.
+    "x" * 63 + "1 ", "x" * 62 + " 1 ", "\xa04 ", "$MODE3" + "x" * 60 + " ",
 ]
 
 # What the byte at 0x100017 holds before the original's pass in these tests:
