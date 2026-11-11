@@ -12,6 +12,7 @@
 #include "pops_compat_db.h"
 #include "pops_modes_patches.h"
 #include "pops_builtin_db.h"
+#include "pops_igr_skin.h"
 #include "pops_resident.h"
 #include "pops_read_trace.h"
 #include <ctype.h>
@@ -353,6 +354,71 @@ static int pops_load_bdma_group(const char *role, const char *const *names,
     }
   }
   return 0;
+}
+
+/* POPStarter's IGR menu skin (FUN_0087e464, called at 0x876b18: after its
+ * always-on pokes, before its OSD/BIOS loaders, the fix files and the
+ * user's commands). IGR_BG.TM2, IGR_NO.TM2 and IGR_YES.TM2, in that order,
+ * are each copied raw over the TIM2 file Sony's POPS carries for its own
+ * in-game reset dialog. The original reads them from the device's POPS
+ * folder (pfs1:/POPS/ or mass:/POPS/); launcHER's stand-in is the folder
+ * its all-games TROJAN_n.BIN/PATCH_n.BIN come from. The size is checked
+ * before anything is read. Nothing here stops the launch, as there: a
+ * missing file leaves Sony's image and one that is too big is skipped. The
+ * original zero-fills the slot and then does not check its read, so a read
+ * that delivers less than the file's size leaves what arrived followed by
+ * zeros; staging the bytes that did arrive gives the same slot.
+ * Kept below the functions tools/test_pops_fix_files.py compiles on the
+ * host. */
+static void pops_stage_igr_skin(void *stagedCore, size_t coreSize, const char *dir) {
+  for (int which = 0; which < POPS_IGR_SKIN_COUNT; ++which) {
+    const PopsIgrSkinSlot *slot = pops_igr_skin_slot(which);
+    uint8_t *buffer = (uint8_t *)0x01f00000;
+    char path[PATH_MAX];
+    int length = snprintf(path, sizeof(path), "%s%s", dir, slot->name);
+    if (length < 0 || (size_t)length >= sizeof(path)) {
+      DPRINTF("POPS: IGR skin %s: path too long\n", slot->name);
+      continue;
+    }
+    int fd = open(path, O_RDONLY);
+    if (fd < 0) {
+      DPRINTF("POPS: IGR skin %s: NOT FOUND\n", path);
+      continue;
+    }
+    off_t size = lseek(fd, 0, SEEK_END);
+    if (size < 0) {
+      /* Not copied: the original takes a failed size query as a size and
+       * zero-fills the slot and that many bytes below it. */
+      DPRINTF("POPS: IGR skin %s: size query failed, slot left alone\n", path);
+      close(fd);
+      continue;
+    }
+    if (size > (off_t)slot->max_size) {
+      DPRINTF("POPS: IGR skin %s: TOO BIG ! (%u > %u)\n", path, (unsigned)size,
+              (unsigned)slot->max_size);
+      close(fd);
+      continue;
+    }
+    size_t got = 0;
+    if (lseek(fd, 0, SEEK_SET) == 0) {
+      while (got < (size_t)size) {
+        size_t chunk = (size_t)size - got;
+        if (chunk > 65536)
+          chunk = 65536;
+        ssize_t n = read(fd, buffer + got, chunk);
+        if (n <= 0 || (size_t)n > chunk)
+          break;
+        got += (size_t)n;
+      }
+    }
+    close(fd);
+    int result = pops_igr_skin_stage(stagedCore, coreSize, which, buffer, got);
+    if (result)
+      DPRINTF("POPS: IGR skin %s: not staged (%d)\n", path, result);
+    else
+      DPRINTF("POPS: IGR skin %s: LOADED (%u of %u bytes)\n", path, (unsigned)got,
+              (unsigned)size);
+  }
 }
 
 /* POPStarter's XX. driver pair: start each buffered file, usbd.irx first,
@@ -1381,6 +1447,12 @@ int launchPOPS(int argc, char *argv[]) {
     msg("POPS: POPStarter launch hooks failed: %d\n", res);
     return res;
   }
+
+  /* POPStarter's IGR menu skin: next in its launch function (0x876b18),
+   * before everything below. Never fatal. Sony's dialog, and so the skin,
+   * is only shown under $IGR0..2: without a command launcHER's own direct
+   * exit is used. */
+  pops_stage_igr_skin((void *)stagedCore, plan.core_size, vcdDir);
 
   /* Stage opt-in runtime core corrections when configured */
   if (cfg.runtime_corrections) {
