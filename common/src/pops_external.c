@@ -208,6 +208,8 @@ const char *pops_trojan_reason_text(unsigned reason) {
     return "it uses POPStarter code at 0x232790..0x232ec7 outside the slots";
   case POPS_TROJAN_NO_MAIN:
     return "it uses POPStarter's own program, which is not in memory";
+  case POPS_TROJAN_NO_LARGE:
+    return "the file is larger than launcHER's 1 MiB fix file buffer";
   default:
     return "unknown reason";
   }

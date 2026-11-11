@@ -284,6 +284,52 @@ static int readPopsDependency(const char *path, void *buffer, size_t max_size,
   return result;
 }
 
+/* One TROJAN_n.BIN, opened, read as POPStarter reads it (0x881134..0x881230,
+ * 0x881a1c; tools/test_pops_trojan.py, class Original, runs the original
+ * with these failures): the size is what the lseek to the end returns, a
+ * failure included, and a size below 0x44 is Invalid; neither the rewind
+ * nor the header read is checked, so what did not arrive stays zero (the
+ * original clears its header after every file and reads it in one call;
+ * here it is read until it has arrived or a read returns nothing). The
+ * payload is read only for a file the original would apply and that fits
+ * `capacity`. Returns 0 with the whole file in buffer and *size set, a
+ * POPS_FIX_SKIP_* result (pops_fix_trojan_header), or a negative error for
+ * a failed payload read, which the original does not check: it copies
+ * whatever its buffer holds, so that stays fatal here. */
+static int pops_read_trojan(int fd, void *memory, size_t capacity, unsigned slot,
+                            PopsTrojanSet *set, size_t *size) {
+  uint8_t *buffer = memory;
+  off_t end = lseek(fd, 0, SEEK_END);
+  /* The original keeps the size as a signed 32-bit word. */
+  size_t fileSize = end > 0 && end <= 0x7fffffff ? (size_t)end : 0;
+  size_t total = 0;
+  lseek(fd, 0, SEEK_SET);
+  memset(buffer, 0, POPS_CONTAINER_HEADER_SIZE);
+  while (total < POPS_CONTAINER_HEADER_SIZE) {
+    ssize_t n = read(fd, buffer + total, POPS_CONTAINER_HEADER_SIZE - total);
+    if (n <= 0 || (size_t)n > POPS_CONTAINER_HEADER_SIZE - total)
+      break;
+    total += (size_t)n;
+  }
+  int result = pops_fix_trojan_header(set, buffer, fileSize, slot, capacity);
+  if (result)
+    return result;
+  if (lseek(fd, POPS_CONTAINER_HEADER_SIZE, SEEK_SET) != POPS_CONTAINER_HEADER_SIZE)
+    return -EIO;
+  total = POPS_CONTAINER_HEADER_SIZE;
+  while (total < fileSize) {
+    size_t chunk = fileSize - total;
+    if (chunk > 65536)
+      chunk = 65536;
+    ssize_t n = read(fd, buffer + total, chunk);
+    if (n <= 0 || (size_t)n > chunk)
+      return n < 0 && errno ? -errno : -EIO;
+    total += (size_t)n;
+  }
+  *size = fileSize;
+  return 0;
+}
+
 /* The archived MAIN calls root TROJAN, root PATCH, title TROJAN, title PATCH
  * (0x876d6c/0x876e00/0x877078/0x877118). Slot order is 0..9 in both loaders.
  * These are explicit external fix files, never files from VMCDIR redirection.
@@ -346,11 +392,12 @@ static int pops_user_bios_load(void *stagedCore, size_t coreSize, const char *di
  * with its words and the next slot is read, as there (its loader returns 1
  * whatever happened and its callers ignore that). A TROJAN it would apply
  * and launcHER cannot host is skipped too, with a line that says so: the
- * game then runs without that fix. Any other failure, a read error included
- * (the original reads every open failure as NOT FOUND), still stops the
- * launch, and the staged executable is discarded by the caller. So does a
- * file larger than the 1 MiB read buffer, which the original has no limit
- * for. */
+ * game then runs without that fix; so is one larger than the 1 MiB read
+ * buffer, which the original has no limit for. A TROJAN that cannot be
+ * opened, for whatever reason, is "NOT FOUND" there and here, and one whose
+ * size or header cannot be read is "Invalid" (pops_read_trojan). Any other
+ * failure, a PATCH file's read error or a TROJAN payload's included, still
+ * stops the launch, and the staged executable is discarded by the caller. */
 static int pops_stage_fix_files(void *stagedCore, size_t coreSize,
                                  const char *vcdDir, const char *titleDir,
                                  uint16_t builtinId, uint8_t initialModes,
@@ -395,20 +442,18 @@ static int pops_stage_fix_files(void *stagedCore, size_t coreSize,
                                 kind ? "PATCH" : "TROJAN", slot);
         if (length < 0 || (size_t)length >= sizeof(path))
           return -ENAMETOOLONG;
-        result = readFullFile(path, buffer, 0x100000, &size);
-        if (result == -ENOENT)
-          continue;
-        if (result == -EINVAL && !kind) {
-          /* readFullFile refuses an empty file and one too large alike. The
-           * original calls an empty TROJAN file "Invalid", as it does every
-           * one under 0x44 bytes, and reads the next slot. */
+        if (kind) {
+          result = readFullFile(path, buffer, 0x100000, &size);
+          if (result == -ENOENT)
+            continue;
+        } else {
           int fd = open(path, O_RDONLY);
-          if (fd >= 0) {
-            off_t end = lseek(fd, 0, SEEK_END);
-            close(fd);
-            if (end == 0)
-              result = POPS_FIX_SKIP_INVALID;
+          if (fd < 0) {
+            DPRINTF("POPS: %s NOT FOUND\n", path);
+            continue;
           }
+          result = pops_read_trojan(fd, buffer, 0x100000, slot, trojanSet, &size);
+          close(fd); /* not checked there either */
         }
         if (!result)
           result = kind ? pops_fix_stage_rom(&context, stagedCore, coreSize, buffer, size,

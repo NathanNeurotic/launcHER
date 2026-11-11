@@ -272,7 +272,10 @@ typedef struct {
 /* POPS_TROJAN_APPLY, POPS_TROJAN_INVALID or POPS_TROJAN_OUTDATED; negative
  * for a null argument or a slot above 9. `out` is written unless the file
  * is Invalid. fingerprint_builtin_id: the built-in entry the disc's
- * fingerprint selected, 0 for none. */
+ * fingerprint selected, 0 for none. `size` is the file's size; only the
+ * first POPS_CONTAINER_HEADER_SIZE bytes of `file` are read (none when
+ * `size` is below POPS_TROJAN_MIN_FILE), so the header alone may be given,
+ * as the original decides from its header and the file's size. */
 int pops_trojan_verdict(const void *file, size_t size, unsigned slot,
                         unsigned fingerprint_builtin_id, PopsTrojanInfo *out);
 
@@ -351,7 +354,8 @@ enum {
   POPS_TROJAN_NO_BUILTIN,   /* names a built-in entry's fix code */
   POPS_TROJAN_NO_OWNED,     /* names POPStarter's code at 0x0143a000..0x014601ff */
   POPS_TROJAN_NO_BLOCK1,    /* names POPStarter's first part outside the slots */
-  POPS_TROJAN_NO_MAIN       /* names POPStarter's program */
+  POPS_TROJAN_NO_MAIN,      /* names POPStarter's program */
+  POPS_TROJAN_NO_LARGE      /* the file is larger than launcHER's fix file read buffer */
 };
 
 /* A short English clause for a POPS_TROJAN_NO_* value, for the launch log. */

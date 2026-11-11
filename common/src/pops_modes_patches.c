@@ -644,6 +644,26 @@ int pops_fix_stage_trojan(PopsFixContext *context, PopsTrojanSet *set, void *sta
   return 0;
 }
 
+int pops_fix_trojan_header(PopsTrojanSet *set, const void *header, size_t file_size,
+                           unsigned slot, size_t capacity) {
+  PopsTrojanInfo info;
+  if (!header || slot > 9)
+    return -EINVAL;
+  int verdict = pops_trojan_verdict(header, file_size, slot, set ? set->fingerprint_id : 0, &info);
+  if (verdict < 0)
+    return -EINVAL;
+  if (verdict == POPS_TROJAN_INVALID)
+    return POPS_FIX_SKIP_INVALID;
+  if (verdict == POPS_TROJAN_OUTDATED)
+    return POPS_FIX_SKIP_OUTDATED;
+  if (file_size > capacity) {
+    if (set)
+      set->reason = POPS_TROJAN_NO_LARGE;
+    return POPS_FIX_SKIP_UNHOSTED;
+  }
+  return 0;
+}
+
 int pops_fix_stage(PopsFixContext *context, void *staged_core, size_t core_size,
                     const void *file, size_t file_size, unsigned slot,
                     int expected_trojan) {

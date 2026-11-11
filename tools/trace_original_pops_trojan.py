@@ -84,6 +84,7 @@ class Loader:
         self.files = {}
         self.handles = {}
         self.events = []
+        self.faults = {}
         self.args = (mc.UC_MIPS_REG_A0, mc.UC_MIPS_REG_A1, mc.UC_MIPS_REG_A2, mc.UC_MIPS_REG_A3)
         natives = {PRINTF: self._printf, STRLEN: self._strlen, MEMCPY: self._memcpy,
                    MEMSET: self._memset, MALLOC: self._malloc, GETSTAT: self._getstat,
@@ -141,9 +142,12 @@ class Loader:
     def _open(self, a):
         path = self._string(a[0])
         self.events.append(("open", path))
-        if path in self.files:
+        fault = self.faults.get(path, {})
+        if "open" in fault:
+            self._ret(fault["open"])
+        elif path in self.files:
             handle = 3 + len(self.handles)
-            self.handles[handle] = [self.files[path], 0]
+            self.handles[handle] = [self.files[path], 0, path, 0]
             self._ret(handle)
         else:
             self._ret(-2)
@@ -151,11 +155,22 @@ class Loader:
     def _lseek(self, a):
         entry = self.handles[a[0]]
         offset = a[1] - (1 << 32) if a[1] >> 31 else a[1]
+        fault = self.faults.get(entry[2], {})
+        if a[2] == 2 and "size" in fault:
+            self._ret(fault["size"])
+            return
         entry[1] = offset if a[2] == 0 else (len(entry[0]) + offset if a[2] == 2 else entry[1] + offset)
         self._ret(entry[1])
 
     def _read(self, a):
         entry = self.handles[a[0]]
+        reads = self.faults.get(entry[2], {}).get("read", ())
+        number, entry[3] = entry[3], entry[3] + 1
+        if number < len(reads) and reads[number] is not None:
+            # A failed read: nothing written, the given (negative) count returned.
+            self.events.append(("read", a[1], a[2], reads[number]))
+            self._ret(reads[number])
+            return
         data = entry[0][entry[1]:entry[1] + a[2]]
         if data:
             self.uc.mem_write(a[1], data)
@@ -175,11 +190,16 @@ class Loader:
         self.events.append(("dircheck", self._string(a[0])))
         self._ret(1)
 
-    def run(self, files, scope=0, title=b"", hdd=False, builtin=0, loader=TROJAN_LOADER):
-        """files: {path bytes: data}. -> (return value, events, memory after)."""
+    def run(self, files, scope=0, title=b"", hdd=False, builtin=0, loader=TROJAN_LOADER,
+            faults=None):
+        """files: {path bytes: data}. -> (return value, events, memory after).
+        faults: {path bytes: {"open": rc} | {"size": rc} | {"read": [rc or None, ...]}}:
+        a failed open, a failed lseek to the end, or the n-th read call on
+        that file failing with the count given (None: that read succeeds)."""
         mc, uc = self.mc, self.uc
         uc.mem_write(0, self.baseline)
         self.files, self.handles, self.events = dict(files), {}, []
+        self.faults = dict(faults or {})
         state = {GP_DISABLED: 0, 0x3460: 0, 0x3868: 1, GP_HDD: 0 if hdd else 1, 0x381C: 0,
                  0x38B8: 0, 0x38E0: 0, 0x38B0: 0, GP_REVISION: 6, GP_BUILTIN: builtin,
                  0x3864: 0, 0x4FA0: 1, 0x38D0: 0, 0x3898: 0, 0x38A0: 0}

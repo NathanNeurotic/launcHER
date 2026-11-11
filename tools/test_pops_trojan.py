@@ -72,7 +72,7 @@ GP1_HOOK = 0x21a63c
 APPLY, INVALID, OUTDATED = 0, 1, 2
 SKIP_INVALID, SKIP_OUTDATED, SKIP_UNHOSTED = 1, 2, 3
 (NO_UNALIGNED, NO_ENTRY, NO_RANGE, NO_HOOK, NO_SPACE, NO_SLOT, NO_480P, NO_BLOCK2, NO_BUILTIN,
- NO_OWNED, NO_BLOCK1, NO_MAIN) = range(1, 13)
+ NO_OWNED, NO_BLOCK1, NO_MAIN, NO_LARGE) = range(1, 14)
 K0, K1, GP, RA = 26, 27, 28, 31
 JR_RA = [0x03e00008, 0]
 
@@ -256,6 +256,8 @@ def build(directory, extra=''):
     lib.pops_fix_context_init.argtypes = [c.POINTER(Context), c.c_void_p, c.c_size_t, c.c_uint8]
     lib.pops_fix_stage_trojan.argtypes = [c.POINTER(Context), c.POINTER(TrojanSet), c.c_void_p,
                                           c.c_size_t, c.c_void_p, c.c_size_t, c.c_uint]
+    lib.pops_fix_trojan_header.argtypes = [c.POINTER(TrojanSet), c.c_void_p, c.c_size_t, c.c_uint,
+                                           c.c_size_t]
     lib.pops_trojan_reason_text.restype = c.c_char_p
     lib.pops_trojan_reason_text.argtypes = [c.c_uint]
     lib.pops_trojan_scan.argtypes = [c.c_void_p, c.c_uint32, c.c_uint32, c.c_uint32, c.c_void_p,
@@ -379,12 +381,38 @@ static void msg(const char *format, ...) {
   va_end(arguments);
   if (wrote > 0 && (size_t)wrote < sizeof(log_text) - log_used) log_used += (size_t)wrote;
 }
-static int fail_reads;
+/* Failures the device can give. fail_reads: the n-th read call from now
+ * and every one after it fails (0: none). fault_name / fault_kind: the
+ * file whose name ends so fails its open (1) or its size query (2). */
+static int fail_reads, read_calls, fault_kind, fault_fd = -1;
+static char fault_name[64];
 static ssize_t test_read(int fd, void *buffer, size_t size) {
-  if (fail_reads) { errno = EIO; return -1; }
+  if (fail_reads && ++read_calls >= fail_reads) { errno = EIO; return -1; }
   return read(fd, buffer, size);
 }
+static int test_open(const char *path, int flags) {
+  size_t length = strlen(path), name = strlen(fault_name);
+  int match = fault_kind && length >= name && !strcmp(path + length - name, fault_name);
+  if (match && fault_kind == 1) { errno = EIO; return -1; }
+  int fd = open(path, flags | O_BINARY);
+  if (match && fault_kind == 2) fault_fd = fd;
+  return fd;
+}
+static off_t test_lseek(int fd, off_t offset, int whence) {
+  if (fd == fault_fd && whence == SEEK_END) { errno = EIO; return -1; }
+  return lseek(fd, offset, whence);
+}
+static int test_close(int fd) {
+  if (fd == fault_fd) fault_fd = -1;
+  return close(fd);
+}
+#ifndef O_BINARY
+#define O_BINARY 0
+#endif
 #define read test_read
+#define open test_open
+#define lseek test_lseek
+#define close test_close
 %s
 int test_fix_files(void *core, size_t size, const char *root, const char *title,
                    unsigned fingerprint, PopsTrojanSet *set, int offered) {
@@ -404,7 +432,12 @@ const unsigned char *test_hold(void) { return host_hold; }
 int test_dependency(const char *path, void *buffer, size_t size, size_t *read_size) {
   return readPopsDependency(path, buffer, size, read_size);
 }
-void test_fail_reads(int fail) { fail_reads = fail; }
+void test_fail_reads(int fail) { fail_reads = fail; read_calls = 0; }
+void test_fault(const char *name, int kind) {
+  strncpy(fault_name, name, sizeof(fault_name) - 1);
+  fault_kind = kind;
+  fault_fd = -1;
+}
 '''
 
 
@@ -584,6 +617,32 @@ class Native(Built):
                                                             data, len(data), 0), expected)
         self.assertEqual(memory, pristine())
         del pointer
+
+    def test_the_header_decision(self):
+        state = TrojanSet()
+        self.lib.pops_trojan_set_init(c.byref(state), 0, 0)
+        good = trojan(size=0x100)
+        for data, size, capacity, expected in (
+                (good[:0x40], len(good), 0x100000, 0),
+                (good[:0x40], len(good), len(good), 0),
+                (good[:0x40], len(good), len(good) - 1, SKIP_UNHOSTED),
+                (good[:0x40], len(good) + 4, 0x100000, SKIP_INVALID),
+                (good[:0x40], 0x43, 0x100000, SKIP_INVALID),
+                (bytes(0x40), len(good), 0x100000, SKIP_INVALID),
+                (trojan(fmt=3, ba=5)[:0x40], 0x60, 0x10, SKIP_UNHOSTED)):
+            state.reason = 0
+            self.assertEqual(self.lib.pops_fix_trojan_header(c.byref(state), data, size, 0, capacity),
+                             expected, (size, capacity))
+            self.assertEqual(state.reason, NO_LARGE if expected == SKIP_UNHOSTED else 0)
+        # The outdated rule reads the set's fingerprint entry.
+        self.lib.pops_trojan_set_init(c.byref(state), 7, 0)
+        self.assertEqual(self.lib.pops_fix_trojan_header(c.byref(state), trojan(fmt=3, ba=5)[:0x40],
+                                                         0x60, 0, 0x10), SKIP_OUTDATED)
+        self.assertEqual(self.lib.pops_fix_trojan_header(None, good[:0x40], len(good), 0, 0), SKIP_UNHOSTED)
+        self.assertEqual(self.lib.pops_fix_trojan_header(None, None, len(good), 0, 0), -errno.EINVAL)
+        self.assertEqual(self.lib.pops_fix_trojan_header(None, good[:0x40], len(good), 10, 0x100000),
+                         -errno.EINVAL)
+        self.assertNotIn(b'unknown', self.lib.pops_trojan_reason_text(NO_LARGE))
 
     def test_arena(self):
         for address, size, expected in [
@@ -1127,6 +1186,37 @@ class Original(Built):
         returned, events, after = self.loader.run({b'mass:/POPS/TROJAN_0.BIN': trojan(size=4)})
         self.assertEqual(self.tracer.verdicts(events), ['APPLIED'])
 
+    def test_device_failures(self):
+        # The modelled device fails one call; what the original then does.
+        # Not a console run: the failures are the tracer's (faults=).
+        path = lambda slot: b'mass:/POPS/TROJAN_%d.BIN' % slot
+        good = {path(0): trojan(slot=0, hook=0x2327d8), path(1): trojan(slot=1, hook=0x2327e0)}
+        for code in (-1, -2, -5, -19):
+            with self.subTest(open=code):
+                # Any failed open: NOT FOUND, and the next slot is read.
+                returned, events, after = self.loader.run(good, faults={path(0): {'open': code}})
+                self.assertEqual(returned, 1)
+                self.assertEqual(self.tracer.verdicts(events), ['APPLIED'])
+                self.assertEqual([e[1] for e in events if e[0] == 'msg'].count('NOT FOUND'), 9)
+                self.assertEqual(after[0x2327d8:0x2327dc], self.loader.before[0x2327d8:0x2327dc])
+                self.assertEqual(struct.unpack_from('<I', after, 0x2327e0)[0], jal(E))
+        # A failed size query: Invalid.
+        _, events, _ = self.loader.run(good, faults={path(0): {'size': -5}})
+        self.assertEqual(self.tracer.verdicts(events), ['INVALID', 'APPLIED'])
+        # A failed header read after a file: the cleared header, Invalid.
+        _, events, _ = self.loader.run(good, faults={path(1): {'read': [-5]}})
+        self.assertEqual(self.tracer.verdicts(events), ['APPLIED', 'INVALID'])
+        # A failed payload read: not checked, the file is applied.
+        _, events, after = self.loader.run({path(0): good[path(0)]},
+                                           faults={path(0): {'read': [None, -5]}})
+        self.assertEqual(self.tracer.verdicts(events), ['APPLIED'])
+        self.assertEqual(struct.unpack_from('<I', after, 0x2327d8)[0], jal(E))
+        # No size limit: a payload of 1 MiB is applied.
+        big = trojan(size=0x100000, hook=0x2327d8)
+        _, events, after = self.loader.run({path(0): big})
+        self.assertEqual(self.tracer.verdicts(events), ['APPLIED'])
+        self.assertEqual(after[E:E + 0x100000], big[0x40:])
+
     def test_title_scope_reads_ten_files_of_another_folder(self):
         # How the caller forms the folder name it passes is not examined here.
         _, events, _ = self.loader.run({}, scope=1, title=b'GAME')
@@ -1457,6 +1547,8 @@ class Source(Built):
                                             c.c_uint, c.POINTER(TrojanSet), c.c_int]
         self.lib.test_log.restype = c.c_char_p
         self.lib.test_fail_reads(0)
+        self.lib.test_fault.argtypes = [c.c_char_p, c.c_int]
+        self.lib.test_fault(b'', 0)
         self.folder = tempfile.TemporaryDirectory()
         self.root = Path(self.folder.name) / 'POPS'
         self.title = self.root / 'GAME'
@@ -1591,14 +1683,35 @@ class Source(Built):
         self.assertEqual(result, -errno.EINVAL)
         self.assertIn('Fix file rejected', log)
         (self.root / 'PATCH_0.BIN').unlink()
-        # Larger than the read buffer: launcHER stops (the original has no
-        # such limit; a known difference).
-        self.memory[:] = pristine()
+
+    def test_a_file_larger_than_the_read_buffer_is_skipped_not_fatal(self):
+        # The original applies a file of any size (Original class, a payload
+        # of 1 MiB). launcHER reads fix files into 1 MiB: a file it would
+        # apply is skipped with a line, one it calls Invalid is Invalid, and
+        # the slots after it are read.
         (self.root / 'TROJAN_0.BIN').write_bytes(trojan(size=0x100000))
+        (self.root / 'TROJAN_1.BIN').write_bytes(trojan(slot=1, size=0x100000, be=0))
+        (self.root / 'TROJAN_2.BIN').write_bytes(trojan(slot=2, load=0x2f0000, hook=0x2f0100))
         result, log = self.run_files()
-        self.assertEqual(result, -errno.EINVAL)
-        self.assertIn('Fix file rejected', log)
-        self.assertEqual(self.memory, pristine())
+        self.assertEqual(result, 0)
+        lines = log.splitlines()
+        self.assertEqual(len(lines), 2, lines)
+        self.assertIn("TROJAN_0.BIN is valid for POPStarter but NOT loaded by launcHER: the file is "
+                      "larger than launcHER's 1 MiB fix file buffer", lines[0])
+        self.assertTrue(lines[1].endswith('TROJAN_1.BIN: Invalid'), lines[1])
+        expected = pristine()
+        expected[0xf0000:0xf0020] = trojan()[0x40:]
+        struct.pack_into('<I', expected, 0xf0100, jal(0x2f0000))
+        self.assertEqual(self.memory, expected)
+        self.assertEqual(self.state.payload_count, 0)
+        # Exactly the buffer's size is read and staged.
+        self.memory[:] = pristine()
+        (self.root / 'TROJAN_0.BIN').write_bytes(trojan(load=0x2f1000, hook=0x2f0104,
+                                                       size=0x100000 - 0x40))
+        (self.root / 'TROJAN_1.BIN').unlink()
+        result, log = self.run_files()
+        self.assertEqual((result, log), (0, ''))
+        self.assertEqual(struct.unpack_from('<I', self.memory, 0xf0104)[0], jal(0x2f1000))
 
     def test_the_outdated_rule_needs_a_fingerprint_entry(self):
         (self.root / 'TROJAN_2.BIN').write_bytes(trojan(slot=2, fmt=3, ba=5, load=0x2f1000,
@@ -1607,14 +1720,59 @@ class Source(Built):
         self.assertEqual((result, log), (0, ''))
         self.assertEqual(struct.unpack_from('<I', self.memory, 0xf0104)[0], jal(0x2f1000))
 
-    def test_a_read_error_still_stops_the_launch(self):
-        (self.root / 'TROJAN_0.BIN').write_bytes(trojan(be=0))
-        (self.root / 'TROJAN_1.BIN').write_bytes(trojan(slot=1, load=0x2f0000, hook=0x2f0100))
+    def test_a_header_that_cannot_be_read_is_invalid(self):
+        # The original does not check its header read: what did not arrive
+        # is its cleared header, which is Invalid (Original class).
+        (self.root / 'TROJAN_0.BIN').write_bytes(trojan(load=0x2f0000, hook=0x2f0100))
+        (self.root / 'TROJAN_1.BIN').write_bytes(trojan(slot=1, load=0x2f1000, hook=0x2f0104))
         self.lib.test_fail_reads(1)
+        result, log = self.run_files()
+        self.assertEqual(result, 0)
+        lines = log.splitlines()
+        self.assertEqual(len(lines), 2, lines)
+        for slot, line in enumerate(lines):
+            self.assertTrue(line.endswith('TROJAN_%d.BIN: Invalid' % slot), line)
+        self.assertEqual(self.memory, pristine())
+
+    def test_a_payload_read_error_still_stops_the_launch(self):
+        # The original copies whatever its buffer holds (Original class);
+        # launcHER does not stage a payload it could not read.
+        (self.root / 'TROJAN_0.BIN').write_bytes(trojan(load=0x2f0000, hook=0x2f0100))
+        self.lib.test_fail_reads(2)
         result, log = self.run_files()
         self.assertEqual(result, -errno.EIO)
         self.assertIn('Fix file rejected', log)
         self.assertEqual(self.memory, pristine())
+
+    def test_a_file_that_cannot_be_opened_is_not_found(self):
+        # Any failed open is "NOT FOUND" in the original and the next slot is
+        # read (Original class); before this it stopped the launch here.
+        (self.root / 'TROJAN_0.BIN').write_bytes(trojan(load=0x2f0000, hook=0x2f0100))
+        (self.root / 'TROJAN_1.BIN').write_bytes(trojan(slot=1, load=0x2f1000, hook=0x2f0104))
+        self.lib.test_fault(b'POPS/TROJAN_0.BIN', 1)
+        result, log = self.run_files()
+        self.assertEqual((result, log), (0, ''))
+        expected = pristine()
+        expected[0xf1000:0xf1020] = trojan()[0x40:]
+        struct.pack_into('<I', expected, 0xf0104, jal(0x2f1000))
+        self.assertEqual(self.memory, expected)
+
+    def test_a_file_whose_size_cannot_be_read_is_invalid(self):
+        (self.root / 'TROJAN_0.BIN').write_bytes(trojan(load=0x2f0000, hook=0x2f0100))
+        (self.root / 'TROJAN_1.BIN').write_bytes(trojan(slot=1, load=0x2f1000, hook=0x2f0104))
+        self.lib.test_fault(b'POPS/TROJAN_0.BIN', 2)
+        result, log = self.run_files()
+        self.assertEqual(result, 0)
+        self.assertEqual(len(log.splitlines()), 1)
+        self.assertTrue(log.splitlines()[0].endswith('TROJAN_0.BIN: Invalid'), log)
+        self.assertEqual(struct.unpack_from('<I', self.memory, 0xf0104)[0], jal(0x2f1000))
+
+    def test_a_patch_read_error_still_stops_the_launch(self):
+        (self.root / 'PATCH_1.BIN').write_bytes(bytes(0x40))
+        self.lib.test_fault(b'POPS/PATCH_1.BIN', 1)
+        result, log = self.run_files()
+        self.assertEqual(result, -errno.EIO)
+        self.assertIn('Fix file rejected', log)
 
     def test_payloads_above_the_image_are_recorded_in_file_order(self):
         first = trojan(slot=2, load=0x01500000, hook=0x2f0100)

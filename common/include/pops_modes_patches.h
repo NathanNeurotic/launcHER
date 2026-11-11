@@ -133,6 +133,16 @@ int pops_fix_finalize_video(PopsFixContext *context, void *staged_core,
 int pops_fix_stage_trojan(PopsFixContext *context, PopsTrojanSet *set, void *staged_core,
                           size_t core_size, const void *file, size_t file_size,
                           unsigned slot);
+/* The decision POPStarter makes from a TROJAN_n.BIN's header and its size,
+ * before it reads the payload: POPS_FIX_SKIP_INVALID or
+ * POPS_FIX_SKIP_OUTDATED as pops_trojan_verdict says; for a file it would
+ * apply, POPS_FIX_SKIP_UNHOSTED (set->reason POPS_TROJAN_NO_LARGE) when the
+ * file is larger than `capacity`, the bytes the caller can read it into
+ * (the original has no such limit), else 0: read the whole file and hand
+ * it to pops_fix_stage_trojan. `header` holds the first
+ * POPS_CONTAINER_HEADER_SIZE bytes. -EINVAL for a bad call. */
+int pops_fix_trojan_header(PopsTrojanSet *set, const void *header, size_t file_size,
+                           unsigned slot, size_t capacity);
 
 /* A PATCH_n.BIN; slot must match the filename. expected_trojan must be 0: a
  * TROJAN_n.BIN goes through pops_fix_stage_trojan.
