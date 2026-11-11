@@ -72,6 +72,18 @@ addresses (`0x881270..0x881904`) are from the disassembly; the tests check
 the behaviour, not the addresses. That the payload buffer (`malloc` of
 twice the size) is never freed is also read from the disassembly only.
 
+Device failures, measured the same way with failures put into the modelled
+file calls (`Original.test_device_failures`): a failed open, whatever the
+error, prints `NOT FOUND` and the next number is read; a failed size query
+(the `lseek` to the end) leaves a size below `0x44`, so the file is
+Invalid; the rewind and the header read are not checked, and the header
+buffer is cleared after every file, so a header that does not arrive reads
+as zeros and is Invalid; the payload read is not checked either, so a file
+whose payload read fails is still applied, with whatever the buffer held.
+The check addresses (open `0x88115c`, size and header `0x881188..0x881230`,
+payload `0x881a1c`, clearing `0x881d24`) are from the disassembly. A file of
+1 MiB of payload is applied like any other; the original has no size limit.
+
 ## The ten slots
 
 POPStarter overwrites two parts of the POPS core with code of its own
@@ -134,10 +146,24 @@ file:
 
 - Invalid: prints `POPS: <path>: Invalid` and reads the next number.
 - Outdated: prints `POPS: <path>: Skipped (outdated)` and reads the next.
-- A missing file is skipped silently.
+- A file that does not open, for any reason, is `NOT FOUND` (debug log
+  only) and the next number is read.
+
+A TROJAN file is read as the original reads it (`pops_read_trojan`): the
+size from the `lseek` to the end, a failure reading as size 0; the first
+`0x40` bytes, with whatever does not arrive left zero; the verdict from
+those two (`pops_fix_trojan_header`). So a file whose size or header cannot
+be read is Invalid there and here. Only a file that will be applied has its
+payload read.
 
 Before this work an Invalid file stopped the launch, and the outdated rule
 did not exist.
+
+The skip results share a number with a PATCH result: `POPS_MODE6_SKIPPED`
+(a PATCH file's mode 6 not applied under a user `BIOS.BIN`) has the value of
+`POPS_FIX_SKIP_INVALID`. The loop only reads the skip results for a TROJAN
+file, so such a PATCH file is still applied and not called Invalid
+(`test_a_patch_whose_mode_6_is_skipped_is_not_called_invalid`).
 
 ### Hosting (where launcHER is stricter)
 
@@ -169,7 +195,10 @@ A file is loaded when all of these hold:
 - when the file hooks a slot or its payload names one: the launch can
   offer the slots (below);
 - there is room: at most 20 payloads and `0x6f0000` bytes above the image
-  per launch.
+  per launch;
+- the file is at most 1 MiB, the fix file read buffer. A larger file is
+  skipped with the line above ("larger than launcHER's 1 MiB fix file
+  buffer"), not read; the original has no limit.
 
 The payload scan (`pops_trojan_scan`) follows the code from the entry and
 from every address inside the payload that a jump can reach. It sees direct
@@ -291,12 +320,13 @@ console, not in an emulator.
 | Installing the slots | `Native`, on made-up bytes with the expected sums | the two runs and the GP1 `jal` written, nothing else |
 | Handoff copy | `Native` | every record checked before the first write; null pointer refused |
 | The launcher's loop | `Source`: the real loop compiled for the host with real files | skip lines, order, read errors |
+| Device failures | `Source` with failing `open`, `lseek` and `read` put in; `Original.test_device_failures` on the original | not found, Invalid, payload read error, as listed under the loader and below |
 | Real files | `test_pops_trojan_corpus.py` | table above |
 
-The resident image for these runs was built with the ps2build EE GCC
-(7,504 bytes). The whole launcHER ELF was not built for this work; the
-changed C files were compiled to EE objects and the launcher file was
-compiled against the PS2SDK headers, without new warnings.
+The resident image was built by the project's container build
+(`ghcr.io/ps2homebrew/ps2homebrew:main`, 7,504 bytes); the whole
+`launcHER.elf` built there is 331,284 bytes. The build's warnings are all
+in code this work did not change.
 
 ## Known differences from the original
 
@@ -306,10 +336,14 @@ compiled against the PS2SDK headers, without new warnings.
 2. launcHER refuses addresses the original accepts: anything not a multiple
    of 4, an entry outside the payload, a payload or hook outside the places
    listed above, a hook of 0.
-3. A read error on a fix file stops the launch. The original treats every
-   failed open as "not found" and goes on.
-4. A TROJAN file over 1 MiB stops the launch (the read buffer's size). The
-   original has no such limit. The largest file examined is 770,304 bytes.
+3. A TROJAN file whose payload read fails stops the launch. The original
+   does not check that read and applies the file with whatever its buffer
+   held. Every earlier failure (open, size, header) is handled as the
+   original handles it. A PATCH file's read error also stops the launch;
+   PATCH reading was not changed by this work.
+4. A TROJAN file over 1 MiB is skipped with the line above (the read
+   buffer's size). The original has no such limit and applies it. The
+   largest file examined is 770,304 bytes.
 5. On the frame of a disc swap, a payload at slots 6 to 10 finds `a0`, `ra`
    and `v0` different from the original's, and `a0` and `v0` differ at the
    return; the stores are the same. Measured on `r5900_mini`; every other
