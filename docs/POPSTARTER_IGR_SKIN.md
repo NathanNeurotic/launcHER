@@ -1,10 +1,10 @@
 # POPStarter r13's IGR menu skin (`IGR_BG.TM2`, `IGR_NO.TM2`, `IGR_YES.TM2`)
 
 Measured on the original (POPSTARTER.ELF MAIN and POPS.ELF, external inputs)
-on 2026-11-11 and copied into launcHER for POPStarter launches. Ember
-launches never reach this code. Nothing here was tested on a console: every
-result below is a host test or the original's code run under an emulator
-with its file I/O modelled.
+on 2026-11-11 and copied into launcHER's `launchPOPS`, which is reached only
+for a POPS target (`isPopsTarget`, pinned by the test). Nothing here was
+tested on a console: every result below is a host test or the original's
+code run under an emulator with its file I/O modelled.
 
 ## What the original does
 
@@ -21,13 +21,29 @@ copies three user files raw over them:
 The three slots are one run, `0x2feff0..0x34ee70`.
 
 The loader has one caller, the `jal` at `0x876b18` in the launch function
-(no other `jal`, `j` or pointer to it in MAIN). The earlier mapping of that
-function puts the call after the POPS core is in memory and before the OSD
-image, `BIOS.BIN`, the fix files and the commands; only the call and its
-gates were read again here. The call is made when the shared
-abort flag `gp+0x38dc` is 0 (`0x876a84`) and the launch function's local at
-`fp+0x1108` is 1 (`0x876a90`); that local is set at `0x8712ec` when the
-preset byte at `0x10002d` is 1, which it is in the MAIN profile's file.
+(no other `jal`, `j` or pointer to it in MAIN). The call is made when the
+shared abort flag `gp+0x38dc` is 0 (`0x876a84`) and the launch function's
+local at `fp+0x1108` is 1 (`0x876a90`); that local is set at `0x8712ec` when
+the preset byte at `0x10002d` is 1, which it is in the MAIN profile's file.
+
+### Where the call sits in the launch function
+
+- After the built-in list. The fingerprint lookup-and-apply `FUN_008ff0e4`
+  is called only from the launch function, at six sites (`0x8757d4`,
+  `0x875d70`, `0x875f78`, `0x8762a8`, `0x876424`, `0x8769ac`), all below
+  `0x876b18`; the last one continues with `b 0x876a40`, which runs into the
+  call's gate. No branch from before the gate lands past the call, none from
+  past the call goes back to those sites, and the function has no `jr`
+  through a register other than `ra`.
+- Before the config parser `FUN_00883270` (called at `0x8771ac` and
+  `0x87724c`). The apply function `FUN_008e00d0` has four more callers
+  (`0x890f4c`, `0x8912e4`, `0x8917f0`, `0x891e78`), all inside that parser;
+  `docs/POPSTARTER_BUILTIN_DB.md` gives them to `$VCDID_n`. So an entry
+  chosen by fingerprint is applied before the skin and one chosen by
+  `$VCDID_n` after it.
+- The earlier mapping of the function puts the call after the POPS core is
+  in memory and the always-on pokes, and before the OSD image, `BIOS.BIN`,
+  the fix files and the commands. That part was not read again here.
 
 Inside:
 
@@ -43,9 +59,9 @@ Inside:
    - size = seek to the end. `IGR_BG.TM2`: size greater than `0x4c300`
      prints `TOO BIG !`. The other two: size not below `0x1dbd` prints
      `TOO BIG !`. Nothing is read from a file that is too big;
-   - seek to the start, zero the whole slot, read `slot` bytes into it
-     (result not checked), zero from `slot + size` to the end of the slot
-     again, print `LOADED`;
+   - seek to the start (result not checked), zero the whole slot, issue one
+     read of `slot` bytes into it (count not checked), zero from
+     `slot + size` to the end of the slot again, print `LOADED`;
    - close.
 4. Return 1.
 
@@ -75,16 +91,41 @@ What POPS does with a slot that does not hold a valid TIM2 file was not run.
   original accepts; in each case the core is untouched. As in the original,
   neither the file nor the slot is inspected.
 - `pops_stage_igr_skin()` in `launcher/src/handler_pops.c` reads the files:
-  open, size by seeking to the end, refuse a size above the limit before
-  anything is read, seek to the start, read into the 1 MiB scratch buffer at
-  `0x01f00000`, stage what arrived. Missing, too big or unreadable is logged
-  in debug builds and never stops the launch.
-- It is called once in `launchPOPS`, right after the always-on launch hooks
-  and pokes and before the runtime corrections, the built-in list, the
-  commands, the fix files, the PS1 BIOS shell edits, the region change,
-  `$RESET_WARMBOOT` and the opcode pass. This is the original's position
-  relative to the stages launcHER has; the OSD image and `BIOS.BIN`, which
-  the original handles next, do not exist in launcHER yet.
+  open, size by seeking to the end, close and move on if that fails or the
+  size is above the limit (nothing is read), seek to the start, read into
+  the scratch area at `0x01f00000` in requests of at most 64 KiB until the
+  size has arrived or a read returns 0 or an error, close, stage what
+  arrived. The largest skin read ends at `0x01f4c300`; the loose-ELF path's
+  scratchpad staging at `0x01f80000` is above that. Nothing in the reader
+  stops the launch; each outcome is a debug line.
+- It is called once in `launchPOPS`, unconditionally:
+
+  | Order in `launchPOPS` | |
+  |---|---|
+  | core patches | |
+  | runtime corrections (`$FIX_*`, launcHER's own) | must come before any other write, see below |
+  | always-on hooks and pokes | |
+  | built-in entry | fingerprint match or `$VCDID_n` |
+  | **IGR skin** | |
+  | commands, recompiler add-ons, fix files, video, PS1 BIOS shell edits, region, `$RESET_WARMBOOT`, `MODULE_n.IRX` names, `$LOAD_PADMAN`, SLBB bypass, resident pad/widescreen/progressive/display hooks, opcode pass | |
+
+  This is the original's order for a fingerprint-matched entry. For a
+  `$VCDID_n` entry the original applies the entry after the skin and
+  launcHER before it; the two orders leave the same core because no
+  built-in operation writes inside the three slots (all 624 entries applied
+  in both orders, see Evidence).
+
+### The runtime corrections have to come first
+
+`pops_core_runtime_corrections_stage` accepts only the pristine or the
+core-patched POPS image as a whole (SHA-256). One skin byte makes it return
+-4 with nothing written, and `launchPOPS` treats that as fatal ("Runtime
+corrections staging failed"). Measured on the real core: after a 1-byte
+file in any of the three slots, all six masks (1, 2, 4, 8, 16, 31) are
+refused; in `launchPOPS`'s order, with the stage straight after the core
+patches, all six succeed with a skin staged later. The first version of
+this feature staged the skin before that stage; the test now pins the order
+and runs both.
 
 ### Where the files go
 
@@ -94,7 +135,12 @@ project's notes say `hdd0:__common`) or `mass:/POPS/`. launcHER reads the
 three files from the folder the launched VCD is in, the same folder it reads
 the all-games `TROJAN_n.BIN` and `PATCH_n.BIN` from. This is a stand-in
 until launcHER has the HDD `__common` layout. When the VCD itself is in
-`mass:/POPS/` the two are the same folder.
+`mass:/POPS/` the two are the same folder. On HDD they are not: a skin kept
+in `__common/POPS/`, where POPStarter users have it, is not found.
+
+launcHER has a second stand-in for the same original folder: `MODULE_n.IRX`
+is read from the folder POPS.ELF came from (`popsDir`), not from the VCD's
+folder. Which of the two the skin should follow is the owner's call.
 
 ### When the skin is visible
 
@@ -120,8 +166,14 @@ files are still loaded under every setting, as in the original.
 - The limit for `IGR_NO.TM2` and `IGR_YES.TM2` is 7,612 bytes although the
   slot is 7,616: a file padded to the slot size is refused.
 - The files are loaded even when the dialog can never open.
-- A read that delivers less than the file's size leaves what arrived
-  followed by zeros.
+- A device that delivers part of the file and then nothing more (end of
+  file or an error) leaves that part followed by zeros.
+- A size query that disagrees with the data: the slot gets the first `size`
+  bytes the device delivers, then zeros.
+- A read that reports more bytes than were asked for: the count is not
+  believed (the original never looks at it).
+- A failed seek back to the start that leaves the position at the end of
+  the file: the slot is all zeros.
 
 ## Not the same as the original
 
@@ -130,18 +182,21 @@ files are still loaded under every setting, as in the original.
   -666 path are not copied.
 - The folder (above).
 - A failed size query. The original takes the negative result as a size:
-  it zeroes the slot and that many bytes below it and prints `LOADED`
-  (measured for -5 on `IGR_NO.TM2` and -1 on `IGR_YES.TM2`, where the bytes
-  below are the end of the previous slot; not run for `IGR_BG.TM2`, where
-  they would be POPS data before the first slot). launcHER leaves the slot
+  it prints `LOADED`, zeroes the slot and that many bytes below it. For
+  `IGR_NO.TM2` and `IGR_YES.TM2` those are the end of the previous slot;
+  for `IGR_BG.TM2` they are POPS's own data in front of the first slot
+  (run for -1, -5, -16 and -4096 on all three files and both backends).
+  launcHER asks nothing more of the file, closes it and leaves the core
   alone.
-- The original issues one read of the whole slot size. launcHER reads the
-  file's size in pieces of at most 64 KiB and stops at the first short or
-  failed read. A device that returns a short count and would deliver more on
-  a second call gives a fuller slot in launcHER than in the original.
-- A failed seek back to the start: launcHER stages 0 bytes (slot all zeros).
-  The original does not check that seek and reads from wherever the file
-  position is (read from its code; this case was not run).
+- A device that returns a short count and has more to give on the next
+  call. The original issues one read of the whole slot and does not look at
+  the count, so it keeps the first piece only. launcHER asks again until the
+  file's size has arrived and stages the whole file. Run on both sides.
+- A failed seek back to the start that leaves the position anywhere but the
+  end: launcHER stages 0 bytes (slot all zeros); the original reads from
+  wherever the position is. Read from its code; not run, because the device
+  model leaves the position at the end.
+- A read that fails after storing some bytes: not modelled on either side.
 - Messages are debug output with different text, not the original's screen
   log.
 - launcHER's default in-game reset is its own direct exit, so without
@@ -150,40 +205,90 @@ files are still loaded under every setting, as in the original.
 
 ## Evidence
 
-`tools/test_pops_igr_skin.py` (in CI), 30 tests; 14 need no inputs.
+`tools/test_pops_igr_skin.py` (in CI), 48 tests; 27 need no inputs. The
+device model both sides run on is `SkinFile` in
+`tools/trace_original_pops_igr_skin.py`: a size the seek to the end
+reports, a total the device ever delivers and what a read returns after
+that, a most-per-read, a failing rewind, an over-reported count.
 
-- Native: the table; sizes 0, 1, max-1, max, max+1, slot and slot+1 for each
-  of the three files (12 accepted, 7 refused, the rest of the core
-  untouched); `-ERANGE` on short cores; arguments.
-- Original's instructions (`POPSTARTER_TEST_ELF`): the three paths for both
-  backends, fill and read addresses and lengths and the size tests are
+- Native (6, no inputs): the table; sizes 0, 1, max-1, max, max+1, slot and
+  slot+1 for each of the three files (12 accepted, 7 refused, the rest of
+  the core untouched); `-ERANGE` on short cores; arguments.
+- Reader (11, no inputs): `pops_stage_igr_skin` itself, the function's text
+  taken from `handler_pops.c` and compiled on the host with only its
+  scratch address replaced and `open`/`lseek`/`read`/`close` handed to the
+  device model. Compared with a Python model of the original (the model is
+  held to the original in the Original class below): 16 boundary-size runs
+  over both path prefixes, 41 runs with absent files and seeded random sets,
+  0-byte files, too-big files (no read call, core untouched), and 40
+  misbehaving-device runs on each of two prefixes, three files to a run
+  (stops for good 24, size and data disagree 7, failed rewind 4,
+  over-reported count 4, one piece that is the whole file 1). The two
+  differences are run too: 4 failed-size-query runs (core untouched, file
+  closed) and 3 runs with the file in pieces (whole file staged). Every one
+  of those runs also checks the calls: the three files in the original's
+  order, read
+  only, the size asked first, nothing read from a refused file, every
+  request at most 64 KiB and inside the file's size, every handle closed
+  once, the scratch area never written past the largest file.
+- Dialog (2; 1 needs `POPS_TEST_ELF`): the table in "When the skin is
+  visible".
+- Staging (4, no inputs): the built-in list (257 core writes of 906
+  operations, the highest ending at `0x21af71`; all 624 entries applied,
+  and applied before and after a skin with the same result), the always-on
+  hooks and pokes, the opcode pass and the `$RESET_WARMBOOT` scan on
+  synthetic cores write nothing inside `0x2feff0..0x34ee70`.
+- Real core (7, `POPS_TEST_ELF`): Sony's three TIM2 headers and that their
+  sizes are the original's limits; the stages before the skin leave the
+  slots alone, with each runtime-corrections mask as well; the runtime
+  corrections refuse a core with a skin; each later stage run on its own
+  over a core with a skin read by the reader keeps the skin: 80 command
+  lines, the recompiler add-on emit (4), the fix-file context with its
+  progressive check and video pass (36 region and video combinations), the
+  PS1 BIOS shell edits, 72 region changes, `$RESET_WARMBOOT`, 11
+  `MODULE_n.IRX` names, `$LOAD_PADMAN`, the SLBB bypass, the resident pad
+  (3), widescreen (3), progressive (3) and display hooks, the opcode pass,
+  every one returning success; a fix file aimed elsewhere keeps the skin and
+  one aimed at a slot replaces exactly its bytes; 21 whole launches in
+  `launchPOPS`'s order (7 masks by 3 built-in choices) keep the skin; the
+  same launch with the skin staged before the runtime corrections is refused
+  for all 6 masks.
+- Original's instructions (4, `POPSTARTER_TEST_ELF`): the three paths for
+  both backends, fill and read addresses and lengths and the size tests are
   decoded from the loader and equal launcHER's table; one caller; the gate
-  words; the three message strings.
-- Original run (`POPSTARTER_TEST_ELF`, `POPS_TEST_ELF`, unicorn): the loader
-  runs as shipped over the real core with open, seek, read and close
-  modelled (`tools/trace_original_pops_igr_skin.py`). In 45 runs over both
-  backends, with every boundary size, seeded random sizes and contents, no
-  files, and a core filled with noise, the whole core after the run is
-  byte-identical to what `pops_igr_skin_stage` leaves, the printed outcome
-  maps to launcHER's result (`NOT FOUND` / `TOO BIG !` / `LOADED` to absent /
-  `-EFBIG` / 0; each outcome seen for each file on each backend), nothing
-  outside the core and the stack changes and every file is closed. Nine
-  more runs cover the gates (4), a short read (3) and a failed size query
-  (2).
-- Sony's own files (`POPS_TEST_ELF`): the three TIM2 headers in the real
-  core and that their sizes are the original's limits.
-- Nothing else launcHER stages writes inside `0x2feff0..0x34ee70`: the
-  built-in list (257 core writes of 906 operations, all below `0x21b000`;
-  all 624 entries applied), the always-on hooks and pokes, the opcode pass
-  and the `$RESET_WARMBOOT` scan on synthetic cores; with `POPS_TEST_ELF`
-  also the core patches, 80 command lines, the PS1 BIOS shell edits, 72
-  region and video combinations, `$LOAD_PADMAN` and one whole launch order
-  with a skin staged. Not checked: user fix files (`TROJAN_n.BIN`,
-  `PATCH_n.BIN`), which can write anywhere and run after the skin as in the
-  original, and the resident display, widescreen and progressive hooks.
-- Source: one call in `launchPOPS` at the position above; the reader tests
-  the size before it reads; the file is in the CMake list and CI.
+  words; the order facts in "Where the call sits"; the three message
+  strings.
+- Original run (9, both inputs and unicorn; a missing unicorn is an error,
+  not a skip): the loader runs as shipped over the real core. 141 runs, each
+  held to the model over the whole core, with its prints, return value 1,
+  nothing else in memory changed and every file closed:
+  - 47 with files a device delivers whole (18 boundary, 24 seeded random
+    with each outcome forced once per file per backend, 2 with no file, 2
+    over a core of noise, 1 quiet): also equal to `pops_igr_skin_stage` and
+    to launcHER's reader run on the same files;
+  - 80 on misbehaving devices where launcHER is meant to match (the 40 runs
+    above on both backends): also equal to launcHER's reader;
+  - 8 with a failed size query and 6 with the file in pieces: the original
+    and launcHER's reader each do what "Not the same" says.
+  Four more runs cover the gates.
+- Source (5, no inputs): one call in `launchPOPS`, a bare statement with no
+  condition, block or preprocessor conditional around it, after the core
+  patches, the runtime corrections, the hooks and the built-in entry and
+  before every later stage; the reader is static with that one caller and
+  `launchPOPS` is called only behind `isPopsTarget`; the reader's own order
+  of calls; the file is in the CMake list and CI.
+
+Mutants (run once, 2026-11-11, on copies of the tree, without the reference
+inputs): 27 single edits, 6 in `pops_igr_skin.c` and 21 in
+`handler_pops.c` (inverted rewind test, count not accumulated, too-big file
+falling through, 0-byte file skipped, loop not ending at end of file, four
+ways of gating the call, `break` on an over-long path, a larger request,
+three leaked handles, limit off by one, over-reported count believed,
+staging the reported size, failed size query accepted, files in reverse
+order, the call moved above the built-in entry, the call moved above the
+runtime corrections). All 27 fail the test file; the unchanged tree passes.
 
 Not measured: anything on a console. In particular that POPS shows a
-replaced image correctly, and that YES and NO in Sony's dialog behave under
-launcHER's resident code with `$IGR0..2`, are untested.
+replaced image correctly, that YES and NO in Sony's dialog behave under
+launcHER's resident code with `$IGR0..2`, and how launcHER's own I/O stack
+delivers a 312 KiB file, are untested.

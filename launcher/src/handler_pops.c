@@ -357,17 +357,25 @@ static int pops_load_bdma_group(const char *role, const char *const *names,
 }
 
 /* POPStarter's IGR menu skin (FUN_0087e464, called at 0x876b18: after its
- * always-on pokes, before its OSD/BIOS loaders, the fix files and the
- * user's commands). IGR_BG.TM2, IGR_NO.TM2 and IGR_YES.TM2, in that order,
- * are each copied raw over the TIM2 file Sony's POPS carries for its own
- * in-game reset dialog. The original reads them from the device's POPS
- * folder (pfs1:/POPS/ or mass:/POPS/); launcHER's stand-in is the folder
- * its all-games TROJAN_n.BIN/PATCH_n.BIN come from. The size is checked
- * before anything is read. Nothing here stops the launch, as there: a
- * missing file leaves Sony's image and one that is too big is skipped. The
- * original zero-fills the slot and then does not check its read, so a read
- * that delivers less than the file's size leaves what arrived followed by
- * zeros; staging the bytes that did arrive gives the same slot.
+ * always-on pokes and the built-in entry its fingerprint match applies,
+ * before its OSD/BIOS loaders, the fix files and the user's commands).
+ * IGR_BG.TM2, IGR_NO.TM2 and IGR_YES.TM2, in that order, are each copied
+ * raw over the TIM2 file Sony's POPS carries for its own in-game reset
+ * dialog. The original reads them from the device's POPS folder
+ * (pfs1:/POPS/ or mass:/POPS/); launcHER's stand-in is the folder its
+ * all-games TROJAN_n.BIN/PATCH_n.BIN come from (MODULE_n.IRX uses another
+ * stand-in, the folder POPS came from). The size is checked before anything
+ * is read. Nothing here stops the launch: a missing file leaves Sony's
+ * image and one that is too big is skipped, as there (the original's one
+ * fatal path, its POPS-folder check, is not copied).
+ * The original zero-fills the slot, issues one read of the whole slot and
+ * does not look at the count. Here the file is read in pieces until its
+ * size has arrived or a read returns nothing; what arrived is staged,
+ * followed by zeros. That is the original's slot when the device delivers
+ * the file or stops for good; a device that returns a short count and has
+ * more to give on the next call fills more of the slot here than there.
+ * Differences: docs/POPSTARTER_IGR_SKIN.md. tools/test_pops_igr_skin.py
+ * compiles this function on the host and runs it against the original.
  * Kept below the functions tools/test_pops_fix_files.py compiles on the
  * host. */
 static void pops_stage_igr_skin(void *stagedCore, size_t coreSize, const char *dir) {
@@ -406,9 +414,11 @@ static void pops_stage_igr_skin(void *stagedCore, size_t coreSize, const char *d
         if (chunk > 65536)
           chunk = 65536;
         ssize_t n = read(fd, buffer + got, chunk);
-        if (n <= 0 || (size_t)n > chunk)
+        if (n <= 0)
           break;
-        got += (size_t)n;
+        /* A count above the request is taken as the request: the original
+         * never looks at the count, and no more than that was asked for. */
+        got += (size_t)n > chunk ? chunk : (size_t)n;
       }
     }
     close(fd);
@@ -1462,12 +1472,6 @@ int launchPOPS(int argc, char *argv[]) {
     return res;
   }
 
-  /* POPStarter's IGR menu skin: next in its launch function (0x876b18),
-   * before everything below. Never fatal. Sony's dialog, and so the skin,
-   * is only shown under $IGR0..2: without a command launcHER's own direct
-   * exit is used. */
-  pops_stage_igr_skin((void *)stagedCore, plan.core_size, vcdDir);
-
   /* The built-in entry's core writes come first, as in the original; the
    * user's commands below can undo them ($UNDO_*). Its EE code is copied
    * just before handoff, with the resident image. */
@@ -1483,6 +1487,20 @@ int launchPOPS(int argc, char *argv[]) {
       return res;
     }
   }
+
+  /* POPStarter's IGR menu skin. Its launch function calls the loader at
+   * 0x876b18: after the fingerprint match has applied a built-in entry (the
+   * six call sites 0x8757d4..0x8769ac) and before the fix files and the
+   * commands, so here. An entry chosen by $VCDID_n is applied by the
+   * original's parser, after the skin; launcHER applies either kind above.
+   * The order of those two cannot show: no built-in entry writes inside the
+   * three slots (tools/test_pops_igr_skin.py applies all of them in both
+   * orders). It also has to stay below the runtime corrections above, which
+   * accept only the pristine or the core-patched image as a whole and are
+   * fatal when they refuse. Never fatal itself. Sony's dialog, and so the
+   * skin, is only shown under $IGR0..2: without a command launcHER's own
+   * direct exit is used. */
+  pops_stage_igr_skin((void *)stagedCore, plan.core_size, vcdDir);
 
   if ((cfg.breakpoint & (POPS_BREAKPOINT_0 | POPS_BREAKPOINT_1)) &&
       (uint32_t)(uintptr_t)stagedCore + plan.core_size > POPS_BUILTIN_BREAK_ADDR) {

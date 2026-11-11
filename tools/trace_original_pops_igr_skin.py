@@ -13,12 +13,17 @@ the POPS core mapped at their own addresses. Only what it calls is modelled:
   - the pfs backend's open/lseek/read/close (0x916758, 0x916c08, 0x9169b0,
     0x916878) and the calls the mass backend's four thin wrappers
     (0x8d6c94, 0x8d6d64, 0x8d6d24, 0x8d6cf4, run as shipped) end in
-    (0x91ba70, 0x91bdc8, 0x91bbb8, 0x91bb38): an in-memory file table;
+    (0x91ba70, 0x91bdc8, 0x91bbb8, 0x91bb38): a file table of SkinFile
+    objects (below), which can also misbehave the way a device might;
   - memset (0x9188b8; it uses R5900 128-bit instructions Unicorn lacks);
   - the POPS-folder check FUN_008d8958, only reached when gp+0x3868 != 1.
 No memory-write hook is used: the caller gets the whole core after the run
 and every other byte of memory that changed. Needs POPSTARTER_TEST_ELF and
 POPS_TEST_ELF. Nothing here is a console run.
+
+SkinFile and Handle need no inputs and no Unicorn: tools/test_pops_igr_skin.py
+drives launcHER's own reader with the same objects, so both sides see one
+device model.
 """
 import os
 import struct
@@ -26,8 +31,6 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from trace_original_pops_io import decode_main  # noqa: E402
-from trace_original_pops_warmboot import core_image  # noqa: E402
 
 BASE = 0x870000
 GP = 0x9B68F0
@@ -54,12 +57,85 @@ FLAG_QUIET = 0x38B0    # 1: no printf
 PREFIX = {0: "pfs1:/POPS/", 1: "mass:/POPS/"}
 NAMES = ("IGR_BG.TM2", "IGR_NO.TM2", "IGR_YES.TM2")
 
+SEEK_SET, SEEK_CUR, SEEK_END = 0, 1, 2
+
+
+class SkinFile:
+    """One file as a device presents it. With only `data` it behaves.
+
+    size      what a seek to the end returns instead of len(data). Negative
+              is a failed size query: the position does not move.
+    total     the most bytes the device ever delivers from one open handle,
+              over all its reads (a device that stops for good).
+    after     what a read returns once `total` is used up: 0, or a negative
+              error.
+    per_read  the most bytes one read call delivers (a device that hands the
+              file over in pieces; asking again gets the next piece).
+    rewind    what a seek to the start returns instead of 0; the position
+              then stays where it was (at the end, after the size query).
+    extra     added to the count a read returns when it delivered all that
+              was asked for (a driver that over-reports; the bytes written
+              are still the bytes asked for).
+    """
+
+    def __init__(self, data, size=None, total=None, after=0, per_read=None, rewind=None, extra=0):
+        self.data = bytes(data)
+        self.size, self.total, self.after = size, total, after
+        self.per_read, self.rewind, self.extra = per_read, rewind, extra
+
+    def open(self):
+        return Handle(self)
+
+
+def as_file(value):
+    return value if isinstance(value, SkinFile) else SkinFile(value)
+
+
+class Handle:
+    def __init__(self, f):
+        self.f, self.pos, self.delivered = f, 0, 0
+
+    def lseek(self, offset, whence):
+        f = self.f
+        if whence == SEEK_END:
+            if f.size is not None:
+                if f.size >= 0:
+                    self.pos = f.size + offset
+                return f.size
+            self.pos = len(f.data) + offset
+        elif whence == SEEK_SET:
+            if f.rewind is not None:
+                return f.rewind
+            self.pos = offset
+        else:
+            self.pos += offset
+        return self.pos
+
+    def read(self, want):
+        """(count the call returns, bytes it stored)."""
+        f = self.f
+        if f.total is not None and self.delivered >= f.total:
+            return f.after, b""
+        n = want
+        if f.per_read is not None:
+            n = min(n, f.per_read)
+        if f.total is not None:
+            n = min(n, f.total - self.delivered)
+        chunk = f.data[self.pos:self.pos + n] if self.pos >= 0 else b""
+        self.pos += len(chunk)
+        self.delivered += len(chunk)
+        count = len(chunk)
+        if f.extra and want and len(chunk) == want:
+            count += f.extra
+        return count, chunk
+
 
 class Emulator:
     """One Unicorn instance, reused: run() restores the core and the flags."""
 
     def __init__(self, core):
         from unicorn import Uc, UC_ARCH_MIPS, UC_MODE_MIPS64, UC_MODE_LITTLE_ENDIAN, UC_HOOK_CODE
+        from trace_original_pops_io import decode_main
         self.main = bytes(decode_main(Path(os.environ["POPSTARTER_TEST_ELF"]).read_bytes()))
         self.core = bytes(core)
         self.uc = Uc(UC_ARCH_MIPS, UC_MODE_MIPS64 + UC_MODE_LITTLE_ENDIAN)
@@ -95,33 +171,25 @@ class Emulator:
             self._ret(0)
         elif addr in OPEN:
             path = self._cstr(a0)
-            data = st["files"].get(path)
+            f = st["files"].get(path)
             fd = -2
-            if data is not None:
+            if f is not None:
                 fd = st["next_fd"]
                 st["next_fd"] += 1
-                st["fds"][fd] = [bytes(data), 0]
+                st["fds"][fd] = as_file(f).open()
             log.append(("open", OPEN.index(addr), path, a1, fd))
             self._ret(fd)
         elif addr in LSEEK:
-            entry = st["fds"][a0]
             offset = a1 - (1 << 32) if a1 & 0x80000000 else a1
-            if a2 == 2 and st["seek_end"] is not None:
-                pos = st["seek_end"]           # a modelled failure of the size query
-            else:
-                pos = offset if a2 == 0 else (len(entry[0]) + offset if a2 == 2 else entry[1] + offset)
-                entry[1] = pos
+            pos = st["fds"][a0].lseek(offset, a2)
             log.append(("lseek", a0, offset, a2, pos))
             self._ret(pos)
         elif addr in READ:
-            entry = st["fds"][a0]
-            want = a2 if st["read_limit"] is None else min(a2, st["read_limit"])
-            chunk = entry[0][entry[1]:entry[1] + want]
+            count, chunk = st["fds"][a0].read(a2)
             if chunk:
                 uc.mem_write(a1, chunk)
-            entry[1] += len(chunk)
-            log.append(("read", a0, a1, a2, len(chunk)))
-            self._ret(len(chunk))
+            log.append(("read", a0, a1, a2, count))
+            self._ret(count)
         elif addr in CLOSE:
             log.append(("close", a0))
             st["fds"].pop(a0, None)
@@ -142,12 +210,10 @@ class Emulator:
             st["error"] = "left the loader at %#x" % addr
             uc.emu_stop()
 
-    def run(self, files, backend=0, abort=0, checked=1, quiet=0, dircheck=1,
-            seek_end=None, read_limit=None, core=None):
-        """files: {full path: bytes}. Returns a dict with the return value,
-        the call log, the core afterwards and what else changed in memory.
-        seek_end: value every lseek(fd, 0, SEEK_END) returns instead of the
-        size; read_limit: most bytes one read delivers."""
+    def run(self, files, backend=0, abort=0, checked=1, quiet=0, dircheck=1, core=None):
+        """files: {full path: bytes or SkinFile}. Returns a dict with the
+        return value, the call log, the core afterwards and what else
+        changed in memory."""
         from unicorn.mips_const import UC_MIPS_REG_GP, UC_MIPS_REG_RA, UC_MIPS_REG_SP, UC_MIPS_REG_V0
         uc = self.uc
         before_core = self.core if core is None else bytes(core)
@@ -163,7 +229,7 @@ class Emulator:
         uc.reg_write(UC_MIPS_REG_SP, STACK)
         uc.reg_write(UC_MIPS_REG_RA, STOP)
         self.state = {"files": files, "fds": {}, "next_fd": 3, "log": [], "error": None,
-                      "dircheck": dircheck, "seek_end": seek_end, "read_limit": read_limit}
+                      "dircheck": dircheck}
         uc.emu_start(FUNC, STOP, count=4_000_000)
         st = self.state
         if st["error"]:
@@ -207,6 +273,7 @@ def changed_ranges(before, after, base=CORE_BASE):
 
 
 def main():
+    from trace_original_pops_warmboot import core_image
     core = core_image(os.environ["POPS_TEST_ELF"])
     emu = Emulator(core)
     cases = [
@@ -221,8 +288,12 @@ def main():
         ("empty NO, pfs", dict(files={PREFIX[0] + NAMES[1]: b""}, backend=0)),
         ("abort flag set", dict(files={PREFIX[0] + NAMES[0]: b"\x11" * 16}, abort=1)),
         ("folder check fails", dict(files={PREFIX[0] + NAMES[0]: b"\x11" * 16}, checked=0, dircheck=-666)),
-        ("size query returns -5, pfs", dict(files={PREFIX[0] + NAMES[1]: b"\x22" * 64}, seek_end=-5)),
-        ("read delivers 10 of 64 bytes", dict(files={PREFIX[0] + NAMES[2]: b"\x33" * 64}, read_limit=10)),
+        ("size query returns -5, pfs",
+         dict(files={PREFIX[0] + NAMES[1]: SkinFile(b"\x22" * 64, size=-5)})),
+        ("each read delivers 10 of 64 bytes",
+         dict(files={PREFIX[0] + NAMES[2]: SkinFile(b"\x33" * 64, per_read=10)})),
+        ("the device stops for good after 10 of 64 bytes",
+         dict(files={PREFIX[0] + NAMES[2]: SkinFile(b"\x33" * 64, total=10, after=-5)})),
     ]
     for title, kw in cases:
         r = emu.run(**kw)
