@@ -120,7 +120,12 @@ typedef struct {
 #define POPS_CHEAT_W32        0x40u
 
 typedef struct {
-  /* Video settings */
+  /* Video settings. video_mode holds the original's three words the way
+   * its region pass reads them (0x879034): POPS_VMODE_NTSC2PAL is the
+   * forced-PAL flag (gp+0x38a0, $FORCEPAL), which a later $NOPAL does not
+   * clear; POPS_VMODE_NOPAL is the automatic-PAL selector off (gp+0x4fa0,
+   * $NOPAL) with no forced PAL; POPS_VMODE_480P is $480P, which clears
+   * both and sets progressive_requested. */
   uint8_t video_mode;
   uint8_t hdtv_fix;
   int16_t x_offset;
@@ -186,7 +191,16 @@ typedef struct {
   uint32_t gs_values[6]; /* DX, DY, MAGH, MAGV, DW, DH */
   uint8_t gs_mask;
   uint8_t gs_display_valid;
-  uint8_t progressive_requested; /* $480p remains active across region commands */
+  /* $480p remains active across region commands. It is also what the text
+   * can know of the original's gp+0x3864, which $480P sets (0x8902a4) and
+   * $FORCEPAL tests (0x8987f0): once set, $FORCEPAL does nothing. The
+   * original also sets that word at start-up for its built-in 480p setting
+   * (0x871218; pops_config_load_table does the same) and for a resident
+   * signature it finds in memory (0x871718), and from a PATCH file's video
+   * action (0x88301c, 0x8830a4, 0x883174), which it reads BEFORE the text;
+   * launcHER stages fix files after the text, so those two are not seen
+   * here (docs/POPSTARTER_CONFIG_TEXT.md). */
+  uint8_t progressive_requested;
 
   /* Pad commands, applied by the resident code (pops_resident.h). Bit n of
    * pad_override forces the controller ID that port n reports to the game

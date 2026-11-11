@@ -223,11 +223,12 @@ static int command_hex_byte(const unsigned char *t) {
 /* Commands that are a name and nothing else. */
 static void apply_plain_command(PopsConfig *cfg, const char *name) {
   if (!strcmp(name, "$NOPAL")) {
-    cfg->video_mode = POPS_VMODE_NOPAL;
-    return;
-  }
-  if (!strcmp(name, "$FORCEPAL")) {
-    cfg->video_mode = POPS_VMODE_NTSC2PAL;
+    /* 0x89860c: one store, gp+0x4fa0 = 0 (no automatic PAL for a European
+     * disc). The forced-PAL flag of an earlier $FORCEPAL (gp+0x38a0) stays,
+     * and the region pass tests that one first (0x879034): $FORCEPAL and
+     * then $NOPAL is still forced PAL. */
+    if (cfg->video_mode != POPS_VMODE_NTSC2PAL)
+      cfg->video_mode = POPS_VMODE_NOPAL;
     return;
   }
   if (!strcmp(name, "$HDTVFIX")) {
@@ -403,6 +404,7 @@ static int apply_position(PopsConfig *cfg, int y, uint32_t value) {
 enum {
   CMD_PLAIN,    /* name, terminator */
   CMD_OPCODES,  /* $ORIGINAL_OPCODES: the terminator is tested two columns late */
+  CMD_FORCEPAL, /* name, terminator; does nothing once a $480P was taken */
   CMD_GS,       /* $DX_ $DY_ $MAGH_ $MAGV_ $DW_ $DH_: 1..5 digits, once per file */
   CMD_480P,     /* "$480", 'P', terminator */
   CMD_LEFTADJ,  /* 1..3 digits */
@@ -480,7 +482,7 @@ static const PopsCommand pops_commands[] = {
   CMD("$PAD", CMD_PADID, 0),                      /* 0x8982b4 */
   CMD("$MUTE_ALL", CMD_PLAIN, 0),                 /* 0x8984a4 */
   CMD("$NOPAL", CMD_PLAIN, 0),                    /* 0x898628 */
-  CMD("$FORCEPAL", CMD_PLAIN, 0),                 /* 0x89882c */
+  CMD("$FORCEPAL", CMD_FORCEPAL, 0),              /* 0x89882c */
   CMD("$?POS_", CMD_POSITION, 0),                 /* 0x89a2d0 */
   CMD("$DWSTRETCH_", CMD_STRETCH, 0),             /* 0x89b604 */
   CMD("$DWCROP_", CMD_CROP, 0),                   /* 0x89c918 */
@@ -527,6 +529,21 @@ static int run_command(PopsConfig *cfg, const PopsCommand *command, const unsign
       return 0;
     apply_plain_command(cfg, command->name);
     *effect = 1;
+    return 1;
+  case CMD_FORCEPAL:
+    /* 0x8987f0: the handler's three stores (gp+0x38a0, the forced-PAL flag
+     * the region pass reads at 0x879034, and gp+0x38d0, gp+0x3898) are
+     * skipped when gp+0x3864 is set. $480P sets it (0x8902a4) and nothing
+     * clears it, so after a $480P, in this file or an earlier one, the
+     * command is taken and does nothing. progressive_requested is that
+     * word as far as the text goes; pops_config.h says what else sets it
+     * in the original. */
+    if (!command_end(*rest))
+      return 0;
+    if (!cfg->progressive_requested) {
+      cfg->video_mode = POPS_VMODE_NTSC2PAL;
+      *effect = 1;
+    }
     return 1;
   case CMD_GS:
     /* Once a value is in (fp+0xfc..0x110, one per command, per file), the
@@ -675,7 +692,17 @@ static int run_command(PopsConfig *cfg, const PopsCommand *command, const unsign
 
 /* Tokens that are launcHER's own: POPStarter r13 has none of them. They
  * keep launcHER's earlier line rules: tokens are split at white space and a
- * token starting with '#' or ';' ends its line. */
+ * token starting with '#' or ';' ends its line. The byte classes are spelt
+ * out: the C library's isspace/isdigit follow the locale for bytes above
+ * 0x7f, which a host test process and the EE build need not share. */
+static int token_space(unsigned char c) {
+  return c == ' ' || (c >= '\t' && c <= '\r'); /* TAB LF VT FF CR */
+}
+
+static int token_digit(unsigned char c) {
+  return c >= '0' && c <= '9';
+}
+
 static void apply_launcher_token(PopsConfig *cfg, const char *token) {
   /* Not POPStarter commands; no grounded POPS writes exist for them. */
   if (!strcasecmp(token, "$480i") || !strcasecmp(token, "$576p") ||
@@ -710,11 +737,11 @@ static void apply_launcher_token(PopsConfig *cfg, const char *token) {
     cfg->no_boot = 1;
     return;
   }
-  if (!strncasecmp(token, "$MODE", 5) && isdigit((unsigned char)token[5])) {
+  if (!strncasecmp(token, "$MODE", 5) && token_digit((unsigned char)token[5])) {
     add_compat_mode(cfg, (int)strtol(token + 5, NULL, 10));
     return;
   }
-  if (isdigit((unsigned char)*token) && token[1] == '\0') {
+  if (token_digit((unsigned char)*token) && token[1] == '\0') {
     add_compat_mode(cfg, *token - '0');
     return;
   }
@@ -743,14 +770,32 @@ static void apply_launcher_token(PopsConfig *cfg, const char *token) {
     cfg->runtime_corrections |= POPS_FIX_ALL;
 }
 
+/* Copies the run of non-blank bytes at *at (up to a NUL or `size`) to
+ * token + length and moves *at past the whole run. Returns the new token
+ * length, or 0 when the run does not fit: a run longer than a token can
+ * hold is no token at all, and its tail is not read as another one. */
+static size_t launcher_token_run(const unsigned char *text, size_t size, size_t *at,
+                                 char token[64], size_t length) {
+  int fits = 1;
+  while (*at < size && text[*at] && !token_space(text[*at])) {
+    if (length < 63)
+      token[length++] = (char)text[*at];
+    else
+      fits = 0;
+    ++*at;
+  }
+  token[length] = '\0';
+  return fits ? length : 0;
+}
+
 /* The next launcHER token at or after *position: its offset, or `size`
  * when there is none. "MODE n" / "$MODE n" on one line comes back as the
  * token "$MODEn". */
 static size_t next_launcher_token(const unsigned char *text, size_t size, size_t *position,
                                   char token[64]) {
-  size_t at = *position, start, length;
+  size_t at = *position, start;
   for (;;) {
-    while (at < size && text[at] && isspace(text[at]))
+    while (at < size && text[at] && token_space(text[at]))
       ++at;
     if (at >= size)
       break;
@@ -760,21 +805,17 @@ static size_t next_launcher_token(const unsigned char *text, size_t size, size_t
       continue;
     }
     start = at;
-    length = 0;
-    while (at < size && text[at] && !isspace(text[at]) && length < 63)
-      token[length++] = (char)text[at++];
-    token[length] = '\0';
+    if (!launcher_token_run(text, size, &at, token, 0))
+      continue;
     if (!strcasecmp(token, "MODE") || !strcasecmp(token, "$MODE")) {
       size_t digit = at;
-      while (digit < size && text[digit] != '\n' && isspace(text[digit]))
+      while (digit < size && text[digit] != '\n' && token_space(text[digit]))
         ++digit;
-      if (digit < size && isdigit(text[digit])) {
+      if (digit < size && token_digit(text[digit])) {
         memcpy(token, "$MODE", 5);
-        length = 5;
         at = digit;
-        while (at < size && text[at] && !isspace(text[at]) && length < 63)
-          token[length++] = (char)text[at++];
-        token[length] = '\0';
+        if (!launcher_token_run(text, size, &at, token, 5))
+          continue;
       }
     }
     *position = at;
