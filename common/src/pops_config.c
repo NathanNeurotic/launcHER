@@ -933,17 +933,6 @@ int pops_config_load_file(PopsConfig *cfg, const char *filepath) {
   return load_config_file(cfg, filepath, 0, 0);
 }
 
-/* Trim without forming a pointer before an empty line's buffer. */
-static char *trim_line(char *line) {
-  char *start = line, *end;
-  while (*start && isspace((unsigned char)*start))
-    ++start;
-  end = start + strlen(start);
-  while (end > start && isspace((unsigned char)end[-1]))
-    *--end = '\0';
-  return start;
-}
-
 static int finish_file(FILE *file, int result) {
   if (!result && ferror(file))
     result = errno ? -errno : -EIO;
@@ -1003,32 +992,54 @@ int pops_config_load_discs(PopsConfig *cfg, const char *filepath) {
   return result;
 }
 
+int pops_config_parse_vmcdir(PopsConfig *cfg, const char *text, size_t size) {
+  size_t length = 0;
+  if (!cfg || (!text && size))
+    return 0;
+  /* 0x9b1a90: a file of 104 bytes or more is not used. */
+  if (size >= POPS_VMCDIR_FILE_MAX)
+    return 0;
+  /* 0x9b1ac0: neither is one with any of these anywhere, a line end
+   * after the name and bytes after a NUL included. */
+  for (size_t i = 0; i < size; ++i)
+    if (text[i] == '\r' || text[i] == '\n' || text[i] == '/' || text[i] == '\\' || text[i] == ':')
+      return 0;
+  /* The name is every byte up to a NUL or the end, as it stands. */
+  while (length < size && text[length])
+    ++length;
+  memcpy(cfg->vmc_dir, text, length);
+  cfg->vmc_dir[length] = '\0';
+  cfg->vmc_dir_set = 1;
+  return 1;
+}
+
 int pops_config_load_vmcdir(PopsConfig *cfg, const char *filepath) {
-  char line[256];
+  char text[POPS_VMCDIR_FILE_MAX];
+  size_t size = 0;
   int result = 0;
   FILE *f;
   if (!cfg || !filepath)
     return -EINVAL;
-  f = open_config(filepath);
+  /* Binary: a CR counts. */
+  f = fopen(filepath, "rb");
+  {
+    int error = errno;
+    DPRINTF("POPS config: %s open=%d errno=%d\n", filepath, f != NULL, f ? 0 : error);
+    errno = error;
+  }
   if (!f)
     return errno ? -errno : -EIO;
-  if (fgets(line, sizeof(line), f)) {
-    char *start = trim_line(line);
-    size_t length = strlen(start);
-    if (length > 103)
-      result = -EOVERFLOW;
-    else if (strpbrk(start, "/\\:") || !strcmp(start, ".") ||
-             !strcmp(start, ".."))
-      result = -EINVAL;
-    else {
-      char extra[2];
-      if (fgets(extra, sizeof(extra), f))
-        result = -EINVAL;
-    }
-    if (!result && *start)
-      strcpy(cfg->vmc_dir, start);
+  /* POPS_VMCDIR_FILE_MAX bytes are enough to know the file is too long. */
+  while (size < sizeof(text)) {
+    size_t got = fread(text + size, 1, sizeof(text) - size, f);
+    if (!got)
+      break;
+    size += got;
   }
-  return finish_file(f, result);
+  result = finish_file(f, 0);
+  if (!result)
+    pops_config_parse_vmcdir(cfg, text, size);
+  return result;
 }
 
 int pops_config_load_cheats(PopsConfig *cfg, const char *filepath) {

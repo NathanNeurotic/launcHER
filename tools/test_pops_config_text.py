@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CHEATS.TXT commands: launcHER's reader against POPStarter r13's own.
+"""CHEATS.TXT commands and VMCDIR.TXT: launcHER's readers against POPStarter r13's own.
 
 Native checks need nothing: they hold launcHER's reader
 (pops_config_parse_text) to the table below, which is what the original's
@@ -12,7 +12,11 @@ texts and for seeded random texts, the same commands at the same offsets,
 the same cheat codes stepped over, and the same numbers reaching the
 position, compatibility-mode and game-id handlers.
 
-This is bounded emulation of one routine. It is not a POPS boot and not a
+The VMCDIR.TXT reader (FUN_008d4f84) is run the same way: which files it
+takes, which it ignores, and the folder name it puts in POPS's two path
+strings.
+
+This is bounded emulation of two routines. It is not a POPS boot and not a
 console test.
 """
 import ctypes as c
@@ -42,6 +46,12 @@ LIB.pops_config_parse_text.argtypes = [c.POINTER(F.PopsConfig), c.c_char_p, c.c_
 LIB.pops_config_parse_text.restype = c.c_int
 LIB.pops_config_parse_line.argtypes = [c.POINTER(F.PopsConfig), c.c_char_p]
 LIB.pops_config_parse_line.restype = c.c_int
+LIB.pops_config_parse_vmcdir.argtypes = [c.POINTER(F.PopsConfig), c.c_char_p, c.c_size_t]
+LIB.pops_config_parse_vmcdir.restype = c.c_int
+LIB.pops_config_load_vmcdir.argtypes = [c.POINTER(F.PopsConfig), c.c_char_p]
+LIB.pops_config_load_vmcdir.restype = c.c_int
+LIB.pops_config_discover.argtypes = [c.POINTER(F.PopsConfig), c.c_char_p, c.c_char_p]
+LIB.pops_config_discover.restype = c.c_int
 
 # Where the original's $XPOS_n and $YPOS_n copy their 16-bit value in POPS.
 X_SITE, Y_SITE = 0x21B128, 0x21C18C
@@ -70,6 +80,74 @@ CODES = ["$80012345 1234", "$30112345 0012", "$D0012345 1234", "$50000102 0001",
 MODE_TOKEN = re.compile(r"(?:^|[\s\0])(?:\$?MODE\s*[0-9]|[1-8](?:$|[\s\0]))")
 ENDS = ["\r\n", "\n", " ", "$", "\0", ""]
 NOT_ENDS = ["\t", "X", "_", "2", "#", ";", ",", "\x80"]
+
+
+# VMCDIR.TXT: file contents and the folder name the original's reader
+# (FUN_008d4f84) put in POPS's path strings, None where it ignored the file
+# and changed nothing. From its run under emulation.
+VMC_EXPECTED = [
+    (b"", b""), (b"SAVES", b"SAVES"), (b"saves", b"saves"), (b" SAVES ", b" SAVES "),
+    (b"\tSAVES", b"\tSAVES"), (b"SA VES", b"SA VES"), (b"#SAVES", b"#SAVES"), (b" ", b" "),
+    (b".", b"."), (b"..", b".."), (b"\xe9t\xe9", b"\xe9t\xe9"),
+    # A line end anywhere, also after the name, and the file is ignored.
+    (b"SAVES\r\n", None), (b"SAVES\n", None), (b"SAVES\r", None), (b"SAVES\r\nJUNK", None),
+    (b"SAVES\nJUNK", None), (b"SAVES\r\n\r\n", None), (b"\r\n", None), (b"\n", None),
+    (b"A/B", None), (b"A\\B", None), (b"A:B", None), (b"A\nB/C", None),
+    # A NUL ends the name, but the bytes after it are still looked at.
+    (b"SAVES\0JUNK", b"SAVES"), (b"\0", b""), (b"A\0/B", None), (b"A\0\nB", None),
+    (b"A\0:B", None), (b"\0/", None), (b"A\0\0\\", None),
+    # 103 bytes are taken, 104 are not: the file's size, not the name's.
+    (b"x" * 102, b"x" * 102), (b"x" * 103, b"x" * 103), (b"x" * 104, None), (b"x" * 300, None),
+    (b"SAVES\0" + b"x" * 97, b"SAVES"), (b"SAVES\0" + b"x" * 98, None),
+    (b"SAVES\0" + b"x" * 200, None), (b"\0" + b"x" * 102, b""), (b"\0" + b"x" * 103, None),
+]
+VMC_KEEP = b"Keep"
+
+
+def launcher_vmcdir(data):
+    """launcHER's reader on one file's bytes: the folder name, or None."""
+    cfg = F.PopsConfig()
+    LIB.pops_config_init(c.byref(cfg))
+    cfg.vmc_dir = VMC_KEEP
+    taken = LIB.pops_config_parse_vmcdir(c.byref(cfg), bytes(data), len(data))
+    if not taken:
+        assert (cfg.vmc_dir, cfg.vmc_dir_set) == (VMC_KEEP, 0), data
+        return None
+    assert (taken, cfg.vmc_dir_set) == (1, 1), data
+    return cfg.vmc_dir
+
+
+def original_vmcdir(data, game=None):
+    """The original's reader on one file's bytes: (folder name or None, the
+    path it opened)."""
+    import trace_original_pops_config_text as T
+    before = {T.VMCDIR_PATHS[0]: b"pfs1:/TITLE/".ljust(0x80, b"\0"),
+              T.VMCDIR_PATHS[1]: b"pfs1:/TITLE/SLOT%d.VMC".ljust(0x80, b"\0")}
+    run = T.vmcdir(data, game, before)
+    if run.result != 1:
+        assert run.result == 0 and not run.paths, (data, run)
+        return None, run.opens
+    folder, card = run.paths[T.VMCDIR_PATHS[0]], run.paths[T.VMCDIR_PATHS[1]]
+    assert folder.startswith(b"pfs1:/") and folder.endswith(b"/"), (data, run)
+    assert card == folder + b"SLOT%d.VMC", (data, run)
+    return folder[6:-1], run.opens
+
+
+def random_vmcdir(rng):
+    kind = rng.randrange(8)
+    if kind == 0:
+        length = rng.choice((100, 101, 102, 103, 104, 105, 127, 128, 200))
+    else:
+        length = rng.randrange(0, 24)
+    alphabet = b"SAVESaves_ -.#\t0123456789\xe9"
+    if kind in (1, 2):
+        alphabet += b"\r\n/\\:\0"
+    data = bytearray(rng.choice(alphabet) for _ in range(length))
+    if kind == 3 and data:
+        data[rng.randrange(len(data))] = rng.choice(b"\r\n/\\:\0")
+    if kind == 4:
+        data += rng.choice((b"\r\n", b"\n", b"\r", b"\0", b"\0\n", b"/"))
+    return bytes(data)
 
 
 def launcher(text, number=0, cfg=None):
@@ -453,6 +531,57 @@ class Native(unittest.TestCase):
         # It leaves the shared number alone.
         self.assertEqual(launcher_positions(launcher("$LEFTADJ_12 $USBDELAY_7 $XPOS_Q ")[1]), (12, None))
 
+    def test_vmcdir(self):
+        """VMCDIR.TXT: taken or ignored, and the name, as the table says."""
+        for data, want in VMC_EXPECTED:
+            self.assertEqual(launcher_vmcdir(data), want, data[:24])
+        # NULL text with no bytes is the empty file.
+        cfg = F.PopsConfig()
+        LIB.pops_config_init(c.byref(cfg))
+        self.assertEqual(LIB.pops_config_parse_vmcdir(c.byref(cfg), None, 0), 1)
+        self.assertEqual((cfg.vmc_dir, cfg.vmc_dir_set), (b"", 1))
+
+    def test_vmcdir_files(self):
+        """An ignored file is not an error, and the game's own file is read
+        after the one for all games."""
+        import errno
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "Game").mkdir()
+            path = root / "VMCDIR.TXT"
+            for data, want in VMC_EXPECTED:
+                path.write_bytes(data)
+                cfg = F.PopsConfig()
+                LIB.pops_config_init(c.byref(cfg))
+                cfg.vmc_dir = VMC_KEEP
+                self.assertEqual(LIB.pops_config_load_vmcdir(c.byref(cfg), str(path).encode()), 0, data[:24])
+                self.assertEqual((cfg.vmc_dir, cfg.vmc_dir_set),
+                                 (VMC_KEEP, 0) if want is None else (want, 1), data[:24])
+            path.unlink()
+            self.assertEqual(LIB.pops_config_load_vmcdir(c.byref(cfg), str(path).encode()), -errno.ENOENT)
+
+            def discover():
+                cfg = F.PopsConfig()
+                LIB.pops_config_init(c.byref(cfg))
+                self.assertEqual(LIB.pops_config_discover(c.byref(cfg), (str(root) + "/").encode(), b"Game"), 0)
+                return (cfg.vmc_dir, cfg.vmc_dir_set)
+
+            self.assertEqual(discover(), (b"", 0))
+            path.write_bytes(b"Shared")
+            self.assertEqual(discover(), (b"Shared", 1))
+            (root / "Game" / "VMCDIR.TXT").write_bytes(b"Other")
+            self.assertEqual(discover(), (b"Other", 1))
+            # The game's file with a line end is ignored: the first one stays.
+            (root / "Game" / "VMCDIR.TXT").write_bytes(b"Other\r\n")
+            self.assertEqual(discover(), (b"Shared", 1))
+            # An empty one is taken: the POPS folder itself.
+            (root / "Game" / "VMCDIR.TXT").write_bytes(b"")
+            self.assertEqual(discover(), (b"", 1))
+            path.write_bytes(b"Shared\n")
+            (root / "Game" / "VMCDIR.TXT").unlink()
+            self.assertEqual(discover(), (b"", 0))
+
     def test_parse_line_is_the_same_reader(self):
         cfg = F.PopsConfig()
         LIB.pops_config_init(c.byref(cfg))
@@ -461,6 +590,22 @@ class Native(unittest.TestCase):
 
 
 class Source(unittest.TestCase):
+    def test_vmcdir_use(self):
+        """The launcher takes the folder only from a file that was used, and
+        an empty name is the POPS folder itself."""
+        handler = (ROOT / "launcher/src/handler_pops.c").read_text(encoding="utf-8").replace("\r\n", "\n")
+        self.assertIn('  if (cfg.vmc_dir_set) {\n', handler)
+        self.assertIn('    if (cfg.vmc_dir[0])\n'
+                      '      snprintf(vmcDir, sizeof(vmcDir), "%s%s/", vcdDir, cfg.vmc_dir);\n'
+                      '    else\n'
+                      '      snprintf(vmcDir, sizeof(vmcDir), "%s", vcdDir);\n', handler)
+        self.assertNotIn("if (cfg.vmc_dir[0]) {", handler)
+        reader = SOURCE[SOURCE.index("int pops_config_load_vmcdir("):SOURCE.index("int pops_config_load_cheats(")]
+        self.assertIn('fopen(filepath, "rb")', reader)
+        self.assertNotIn("EOVERFLOW", reader)
+        self.assertNotIn("EINVAL;\n  }", reader)
+        self.assertNotIn("trim_line", SOURCE)
+
     def test_usb_delay_use_is_unchanged(self):
         """The parsed digit matches the original; what launcHER does with it
         (an EE sleep before the launch, only when it is above 0) is as it was."""
@@ -551,6 +696,35 @@ class Original(unittest.TestCase):
     def test_fixed_texts(self):
         for text in FIXED:
             self.compare(text)
+
+    def test_vmcdir_fixed(self):
+        for data, want in VMC_EXPECTED:
+            got, opens = original_vmcdir(data)
+            self.assertEqual(got, want, data[:24])
+            self.assertEqual(opens, [b"mass:/POPS/VMCDIR.TXT"], data[:24])
+            self.assertEqual(launcher_vmcdir(data), got, data[:24])
+        # The game's own file: the same rules.
+        for data, want in VMC_EXPECTED[:30]:
+            got, opens = original_vmcdir(data, b"Game Name/")
+            self.assertEqual(got, want, data[:24])
+            self.assertEqual(opens, [b"mass:/POPS/Game Name/VMCDIR.TXT"], data[:24])
+        # No file: nothing changes.
+        import trace_original_pops_config_text as T
+        run = T.vmcdir(None)
+        self.assertEqual((run.result, run.paths, run.opens), (0, {}, [b"mass:/POPS/VMCDIR.TXT"]))
+        print("original VMCDIR.TXT reader: %d files match the table (%d of them also as the "
+              "game's own file)" % (len(VMC_EXPECTED), 30))
+
+    def test_vmcdir_random(self):
+        rng = random.Random(0x8D4F84)
+        taken = 0
+        for _ in range(400):
+            data = random_vmcdir(rng)
+            got, _ = original_vmcdir(data)
+            self.assertEqual(launcher_vmcdir(data), got, data[:40])
+            taken += got is not None
+        print("original VMCDIR.TXT reader: 400 random files match (%d taken, %d ignored)"
+              % (taken, 400 - taken))
 
     def test_usb_delay_byte(self):
         """$USBDELAY_n: the byte at 0x100017 after the original's pass."""

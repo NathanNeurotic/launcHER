@@ -64,6 +64,8 @@ enum PopsRegion {
 #define POPS_DISC_SLOT_SIZE   0x60
 #define POPS_DISC_SLOT_PREFIX "pfs0:/"
 #define POPS_DISC_LINE_MAX    90
+/* A VMCDIR.TXT of this many bytes or more is ignored by the original. */
+#define POPS_VMCDIR_FILE_MAX  104
 #define POPS_MAX_CHEATS   256
 
 /* Cheat gates. POPStarter puts one test in front of its cheat codes and
@@ -259,6 +261,9 @@ typedef struct {
    * original keeps the byte its ELF ships with (1), which launcHER does not
    * model: usb_delay stays 0. */
   uint8_t usb_delay_set;
+  /* A VMCDIR.TXT was used (pops_config_parse_vmcdir): vmc_dir is its
+   * folder name, empty for the POPS folder itself. */
+  uint8_t vmc_dir_set;
 } PopsConfig;
 
 /* PopsConfig.fakelc */
@@ -329,7 +334,18 @@ void pops_config_parse_discs(PopsConfig *cfg, char *text, size_t size);
 /* Read one DISCS.TXT into the slots (pops_config_parse_discs). */
 int pops_config_load_discs(PopsConfig *cfg, const char *filepath);
 
-/* Parse VMCDIR.TXT (single folder name) */
+/* POPStarter's VMCDIR.TXT reader (FUN_008d4f84 in its main image), for one
+ * file of `size` bytes. Returns 1 when the file is used, 0 when it is
+ * ignored and nothing changes. Ignored: a file of POPS_VMCDIR_FILE_MAX bytes
+ * or more, and a file with CR, LF, '/', a backslash or ':' anywhere, so a
+ * name followed by a line end is ignored too. Otherwise vmc_dir becomes
+ * the bytes up to a NUL or the end of the file, untrimmed (spaces, tabs,
+ * '#', "." and ".." are kept), and vmc_dir_set is set. An empty file is
+ * used: the name is empty, which is the POPS folder itself. */
+int pops_config_parse_vmcdir(PopsConfig *cfg, const char *text, size_t size);
+
+/* Read one VMCDIR.TXT (pops_config_parse_vmcdir). A file that is ignored is
+ * not an error: only a failed open or read is. */
 int pops_config_load_vmcdir(PopsConfig *cfg, const char *filepath);
 
 /* Parse CHEATS.TXT (GameShark codes and $ directives) */

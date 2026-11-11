@@ -1,4 +1,4 @@
-# POPStarter r13's text files: how CHEATS.TXT commands are recognised
+# POPStarter r13's text files: CHEATS.TXT commands, `$USBDELAY_n`, VMCDIR.TXT
 
 Measured on the original (POPSTARTER.ELF MAIN, external input, decoded image
 at `0x870000`) on 2026-11-11, by reading its code and by running that code
@@ -186,6 +186,58 @@ code (which file operation) was not traced.
 - Files over 1 MiB are refused (`-EFBIG`); the original has no limit.
 - `gp+0x3880` (the `$480p` gate) is not modelled.
 
+## VMCDIR.TXT (`FUN_008d4f84`)
+
+Run under emulation as a USB launch (`gp+0x3448 = 1`, `gp+0x3868 = 1`) with
+the file services answered from synthetic bytes. The HDD path of the same
+function (other file calls) was not run.
+
+Called at `0x8772e0` with `a0 = 0` (opens `mass:/POPS/VMCDIR.TXT`, "for all
+games") and at `0x877380` with `a0 = 1` (opens
+`mass:/POPS/<game>/VMCDIR.TXT`), after the two CHEATS.TXT calls. The second
+is skipped when `gp+0x38dc` or `gp+0x3460` is set.
+
+What one file does:
+
+| File | Result |
+| --- | --- |
+| missing | returns 0, nothing changes |
+| 104 bytes or more (the file's size) | message `0x9b1a90`, returns 0, nothing changes |
+| CR, LF, `/`, `\` or `:` anywhere in the file, also after a NUL | message `0x9b1ac0`, returns 0, nothing changes |
+| anything else, the empty file included | returns 1; POPS's strings at `0x4F8080` and `0x4F8100` become `pfs1:/<name>/` and `pfs1:/<name>/SLOT%d.VMC` |
+
+`<name>` is every byte of the file up to a NUL or the end, as it stands.
+
+- **A name followed by a line end is ignored.** `SAVES` + CR LF, `SAVES` +
+  LF and `SAVES` + CR all leave the saves where they were. Only a file with
+  no line end at all is used.
+- **Ignored is never an abort.** The launch goes on with what it had: the
+  game's folder, or the folder a first VMCDIR.TXT gave.
+- **Nothing is trimmed.** A space, a TAB, `#`, lower case and bytes above
+  `0x7f` are part of the name (` SAVES ` gives `pfs1:/ SAVES /`).
+- **`.` and `..` are names** (`pfs1:/../`).
+- **An empty file is used**: the strings become `pfs1://` and
+  `pfs1://SLOT%d.VMC`, the POPS folder itself.
+- The limit is on the file's size: `SAVES`, a NUL and 97 more bytes (103)
+  is `SAVES`; with 98 more (104) it is ignored.
+- The game's own file follows the same rules and, when used, replaces what
+  the first file gave; when ignored, the first file's folder stays.
+
+### launcHER
+
+- `pops_config_parse_vmcdir()` is the same decision on a buffer;
+  `pops_config_load_vmcdir()` reads at most 104 bytes in binary and returns
+  0 for a file that is ignored (it used to stop the launch with
+  `-EOVERFLOW` or `-EINVAL`, to trim the name, to take `SAVES` + CR LF and
+  to refuse `.` and `..`).
+- `vmc_dir_set` says a file was used; `vmc_dir` may then be empty.
+  `handler_pops.c` puts the cards in `<POPS folder>/<name>/`, or in the POPS
+  folder itself for the empty name.
+- Not the original's: launcHER still looks for cards named
+  `<serial>.VMC0` / `<game>.VMC0` beside `SLOT0.VMC` in that folder, and in
+  the POPS folder itself a new card is named `<serial>.VMC0`, where the
+  original's string is `SLOT%d.VMC`.
+
 ## Evidence (host and emulation only)
 
 `python tools/test_pops_config_text.py` with `POPSTARTER_TEST_ELF`:
@@ -199,6 +251,9 @@ code (which file operation) was not traced.
   over; 96 texts also had a launcHER-only `MODE` token, 20 wrote
   `0x100017`);
 - 300 seeded random `$USBDELAY` texts: the same (84 wrote `0x100017`);
+- VMCDIR.TXT: 39 fixed files (30 of them also as the game's own file) and
+  400 seeded random files (212 used, 188 ignored): used or ignored, and
+  the name, are the same;
 - 30 text/start-value pairs for the shared number temporary;
 - `FUN_008dc2c4`: 21 modes, with and without `$SUBCDSTATUS`.
 

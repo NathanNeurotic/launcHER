@@ -1045,9 +1045,14 @@ int launchPOPS(int argc, char *argv[]) {
 
   /* Resolve VMC destination directory */
   char vmcDir[PATH_MAX] = {0};
-  if (cfg.vmc_dir[0]) {
-    /* VMCDIR is already validated as one relative folder name. */
-    snprintf(vmcDir, sizeof(vmcDir), "%s%s/", vcdDir, cfg.vmc_dir);
+  if (cfg.vmc_dir_set) {
+    /* VMCDIR.TXT as the original takes it (pops_config_parse_vmcdir): a
+     * name with no '/', backslash or ':', or an empty file for the POPS
+     * folder itself. */
+    if (cfg.vmc_dir[0])
+      snprintf(vmcDir, sizeof(vmcDir), "%s%s/", vcdDir, cfg.vmc_dir);
+    else
+      snprintf(vmcDir, sizeof(vmcDir), "%s", vcdDir);
   } else {
     /* Probe candidate VMC locations:
      * 1. Subfolder <vcdDir>/<gameBase>/ (standard POPStarter convention)
