@@ -972,6 +972,28 @@ class Original(unittest.TestCase):
         self.assertEqual(out["message"], "smb-missing")
         self.assertEqual([p for p, _m, _f in out["opens"]], list(T.IP_PATHS) + list(T.SMB_PATHS))
 
+    def test_an_open_result_of_zero_is_no_file(self):
+        """Both readers go on only when the open returns more than 0."""
+        good = b"10.0.0.9 SHARE"
+        for value, message, share in ((3, None, b"SHARE"), (1, None, b"SHARE"), (0, "smb-missing", b""),
+                                      (-1, "smb-missing", b""), (-2, "smb-missing", b"")):
+            out = T.configure(self.emu, {T.SMB_PATHS[0]: good}, open_results={T.SMB_PATHS[0]: value})
+            self.assertEqual((out["message"], out["share"].split(b"\0")[0]), (message, share), value)
+        ip = b"1.1.1.1 2.2.2.2 3.3.3.3"
+        for value, absent in ((3, 0), (0, 1), (-1, 1)):
+            out = T.configure(self.emu, {T.IP_PATHS[0]: ip, T.SMB_PATHS[0]: good},
+                              open_results={T.IP_PATHS[0]: value})
+            self.assertEqual((out["fatal"], out["ip_absent"]), (None, absent), value)
+
+    def test_bad_port_sites(self):
+        """Where each kind of bad port stops."""
+        for text, site in ((b"10.0.0.2: S", 0x872D74), (b"10.0.0.2:123456 S", 0x872D74),
+                           (b"10.0.0.2:a S", 0x872DE4), (b"10.0.0.2:1a S", 0x872E58),
+                           (b"10.0.0.2:12a S", 0x872ECC), (b"10.0.0.2:123a S", 0x872F40),
+                           (b"10.0.0.2:1234a S", 0x872FB4), (b"10.0.0.2:65536 S", 0x87327C)):
+            out = T.configure(self.emu, {T.SMB_PATHS[0]: text})
+            self.assertEqual((out["fatal"], out["message"]), (site, "smb-bad-port"), text)
+
     def test_messages(self):
         for addr, key in T.MESSAGES.items():
             text = _image_text(addr)

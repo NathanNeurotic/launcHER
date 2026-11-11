@@ -362,12 +362,14 @@ def _split_share(raw):
             "share_password_type": struct.unpack_from("<i", raw, 512)[0]}
 
 
-def configure(emu, files, sentinel=0):
+def configure(emu, files, sentinel=0, open_results=None):
     """Run the defaults block and the two readers with `files` ({path:
     bytes}) on the cards, in SB. mode with messages on (what the SB. test
     leaves, see scan()). `sentinel` fills the data area around the three
     structures before the readers run, so that a write outside them shows
-    even when it stores a zero.
+    even when it stores a zero. `open_results` ({path: value}) makes the
+    open of a path return that value instead, the file's bytes then being
+    read through it.
 
     Returns a dict:
       fatal        None, or the call site of the stop function
@@ -393,6 +395,10 @@ def configure(emu, files, sentinel=0):
     emu.run(DEFAULTS)
     st["files"] = dict(files)
     st["log"] = []
+    for name, value in (open_results or {}).items():
+        st["files"].pop(name, None)
+        st["fds"][value] = [bytes(files[name]), 0]
+    st["open_result"] = lambda name: (open_results or {}).get(name, -2)
     if sentinel:
         fill = bytes([sentinel])
         base = BASE + len(image())
