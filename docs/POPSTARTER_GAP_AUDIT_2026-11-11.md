@@ -206,43 +206,49 @@ executed end to end by anyone.
 | `0x870bd0..0x871324` | reads the preset block (section 9) | none |
 | `0x871328..0x8713c4` | `argc == 0` or `argv[0]` begins `cdrom`: Exit | none |
 | `0x8714b8..0x8719c4` | `SB.` / `XX.` scan of `argv[0]` | `:755-762`, different rules (section 10) |
-| `0x8719f0..0x873ef0` | `mc?:/POPSTARTER/` modules, `IPCONFIG.DAT` / `SMBCONFIG.DAT` | `:789-818` and `handler_smb.c` (section 11) |
+| `0x8719f0..0x873ef0` | `mc?:/POPSTARTER/` modules, `IPCONFIG.DAT` / `SMBCONFIG.DAT` | `handler_smb.c` with `common/src/pops_smb_config.c` since `21c3476` (section 11) |
 | `0x873ef0..0x8743d8` | `hdd0:__common` mount to `pfs1`, POPS folder check, SMB logon; launch type parser `FUN_008d8db8` called at `0x87432c` | no `__common`; own resolver in `common/src/launch_args.c` |
 | `0x8743d8` | POPS load `FUN_0087cf68` | `:830` search, `:1203-1281` load and SHA-256 pin |
 | `0x874754` | copies its always-live block `0x983150` to `0x232790` (`0x738` bytes) | own resident image, `:1363-1379` |
 | `0x874a24..0x874c94` | preset-driven core patches | `:1379` `pops_apply_always_on_pokes` |
 | `0x8754e0..0x876690` | VCD probes per launch type | `:823` (the target is already a `.vcd` path) |
-| `0x8766fc..0x876a40` | physical disc fallback (section 8) | none |
+| `0x8766fc..0x876a40` | physical disc fallback (section 8) | none: `common/src/pops_physical_disc.c` is built into the launcher since `f22a69f` but nothing calls it |
 | `0x8757d4..0x8769ac` | built-in fingerprint `FUN_008ff0e4` (six call sites) | `:896-924`, `:1404` |
 | `0x876a50`, `0x876a7c` | exit program copy to `0x1450000`, `j 0x1450000` at `0x2362fc` | not copied on purpose |
-| `0x876b18` | IGR skin (section 6) | none |
-| `0x876bac`, `0x876cd8`, `0x876d6c`, `0x876e00` | all games: OSD, BIOS, TROJAN, PATCH | TROJAN and PATCH only, `:1450` |
-| `0x876ea0`, `0x876fd8`, `0x877078`, `0x877118` | current game: OSD, BIOS, TROJAN, PATCH | TROJAN and PATCH only, `:1450` |
-| `0x8771ac`, `0x87724c` | `CHEATS.TXT`, all games then current game (`FUN_00883270`) | `:926` read, `:1419` `pops_apply_all_config_patches` |
+| `0x876b18` | IGR skin (section 6) | `pops_stage_igr_skin` (`:1657`), after the built-in entry, since `173d5de` |
+| `0x876bac`, `0x876cd8`, `0x876d6c`, `0x876e00` | all games: OSD, BIOS, TROJAN, PATCH | BIOS, TROJAN and PATCH (no OSD), in `pops_stage_fix_files` inside `pops_stage_user_files` (`:1683`), after the commands |
+| `0x876ea0`, `0x876fd8`, `0x877078`, `0x877118` | current game: OSD, BIOS, TROJAN, PATCH | as the row above |
+| `0x8771ac`, `0x87724c` | `CHEATS.TXT`, all games then current game (`FUN_00883270`) | read in `launchPOPS`; applied by `pops_apply_all_config_patches_rom` inside `pops_stage_user_files`, before the files |
 | `0x8772e0`/`0x877380`, `0x877414`/`0x8774b4` | `VMCDIR.TXT`, `DISCS.TXT` | `:926` |
 | `0x878ebc` | VMC preparation `FUN_008d8050` | `:1639-1661` |
-| `0x878f64` | PS1 BIOS shell edits, gated on four flags | `:1484`, ungated |
-| `0x879034` | region pass | `:1492` |
-| `0x8795f0` | `$RESET_WARMBOOT` pass | `:1508` |
-| `0x879d04..0x879e58` | `$USBDELAY` byte patched into the PFS wrapper | none (`:1751` sleeps on the EE instead) |
+| `0x878f64` | PS1 BIOS shell edits, gated on four flags | `pops_apply_bios_shell_edits_rom` (`:1714`), gated on the loader state since `0945127` |
+| `0x879034` | region pass | `pops_apply_region_rom` (`:1722`) |
+| `0x8795f0` | `$RESET_WARMBOOT` pass | `pops_apply_reset_warmboot` (`:1740`) |
+| `0x879d04..0x879e58` | `$USBDELAY` byte patched into the PFS wrapper | none (`sleep(cfg.usb_delay)` at `:1985` on the EE instead; in progress on a side branch, section 9) |
 | `0x879e5c..0x87c1e0` | IOP resets, module starts, final clears, `j 0x22e440` | `:1665` onwards |
 
 **Order difference that already exists.** The original runs TROJAN and PATCH
 files (all games, then the game) before the `CHEATS.TXT` parser. launcHER
-runs `pops_apply_all_config_patches` (`:1419`) before `pops_stage_fix_files`
-(`:1450`), and `tools/test_pops_launch_hooks.py:837-870` pins that order by
-text. (The comment at `:1480-1483`, that the shell edits come "after the
-fix files and the user's commands", is true of both; it says nothing about
-the order of those two.) How many existing inputs end differently
-because of this has not been measured (`read`; host: yes). One case is
-named: `$COMPATIBILITY_0x06` in `CHEATS.TXT` plus an `OSD.BIN` ends with the
-OSD off in the original and would end with it on if the OSD were staged
-after the commands.
+runs the user's commands before its fix files. At `ef663b2` both are inside
+`pops_stage_user_files` (`handler_pops.c`): `pops_apply_all_config_patches_rom`,
+then `pops_resident_hook_recompiler_emit`, then `pops_stage_fix_files`, and
+`tools/test_pops_launch_hooks.py` (`Source.test_launch_order`) pins that order
+by text. For the BIOS flags the merge `0945127` added a look-ahead so the
+commands see the flags the original's commands would see
+(`docs/POPSTARTER_USER_BIOS.md` difference 1). With no `BIOS.BIN` loaded the
+order still shows at `0x2525b0`: 28 of that document's 270 launch-sequence
+scenarios end differently, all through a `$UNDO_` command (its difference
+2; Unicorn on the host). Other inputs ending differently because of this
+have not been measured. One case cannot occur yet because there is no OSD
+loader: `$COMPATIBILITY_0x06` in `CHEATS.TXT` plus an `OSD.BIN` ends with
+the OSD off in the original and would end with it on if the OSD were
+staged after the commands.
 
-The same test also requires `res = pops_apply_bios_shell_edits(` to stand
-alone on its line with no flag gate before it. Gating the shell edits
-(sections 4 and 5) and reordering fix files both break that test by design;
-it has to be updated in the same commit.
+At `cfebe01` the same test required `res = pops_apply_bios_shell_edits(` with
+no flag gate. Since `0945127` it pins `res = pops_apply_bios_shell_edits_rom(`
+and `res = regionRead ? pops_apply_region_rom(` instead, which take the
+loader state; reordering the fix files would still break the test by design
+and has to update it in the same commit.
 
 ## 3a. The original's state flags used below
 
@@ -255,8 +261,8 @@ All are words at `gp + offset`.
 | `0x3414` | launch type 0..3 (section 10) | `read` |
 | `0x3410` | 1 when no VCD was found: physical disc mode | `2x S11` |
 | `0x38dc` | shared abort flag: 15 readers in `main`, set by the POPS folder check and several loaders. Not a per-function "done" flag (REPOP's comment at `popstarter/src/main.c:1225-1236` says so wrongly) | `2x` |
-| `0x3868` | POPS folder already checked | `read` |
-| `0x3460` | the game's folder is missing; skips every later current-game loader | `1x` |
+| `0x3868` | POPS folder already checked. Set to 1 by the check `FUN_008d8958` itself on entry (`0x8d899c`) and by `main` at `0x87425c` (`SB.` PAK loop success). `main`'s own check at `0x873f9c` is skipped when `gp+0x3888 != 0`. Seven call sites of `FUN_008d8958`: `0x873f9c` (`main`), `0x87e49c` (IGR), `0x87ec38` (OSD), `0x880348` (BIOS), `0x880aac` (TROJAN), `0x881e70` (PATCH), `0x8d4fac` (VMCDIR reader) | `read` for the meaning; callers and stores `1x S32` |
+| `0x3460` | the game's folder is missing; skips every later current-game loader. Also set to 1, with `gp+0x38dc`, by `FUN_008d8958` when the POPS folder is missing | `1x`; the folder-check store `2x S30 S31` |
 | `0x381c`, `0x38b8` | a one-character suffix after `POPS` in folder names is in use, and the character (`POPS0`..`POPS9`) | `read`; one emulated open with suffix `3` (`1x`) |
 | `0x38f0` | game folder name ending in `/` | `2x` |
 | `0x3890` | "built-in BIOS integrity": 1 on both PAK load paths; on the `POPS.ELF` path three checks each overwrite it, so only the last (`0x2525b0 == 0x0ff01bfc`) decides | `1x` (two agents ran the same slice with the same result; the critic did not) |
@@ -282,23 +288,48 @@ Handler `FUN_0088019c(scope, name)`, `0x88019c..0x880a20`; callers
 | On accept: flag `gp+0x38a4` (all games) or `gp+0x3b98` (game), and halfword `0x20079a = 0x1000`, which turns POPS's `bnez v0` at `0x200798` into an unconditional branch past its "xCdInit failed" exit | `2x S5 S12` | yes |
 | Missing file or too small: return 0, nothing written to POPS and no BIOS flag set | `2x` | yes |
 | Game scope only, before the file is opened: the handler reads the once-flag `gp+0x38e0` (`0x8804ec`). If it is not 1 it sets it to 1 and checks that the game folder exists (`FUN_008d7e78` on `pfs1:`, the stat call `0x91bf80` on `mass:`). A missing folder sets `gp+0x3460 = 1` and returns -666 with nothing opened. If the flag is already 1 the folder is not checked. So a game-scope call always leaves `gp+0x38e0 = 1`, also when the file is missing or too small | `2x S22` (the reviewer's run and S22) | yes |
+| Both scopes, before the game-folder check: the POPS folder exit (`0x880338..0x880380`). The handler reads `gp+0x3868` and, if it is not 1, calls the POPS folder check `FUN_008d8958` (`jal` at `0x880348`). A result of 1 goes on. Otherwise all games returns -666 (`sw` of 1 to `gp+0x38dc` at `0x880374`, `li v0,-666` at `0x880378`) and the game scope goes on (the scope test at `0x880360..0x880368`). The check itself sets `gp+0x3868 = 1`, and on a missing folder `gp+0x38dc = 1` and `gp+0x3460 = 1` (S32), so after a missing POPS folder a game-scope load still runs while every later current-game loader is skipped. `main` normally makes the same check much earlier (`jal 0x8d8958` at `0x873f9c`, skipped when `gp+0x3888 != 0`) and sets `gp+0x3868`, so in a whole launch this exit is reached only where that earlier check was skipped and `gp+0x3868` was not set otherwise. `main` skips it on `SB.` launches (`gp+0x3888 = 3`) and sets `gp+0x3868` itself at `0x87425c` only when the `SB.` PAK loop succeeds; which launches end up here has not been traced end to end (`read`). OSD, TROJAN and PATCH also call the check and have a `-666` store right after it (S32); their scope handling was not traced | `2x S30 S32` (S30 run here; the reviewer reported it first) | yes |
 | Gates inside the handler: any scope `gp+0x38dc`; all games `gp+0x343c`, `gp+0x344c`, `gp+0x3430`; game `gp+0x3878`, `gp+0x344c`, `gp+0x3460`. A game BIOS is not blocked by an all-games OSD, and loads over an all-games BIOS | `2x` | yes |
 | Extra gate in `main` (`0x876bb4..0x876cd8`, `0x876ea8..0x876fd8`): skipped when any of the eight preset compat slots (`0x100018..0x10001f`) equals 6. They are all 0 in the four profiles, so this never fires there | `1x`; preset values `2x S2` | yes |
 | Readers of the two BIOS flags: the shell edits, the eight region groups, the three `$UNDO_` handlers (`0x8948f0`, `0x894d4c`, `0x895088`), `FUN_008db97c` (`0x8db98c`), mode 6 in `FUN_008dc2c4` (`0x8dc75c..0x8dc83c`). The `$RESET_WARMBOOT` pass reads none, so it scans a user BIOS too | `2x S11` | yes |
 | With a BIOS flag set, the three `$UNDO_` commands skip their `0x2525b0 = 0x1bfc` write, and mode 6 writes nothing and prints "please delete BIOS.BIN ..." (only on non-quiet profiles) | `1x` (reader sites `2x S11`) | yes |
 | There is no integrity check on the user's file. The message "Built-in BIOS integrity check was not passed" belongs to the OSD handler's gate `gp+0x3890` and is about POPS's own ROM copy | `2x` | yes |
 
-launcHER: nothing. No reader, no flag, nothing writes `0x20079a` (S17 grep).
-`pops_apply_bios_shell_edits` (`handler_pops.c:1484`) and `pops_apply_region`
-(`:1492`) are unconditional. `readFullFile` (`:204`) reads whole files with a
-cap, so it cannot express "any size above `0x7ff8e`, read the first
-`0x7ff90`": a partial reader is needed.
+launcHER at `cfebe01` had nothing here. Since the merge `0945127` (at
+`ef663b2`) it has a loader, described with its evidence in
+`docs/POPSTARTER_USER_BIOS.md`; what follows is taken from that document and
+from the code, not re-measured by this pass:
 
-Gap, beyond the missing loader: the three downstream passes need the flags
-(section 5a); launcHER's mode-6 and fix-context code check `0x2525b0`
-against expected bytes, so a user BIOS would currently make a launch fail
-(`read`); `pops_apply_reset_warmboot` has not been checked for assumptions
-about pinned ROM content (`read`).
+- `PopsUserRomState` (`common/include/pops_modes_patches.h`) holds the
+  BIOS flags, the OSD words and `osd_off`; `pops_user_bios_stage()` is the
+  loader after its open (entry tests, size test, copy of at most `0x7ff90`
+  bytes, `0x20079a`, flag); `pops_user_bios_load()` in `handler_pops.c` is
+  the file side with a partial read. `pops_stage_user_files()` (called at
+  `handler_pops.c:1683`) runs it for both folders, and the shell edits
+  (`pops_apply_bios_shell_edits_rom`, `:1714`) and the region pass
+  (`pops_apply_region_rom`, `:1722`) now take the flags.
+- `tools/test_pops_user_bios.py` compares it with the original under
+  Unicorn (with `gp+0x3868 = 1`, so without the POPS folder exit); its
+  launch-sequence row is 270 scenarios, 242 equal and 28 differing only at
+  `0x2525b0` (that document's difference 2).
+- Differences that document lists: the commands run before the files (with
+  a look-ahead so the commands see the flags); the order of commands among
+  themselves; fix-file bookkeeping; `$NOBOOT`/`$BIOS`; no `gp+0x38dc` or
+  `gp+0x3460`; messages to the debug log only; size test on the low 32
+  bits; one-byte state. Its folders are the `.VCD`'s folder and
+  `<folder>/<name>/`, standing in for `POPS/` and `POPS/<game>/`.
+- Not copied: the POPS folder exit above. That document's difference 5
+  says `gp+0x38dc` and `gp+0x3460` are not kept, but does not name this
+  exit. launcHER keeps no `gp+0x3868`, `gp+0x38dc` or
+  `gp+0x3460`, so an all-games `BIOS.BIN` call never returns -666 for a
+  missing POPS folder and a missing folder never stops the later
+  current-game loaders. Proposed as a quirk entry in this pass's report;
+  the quirks file is not edited here.
+- Known gap that document records: a built-in entry with compatibility
+  modes followed by `$UNDO_COMPATIBILITY_CODES` is refused with `-EINVAL`
+  for 294 of 624 entries; the test marks it as an expected failure.
+
+Host tests and Unicorn runs only. NOT TESTED on a console.
 
 Not known: how POPS behaves with a different PS1 BIOS. Console only.
 
@@ -327,9 +358,13 @@ handler's checks.
 | `FUN_008db97c`, mode 6 and the `$UNDO_` handlers read only the BIOS flags, never the OSD ones. Mode 6 after an OSD load still writes `0x2525b0 = 0x0648` | `1x` | yes |
 | The v2 code leaves a `jal` in a `jal`'s delay slot (`0x252c34`/`0x252c38`). What POPS's recompiler does with that is unknown | `2x` for the words; behaviour unknown | no |
 
-launcHER: nothing. Wiring points: `pops_stage_fix_files`
-(`handler_pops.c:282`), the shell edits call (`:1484`), `pops_apply_region`
-(`:1492`), `PopsFixContext`.
+launcHER: still no OSD loader at `ef663b2`. Since `0945127` the four OSD
+words live in `PopsUserRomState` and the shell edits, region pass, mode 6
+and `$UNDO_` functions follow them (`docs/POPSTARTER_USER_BIOS.md`
+section 4), but nothing sets them in a launch. Wiring points:
+`pops_stage_fix_files` and `pops_stage_user_files` (`handler_pops.c`), the
+`PopsUserRomState` the launch passes to `pops_apply_bios_shell_edits_rom`
+and `pops_apply_region_rom`.
 
 ### 5a. What the BIOS and OSD flags change later (shared by sections 4 and 5)
 
@@ -344,9 +379,13 @@ The current `docs/POPSTARTER_LAUNCH_HOOKS.md` and the inventory's region
 paragraph say only "skipped when a user BIOS/OSD file was loaded"; the table
 above is the measured rule.
 
-Two implementation plans exist and disagree on where the six flags live
-(`PopsFixContext` fields versus a `PopsConfig` byte plus a helper). Pick one
-before either lands.
+Two implementation plans disagreed on where the six flags live. Settled by
+the merge `0945127`: they are fields of `PopsUserRomState`
+(`common/include/pops_modes_patches.h`), and
+`tools/test_pops_user_bios.py` compares the shell slice (131 flag
+combinations) and the region window (342 cases) with the original under
+Unicorn (`docs/POPSTARTER_USER_BIOS.md` section 5; not re-run by this pass
+beyond the full host run of section 19). NOT TESTED on a console.
 
 ## 6. IGR skin (IGR_BG.TM2, IGR_NO.TM2, IGR_YES.TM2)
 
@@ -358,8 +397,8 @@ Function `FUN_0087e464`, `0x87e464..0x87eb20`, single caller `0x876b18`.
 | Order BG, NO, YES. Per file: open; size by seek; BG rejected above `0x4c300` bytes, NO and YES rejected from `0x1dbd` (largest accepted 7,612); otherwise the slot is zeroed, the file read into it, and the rest zero | `2x S7` | yes |
 | Slots: BG `0x2feff0`, `0x4c300` bytes; NO `0x34b2f0` and YES `0x34d0b0`, `0x1dc0` bytes each. These hold Sony's own TIM2 files in `POPS.ELF`, and the limits equal Sony's file sizes | `2x S9` | yes |
 | The file is copied raw. No TIM2 check of any kind. A zero-length file is accepted and wipes Sony's image | `2x` | yes |
-| Nothing else in POPS changes. No file outcome (missing, too big, accepted) is an error: the function then returns 1 | `2x S23` | yes |
-| Two other return values exist. With `gp+0x38dc` equal to 1 the function returns 0 at once and opens nothing (`0x87e474..0x87e488`). With `gp+0x3868` not 1 it first runs the POPS folder check `FUN_008d8958`; a result other than 1 sets the abort flag `gp+0x38dc = 1` and returns -666, again opening nothing (`0x87e48c..0x87e4c4`). The first version of this row said only "the function returns 1" | return 0: `2x S23` (the reviewer's run and S23). The -666 path: `1x S23`, with the folder check's result forced, the check itself not run. Whether `gp+0x3868` can still be 0 when `main` reaches the call was not examined | yes |
+| Nothing else in POPS changes. No file outcome (missing, too big, accepted) is an error: once past its two entry tests the function returns 1 | `2x S23` | yes |
+| Two other return values exist. With `gp+0x38dc` equal to 1 the function returns 0 at once and opens nothing (`0x87e474..0x87e488`). With `gp+0x3868` not 1 it first runs the POPS folder check `FUN_008d8958` (`jal` at `0x87e49c`); a result other than 1 sets the abort flag `gp+0x38dc = 1` and returns -666 (`0x87e4bc`), again opening nothing (`0x87e48c..0x87e4c4`). At that call the check returns only 1 or -666, because the function has just tested `gp+0x38dc` and `gp+0x3868` itself. The check also writes: `gp+0x3868 = 1` on every call that gets that far, and on a missing folder `gp+0x3460 = 1` (which skips every later current-game loader) as well as `gp+0x38dc = 1`. On `mass:` a failed stat of `mass:/POPS` is followed by a call of `0x91be68` on `mass0:/POPS`. The first version of this row said only "the function returns 1"; the second did not list the extra writes | return 0: `2x S23` (the reviewer's run and S23). The -666 path and the writes: `2x S31 S32` (S31 with the check executed; the reviewer's second review first). Whether `gp+0x3868` can still be 0 when `main` reaches the call: `main` sets it through its own check at `0x873f9c` (skipped when `gp+0x3888 != 0`) and at `0x87425c` (`SB.` PAK loop success); not traced end to end (`read`) | yes |
 | `main` does not use the return value. It tests `gp+0x38dc` before the call (`0x876a84`) and reads it again after (`0x876b20`), so the function's own `gp+0x38dc` test repeats one that `main` has just made | `read S24` | yes |
 | Gates: preset byte `0x10002d` must be 1 (it is in all four profiles) and `gp+0x38dc` must be 0. Both are tested in `main` before the call (`0x876a84..0x876a98`); the function itself repeats only the `gp+0x38dc` test, and called directly with the preset byte 0 or 2 it still opens the three files | preset values `2x S2`; where the tests sit `read S24`, `1x S23` | yes |
 | The skin loads before any config file is parsed, so `$IGRn` and `$NOIGR` do not affect loading | `read` | yes |
@@ -368,13 +407,31 @@ Function `FUN_0087e464`, `0x87e464..0x87eb20`, single caller `0x876b18`.
 | The three `IGR_*.TM2` files are not the only way these pictures change. One fix file in the community corpus, a `PATCH_5.BIN` of 327,360 bytes, carries a 327,296-byte payload for `0x2feff0..0x34ee70`, which is exactly the three slots. The original's PATCH loader writes it there, and so does launcHER's `pops_fix_stage` today (same bytes) | `2x S27` (the reviewer's census and S27) | yes |
 | In the original the skin call (`0x876b18`) comes before both PATCH passes (`0x876e00`, `0x877118`), so such a PATCH file overwrites whatever the skin loader put there | `inferred` from the call-site order (`2x S6`) and the row above; the two were not run in sequence | yes |
 
-launcHER: no skin code; `TM2` does not occur in `common/` or `launcher/`
-(S17). Before this audit README.md and `docs/pops-setup.html` told users to
-place these files beside the game; both are corrected in the same commit as
-this document.
+launcHER at `cfebe01` had no skin code (S17). Since the merge `173d5de` (at
+`ef663b2`) `launchPOPS` calls `pops_stage_igr_skin` (`handler_pops.c:1657`)
+after the built-in entry; `docs/POPSTARTER_IGR_SKIN.md` describes it and
+`tools/test_pops_igr_skin.py` (48 tests, 141 runs of the original under
+Unicorn with `gp+0x3868 = 1`) compares it. What this pass read in the code,
+not measured further:
 
-A skin would be visible in launcHER only under `$IGR0..2`, because of the
-default described next.
+- It reads the three files from the `.VCD`'s folder (`vcdDir`), not from
+  `POPS/`; it has no `gp+0x38dc` gate and no -666 path (no POPS folder
+  check), and no return value the launch looks at.
+- Its place after the built-in entry and before the fix files keeps the
+  original's order against `PATCH_n.BIN` (a `PATCH` file still overwrites
+  the slots).
+- A skin is visible only under `$IGR0..2`, because of the default described
+  next.
+- The POPS folder exit above is not copied; that document lists this
+  among its differences, but not the check's writes of `gp+0x3460` and
+  `gp+0x3868`, and the quirks file has no entry for it. A quirk entry is
+  proposed in this pass's report.
+
+Before this audit README.md and `docs/pops-setup.html` told users to place
+these files beside the game; the first pass corrected both to "not
+supported". With the merge that correction is out of date again: the
+report of this pass proposes the new text (those two files are not edited
+here). Host tests and Unicorn runs only. NOT TESTED on a console.
 
 ## 7. The default IGR (no `$IGR` command)
 
@@ -414,6 +471,17 @@ disc slot (`common/src/pops_resident_engine.c:340`).
 `launcher/src/handler_cdrom.c` is a separate PS1DRV/DKWDRV disc booter and
 is unrelated.
 
+Since the merge `f22a69f` (at `ef663b2`), `common/src/pops_physical_disc.c`
+holds the host part, described in `docs/POPSTARTER_PHYSICAL_DISC.md`: the
+probe's decision (`pops_physical_disc_plan`), the four core writes
+(`pops_physical_disc_stage`, which checks Sony's values first), the name
+clear and the sector fingerprint. The file is built into the launcher, but
+nothing in `launcher/` calls these functions, so a launch still needs a VCD
+and the paragraph above still holds. That document's "Not done" list
+(drive access and a launch path, the resident part, `DISCS.TXT`,
+`sceCdInit(5)`, POPS's own disc layer) is unchanged by this pass. The
+merge has not been reviewed. Host tests only; NOT TESTED on a console.
+
 Gap: the whole feature, plus a product decision (how is a physical launch
 requested when launcHER's target is a `.vcd` path), plus threading an
 optional VCD through about 1,100 lines of `launchPOPS`. Drive reads, CDDA
@@ -435,13 +503,18 @@ PS1 image mounted.
 | `thbase` 33 is `DelayThread` with an argument in microseconds, and device-table entry 3 is `open` | `inferred` from the PS2SDK import numbering and the ioman device-table layout. The in-repo `tools/trace_original_pops_io.py` makes the same two assumptions (it routes Sony's `ioman` open to entry 3 and models `thbase` 33 as `DelayThread`) | no |
 | So: a one-time delay of n seconds on the IOP at the wrapper's first open, 1 second with no command, on `XX.`/`SB.` launches only | `inferred` from the rows above. Nobody has observed the wait itself: no IOP kernel was involved in any run | no |
 
-launcHER: `common/src/pops_config.c:479-486` accepts `$USBDELAY_<any
-digits>` and `$USBDELAY<digits>`; default 0; `handler_pops.c:1751-1753`
-does `sleep(n)` on the EE, after the IOP reset and the module loads, on any
-device (S19). Nothing in `launcher/iop/popfs` delays.
+launcHER at `cfebe01`: `$USBDELAY_<any digits>` and `$USBDELAY<digits>`
+accepted (S19). Since the merge `95ba812` (at `ef663b2`) the parser takes
+exactly one digit and a terminator, as the original (`CMD_USBDELAY` in
+`common/src/pops_config.c`; `tools/test_pops_config_text.py`). Unchanged:
+the default is 0 where the original's byte is 1, and `handler_pops.c:1985`
+does `sleep(cfg.usb_delay)` on the EE, after the module loads, on any
+device. Nothing in `launcher/iop/popfs` delays.
 
-Gap: parser (host-verifiable now); default; where and when the delay runs
-(needs a console or emulator run to call working).
+Gap: the default; where and when the delay runs (needs a console or
+emulator run to call working). The first review of `95ba812` has open
+findings; the answers are in progress on a side branch, so this paragraph
+states only the merged code.
 
 ### A second, separate USB delay
 
@@ -492,7 +565,7 @@ text of the function the byte gates, not from reading that function.
 | `0x10002f` | 3 | `gp+0x385c`, auto-patch level; 4 is "TEST MODE" | |
 
 launcHER: `pops_config_load_table` / `pops_config_export_table`
-(`common/src/pops_config.c:931`, `:956`) describe a 32-byte table with a
+(`common/src/pops_config.c`) describe a 32-byte table with a
 different mapping (`table[3]` as `$USBDELAY`, where the original has the
 busy-wait there and `$USBDELAY` at index 7; `table[8+i]` as booleans; a
 default starting `0xff`, which is the DEBUG value). Nothing in `launcher/`
@@ -600,13 +673,37 @@ share-password form, port 0, a non-IPv4 server, `/` in the share and extra
 lines, canonicalises the IP, trims the share, and treats a two-line file as
 a named user where the original stays guest.
 
-Gap: the parser is small and host-verifiable. The external IRX set, the
-`mass` rename and the connect order need a console.
+That paragraph is launcHER at `cfebe01`, and it is still what every SMB
+launch except one kind does at `ef663b2`. Since the merge `21c3476` a launch
+whose target is a PS1 disc image and whose name carries `SB.` takes the
+original's rules instead: `common/src/pops_smb_config.c` (parsers for both
+files, defaults, the echo request, the file lookup), switched in by
+`sb_rules()` in `launcher/src/handler_smb.c`; `IPCONFIG.DAT` is optional;
+LOGON, ECHO, OPENSHARE in that order; `mc0:`/`mc1:` `POPSTARTER/` first,
+launcHER's own places after. `docs/POPSTARTER_SMB_CONFIG.md` lists what is
+copied, what is not (values that would leave a structure are refused,
+launcHER's modules and `smb:` device, no 119-try loop, launcHER's own `SB.`
+test, and others) and the evidence (host tests and the original's code
+under Unicorn, `tools/test_pops_smb_config.py`). The merge has not been
+reviewed; this pass did not re-measure it. NOT TESTED on a console.
+
+Gap: the external IRX set, the `mass` rename, the connect loop and the
+original's `SB.` test (section 10) are still not copied; they need a console
+or a decision.
 
 ## 12. TROJAN_n.BIN / PATCH_n.BIN
 
 Loaders `FUN_00880a24` (TROJAN) and `FUN_00881de8` (PATCH); callers in
 section 3.
+
+**State at `ef663b2`.** The launcHER side of this section is unchanged by
+the merged code: the rows below still describe it. Work on TROJAN files is
+in progress on a side branch; this document does not anticipate its
+outcome. The corpus counts and the ten hook slots were re-counted by this
+pass from the corpus headers (S15 numbers again: 3,952 / 509 TROJAN,
+870 / 10 PATCH, one hook per file number), and
+`tools/test_pops_doc_claims.py` now checks them when `POPS_TROJAN_CORPUS`
+is set.
 
 ### Corpus result (the largest gap found)
 
@@ -677,22 +774,28 @@ outside the core, which is why it did not show this.
 
 ## 13. Config-text recognition
 
-All `1x`, from the report the critic did not see: the original's parser
-section (`0x883aa8` onwards, inside `FUN_00883270`) and `FUN_008d4f84` run
-on the R5900 interpreter, against launcHER's `pops_config_load_file` built
-on host. The command census (`2x S14`) is separate: every command in the
+The "Original" column is all `1x`, from the report the critic did not see:
+the original's parser section (`0x883aa8` onwards, inside `FUN_00883270`)
+and `FUN_008d4f84` run on the R5900 interpreter, against launcHER's
+`pops_config_load_file` built on host. The "launcHER at `cfebe01`" column is
+that run. The last column is the merged code at `ef663b2` (merge
+`95ba812`), taken from `docs/POPSTARTER_CONFIG_TEXT.md` and
+`tools/test_pops_config_text.py`, not re-run by this pass beyond the host
+run of section 19. The first review of that merge has open findings and
+the answers are in progress on a side branch; the column states only the
+merged code. The command census (`2x S14`) is separate: every command in the
 binary has an inventory row, and no inventory command is missing from the
 binary apart from the aliases and removed names already listed there.
 
-| Input | Original | launcHER (`common/src/pops_config.c:570-649`) |
-|---|---|---|
-| `#$SMOOTH`, `; $SMOOTH`, `x$SMOOTH` | applied: a command is recognised at any `$`, whatever precedes it | ignored |
-| `$SMOOTH$SCANLINES` | both applied: `$` is a terminator | neither |
-| `$SMOOTH<TAB>$SCANLINES` | only `$SCANLINES`: TAB is not a terminator | both |
-| `$MODE 3`, `MODE 3`, `$NOBOOT` | nothing | compat mode 3; `no_boot` |
-| `VMCDIR.TXT` over 103 bytes, or containing `\`, `/`, `:`, CR or LF | file ignored, launch continues | launch aborted for `A/B`, a second line, or 104 bytes (`:809-835`, `:891-903`) |
-| `VMCDIR.TXT` `SAVES<CR><LF>` or ` SAVES ` | ignored (illegal character) / spaces kept | accepted and trimmed |
-| empty `VMCDIR.TXT` | directory becomes the POPS root | |
+| Input | Original | launcHER at `cfebe01` (`common/src/pops_config.c:570-649` then) | launcHER at `ef663b2` |
+|---|---|---|---|
+| `#$SMOOTH`, `; $SMOOTH`, `x$SMOOTH` | applied: a command is recognised at any `$`, whatever precedes it | ignored | applied, as the original |
+| `$SMOOTH$SCANLINES` | both applied: `$` is a terminator | neither | both, as the original |
+| `$SMOOTH<TAB>$SCANLINES` | only `$SCANLINES`: TAB is not a terminator | both | the original's handler pass and terminator set (`pops_config_parse_text`); this exact text not checked by this pass |
+| `$MODE 3`, `MODE 3`, `$NOBOOT` | nothing | compat mode 3; `no_boot` | unchanged: launcHER's own tokens are still read, with launcHER's earlier rules |
+| `VMCDIR.TXT` over 103 bytes, or containing `\`, `/`, `:`, CR or LF | file ignored, launch continues | launch aborted for `A/B`, a second line, or 104 bytes (`:809-835`, `:891-903` then) | file ignored, launch continues (`pops_config_parse_vmcdir`) |
+| `VMCDIR.TXT` `SAVES<CR><LF>` or ` SAVES ` | ignored (illegal character) / spaces kept | accepted and trimmed | as the original |
+| empty `VMCDIR.TXT` | directory becomes the POPS root | | the POPS folder itself, as the original; card names still differ (`<serial>.VMC0` beside `SLOT0.VMC`) |
 
 File names: the only config files the original builds names for are
 `OSD.BIN`, `BIOS.BIN`, `TROJAN_n.BIN`, `PATCH_n.BIN`, `CHEATS.TXT`,
@@ -711,12 +814,20 @@ from launcHER's sources (S17 for the lines).
 
 - `PATCHES.TXT` and `MODES.TXT` (`pops_config.c:853-915`), `MODE n` /
   `$MODE n` (`:598`, `:629`), bare digits in `MODES.TXT`.
-- `$NOBOOT` / `$BIOS` (`pops_config.c:319`): not r13 commands. launcHER
-  acts on them: `pops_modes_patches.c:1575-1582` rewrites `0x2525b0` to
-  `0x1bfc` when it reads `0x0648`. After a mode 6 this ends differently from
-  the original, which ignores the token.
+- `$NOBOOT` / `$BIOS`: not r13 commands. launcHER acts on them: it
+  rewrites `0x2525b0` to `0x1bfc` when it reads `0x0648` (since `0945127`
+  not when a `BIOS.BIN` was loaded). After a mode 6 this ends differently
+  from the original, which ignores the token.
 - Aliases `$PAL2NTSC`, `$FORCENTSC`, `$NTSC2PAL`.
-- `$USBDELAY` with several digits or without the underscore; the EE sleep.
+- The EE sleep for `$USBDELAY_n` and its default 0. (`$USBDELAY` with
+  several digits or without the underscore was also launcHER-only at
+  `cfebe01`; since `95ba812` the parser takes one digit, as the original.)
+- Since `173d5de` and `0945127`: the IGR skin and `BIOS.BIN` are read from
+  the `.VCD`'s folder (and `<folder>/<name>/` for a game's `BIOS.BIN`), not
+  from `POPS/`; neither has the original's POPS folder exit.
+- Since `21c3476`: on an `SB.` launch of a PS1 game, the network files are
+  also looked for in ten places after the original's two
+  (`pops_netconfig_path`).
 - Config files from `mc0:`/`mc1:` `POPSTARTER/` and `POPS/`
   (`pops_config.c:848-867`).
 - POPS package search folders beyond the device POPS folder, and SHA-256
@@ -806,7 +917,13 @@ closely or executed; strings-only passes do not count.
   inside the ROM range `0x24bc20..0x2cbbb0`, the OSD areas
   `0x262b80..0x2afc20` or the skin slots `0x2feff0..0x34ee70`. This decides
   whether staging order matters, and is cheap to measure from the generated
-  list. For the corpus fix files the answer is now known (S27): one PATCH
+  list. Partly measured since `173d5de`, on launcHER's copy of the list:
+  `tools/test_pops_igr_skin.py` checks that every core write of that list
+  ends below `0x21b000` (so below the ROM range, the OSD areas and the
+  slots), applies entries 1..624 over a marked core with the slots
+  unchanged, and applies each with the skin in both orders with equal
+  results. Writes of the list's other kinds were not checked by that test,
+  and the original's own list was not compared. For the corpus fix files the answer is now known (S27): one PATCH
   file covers the three skin slots exactly, one config-only PATCH changes
   the halfword `0x2525b0` in the ROM range, no PATCH file touches the OSD
   areas, and every TROJAN payload loads outside the core, changing only
@@ -827,24 +944,24 @@ POPS memory, so launcHER needs nothing for it (`1x`; callers `2x S6`).
 which the critic never saw; where those sit in the order is this
 document's proposal, not the critic's.
 
-| # | Increment | Source | Host-verifiable | Effort | Depends on |
-|---|---|---|---|---|---|
-| 1 | Correct the status documents (this commit) | C1 | n/a | small | none |
-| 2 | Fix files the original would skip must not end the launch: treat its "Invalid" and "Skipped (outdated)" outcomes as skip-and-continue in `pops_stage_fix_files`. Then TROJAN parity proper: the original's header rules, payloads outside the core written at their EE address at handoff (after checking them against launcHER's own regions), and the call slots in the resident GP1 work: at least the ten the corpus uses (section 12). An earlier wording said "fifteen"; it came from one mapping report's reading of the block as five slots plus ten, which the count in S26 (5 plus 55 empty pairs) does not support | D A | yes for classification and slot order (add the corpus classifier to `tools/test_pops_fix_files.py`, skipped without the external corpus); a payload actually running needs a console | large | none (the corpus result has been re-run, S27) |
-| 3 | One path table measured from the original: a tool that records every open for backend x scope x suffix x name, a pure function that returns the same strings, and a written decision of how each original folder maps to launcHER's per device, HDD included. No behaviour change | C2 | yes | medium | owner decision on HDD mapping |
-| 4 | IGR skin staging: `pops_igr_skin_stage`, size checked before reading, never fatal, staged after the always-on pokes; default exit unchanged | C3 | yes | small | 3 for the folder |
-| 5 | The six loader flags and the three downstream gates (section 5a, `$UNDO_`, mode 6, launcHER's `$NOBOOT` path), then `BIOS.BIN` with a partial reader | C4 | yes | medium | 3; one home for the flags |
-| 6 | Fix files before commands: first a test that runs both orders and records every differing final core; reorder only if it shows differences. Touches the pinned order test | C5 | yes | medium | before 7 |
-| 7 | `OSD.BIN`: `pops_osd_stage` with one reason code per rejection, whole-core differential, directed boundary cases plus three negative controls (random cases caught two of three deliberate mutants in only 1 to 3 of 600) | C6 | yes | medium | 3, 5, 6 |
-| 8 | `$USBDELAY` parser (one digit, the original's terminators, default 1) and the preset table (fix or delete `pops_config_load_table`); command recognition context and `VMCDIR.TXT` rules; decide which launcHER-only forms stay as documented extensions | C7, D C | yes | small | none |
-| 9 | The `$USBDELAY` effect: a one-time delay on the first wrapped call in popfs, `XX.`/`SB.` only, replacing the EE sleep | C7, D D | host test with a fake delay; working only after a console or emulator run | medium | 8 |
-| 10 | Launch-argument rules as a pure function (prefix scan, launch type, `cdrom` exit) and resolver candidates (`IMAGE0.VCD`, `POPS0..9`, `__.POPS0..9`, fail instead of truncating); `IOPRP.IMG` fallback; remove the test folder from the search list | C8, D B | yes | medium | a decision on where a `.vcd`-target launcher consults ELF-name rules |
-| 11 | SMB config parsers to the original's rules | D E | yes | small | none |
-| 12 | Physical disc fallback: planner, guarded `0x200794` row, CDDA mute for types `0x11`/`0x13`, resident physical flag; device part later and marked untested | C9 | partly | large | last of the features; a decision on how it is requested |
-| 13 | HDD layout: mount `hdd0:__common` and take POPS files, fix files, text files and VMCs from `/POPS/` there; `icon.sys`/`list.ico` | D F | no | medium | 3; console |
-| 14 | IGR default: write nothing without a command, as the original | D G | yes for the write set | trivial | owner decision; the dialog's YES path under launcHER's exit is untested on a console |
-| 15 | SMB external IRX set, `mass` rename, LOGON/ECHO/OPENSHARE order | D E | no | medium | console |
-| 16 | REPOP documentation follow-up (section 17) | C10 | n/a | small | separate repository and PR |
+| # | Increment | Source | Host-verifiable | Effort | Depends on | State at `ef663b2` |
+|---|---|---|---|---|---|---|
+| 1 | Correct the status documents (this commit) | C1 | n/a | small | none | first pass `cfebe01`; second pass this commit |
+| 2 | Fix files the original would skip must not end the launch: treat its "Invalid" and "Skipped (outdated)" outcomes as skip-and-continue in `pops_stage_fix_files`. Then TROJAN parity proper: the original's header rules, payloads outside the core written at their EE address at handoff (after checking them against launcHER's own regions), and the call slots in the resident GP1 work: at least the ten the corpus uses (section 12). An earlier wording said "fifteen"; it came from one mapping report's reading of the block as five slots plus ten, which the count in S26 (5 plus 55 empty pairs) does not support | D A | yes for classification and slot order (add the corpus classifier to `tools/test_pops_fix_files.py`, skipped without the external corpus); a payload actually running needs a console | large | none (the corpus result has been re-run, S27) | not landed; TROJAN work in progress on a side branch |
+| 3 | One path table measured from the original: a tool that records every open for backend x scope x suffix x name, a pure function that returns the same strings, and a written decision of how each original folder maps to launcHER's per device, HDD included. No behaviour change | C2 | yes | medium | owner decision on HDD mapping | not landed |
+| 4 | IGR skin staging: `pops_igr_skin_stage`, size checked before reading, never fatal, staged after the always-on pokes; default exit unchanged | C3 | yes | small | 3 for the folder | landed `173d5de`: reads the `.VCD`'s folder, not `POPS/`; no POPS folder exit (sections 6, 3) |
+| 5 | The six loader flags and the three downstream gates (section 5a, `$UNDO_`, mode 6, launcHER's `$NOBOOT` path), then `BIOS.BIN` with a partial reader | C4 | yes | medium | 3; one home for the flags | landed `0945127` for `BIOS.BIN` and the flags' home (`PopsUserRomState`); OSD words exist but nothing sets them (sections 4, 5a) |
+| 6 | Fix files before commands: first a test that runs both orders and records every differing final core; reorder only if it shows differences. Touches the pinned order test | C5 | yes | medium | before 7 | not landed; `docs/POPSTARTER_USER_BIOS.md` measured 28 of 270 scenarios differing at `0x2525b0` |
+| 7 | `OSD.BIN`: `pops_osd_stage` with one reason code per rejection, whole-core differential, directed boundary cases plus three negative controls (random cases caught two of three deliberate mutants in only 1 to 3 of 600) | C6 | yes | medium | 3, 5, 6 | not landed |
+| 8 | `$USBDELAY` parser (one digit, the original's terminators, default 1) and the preset table (fix or delete `pops_config_load_table`); command recognition context and `VMCDIR.TXT` rules; decide which launcHER-only forms stay as documented extensions | C7, D C | yes | small | none | parser, command recognition and `VMCDIR.TXT` landed `95ba812`; default still 0, preset table unchanged; review answers in progress on a side branch |
+| 9 | The `$USBDELAY` effect: a one-time delay on the first wrapped call in popfs, `XX.`/`SB.` only, replacing the EE sleep | C7, D D | host test with a fake delay; working only after a console or emulator run | medium | 8 | not landed |
+| 10 | Launch-argument rules as a pure function (prefix scan, launch type, `cdrom` exit) and resolver candidates (`IMAGE0.VCD`, `POPS0..9`, `__.POPS0..9`, fail instead of truncating); `IOPRP.IMG` fallback; remove the test folder from the search list | C8, D B | yes | medium | a decision on where a `.vcd`-target launcher consults ELF-name rules | not landed |
+| 11 | SMB config parsers to the original's rules | D E | yes | small | none | landed `21c3476` for `SB.` launches of PS1 games only; not reviewed |
+| 12 | Physical disc fallback: planner, guarded `0x200794` row, CDDA mute for types `0x11`/`0x13`, resident physical flag; device part later and marked untested | C9 | partly | large | last of the features; a decision on how it is requested | host part landed `f22a69f` (planner, core stage, fingerprint), not called by the launch; not reviewed |
+| 13 | HDD layout: mount `hdd0:__common` and take POPS files, fix files, text files and VMCs from `/POPS/` there; `icon.sys`/`list.ico` | D F | no | medium | 3; console | not landed |
+| 14 | IGR default: write nothing without a command, as the original | D G | yes for the write set | trivial | owner decision; the dialog's YES path under launcHER's exit is untested on a console | not landed; owner decision |
+| 15 | SMB external IRX set, `mass` rename, LOGON/ECHO/OPENSHARE order | D E | no | medium | console | not landed |
+| 16 | REPOP documentation follow-up (section 17) | C10 | n/a | small | separate repository and PR | not in this repository |
 
 ## 17. REPOP status
 
@@ -891,8 +1008,8 @@ here.
 | Topic | Settled as |
 |---|---|
 | Region pass, unknown licence, the four zero bytes | skipped in every arm where the unflagged run writes them (section 5a), not "without FORCEPAL" |
-| Folder for `BIOS.BIN` / `OSD.BIN` / skin | the original's device POPS folder (`pfs1:/POPS/` on HDD, `mass:/POPS<s>/` otherwise), not launcHER's `vcdDir`. The two are the same only when the VCD sits in the POPS folder on USB/SMB |
-| Reading `BIOS.BIN` with `readFullFile` | cannot express the size rule; a partial reader is needed. `readFullFile` is fine for `OSD.BIN` and the TM2 files if the size is checked first |
+| Folder for `BIOS.BIN` / `OSD.BIN` / skin | the original's device POPS folder (`pfs1:/POPS/` on HDD, `mass:/POPS<s>/` otherwise), not launcHER's `vcdDir`. The two are the same only when the VCD sits in the POPS folder on USB/SMB. The merged `BIOS.BIN` (`0945127`) and skin (`173d5de`) stages use the `.VCD`'s folder as a stand-in, each listed as a difference in its own document; the path decision of increment 3 is still open |
+| Reading `BIOS.BIN` with `readFullFile` | cannot express the size rule; a partial reader is needed. `readFullFile` is fine for `OSD.BIN` and the TM2 files if the size is checked first. Since `0945127` `pops_user_bios_load` is that partial reader, and the skin stage checks the size before reading |
 | Fix files and commands | the original runs fix files first (section 3). Two feature plans assumed different workarounds; decide the order question (increment 6) before `OSD.BIN` |
 | `$NOBOOT` | not an original token at all; the `0x2525b0` write is launcHER's own |
 | "BIOS.BIN with integrity check" | size test only; the message is the OSD handler's |
