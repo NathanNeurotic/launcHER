@@ -233,6 +233,8 @@ class FeatureTests(unittest.TestCase):
         LIB.pops_compat_db_lookup_title.argtypes = [c.c_char_p]
         LIB.pops_compat_db_lookup_title.restype = c.POINTER(PopsCompatEntry)
         LIB.pops_compat_db_count.restype = c.c_size_t
+        LIB.pops_compat_db_get.argtypes = [c.c_size_t]
+        LIB.pops_compat_db_get.restype = c.POINTER(PopsCompatEntry)
         LIB.pops_apply_compat_modes.argtypes = [c.c_void_p, c.c_size_t, c.c_uint8]
         LIB.pops_apply_compat_modes.restype = c.c_int
         LIB.pops_apply_all_config_patches.argtypes = [c.c_void_p, c.c_size_t, c.POINTER(PopsConfig)]
@@ -1043,11 +1045,32 @@ class FeatureTests(unittest.TestCase):
         self.assertTrue(entry_tk.contents.default_modes & 0x01)  # Mode 1
         self.assertTrue(entry_tk.contents.default_modes & 0x20)  # Mode 6 (OSD bypass)
 
-        # Title substring lookup
+        # Title lookup: the whole title, any case
         entry_tk_title = LIB.pops_compat_db_lookup_title(b"Tekken 3")
         self.assertTrue(bool(entry_tk_title))
         self.assertTrue(entry_tk_title.contents.default_modes & 0x01)
         self.assertTrue(entry_tk_title.contents.default_modes & 0x20)
+        self.assertEqual(LIB.pops_compat_db_lookup_title(b"tekken 3").contents.serial,
+                         entry_tk_title.contents.serial)
+
+    def test_compat_db_title_lookup_needs_the_whole_title(self):
+        # A VCD named TEST.VCD (the emulator fixture, serial TONYHAX.EXE) used
+        # to be reported as "Test Drive 4 (SLES-00948)": its base name is the
+        # start of that title. POPStarter r13 has no lookup by name; it picks
+        # a built-in entry by disc fingerprint only (pops_builtin_lookup).
+        for name in (b"TEST", b"Test", b"Test Drive", b"Drive 4", b"T", b"4", b"Tekken 3 (USA)"):
+            self.assertFalse(bool(LIB.pops_compat_db_lookup_title(name)), name)
+        self.assertFalse(bool(LIB.pops_compat_db_lookup_title(b"")))
+        self.assertFalse(bool(LIB.pops_compat_db_lookup_title(None)))
+        entry = LIB.pops_compat_db_lookup_title(b"TEST DRIVE 4")
+        self.assertTrue(bool(entry))
+        self.assertEqual(entry.contents.title, b"Test Drive 4")
+        # "Tekken" is a title of its own, not the first title that contains it.
+        self.assertEqual(LIB.pops_compat_db_lookup_title(b"Tekken").contents.title, b"Tekken")
+        # Every title finds an entry that carries that title (some differ in case).
+        for i in range(LIB.pops_compat_db_count()):
+            title = LIB.pops_compat_db_get(i).contents.title
+            self.assertEqual(LIB.pops_compat_db_lookup_title(title).contents.title.lower(), title.lower())
 
     def test_modes_and_patches_application(self):
         core_size = 0x303000

@@ -8,11 +8,31 @@
 .globl pops_trampoline_code_end
 
 pops_trampoline_code:
-    /* a0 contains pointer to PopsTrampolineArgs at POPS_TRAMPOLINE_ARGS (0x00084200) */
+    /* a0 contains pointer to PopsTrampolineArgs at POPS_TRAMPOLINE_ARGS (0x00084200).
+     * The caller is the kernel's only thread by now (popsHandoffRetireThreads):
+     * the ExecPS2 below would otherwise rewrite the initial frame of every
+     * thread it terminates, inside memory this code has just given to POPS. */
     move    $s0, $a0
 
     /* Set stack pointer in BIOS unused RAM (0x0008fff0) */
     li      $sp, 0x0008fff0
+
+    /* 0. Interrupts off (Status.EIE = 0) before anything of launcHER's is
+     *    overwritten. launcHER's timer (INTC 11) and SIF (DMAC 5) handlers
+     *    are still registered and step 3 zeroes their code; POPStarter's
+     *    own handlers stay intact up to its ExecPS2 because nothing clears
+     *    its code. ExecPS2 empties the handler lists and itself returns with
+     *    EIE = 0 (the di at kernel 0x80002fa8), so POPS starts as it does
+     *    after POPStarter. The loop is ps2sdk's DI(): a di that loses a race
+     *    with an interrupt is tried again. */
+0:
+    di
+    sync.p
+    mfc0    $t0, $12            /* Status */
+    lui     $t1, 0x0001         /* Status.EIE */
+    and     $t0, $t0, $t1
+    bnez    $t0, 0b
+    nop
 
     /* 1. Zero the whole scratchpad, 0x70000000..0x70004000, as POPStarter
      *    r13 does before it enters POPS (memset at 0x87c0f8). POPS's own

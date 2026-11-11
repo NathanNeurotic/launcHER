@@ -627,15 +627,12 @@ const PopsCompatEntry *pops_compat_db_lookup_title(const char *title) {
   if (!title || !title[0])
     return NULL;
 
-  size_t tlen = strlen(title);
+  /* The whole title, not a part of it: a file named TEST.VCD is not
+   * "Test Drive 4". POPStarter itself has no lookup by name at all. */
   for (size_t i = 0; i < COMPAT_ENTRY_COUNT; ++i) {
     const char *ctitle = s_compat_entries[i].title;
-    if (!ctitle)
-      continue;
-    for (const char *h = ctitle; *h; ++h) {
-      if (!strncasecmp(h, title, tlen))
-        return &s_compat_entries[i];
-    }
+    if (ctitle && !strcasecmp(ctitle, title))
+      return &s_compat_entries[i];
   }
 
   return NULL;

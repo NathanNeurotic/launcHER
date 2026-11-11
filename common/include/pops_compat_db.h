@@ -21,7 +21,7 @@ typedef struct {
 /* Looks up title entry by serial (matches normalized "ABCD-12345" or raw "ABCD_123.45") */
 const PopsCompatEntry *pops_compat_db_lookup(const char *serial);
 
-/* Looks up title entry by title substring (case-insensitive) */
+/* Looks up title entry by its whole title (case-insensitive) */
 const PopsCompatEntry *pops_compat_db_lookup_title(const char *title);
 
 /* Returns total number of registered entries in database */

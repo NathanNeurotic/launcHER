@@ -14,6 +14,7 @@
 #include "pops_builtin_db.h"
 #include "pops_resident.h"
 #include "pops_read_trace.h"
+#include "pops_handoff_ee.h"
 #include <ctype.h>
 #include <fcntl.h>
 #include <kernel.h>
@@ -1024,8 +1025,10 @@ int launchPOPS(int argc, char *argv[]) {
       }
       close(vcdFd);
     }
-    DPRINTF("POPS: Disc region %u (licence at 0x%llx)\n", (unsigned)cfg.disc_region,
-            (unsigned long long)licence);
+    /* No %ll here: the EE libc's printf prints "lx" for %llx. The offset is
+     * a header (0 or 1 MiB) plus four sectors, far below 4 GiB. */
+    DPRINTF("POPS: Disc region %u (licence at 0x%lx)\n", (unsigned)cfg.disc_region,
+            (unsigned long)licence);
   }
 
   /* All card candidates below fit within vcdDir + one optional folder +
@@ -1856,7 +1859,19 @@ int launchPOPS(int argc, char *argv[]) {
   return 0;
 #endif
 
-  /* Execute trampoline below 1 MiB, which stages core, clears RAM, and enters POPS */
+  /* POPStarter enters POPS as the kernel's only thread. Retire launcHER's
+   * other threads now, while their stacks are still launcHER's: ExecPS2
+   * rewrites the initial frame of every thread it terminates, and by then
+   * that memory is POPS code. From here on nothing may wait on another
+   * thread, an alarm or an RPC (no trace line either). */
+  res = popsHandoffRetireThreads();
+  if (res) {
+    msg("POPS: Handoff thread cleanup failed: %d\n", res);
+    return res;
+  }
+
+  /* Execute trampoline below 1 MiB, which turns interrupts off, stages core,
+   * clears RAM, and enters POPS */
   ((void (*)(void *))POPS_TRAMPOLINE_ADDR)((void *)POPS_TRAMPOLINE_ARGS);
 
   return 0;
