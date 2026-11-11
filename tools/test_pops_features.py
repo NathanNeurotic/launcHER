@@ -83,6 +83,7 @@ class PopsConfig(c.Structure):
         ("builtin_no_vmc1", c.c_uint8),
         ("usb_delay_set", c.c_uint8),
         ("vmc_dir_set", c.c_uint8),
+        ("forced_pal", c.c_uint8),
     ]
 
 class PopsCompatEntry(c.Structure):

@@ -224,10 +224,10 @@ static int command_hex_byte(const unsigned char *t) {
 static void apply_plain_command(PopsConfig *cfg, const char *name) {
   if (!strcmp(name, "$NOPAL")) {
     /* 0x89860c: one store, gp+0x4fa0 = 0 (no automatic PAL for a European
-     * disc). The forced-PAL flag of an earlier $FORCEPAL (gp+0x38a0) stays,
+     * disc). The forced-PAL word of an earlier $FORCEPAL (gp+0x38a0) stays,
      * and the region pass tests that one first (0x879034): $FORCEPAL and
      * then $NOPAL is still forced PAL. */
-    if (cfg->video_mode != POPS_VMODE_NTSC2PAL)
+    if (!cfg->forced_pal)
       cfg->video_mode = POPS_VMODE_NOPAL;
     return;
   }
@@ -542,6 +542,7 @@ static int run_command(PopsConfig *cfg, const PopsCommand *command, const unsign
       return 0;
     if (!cfg->progressive_requested) {
       cfg->video_mode = POPS_VMODE_NTSC2PAL;
+      cfg->forced_pal = 1;
       *effect = 1;
     }
     return 1;
@@ -573,8 +574,11 @@ static int run_command(PopsConfig *cfg, const PopsCommand *command, const unsign
   case CMD_480P:
     if (rest[0] != 'P' || !command_end(rest[1]))
       return 0;
+    /* 0x89028c..0x8902ac: the forced-PAL and automatic-PAL words are
+     * cleared, the 480p word set. */
     cfg->video_mode = POPS_VMODE_480P;
     cfg->progressive_requested = 1;
+    cfg->forced_pal = 0;
     if (cfg->gs_mask != 0x3f) {
       cfg->gs_display_valid = 0;
       cfg->hdtv_fix = 0;
@@ -1197,8 +1201,10 @@ int pops_config_load_table(PopsConfig *cfg, const uint8_t table[32]) {
   }
   cfg->igr_type = table[20];
   if (table[26] == 0x02) {
+    /* 0x871208..0x871218: the start-up's own clear of the forced-PAL word. */
     cfg->video_mode = POPS_VMODE_480P;
     cfg->progressive_requested = 1;
+    cfg->forced_pal = 0;
   } else if (table[26] == 0x00) {
     cfg->video_mode = POPS_VMODE_NOPAL;
   }
