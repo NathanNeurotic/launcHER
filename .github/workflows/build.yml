@@ -60,6 +60,8 @@ jobs:
         run: python tools/test_pops_igr_skin.py
       - name: Test POPStarter's always-on launch hooks (guards, pokes, BIOS edits, final clears)
         run: python tools/test_pops_launch_hooks.py
+      - name: Test POPS CHEATS.TXT commands and VMCDIR.TXT
+        run: python tools/test_pops_config_text.py
 
   build:
     runs-on: ubuntu-latest

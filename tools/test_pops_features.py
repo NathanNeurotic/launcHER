@@ -81,6 +81,8 @@ class PopsConfig(c.Structure):
         ("recompiler_addons", c.c_uint8),
         ("fakelc", c.c_uint8),
         ("builtin_no_vmc1", c.c_uint8),
+        ("usb_delay_set", c.c_uint8),
+        ("vmc_dir_set", c.c_uint8),
     ]
 
 class PopsCompatEntry(c.Structure):
@@ -660,9 +662,13 @@ class FeatureTests(unittest.TestCase):
             LIB.pops_config_init(c.byref(cfg))
             self.assertLess(LIB.pops_config_discover(c.byref(cfg),
                             (str(root) + '/').encode(), b'Game'), 0)
+            # The original reads the file as one run of bytes: no line is
+            # too long, and a command after 300 spaces is still a command.
             oversized = root / 'long.txt'
-            oversized.write_text('$80001234 5678' + ' ' * 300)
-            self.assertLess(LIB.pops_config_load_file(c.byref(cfg), str(oversized).encode()), 0)
+            oversized.write_text('$80001234 5678' + ' ' * 300 + '$SMOOTH')
+            LIB.pops_config_init(c.byref(cfg))
+            self.assertEqual(LIB.pops_config_load_file(c.byref(cfg), str(oversized).encode()), 0)
+            self.assertEqual((cfg.cheat_count, cfg.smooth), (1, 1))
 
     def test_unavailable_optional_global_cards_preserve_title_configuration(self):
         LIB.pops_test_set_card_error.argtypes = [c.c_int]
@@ -723,22 +729,24 @@ class FeatureTests(unittest.TestCase):
                 self.assertEqual(cfg.disc_count, count, content[:12])
             path.unlink()
             self.assertEqual(LIB.pops_config_load_discs(c.byref(cfg), encoded), -errno.ENOENT)
+            # VMCDIR.TXT as POPStarter reads it (tools/test_pops_config_text.py):
+            # a file it does not take is ignored, never an error, and a line
+            # end after the name is one of the things it does not take.
             cfg.vmc_dir = b'Keep'
-            path.write_text('X' * 128)
-            self.assertLess(LIB.pops_config_load_vmcdir(c.byref(cfg), encoded), 0)
-            self.assertEqual(cfg.vmc_dir, b'Keep')
-            for value in ('X' * 104, 'Shared\nOther', 'Saves:Other'):
-                path.write_text(value)
-                self.assertLess(LIB.pops_config_load_vmcdir(
-                    c.byref(cfg), encoded), 0)
-                self.assertEqual(cfg.vmc_dir, b'Keep')
-            path.write_text('Shared_Saves\n')
+            for value in (b'X' * 128, b'X' * 104, b'Shared\nOther', b'Saves:Other',
+                          b'Shared_Saves\n', b'Shared_Saves\r\n', b'\n'):
+                path.write_bytes(value)
+                self.assertEqual(LIB.pops_config_load_vmcdir(c.byref(cfg), encoded), 0, value[:16])
+                self.assertEqual((cfg.vmc_dir, cfg.vmc_dir_set), (b'Keep', 0), value[:16])
+            path.write_bytes(b'Shared_Saves')
             self.assertEqual(LIB.pops_config_load_vmcdir(c.byref(cfg), encoded), 0)
-            self.assertEqual(cfg.vmc_dir, b'Shared_Saves')
-            cfg.vmc_dir = b'Keep'
-            path.write_text('\n')
+            self.assertEqual((cfg.vmc_dir, cfg.vmc_dir_set), (b'Shared_Saves', 1))
+            # An empty file is taken: the saves go to the POPS folder itself.
+            path.write_bytes(b'')
             self.assertEqual(LIB.pops_config_load_vmcdir(c.byref(cfg), encoded), 0)
-            self.assertEqual(cfg.vmc_dir, b'Keep')
+            self.assertEqual((cfg.vmc_dir, cfg.vmc_dir_set), (b'', 1))
+            path.unlink()
+            self.assertEqual(LIB.pops_config_load_vmcdir(c.byref(cfg), encoded), -errno.ENOENT)
 
     def test_discs_txt_follows_the_original(self):
         """POPStarter's DISCS.TXT reader (MAIN 0x8d64b0..0x8d6b5c), rule by rule."""
@@ -883,11 +891,14 @@ class FeatureTests(unittest.TestCase):
         self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$NOBOOT"), 0)
         self.assertEqual(cfg.no_boot, 1)
 
+        # POPStarter has no signed position: a number that is not 1..5
+        # digits writes what its shared temporary holds (0 here) and takes
+        # the one X write (tools/test_pops_config_text.py measures it).
         self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$XPOS_-15"), 0)
-        self.assertEqual(cfg.x_offset, -15)
+        self.assertEqual((cfg.x_offset, cfg.display_x, cfg.display_mask & 1), (0, 0, 1))
 
         self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$YPOS_20"), 0)
-        self.assertEqual(cfg.y_offset, 20)
+        self.assertEqual((cfg.y_offset, cfg.display_y, cfg.display_mask & 2), (20, 20, 2))
 
         # Modes
         self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$COMPATIBILITY_0x02"), 0)

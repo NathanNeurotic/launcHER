@@ -64,6 +64,8 @@ enum PopsRegion {
 #define POPS_DISC_SLOT_SIZE   0x60
 #define POPS_DISC_SLOT_PREFIX "pfs0:/"
 #define POPS_DISC_LINE_MAX    90
+/* A VMCDIR.TXT of this many bytes or more is ignored by the original. */
+#define POPS_VMCDIR_FILE_MAX  104
 #define POPS_MAX_CHEATS   256
 
 /* Cheat gates. POPStarter puts one test in front of its cheat codes and
@@ -138,7 +140,7 @@ typedef struct {
   uint8_t no_igr;       /* $NOIGR: POPStarter's IGR-off writes */
   uint8_t igr_type;     /* 0 = launcHER direct exit, 1..6 = $IGR0..$IGR5 */
   uint8_t safe_mode;    /* POPS_SAFE_MODE_* bits: $SAFEMODE, $SAFEMODE2; $NOSAFEMODE clears */
-  uint8_t usb_delay;    /* $USBDELAY_# seconds */
+  uint8_t usb_delay;    /* $USBDELAY_n: the digit n (see usb_delay_set) */
   /* $NOVMC0 / $NOVMC1 (handlers 0x896568 / 0x896718): every pass, the
    * resident code clears the low byte of POPS's card 0 / card 1 state word,
    * so the game finds no card there (POPS_RES_F_NOVMC0/1); $NOVMC1 also
@@ -254,6 +256,14 @@ typedef struct {
    * (the entry's FUN_008dc12c(2), gp+0x38bc = 2). Only the core write of
    * $NOVMC1, no per-pass store, and no SLOT1.VMC is made. */
   uint8_t builtin_no_vmc1;
+  /* A $USBDELAY_n was taken (handler 0x89dbd4..0x89e13c): usb_delay is the
+   * digit the original stores in the byte at 0x100017. Without one the
+   * original keeps the byte its ELF ships with (1), which launcHER does not
+   * model: usb_delay stays 0. */
+  uint8_t usb_delay_set;
+  /* A VMCDIR.TXT was used (pops_config_parse_vmcdir): vmc_dir is its
+   * folder name, empty for the POPS folder itself. */
+  uint8_t vmc_dir_set;
 } PopsConfig;
 
 /* PopsConfig.fakelc */
@@ -285,7 +295,27 @@ typedef struct {
 /* Initialize configuration with factory defaults */
 void pops_config_init(PopsConfig *cfg);
 
-/* Parse a single configuration line (from PATCHES.TXT, MODES.TXT, or CHEATS.TXT) */
+/* What pops_config_parse_text reports, in file order: a command the pass
+ * took at `offset` (`name` is the literal its compare chain starts with,
+ * e.g. "$SMOOTH", "$DX_", "$480", "$PAD", "$?POS_"; `effect` is nonzero
+ * when it changed something), or, with name NULL, a cheat code whose
+ * `effect` columns (14 or 18) the pass stepped over. */
+typedef void (*PopsConfigTrace)(void *context, size_t offset, const char *name, int effect);
+
+/* One CHEATS.TXT, the way POPStarter r13 reads it (FUN_00883270): `size`
+ * bytes scanned as one run, case folded, with no lines, comments or
+ * tokens. A command is taken at any '$' outside a cheat code's columns when
+ * its name is followed by CR, LF, NUL, a space or '$'; see pops_config.c
+ * and docs/POPSTARTER_CONFIG_TEXT.md for each command's exact form. `value`
+ * is what the original's shared number temporary starts at: 0, or the
+ * length of the game's folder name plus one for the game's own file (the
+ * original's string is the name and a '/'). launcHER's own tokens
+ * ($NOBOOT, MODE n, ...) are also read here, by launcHER's line rules.
+ * trace may be NULL. */
+int pops_config_parse_text(PopsConfig *cfg, const char *text, size_t size, uint32_t value,
+                           PopsConfigTrace trace, void *trace_context);
+
+/* pops_config_parse_text for one NUL-terminated string. */
 int pops_config_parse_line(PopsConfig *cfg, const char *line);
 
 /* Parse a text file into configuration */
@@ -304,7 +334,18 @@ void pops_config_parse_discs(PopsConfig *cfg, char *text, size_t size);
 /* Read one DISCS.TXT into the slots (pops_config_parse_discs). */
 int pops_config_load_discs(PopsConfig *cfg, const char *filepath);
 
-/* Parse VMCDIR.TXT (single folder name) */
+/* POPStarter's VMCDIR.TXT reader (FUN_008d4f84 in its main image), for one
+ * file of `size` bytes. Returns 1 when the file is used, 0 when it is
+ * ignored and nothing changes. Ignored: a file of POPS_VMCDIR_FILE_MAX bytes
+ * or more, and a file with CR, LF, '/', a backslash or ':' anywhere, so a
+ * name followed by a line end is ignored too. Otherwise vmc_dir becomes
+ * the bytes up to a NUL or the end of the file, untrimmed (spaces, tabs,
+ * '#', "." and ".." are kept), and vmc_dir_set is set. An empty file is
+ * used: the name is empty, which is the POPS folder itself. */
+int pops_config_parse_vmcdir(PopsConfig *cfg, const char *text, size_t size);
+
+/* Read one VMCDIR.TXT (pops_config_parse_vmcdir). A file that is ignored is
+ * not an error: only a failed open or read is. */
 int pops_config_load_vmcdir(PopsConfig *cfg, const char *filepath);
 
 /* Parse CHEATS.TXT (GameShark codes and $ directives) */

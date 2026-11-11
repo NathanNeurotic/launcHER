@@ -104,15 +104,28 @@ class DisplayTests(unittest.TestCase):
 
     def test_digit_ranges_and_invalid_commands(self):
         for prefix, invalid in [('$LEFTADJ_', ('', '0', '256', '999', '0001')),
-                                ('$XPOS_', ('', '65536', '99999', '000000')),
-                                ('$YPOS_', ('', '65536', '99999', '000000')),
+                                ('$XPOS_', ('65536', '99999')),
+                                ('$YPOS_', ('65536', '99999')),
                                 ('$DWSTRETCH_', ('', '10000', '00000')),
                                 ('$DWCROP_', ('', '10000', '00000'))]:
-            for suffix in (*invalid, '-1', '+1', '1x', '0x10'):
+            malformed = ('-1', '+1', '1x', '0x10')
+            for suffix in invalid if 'POS_' in prefix else (*invalid, *malformed):
                 cfg = self.config(prefix + suffix)
                 data = pristine()
                 self.assertEqual(self.apply(data, cfg), 0)
                 self.assertEqual(data, pristine(), prefix + suffix)
+        # $XPOS_ / $YPOS_ with a number that is not 1..5 digits still write:
+        # the original's shared number temporary, 0 when nothing set it
+        # (measured in tools/test_pops_config_text.py), exactly as $XPOS_0.
+        for prefix, bit in (('$XPOS_', 1), ('$YPOS_', 2)):
+            zero = pristine()
+            self.assertEqual(self.apply(zero, self.config(prefix + '0')), 0)
+            for suffix in ('', '000000', '-1', '+1', '1x', '0x10'):
+                cfg = self.config(prefix + suffix)
+                self.assertEqual((cfg.display_mask, cfg.display_x, cfg.display_y), (bit, 0, 0), suffix)
+                data = pristine()
+                self.assertEqual(self.apply(data, cfg), 0)
+                self.assertEqual(data, zero, prefix + suffix)
 
     def test_first_valid_position_and_last_valid_width(self):
         cfg = self.config('$XPOS_99999 $XPOS_0 $XPOS_100', '$YPOS_65535 $YPOS_10',
