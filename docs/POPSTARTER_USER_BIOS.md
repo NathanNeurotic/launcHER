@@ -39,12 +39,22 @@ So:
   taken. What that does in a launch was not worked out.
 - Both back ends give the same bytes, return value and flags.
 
-Entry tests, before anything is opened (each word is tested with `bnez`):
+Entry tests, before anything is opened (`0x8801b4..0x8802ac`). The loader
+compares each word with 1 (`addiu v0, zero, 1`, then `beq`/`bne`); it is the
+launch function's tests in front of the call (section 2) that are `bnez`.
 
-| Folder | Returns 0 without opening when any of these is set |
+| Folder | Returns 0 without opening when any of these holds 1 |
 |---|---|
 | all games | `gp+0x38dc` (launch given up), `gp+0x343c`, `gp+0x3430` (all-games OSD replacement), `gp+0x344c` (the game's OSD replacement) |
 | game | `gp+0x38dc`, `gp+0x3878`, `gp+0x344c` (the game's OSD replacement), `gp+0x3460` (the game's folder is missing) |
+
+Every `gp`-relative store to the seven loader words of section 3 in MAIN
+stores 0 or 1, so in a launch "holds 1" and "is set" are the same thing.
+With another value forced into a word (2, `0x80`, `0xff`) the loader on its
+own goes on and loads; the launch function's `bnez` in front still skips
+the call for every word it tests. `gp+0x344c` for the all-games folder is
+the one word only the loader tests, so there, and only there, a value other
+than 0 or 1 does not skip the file.
 
 For the game's folder it first looks for the folder itself; when that is
 missing it sets `gp+0x3460` and returns `-666` without opening anything.
@@ -104,7 +114,9 @@ letter is written into the user's file. `0x2525b0` is file offset `0x6990`.
 - `pops_user_bios_stage()` is the loader after its open: the entry tests,
   the size test, the copy of what the read delivered (at most `0x7ff90`
   bytes), the `0x20079a` write and the flag. `pops_user_bios_skipped()` and
-  `pops_user_bios_size_ok()` are its two tests on their own.
+  `pops_user_bios_size_ok()` are its two tests on their own. The first is
+  the launch function's tests and the loader's together: set for every
+  word, equal to 1 for the all-games folder's `gp+0x344c`.
 - `pops_user_bios_load()` (`launcher/src/handler_pops.c`) is the file side:
   open, lseek, the size test on the lseek result, a read of the first
   `0x7ff90` bytes only (in pieces, into the fix-file scratch buffer), then
@@ -119,6 +131,14 @@ letter is written into the user's file. `0x2525b0` is file offset `0x6990`.
 - Order: inside `pops_stage_fix_files`, each folder's `BIOS.BIN` before
   that folder's `TROJAN` and `PATCH` files, all-games folder first, after
   the built-in entry, as in section 2.
+- `pops_stage_user_files()` (`launcher/src/handler_pops.c`) is the part of
+  `launchPOPS` that runs the user's commands and reads the user's files,
+  as one function so that the host tests can run it on files: the look at
+  both `BIOS.BIN` files, the commands, the `$RECOMPILER_ADDON_3/4` jumps,
+  `pops_stage_fix_files`, and the check of difference 1 below. It clears
+  the state it is given and sets `osd_off` from the built-in entry's mode
+  mask. `launchPOPS` calls it once, after the built-in entry, and passes
+  the state on to the shell edits and the region pass.
 - The shell edits, the region pass, mode 6 (from a command, a `PATCH`
   file, the built-in entry or launcHER's own serial list) and the `$UNDO_`
   commands follow section 3 (`pops_apply_bios_shell_edits_rom`,
@@ -134,14 +154,24 @@ Differences from the original:
    `pops_user_bios_load()` (with no core: nothing is read or written)
    whether each file would load, and gives the commands those two flags.
    If the later loads disagree with that answer the launch stops with
-   `-EIO`. The bytes come out the same because the only command writes
-   inside the loaded range are the gated `0x2525b0` ones.
-2. **Text order of the commands** (older, not changed here): the original
-   runs `$COMPATIBILITY_0x..` and `$UNDO_..` in the order they are written;
-   launcHER applies the `$UNDO_` commands first, then the modes. With
-   `$COMPATIBILITY_0x06` written before a `$UNDO_` command and no
-   `BIOS.BIN`, the original ends with `0x2525b0 = 0x1bfc` and launcHER
-   with `0x0648`.
+   `-EIO`. When a `BIOS.BIN` is loaded the bytes come out the same,
+   because the only command writes inside the loaded range are the
+   `0x2525b0` ones and with a load both sides leave them out. When none is
+   loaded the order still shows at `0x2525b0`, as it did before this work:
+   see 2.
+2. **Order of the commands among themselves and against the files**
+   (older, not changed here): the original runs the files, then
+   `$COMPATIBILITY_0x..` and `$UNDO_..` in the order they are written;
+   launcHER applies the `$UNDO_` commands first, then the commands' modes,
+   then the files. Over the 270 scenarios of section 5, with no `BIOS.BIN`
+   loaded the two end differently in exactly these: a `$UNDO_` command is
+   given, the built-in entry did not run mode 6, and mode 6 comes from a
+   `PATCH_n.BIN` or from a `$COMPATIBILITY_0x06` written before the
+   `$UNDO_` command. The original ends with `0x2525b0 = 0x1bfc` (its
+   `$UNDO_` ran last), launcHER with `0x0648`; nothing else differs and
+   `gp+0x3704` is 1 on both sides. Examples: a `PATCH_n.BIN` with mode
+   byte 6 and `$UNDO_GAME_FIXES` in `CHEATS.TXT`; `$COMPATIBILITY_0x06`
+   followed by `$UNDO_LIBCRYPT_FIX`.
 3. **Fix-file bookkeeping.** launcHER checks the words its compatibility
    modes replace before each fix file. `0x2525b0` is inside the loaded
    range, so after a load `pops_fix_context_rom_loaded()` takes that one
@@ -161,6 +191,20 @@ Differences from the original:
    of the size, signed, as the original's compare is on its 32-bit lseek
    result. What the original's drivers return for a file of 2 GiB or more
    was not measured.
+8. **Width of the state.** The original's words are 32 bits; launcHER
+   keeps each as one byte that only ever holds 0 or 1.
+
+Known gap, found while testing the sequence, older than this work and not
+fixed here: a built-in entry with compatibility modes followed by
+`$UNDO_COMPATIBILITY_CODES`. The original puts POPS's words back and goes
+on. launcHER's fix-file session (`pops_fix_context_init_builtin`) still
+expects the entry's words at those sites and refuses the launch with
+`-EINVAL`. On the real core, on the host, that is 294 of the 624 built-in
+entries that apply to it, and the count was the same before the `BIOS.BIN`
+work. `$UNDO_GAME_FIXES` and `$UNDO_LIBCRYPT_FIX` are not affected (before
+this work they failed for one entry).
+`Launch.test_undo_compatibility_codes_after_a_built_in_entry` asserts what
+should happen and is marked as an expected failure.
 
 ## 5. Evidence
 
@@ -179,15 +223,37 @@ functions on the same core; not console runs):
 | Mode dispatcher, mode 6 with all 128 flag combinations and both words, the other modes with each flag | 298 | bytes, `gp+0x3704` and the notice equal |
 | `$COMPATIBILITY_0x06` and the three `$UNDO_` commands through the original's command reader, flags preset | 72 | bytes and `gp+0x3704` equal |
 | Shell slice, region window (4 licences) and `$RESET_WARMBOOT` pass over a core the loader replaced | 1 load | whole core equal |
+| The launch sequence: `pops_stage_user_files` on files against the original's chain (per folder its loader and, for a `PATCH` file's mode byte 6, its mode dispatcher; then its command reader), built-in mode 6 x each folder's `BIOS.BIN` (none, one byte too small, loaded) x `PATCH` mode 6 in neither or one folder x 5 command sets | 270 | 150 with a `BIOS.BIN` loaded: whole core and loader words equal. 92 without: equal. 28 without: `0x2525b0` alone differs (difference 2) |
+| Launch-function tests, loader entry tests, shell slice, mode 6 and region window with a loader word holding 1, 2, `0x80`, `0xff` | 140 | equal |
 
 The 18 region cases are European licence with auto video disabled and
 `$NOPAL` not given, which launcHER's two inputs cannot express; they differ
 from the original only in the four PAL sites.
 
+In the launch-sequence row the original's `PATCH_n.BIN` loader is not run:
+a file's mode byte 6 is represented by the dispatcher that byte reaches
+(`FUN_008dc2c4`). launcHER's side reads a real `PATCH_n.BIN` file.
+launcHER's own launch writes (taken from a run with no command and no
+file) are set aside; the test checks that they stay outside the loaded
+range and outside everything the original's chain changed. A built-in
+entry followed by `$UNDO_COMPATIBILITY_CODES` is left out of the scenarios
+(the known gap of section 4).
+
 Without the two inputs the same file checks the functions against the
 tables above on synthetic cores, runs the reader from `handler_pops.c` on
-files of each size, and pins the call order in the source.
+files of each size, pins the call order in the source, and runs
+`pops_stage_user_files` itself on files (class `Launch`): 432 combinations
+of the two `BIOS.BIN` files (none, one byte too small, loaded), `PATCH`
+mode 6 in either folder, and 12 pairs of built-in mode 6 and commands,
+against what the order of section 4 must leave;
+the four `BIOS.BIN` opens in order, with nothing read at the two looks; ten
+ways a file can change between the look and the load (each `-EIO`) and
+three changes that leave the answer as it was (no error); where the launch
+stops on each kind of error; and what is handed to `pops_stage_fix_files`.
 
 Not measured: a console; a real PS1 BIOS in place of POPS's; what POPS does
 with a file that is not a PS1 BIOS; the OSD loader that sets the other four
-words; builds other than MAIN.
+words; builds other than MAIN; the original's launch function run as one
+piece (the chain above is its pieces, each started with the words the one
+before left); the line of `launchPOPS` that calls `pops_stage_user_files`,
+which no host test executes (its text is pinned).
