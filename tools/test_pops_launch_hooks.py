@@ -935,6 +935,17 @@ class Source(unittest.TestCase):
         self.assertNotIn("pops_resident_hook", between)
         self.assertNotIn("pops_stage_igr_skin(", between)
 
+    def test_trace_lines_use_no_long_long_conversion(self):
+        # The EE libc's printf does not know %ll: a traced launch printed
+        # "POPS: Disc region 3 (licence at 0xlx)" (emulator, trace build).
+        import re
+        for path in sorted((ROOT / "launcher/src").glob("*.c")) + sorted((ROOT / "common/src").glob("*.c")):
+            text = path.read_text(encoding="utf-8", errors="replace")
+            self.assertIsNone(re.search(r'"[^"\n]*%[-+ #0-9.]*ll[diouxX]', text), path.name)
+        src = (ROOT / "launcher/src/handler_pops.c").read_text()
+        self.assertIn('DPRINTF("POPS: Disc region %u (licence at 0x%lx)\\n", (unsigned)cfg.disc_region,\n'
+                      '            (unsigned long)licence);', src)
+
     def test_ember_never_reaches_the_pops_launch(self):
         common = (ROOT / "launcher/src/common.c").read_text()
         self.assertEqual(common.count("launchPOPS("), 1)

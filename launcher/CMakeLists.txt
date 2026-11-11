@@ -23,6 +23,7 @@ set(EE_SOURCES
     src/handler_quickboot.c
     src/handler_pops.c
     src/pops_read_trace.c
+    src/pops_handoff_ee.c
     src/pops_trampoline.S
 )
 
@@ -40,6 +41,7 @@ list(APPEND EE_SOURCES
     ../common/src/pops_boot_stage.c
     ../common/src/pops_core_patches.c
     ../common/src/pops_bootstrap.c
+    ../common/src/pops_handoff.c
     ../common/src/pops_builtin_db.c
     ../common/src/pops_builtin_db_data.c
     ../common/src/pops_igr_skin.c
@@ -490,6 +492,20 @@ endif()
 set_target_properties(launcher_unc PROPERTIES
     LINK_FLAGS "${launcher_link_flags}"
 )
+
+# What the POPS handoff needs from the linked image, checked on every link
+# (tools/check_pops_handoff_layout.py reads this ELF and the trampoline source,
+# nothing else). Skipped when the build host has no Python 3.
+find_program(POPS_HANDOFF_PYTHON NAMES python3)
+if(POPS_HANDOFF_PYTHON)
+  add_custom_command(TARGET launcher_unc POST_BUILD
+      COMMAND "${POPS_HANDOFF_PYTHON}" -B "${CMAKE_SOURCE_DIR}/tools/check_pops_handoff_layout.py"
+              "$<TARGET_FILE:launcher_unc>"
+      COMMENT "Checking the POPS handoff layout of launcher_unc.elf"
+      VERBATIM)
+else()
+  message(STATUS "python3 not found: POPS handoff layout check skipped")
+endif()
 
 # Pack ELF
 add_custom_target(launcher ALL
