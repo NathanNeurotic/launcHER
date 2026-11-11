@@ -278,7 +278,61 @@ static int readPopsDependency(const char *path, void *buffer, size_t max_size,
 /* The archived MAIN calls root TROJAN, root PATCH, title TROJAN, title PATCH
  * (0x876d6c/0x876e00/0x877078/0x877118). Slot order is 0..9 in both loaders.
  * These are explicit external fix files, never files from VMCDIR redirection.
- * The staged executable is discarded by the caller on any failure. */
+ * The staged executable is discarded by the caller on any failure.
+ * Before each folder's TROJAN files it calls its BIOS.BIN loader for that
+ * folder (0x876cd8/0x876fd8); pops_user_bios_load is that loader. */
+
+/* FUN_0088019c for one folder (docs/POPSTARTER_USER_BIOS.md): open
+ * <dir>BIOS.BIN, take its size with lseek, apply the size test, read the
+ * first POPS_USER_BIOS_READ bytes and stage them. As there, a file that is
+ * missing, unopenable or too small is only reported and the launch goes on,
+ * the rewind and the read are not checked, and what the read delivered is
+ * what is loaded. Returns 1 when loaded, 0 when not.
+ * With stagedCore NULL nothing is read or written: the result says whether
+ * the file would be loaded. */
+static int pops_user_bios_load(void *stagedCore, size_t coreSize, const char *dir,
+                               int perGame, PopsUserRomState *rom) {
+  char path[PATH_MAX];
+  void *buffer = (void *)0x01f00000;
+  size_t total = 0;
+  if (pops_user_bios_skipped(perGame, rom))
+    return 0;
+  int length = snprintf(path, sizeof(path), "%sBIOS.BIN", dir);
+  if (length < 0 || (size_t)length >= sizeof(path))
+    return -ENAMETOOLONG;
+  int fd = open(path, O_RDONLY);
+  if (fd < 0) {
+    DPRINTF("POPS: %s NOT FOUND\n", path);
+    return 0;
+  }
+  off_t size = lseek(fd, 0, SEEK_END);
+  lseek(fd, 0, SEEK_SET);
+  if (!pops_user_bios_size_ok(size)) {
+    DPRINTF("POPS: %s is too small\n", path);
+    close(fd);
+    return 0;
+  }
+  if (!stagedCore) {
+    close(fd);
+    return 1;
+  }
+  while (total < POPS_USER_BIOS_READ) {
+    size_t chunk = POPS_USER_BIOS_READ - total;
+    if (chunk > 65536)
+      chunk = 65536;
+    ssize_t n = read(fd, (char *)buffer + total, chunk);
+    if (n <= 0 || (size_t)n > chunk)
+      break;
+    total += (size_t)n;
+  }
+  close(fd);
+  int result = pops_user_bios_stage(stagedCore, coreSize, buffer, total, size, perGame, rom);
+  if (result > 0) {
+    DPRINTF("POPS: User BIOS == %s (%u bytes)\n", path, (unsigned)total);
+  }
+  return result;
+}
+
 static int pops_stage_fix_files(void *stagedCore, size_t coreSize,
                                  const char *vcdDir, const char *titleDir,
                                  uint16_t builtinId, uint8_t initialModes,
@@ -286,6 +340,11 @@ static int pops_stage_fix_files(void *stagedCore, size_t coreSize,
                                  uint32_t progressiveEntry, uint32_t initialInterlace,
                                  PopsUserRomState *rom, PopsFixContext *finalContext) {
   PopsFixContext context;
+  PopsUserRomState noState;
+  if (!rom) {
+    memset(&noState, 0, sizeof(noState));
+    rom = &noState;
+  }
   int result = pops_fix_context_init_builtin(&context, stagedCore, coreSize, builtinId,
                                               initialModes, initialVideo);
   if (result)
@@ -298,6 +357,16 @@ static int pops_stage_fix_files(void *stagedCore, size_t coreSize,
   }
   const char *dirs[] = {vcdDir, titleDir};
   for (unsigned scope = 0; scope < 2; ++scope) {
+    /* The folder's BIOS.BIN replaces POPS's PS1 ROM before the folder's
+     * TROJAN and PATCH files, so the game's BIOS.BIN also replaces what the
+     * all-games files wrote into that range. */
+    result = pops_user_bios_load(stagedCore, coreSize, dirs[scope], scope, rom);
+    if (result > 0)
+      result = pops_fix_context_rom_loaded(&context, stagedCore, coreSize);
+    if (result < 0) {
+      msg("POPS: User BIOS.BIN in %s failed (%d)\n", dirs[scope], result);
+      return result;
+    }
     for (unsigned kind = 0; kind < 2; ++kind) {
       for (unsigned slot = 0; slot < 10; ++slot) {
         char path[PATH_MAX];
@@ -1425,12 +1494,30 @@ int launchPOPS(int argc, char *argv[]) {
   memset(&romState, 0, sizeof(romState));
   romState.osd_off = (builtinPlan.compat_modes & (1 << 5)) != 0;
 
+  /* The original loads both BIOS.BIN files before it runs the user's
+   * commands; launcHER runs the commands first. The commands are therefore
+   * given the two flags the loads below will set: pops_user_bios_load with
+   * no core only says whether each file would be loaded. */
+  PopsUserRomState romAtCommands = romState;
+  res = pops_user_bios_load(NULL, 0, vcdDir, 0, &romAtCommands);
+  if (res >= 0) {
+    romAtCommands.bios_all = res > 0;
+    res = pops_user_bios_load(NULL, 0, gameConfigDir, 1, &romAtCommands);
+  }
+  if (res < 0) {
+    msg("POPS: User BIOS.BIN lookup failed: %d\n", res);
+    return res;
+  }
+  romAtCommands.bios_game = res > 0;
+
   /* Apply compatibility modes and user directive patches */
-  res = pops_apply_all_config_patches_rom((void *)stagedCore, plan.core_size, &cfg, &romState);
+  res = pops_apply_all_config_patches_rom((void *)stagedCore, plan.core_size, &cfg,
+                                          &romAtCommands);
   if (res < 0) {
     msg("POPS: Applying config patches failed: %d\n", res);
     return res;
   }
+  romState.osd_off = romAtCommands.osd_off;
   if (res == POPS_MODE6_SKIPPED) {
     DPRINTF("POPS: Compatibility mode 6 is not applied over a user BIOS.BIN\n");
   }
@@ -1468,6 +1555,11 @@ int launchPOPS(int argc, char *argv[]) {
                               &romState, &fixContext);
   if (res)
     return res;
+  if (romState.bios_all != romAtCommands.bios_all ||
+      romState.bios_game != romAtCommands.bios_game) {
+    msg("POPS: BIOS.BIN changed while the launch was being prepared\n");
+    return -EIO;
+  }
   res = pops_fix_require_progressive(&fixContext, (void *)stagedCore, plan.core_size);
   if (res) {
     msg("POPS: Conflicting final progressive patch: %d\n", res);

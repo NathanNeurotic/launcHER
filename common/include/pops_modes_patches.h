@@ -32,6 +32,34 @@ int pops_user_rom_replaced(const PopsUserRomState *rom);
  * BIOS writes are skipped. */
 int pops_user_rom_keeps_shell(const PopsUserRomState *rom);
 
+/* POPStarter's BIOS.BIN loader (FUN_0088019c, docs/POPSTARTER_USER_BIOS.md).
+ * It reads the first POPS_USER_BIOS_READ bytes of the file over the PS1 ROM
+ * inside POPS, 0x24bc20..0x2cbbaf, when the file's size is at least
+ * POPS_USER_BIOS_MIN_SIZE; there is no check of the content. */
+#define POPS_USER_BIOS_ADDR 0x0024bc20
+#define POPS_USER_BIOS_READ 0x0007ff90
+#define POPS_USER_BIOS_MIN_SIZE 0x0007ff8f
+
+/* The loader's own entry gates: 1 = it returns without opening the file.
+ * per_game 0 is the all-games folder (gp+0x343c, 0x344c, 0x3430), 1 the
+ * game's folder (gp+0x3878, 0x344c). */
+int pops_user_bios_skipped(int per_game, const PopsUserRomState *state);
+
+/* The size test (0x8803d0): the size as a signed 32-bit value must be more
+ * than 0x7ff8e. A failed or negative lseek result is "too small". */
+int pops_user_bios_size_ok(int64_t file_size);
+
+/* One call of the loader on a file that opened. data holds the size_read
+ * bytes a read of POPS_USER_BIOS_READ bytes returned and file_size is the
+ * lseek(END) result. Returns 1 when loaded: the bytes are copied to
+ * POPS_USER_BIOS_ADDR, 0x1000 is written at 0x20079a (unchecked, as there)
+ * and bios_game or bios_all is set. Returns 0 with nothing written when a
+ * gate holds or the file is too small, negative with nothing written on a
+ * bad argument. */
+int pops_user_bios_stage(void *staged_core, size_t core_size, const void *data,
+                         size_t size_read, int64_t file_size, int per_game,
+                         PopsUserRomState *state);
+
 /* A positive result of the *_rom functions below that run compatibility
  * modes: mode 6 was asked for and not applied because a user BIOS.BIN is
  * loaded. The original prints a notice ("delete BIOS.BIN") and goes on. */
@@ -94,6 +122,12 @@ int pops_fix_stage(PopsFixContext *context, void *staged_core, size_t core_size,
 /* The same with the loader state: a PATCH file's mode 6 follows
  * pops_apply_compat_modes_rom's rule; the rest of the file is staged either
  * way. Returns 0, POPS_MODE6_SKIPPED, or a negative error. */
+/* After pops_user_bios_stage returned 1: the compat sites inside the
+ * replaced ROM range (only mode 6's 0x2525b0) now hold the user's bytes, so
+ * their expected values are taken from the core. Every other tracked site
+ * must still match; on a mismatch nothing changes. */
+int pops_fix_context_rom_loaded(PopsFixContext *context, const void *staged_core,
+                                size_t core_size);
 int pops_fix_stage_rom(PopsFixContext *context, void *staged_core, size_t core_size,
                         const void *file, size_t file_size, unsigned slot,
                         int expected_trojan, PopsUserRomState *rom);

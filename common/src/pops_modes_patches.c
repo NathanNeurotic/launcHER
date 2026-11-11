@@ -81,6 +81,50 @@ int pops_user_rom_keeps_shell(const PopsUserRomState *rom) {
   return rom && (rom->bios_game || rom->bios_all || rom->osd_game_b || rom->osd_all_b);
 }
 
+int pops_user_bios_skipped(int per_game, const PopsUserRomState *state) {
+  if (!state)
+    return 0;
+  if (per_game)
+    return state->osd_game_a || state->osd_game_b;
+  return state->osd_all_a || state->osd_game_b || state->osd_all_b;
+}
+
+int pops_user_bios_size_ok(int64_t file_size) {
+  return (int32_t)(uint32_t)(uint64_t)file_size > POPS_USER_BIOS_MIN_SIZE - 1;
+}
+
+int pops_user_bios_stage(void *staged_core, size_t core_size, const void *data,
+                         size_t size_read, int64_t file_size, int per_game,
+                         PopsUserRomState *state) {
+  uint8_t *bytes = staged_core;
+  const size_t rom = POPS_USER_BIOS_ADDR - POPS_CORE_BASE_ADDR;
+  const size_t branch = 0x0020079a - POPS_CORE_BASE_ADDR;
+  if (!bytes || !state || (!data && size_read))
+    return -EINVAL;
+  if (core_size < rom + POPS_USER_BIOS_READ)
+    return -ERANGE;
+  if (size_read > POPS_USER_BIOS_READ)
+    size_read = POPS_USER_BIOS_READ;
+  if (size_read) {
+    uintptr_t a = (uintptr_t)data, b = (uintptr_t)bytes;
+    if (a <= b ? b - a < size_read : a - b < core_size)
+      return -EINVAL;
+  }
+  if (pops_user_bios_skipped(per_game, state) || !pops_user_bios_size_ok(file_size))
+    return 0;
+  if (size_read)
+    memcpy(bytes + rom, data, size_read);
+  /* poke16(0x20079a, 0x1000): POPS's bnez after its xCdInit call becomes an
+   * unconditional branch. The original does not look at what was there. */
+  bytes[branch] = 0x00;
+  bytes[branch + 1] = 0x10;
+  if (per_game)
+    state->bios_game = 1;
+  else
+    state->bios_all = 1;
+  return 1;
+}
+
 /* FUN_008dc2c4's mode 6 arm (0x8dc74c..0x8dc874): 0 = write 0x2525b0 and
  * set gp+0x3704 (FUN_008db97c), POPS_MODE6_SKIPPED = a user BIOS.BIN is
  * loaded (the original only prints a notice), -1 = gp+0x3704 already set,
@@ -399,6 +443,30 @@ int pops_fix_require_progressive(const PopsFixContext *context, const void *stag
   for (unsigned i = 0; i < POPS_PATCH_RESIDENT_SITE_COUNT; ++i)
     if (context->resident_expected[i] != want[i])
       return -EINVAL;
+  return 0;
+}
+
+int pops_fix_context_rom_loaded(PopsFixContext *context, const void *staged_core,
+                                size_t core_size) {
+  PopsFixContext candidate;
+  if (!context || !staged_core ||
+      fix_alias(context, sizeof(*context), staged_core, core_size))
+    return -EINVAL;
+  candidate = *context;
+  for (unsigned i = 0; i < POPS_COMPAT_SITE_COUNT; ++i) {
+    const CompatPatch *patch = &compat_patches[i];
+    size_t offset = patch->address - POPS_CORE_BASE_ADDR;
+    if (patch->address < POPS_USER_BIOS_ADDR ||
+        patch->address + patch->width > POPS_USER_BIOS_ADDR + POPS_USER_BIOS_READ)
+      continue;
+    if (offset > core_size || patch->width > core_size - offset)
+      return -ERANGE;
+    candidate.expected[i] = compat_read(staged_core, patch);
+  }
+  int result = compat_context_check(&candidate, staged_core, core_size);
+  if (result)
+    return result;
+  *context = candidate;
   return 0;
 }
 
