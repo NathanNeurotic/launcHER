@@ -1230,6 +1230,40 @@ class OriginalSlots(Built):
             core[address - BASE] ^= 1
         self.assertEqual(possible(pointer, len(core), c.byref(header)), 1)
 
+    def test_nothing_in_pops_points_into_the_function_the_runs_lie_in(self):
+        # launcHER writes the two runs over part of POPS's function at
+        # 0x232790 (POPStarter overwrites all of it). The basis for calling
+        # it unused: no j/jal from outside it, no word holding one of its
+        # addresses, no lui with addiu/ori that builds one, and no way to
+        # fall into it. A static reading of the image; an address made any
+        # other way is not seen.
+        low, high = 0x232790, 0x232ec8
+        words = struct.unpack_from('<%dI' % (len(self.core) // 4), self.core)
+        found = []
+        for index, word in enumerate(words):
+            at = BASE + 4 * index
+            if low <= at < high:
+                continue
+            if word >> 26 in (2, 3):
+                target = (at + 4) & 0xf0000000 | (word & 0x03ffffff) << 2
+                if low <= target < high:
+                    found.append(('jump', hex(at)))
+            if low <= word < high:
+                found.append(('address word', hex(at)))
+            if word >> 26 == 15:
+                for following in words[index + 1:index + 4]:
+                    if following >> 26 in (9, 13) and (following >> 21 & 31) == (word >> 16 & 31):
+                        low16 = following & 0xffff
+                        if following >> 26 == 9 and low16 & 0x8000:
+                            low16 -= 0x10000
+                        if low <= (((word & 0xffff) << 16) + low16) & 0xffffffff < high:
+                            found.append(('lui pair', hex(at)))
+                        break
+        self.assertEqual(found, [])
+        # The function before it ends with jr ra, its delay slot and a nop.
+        self.assertEqual(words[(low - BASE) // 4 - 3], 0x03e00008)
+        self.assertEqual(words[(low - BASE) // 4 - 1], 0)
+
     FILE_SETS = [
         ('one format 1 file per slot', [dict(slot=n, hook=h, load=E + 0x1000 * n)
                                         for n, h in sorted(model.SLOT_HOOKS.items())]),
