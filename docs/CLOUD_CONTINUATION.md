@@ -14,8 +14,15 @@ kept for the record and is not a description of today's state.
 ### Heads
 
 - launcHER: `codex/popstarter-replacement` at `cfebe01` when the 2026-11-11
-  session started (local and remote-tracking ref agreed; fetch and recheck).
-  PR #23 is draft, base `EMBER`.
+  session started, and at `ef663b2` when the second correction pass of the
+  gap audit began (after the merges `95ba812` config text, `173d5de` IGR
+  skin, `0945127` `BIOS.BIN`, `21c3476` `SB.` network files, `f22a69f`
+  physical disc host part, and the handoff commit). Fetch and recheck.
+  PR #23 is draft, base `EMBER`. Work that was in progress on side branches
+  at `ef663b2` (the handoff defect, TROJAN files, the review answers for the
+  config-text merge) is described in
+  [PR23_HANDOFF_2026-11-11.md](PR23_HANDOFF_2026-11-11.md); this document
+  does not anticipate its outcome.
 - REPOP: the live line is `main` at `bc258e48`. To reproduce the REPOP
   numbers quoted in the gap audit, use a clean checkout or a `git archive`
   export of that commit. The worktree `REPOP.worktrees/pr23` is not a
@@ -35,7 +42,9 @@ Read [POPSTARTER_GAP_AUDIT_2026-11-11.md](POPSTARTER_GAP_AUDIT_2026-11-11.md)
 first. It lists, per area, what the original does with addresses, what
 launcHER does with file and line, the gap, and how well each statement is
 supported. [POPSTARTER_R13_INVENTORY.md](POPSTARTER_R13_INVENTORY.md) was
-corrected from it on the same day. Nothing in either was run on a console.
+corrected from it on the same day. Both were brought up to `ef663b2` by a
+second correction pass (audit header and section 2b). Nothing in either was
+run on a console.
 
 The finding that matters most to users: every TROJAN file found in the
 community fix packs loads outside the POPS core, launcHER rejects all of
@@ -65,9 +74,17 @@ Needs Python with `unicorn` and `capstone`, and a host `gcc` (each test
 builds `common/src` into a shared library). At `cfebe01` there were 26
 `tools/test_*.py` files and CI ran 24 of them, all without the reference
 inputs: 23 as steps of the `host-tests` job in `build.yml` and
-`test_launch_args.py` in its own workflow. The list below is the current
-one; `tools/test_pops_doc_claims.py` compares it with the workflow files
-and fails when they disagree, so change both together.
+`test_launch_args.py` in its own workflow. At `ef663b2` there are 32 and CI
+runs 30: 29 as `host-tests` steps and `test_launch_args.py` (gap audit
+S33). The list below is the current one; `tools/test_pops_doc_claims.py`
+compares it with the steps the workflows really run (an uncommented `run:`
+line that starts `python tools/<file>`, in a step and job with no `if:`
+other than `always()`/`success()`, no `continue-on-error`, in a workflow
+triggered by push or pull request) and fails when they disagree, so change
+both together. Optional third input for that test: `POPS_TROJAN_CORPUS`, a
+folder of community `TROJAN_n.BIN`/`PATCH_n.BIN` files (REPOP's
+`popstarter/` folder was used); it checks the audit's corpus counts and
+hook slots.
 
 <!-- ci-coverage:begin -->
 - Run by no workflow: `test_pops_builtin_db.py`, `test_pops_progressive.py`.
@@ -95,10 +112,23 @@ each: `test_pops_launch_hooks.py` (needs `POPS_RESIDENT_BIN` and
 `test_pops_external.py` (it includes the progressive suite). So the
 comparisons against built EE images did not run in those passes.
 
-After the correction pass of the same day (documents, the new
+After the first correction pass of the same day (documents, the new
 `tools/test_pops_doc_claims.py` and its workflow step; no C source
-changed) the list was run again: 27 files, all exited 0 in both passes,
-with the same three files skipping three tests each in the second pass.
+changed) the list was run again, on the uncommitted tree before its
+commits: 27 files. In the second pass 26 exited 0 and
+`test_pops_external.py` exited 1 at the link step (the two passes had been
+run at the same time, the collision described above); run again alone it
+exited 0. The same three files skipped three tests each in the second
+pass. The independent review then ran the 27 files one after another at the
+committed head `ed30f55`: all exited 0 in both passes. (An earlier version
+of this paragraph said all 27 exited 0 in both passes of the correction
+pass itself; that described the end state, not what was run.)
+
+At `ef663b2` the handoff records its own runs of the 32 files on the merged
+tree ([PR23_HANDOFF_2026-11-11.md](PR23_HANDOFF_2026-11-11.md), section 6).
+The second correction pass of the gap audit ran them again on its branch
+`pr23/docs-2`, one file at a time, temp folders isolated; the result is in
+the audit's section 19.
 Those three files were then run once more with the reference inputs plus
 `POPS_EE_CC` set to ps2build's EE GCC 15.3.1 and `POPS_RESIDENT_BIN` /
 `POPS_TRAMPOLINE_BIN` pointing at images made by hand with that compiler
@@ -132,11 +162,22 @@ python tools/check_pops_resident_image.py $OUT/pops_resident.bin
 That compiler is not CI's, so the bytes may differ from a CI build even
 when the checker passes. The checker is a manual script, not a CI step.
 
-Full target build: **not run locally on 2026-11-11.** ps2build cannot
-build the CMake project as written (the project expects the PS2SDK layout).
-The route below is inferred from CI and from two older container build
-directories, and needs Docker Desktop running; treat it as untested until
-someone runs it:
+Full target build. ps2build cannot build the CMake project as written (the
+project expects the PS2SDK layout). The container route below was not run
+by the first correction pass. The handoff reports a container build of
+`f22a69f` that built, `release/launcHER.elf` 326,772 bytes
+([PR23_HANDOFF_2026-11-11.md](PR23_HANDOFF_2026-11-11.md), section 6).
+The second correction pass ran it in a git worktree of its branch (C code
+as at `ef663b2`). The first try stopped at 28% of the build, at
+`mmceman.irx`, because a new worktree has no checkout of the
+`launcher/iop/mmceman` submodule. After `git submodule update --init
+launcher/iop/mmceman` it built: `release/launcHER.elf` 326,772 bytes, with
+CMake's warning "No Git revision available: writing version=unknown". In a
+worktree the `git config --global` step has to run from `/` (`cd / && git
+config ...`): inside `/workspace` git stops with "not a git repository",
+because the worktree's `.git` file names a Windows path, and for the same
+reason the build cannot read its revision. The route, needing Docker
+Desktop:
 
 ```sh
 docker run --rm -v C:/Users/natha/Github/launcHER:/workspace -w /workspace \
@@ -175,26 +216,34 @@ on a console" stays on a row until tier 3 evidence exists.
 
 ### Next work, ranked
 
-From section 16 of the gap audit; details, dependencies and effort are
-there.
+From section 16 of the gap audit; details, dependencies, effort and the
+state at `ef663b2` are there. For the order the lead set after `ef663b2`
+see [PR23_HANDOFF_2026-11-11.md](PR23_HANDOFF_2026-11-11.md), section 7.
 
 1. Fix files the original would skip must not end the launch; then TROJAN
    parity. The corpus result it rests on has been re-run (gap audit, S27).
+   In progress on a side branch at `ef663b2`.
 2. One path table measured from the original for every per-folder file,
    and a written decision on how each original folder maps to launcHER's
    (HDD `hdd0:__common` included). No behaviour change.
-3. IGR skin staging.
-4. The loader flags and the passes they gate, then `BIOS.BIN`.
+3. IGR skin staging. Landed in `173d5de` (reads the `.VCD`'s folder; no
+   POPS folder exit).
+4. The loader flags and the passes they gate, then `BIOS.BIN`. Landed in
+   `0945127` for `BIOS.BIN` (no POPS folder exit; OSD flags never set).
 5. Fix files before commands: measure both orders, then decide.
 6. `OSD.BIN`.
 7. `$USBDELAY` parser and default, the preset table, command recognition
-   context, `VMCDIR.TXT` rules.
+   context, `VMCDIR.TXT` rules. Parser, recognition and `VMCDIR.TXT` landed
+   in `95ba812`; the default and the preset table are open; the review
+   answers are in progress on a side branch.
 8. The `$USBDELAY` delay itself in popfs (needs tier 2 or 3 to call
    working).
 9. Launch-argument rules, resolver candidates, the `IOPRP.IMG` fallback,
    removing the test folder from the package search list.
-10. SMB config parsers.
-11. Physical disc fallback.
+10. SMB config parsers. Landed in `21c3476` for `SB.` launches of PS1
+    games; not reviewed.
+11. Physical disc fallback. Host part landed in `f22a69f`, not called by
+    the launch; not reviewed.
 12. HDD `__common` layout; SMB external modules and connect order (tier 3).
 13. REPOP documentation follow-up, as a separate REPOP pull request.
 

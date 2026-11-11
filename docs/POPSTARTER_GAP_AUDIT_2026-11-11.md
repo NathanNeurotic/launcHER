@@ -142,52 +142,77 @@ NOT TESTED on a console.
 
 ### What `tools/test_pops_doc_claims.py` checks
 
-The test was added by the first correction pass and extended by the second
-after a review showed that it pinned less than this section used to say.
-It now checks exactly the following; nothing else in this document is read
-by a test.
+The test was added by the first correction pass. The second review showed
+that it pinned less than this paragraph then said (12 of the reviewer's 23
+one-line changes to the documents survived it). The second pass rewrote it;
+it now checks exactly the following, and nothing else in this document is
+read by a test. The results of the deliberate changes tried against it are
+in section 19.
 
 Without the reference inputs (as in CI):
 
 - The `ci-coverage` list in `CLOUD_CONTINUATION.md` against the workflows.
-  A test file counts as run only when an uncommented `run:` line of a step
-  starts a command `python tools/<file>` (or `python3`), the step and its
-  job have no `if:` other than `always()` or `success()` and no
-  `continue-on-error`, and the workflow runs on push or pull request. The
-  parser is itself tested on texts with a commented-out step, an
-  `if: false`, a mention inside `echo`, a job-level `if:` and a manual-only
-  trigger.
+  A test file counts as run only when an uncommented line of a step's
+  `run:` begins a command `python tools/<file>` (or `python3`, `py`, also
+  after `&&` or `;`), not followed by `||` on that line; the step and its
+  job have no `if:` other than `always()`, `success()` or `true` and no
+  `continue-on-error`; and the workflow is triggered by push or pull
+  request. The parser is a small hand-written one for the YAML the
+  workflows use (PyYAML is not a CI dependency). "Every other file" must be
+  a step of the job the block names (`host-tests` in `build.yml`). The
+  parser is itself tested on synthetic texts: a commented-out step and run
+  line, `if: false`, `if: ${{ false }}`, another condition, `if: always()`,
+  `continue-on-error: true`, `|| true`, a mention inside `echo`, a job-level
+  `if:`, a manual-only trigger, a flow-list trigger and a block-scalar
+  `run:`.
 - One address for the `$USBDELAY_` handler in every document; every `S`
-  number cited here is defined; six withdrawn sentences are gone.
+  number cited here is defined, once; eight withdrawn sentences are gone
+  from README.md, `docs/pops-setup.html` and every `docs/*.md`.
 
-With `POPSTARTER_TEST_ELF` (a value that is set but cannot be decoded is a
-failure, not a skip), from the original's bytes, each compared with whole
-phrases of this document:
+With `POPSTARTER_TEST_ELF` (a value that is set but cannot be used, or no
+capstone, is a failure, not a skip), from the original's bytes, each
+compared with whole phrases of this document or the inventory:
 
 - the S21 census, one exact phrase per range (count, number without the
-  test, and the sites when there are one to three), and the two counts in
-  the `gp+0x38b0` row;
-- S25 and the `$USBDELAY_` citations;
-- the BIOS handler's three `-666` exits and their gates (section 4, S32):
-  the POPS folder exit and its scope test, the game-folder exit and the
-  store of `gp+0x38e0` before it;
-- `FUN_008d8958`'s return values and stores (S32) and the seven callers;
-- the IGR skin function's return values 1, 0 and -666 and the instructions
-  that decide them (section 6, S23); the matching phrases of the inventory's
-  IGR row;
-- S24: the gates in `main` and that `main` overwrites `v0` with
-  `gp+0x38dc` right after the call;
-- the `gp+0x38e0` sites (section 3a);
-- S26 and the slot table of section 12, entry by entry, against a list kept
-  in the test; with `POPS_TROJAN_CORPUS` also against the corpus headers,
-  with the file counts of S15;
-- the wrapper run of S28, with the section 9 sentence on when the delay is
-  called and the inventory's `$USBDELAY_n` figures.
+  test, and the sites when there are one to three, with the format string
+  of each for the BIOS handler), `main` ending at `0x87c214` (`jr ra` and
+  its delay slot, then the next function's frame), and the counts and two
+  sites in the `gp+0x38b0` row;
+- S25: the handler address `tools/popstarter_r13_commands.py` prints, the
+  compare one word on, and every `$USBDELAY_` handler citation;
+- `FUN_008d8958` (S32): its entry tests, its stores of `gp+0x3868`,
+  `gp+0x38dc` and `gp+0x3460`, its two `-666` sites, its three callees and
+  the sentence that states its return values; its seven callers in S32 and
+  in the `gp+0x3868` row; `main`'s own call with the `gp+0x3888` gate and
+  its one store of `gp+0x3868` (`0x87425c`);
+- the `-666` stores of the five loaders, as one phrase, each after the
+  loader's single call of the folder check;
+- the BIOS handler's POPS folder exit (the instructions at `0x880338`,
+  `0x880348`, `0x880360`, `0x880368`, `0x880374`, `0x880378` and the
+  section 4 sentence) and its game-folder exit (the once-flag at
+  `0x8804ec`/`0x880500`, the two calls, stores and `-666` sites, and their
+  sentence);
+- the IGR skin function's return values 1, 0 and -666, the instructions
+  that decide them, the section 6 sentences on the folder check and its
+  extra writes, and the inventory's IGR sentence;
+- S24: the frame word's writers and reader, the two `gp+0x38dc` reads
+  around the call with a `nop` in the delay slot, and the S24 sentence
+  whole;
+- the `gp+0x38e0` sites (section 3a), in the order the row names them;
+- S26 and the slot list of section 12, entry by entry, against a list kept
+  in the test (`SLOTS`);
+- the wrapper run of S28, with the S28 sentences, the section 9 sentence on
+  when the delay is called, and the inventory's `$USBDELAY_n` sentence.
 
-It does not repeat the emulated runs S22, S23, S27, S30 and S31, and it
-does not read README.md or `docs/pops-setup.html` beyond the withdrawn
-sentences. The results of the deliberate changes tried against it are in
-section 19.
+With `POPS_TROJAN_CORPUS` (a folder of community fix files; a value that is
+not a folder is a failure): the file counts of S15 and section 12, and that
+every `TROJAN_n.BIN` header's hook word (offset 24) is the slot `SLOTS`
+gives for its file number.
+
+It does not repeat the emulated runs S22, S23, S27, S30 and S31, it does
+not check the launcHER paragraphs of sections 4 to 14 against launcHER's
+code, and it does not read README.md or `docs/pops-setup.html` beyond the
+withdrawn sentences.
 
 ## 3. Order of the original's launch function, and launcHER's
 
@@ -287,8 +312,8 @@ Handler `FUN_0088019c(scope, name)`, `0x88019c..0x880a20`; callers
 | Then `read(fd, 0x24bc20, 0x7ff90)`: the file's first `0x7ff90` bytes replace POPS's ROM copy `0x24bc20..0x2cbbb0`. A normal `0x80000`-byte dump loses its last `0x70` bytes | `2x` | yes |
 | On accept: flag `gp+0x38a4` (all games) or `gp+0x3b98` (game), and halfword `0x20079a = 0x1000`, which turns POPS's `bnez v0` at `0x200798` into an unconditional branch past its "xCdInit failed" exit | `2x S5 S12` | yes |
 | Missing file or too small: return 0, nothing written to POPS and no BIOS flag set | `2x` | yes |
-| Game scope only, before the file is opened: the handler reads the once-flag `gp+0x38e0` (`0x8804ec`). If it is not 1 it sets it to 1 and checks that the game folder exists (`FUN_008d7e78` on `pfs1:`, the stat call `0x91bf80` on `mass:`). A missing folder sets `gp+0x3460 = 1` and returns -666 with nothing opened. If the flag is already 1 the folder is not checked. So a game-scope call always leaves `gp+0x38e0 = 1`, also when the file is missing or too small | `2x S22` (the reviewer's run and S22) | yes |
 | Both scopes, before the game-folder check: the POPS folder exit (`0x880338..0x880380`). The handler reads `gp+0x3868` and, if it is not 1, calls the POPS folder check `FUN_008d8958` (`jal` at `0x880348`). A result of 1 goes on. Otherwise all games returns -666 (`sw` of 1 to `gp+0x38dc` at `0x880374`, `li v0,-666` at `0x880378`) and the game scope goes on (the scope test at `0x880360..0x880368`). The check itself sets `gp+0x3868 = 1`, and on a missing folder `gp+0x38dc = 1` and `gp+0x3460 = 1` (S32), so after a missing POPS folder a game-scope load still runs while every later current-game loader is skipped. `main` normally makes the same check much earlier (`jal 0x8d8958` at `0x873f9c`, skipped when `gp+0x3888 != 0`) and sets `gp+0x3868`, so in a whole launch this exit is reached only where that earlier check was skipped and `gp+0x3868` was not set otherwise. `main` skips it on `SB.` launches (`gp+0x3888 = 3`) and sets `gp+0x3868` itself at `0x87425c` only when the `SB.` PAK loop succeeds; which launches end up here has not been traced end to end (`read`). OSD, TROJAN and PATCH also call the check and have a `-666` store right after it (S32); their scope handling was not traced | `2x S30 S32` (S30 run here; the reviewer reported it first) | yes |
+| Game scope only, before the file is opened: the handler reads the once-flag `gp+0x38e0` (`0x8804ec`). If it is not 1 it sets it to 1 and checks that the game folder exists (`FUN_008d7e78` on `pfs1:`, the stat call `0x91bf80` on `mass:`). A missing folder sets `gp+0x3460 = 1` and returns -666 with nothing opened (`pfs1:` call at `0x880538`, store at `0x880554`, `-666` at `0x880558`; `mass:` call at `0x880570`, store at `0x8805a0`, `-666` at `0x8805a4`). If the flag is already 1 the folder is not checked. So a game-scope call always leaves `gp+0x38e0 = 1`, also when the file is missing or too small | `2x S22` (the reviewer's run and S22) | yes |
 | Gates inside the handler: any scope `gp+0x38dc`; all games `gp+0x343c`, `gp+0x344c`, `gp+0x3430`; game `gp+0x3878`, `gp+0x344c`, `gp+0x3460`. A game BIOS is not blocked by an all-games OSD, and loads over an all-games BIOS | `2x` | yes |
 | Extra gate in `main` (`0x876bb4..0x876cd8`, `0x876ea8..0x876fd8`): skipped when any of the eight preset compat slots (`0x100018..0x10001f`) equals 6. They are all 0 in the four profiles, so this never fires there | `1x`; preset values `2x S2` | yes |
 | Readers of the two BIOS flags: the shell edits, the eight region groups, the three `$UNDO_` handlers (`0x8948f0`, `0x894d4c`, `0x895088`), `FUN_008db97c` (`0x8db98c`), mode 6 in `FUN_008dc2c4` (`0x8dc75c..0x8dc83c`). The `$RESET_WARMBOOT` pass reads none, so it scans a user BIOS too | `2x S11` | yes |
