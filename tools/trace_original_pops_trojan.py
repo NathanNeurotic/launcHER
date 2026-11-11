@@ -28,6 +28,7 @@ GP = 0x9B68F0
 CORE_BASE = 0x200000
 CORE_SIZE = 0x302E60
 TROJAN_LOADER = 0x880A24
+PATCH_LOADER = 0x881DE8  # PATCH_n.BIN, same arguments and file calls
 MEM = 0x02000000
 STACK = 0x01F80000
 HEAP = 0x01A00000
@@ -174,7 +175,7 @@ class Loader:
         self.events.append(("dircheck", self._string(a[0])))
         self._ret(1)
 
-    def run(self, files, scope=0, title=b"", hdd=False, builtin=0):
+    def run(self, files, scope=0, title=b"", hdd=False, builtin=0, loader=TROJAN_LOADER):
         """files: {path bytes: data}. -> (return value, events, memory after)."""
         mc, uc = self.mc, self.uc
         uc.mem_write(0, self.baseline)
@@ -195,7 +196,7 @@ class Loader:
         uc.reg_write(mc.UC_MIPS_REG_RA, RETURN)
         uc.reg_write(mc.UC_MIPS_REG_A0, scope)
         uc.reg_write(mc.UC_MIPS_REG_A1, title_at)
-        uc.emu_start(TROJAN_LOADER, RETURN, count=200_000_000)
+        uc.emu_start(loader, RETURN, count=200_000_000)
         assert uc.reg_read(mc.UC_MIPS_REG_PC) & M32 == RETURN, "the loader did not return"
         return uc.reg_read(mc.UC_MIPS_REG_V0) & M32, self.events, bytes(uc.mem_read(0, MEM))
 

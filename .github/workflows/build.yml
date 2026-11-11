@@ -44,6 +44,8 @@ jobs:
         run: python tools/test_pops_fix_files.py
       - name: Test POPS TROJAN_n.BIN rules, hosting and slot order
         run: python tools/test_pops_trojan.py
+      - name: Test a user's TROJAN and PATCH files (skipped here, needs POPS_TROJAN_CORPUS)
+        run: python tools/test_pops_trojan_corpus.py
       - name: Test POPS resident code (cheat engine, hook and install)
         run: python tools/test_pops_resident.py
       - name: Test POPS display commands
