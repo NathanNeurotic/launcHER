@@ -1651,11 +1651,12 @@ class Source(unittest.TestCase):
                   'msg("POPS: POPStarter launch hooks failed: %d\\n", res);',
                   "res = pops_builtin_apply(builtinId, (void *)stagedCore",
                   'msg("POPS: Applying built-in entry %u failed: %d\\n"']
-        after = ["res = pops_apply_all_config_patches(",
-                 "res = pops_resident_hook_recompiler_emit(",
-                 "res = pops_stage_fix_files(",
-                 "res = pops_apply_bios_shell_edits(",
-                 "res = regionRead ? pops_apply_region(",
+        # The commands, the $RECOMPILER_ADDON_3/4 jumps and the fix files are
+        # one helper, called once (tools/test_pops_launch_hooks.py pins its
+        # inner order).
+        after = ["res = pops_stage_user_files(",
+                 "res = pops_apply_bios_shell_edits_rom(",
+                 "res = regionRead ? pops_apply_region_rom(",
                  "res = pops_apply_reset_warmboot(",
                  "res = pops_module_irx_apply_names(",
                  "res = pops_apply_slbb_vcd_check_bypass(",
@@ -1667,7 +1668,12 @@ class Source(unittest.TestCase):
         for s in after:
             self.assertGreater(body.index(s), at, s)
         # The same folder as the all-games (root) TROJAN_n.BIN / PATCH_n.BIN.
-        self.assertIn("res = pops_stage_fix_files((void *)stagedCore, plan.core_size, vcdDir,", body)
+        self.assertIn("res = pops_stage_user_files((void *)stagedCore, plan.core_size, vcdDir, "
+                      "gameConfigDir,", body)
+        helper = self.src[self.src.index("static int pops_stage_user_files("):
+                          self.src.index("int launchPOPS(")]
+        self.assertIn("res = pops_stage_fix_files(stagedCore, coreSize, vcdDir, titleDir, builtinId,",
+                      helper)
         fix = self.src[self.src.index("static int pops_stage_fix_files("):
                        self.src.index("/* Driver names within one role")]
         self.assertIn("const char *dirs[] = {vcdDir, titleDir};", fix)
