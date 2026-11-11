@@ -12,6 +12,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.x'
+      - name: Test checkable statements of the POPStarter status documents
+        run: python tools/test_pops_doc_claims.py
       - name: Test external POPS and POPStarter container handling
         run: python tools/test_pops_external.py
       - name: Test PSXCore runtime corrections staging, bounds, atomicity and guards

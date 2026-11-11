@@ -16,8 +16,12 @@ kept for the record and is not a description of today's state.
 - launcHER: `codex/popstarter-replacement` at `cfebe01` when the 2026-11-11
   session started (local and remote-tracking ref agreed; fetch and recheck).
   PR #23 is draft, base `EMBER`.
-- REPOP: the live line is `main` at `bc258e48`. Use the worktree
-  `REPOP.worktrees/pr23` or a fresh clone of `main`.
+- REPOP: the live line is `main` at `bc258e48`. To reproduce the REPOP
+  numbers quoted in the gap audit, use a clean checkout or a `git archive`
+  export of that commit. The worktree `REPOP.worktrees/pr23` is not a
+  stable reference: it is on a local working branch that has had commits
+  newer than `bc258e48` since 06:25 (-0800) on 2026-11-11, and REPOP's
+  `tools/parity_report.py` prints other numbers there.
 - REPOP `feat/psxcore-validation` (`d3452068`) is fully superseded: it is an
   ancestor of the branch that was squash-merged into `main` as `0d5ca939`
   (REPOP PR #53). Do not continue on it. The older checkout
@@ -36,8 +40,11 @@ corrected from it on the same day. Nothing in either was run on a console.
 The finding that matters most to users: every TROJAN file found in the
 community fix packs loads outside the POPS core, launcHER rejects all of
 them, and a rejected fix file ends the launch. launcHER's side of that was
-measured twice on a host. That the original accepts them all was measured
-once and is being re-verified. NOT TESTED on a console.
+measured on a host by three separate runs, and so was the original's side
+(its loader accepts all 509 distinct files): the mapping run, an
+independent review's run and a correction pass, each with its own harness
+(gap audit, S27). In all of them file calls are models and no payload was
+executed. NOT TESTED on a console.
 
 ### Local verification recipe (Windows, Git Bash)
 
@@ -55,13 +62,30 @@ for t in tools/test_*.py; do python "$t" || echo "FAILED $t"; done
 ```
 
 Needs Python with `unicorn` and `capstone`, and a host `gcc` (each test
-builds `common/src` into a shared library). There are 26 `tools/test_*.py`
-files; CI's host-tests job runs 23 of them, without the reference inputs
-(`test_launch_args.py`, `test_pops_builtin_db.py` and
-`test_pops_progressive.py` are not steps there). Without the reference
-inputs the Original classes are skipped, so a green CI run says nothing
-about agreement with POPStarter. On a busy machine the two passes take
-tens of minutes.
+builds `common/src` into a shared library). At `cfebe01` there were 26
+`tools/test_*.py` files and CI ran 24 of them, all without the reference
+inputs: 23 as steps of the `host-tests` job in `build.yml` and
+`test_launch_args.py` in its own workflow. The list below is the current
+one; `tools/test_pops_doc_claims.py` compares it with the workflow files
+and fails when they disagree, so change both together.
+
+<!-- ci-coverage:begin -->
+- Run by no workflow: `test_pops_builtin_db.py`, `test_pops_progressive.py`.
+- Run by `launch-args.yml`, not by `build.yml`: `test_launch_args.py`.
+- Every other `tools/test_*.py` file is a step of the `host-tests` job in `build.yml`.
+<!-- ci-coverage:end -->
+
+Without the reference inputs the Original classes are skipped, so a green
+CI run says nothing about agreement with POPStarter. On a busy machine the
+two passes take tens of minutes. Run them one after the other, not at the
+same time in one checkout: eight test files build into `build/pops-host/`
+under fixed names (`test_popfs.py`, `test_pops_external.py`,
+`test_pops_fatfs.py`, `test_pops_modes.py`,
+`test_pops_runtime_corrections.py`, `test_pops_vmc.py`,
+`test_sony_ioman_layout.py`, `test_subq_bridge.py`), and a second run that
+overlaps can fail at the link step with "Permission denied" (seen on
+2026-11-11 with `test_pops_external.py`; a harness collision, not a test
+failure).
 
 Result on 2026-11-11, code at `cfebe01`: all 26 files exited 0 in both
 passes. With the reference inputs three files still skipped three tests
@@ -69,11 +93,28 @@ each: `test_pops_launch_hooks.py` (needs `POPS_RESIDENT_BIN` and
 `POPS_TRAMPOLINE_BIN`, the built EE images), `test_pops_progressive.py`
 (needs an EE compiler on `PATH` or `POPS_EE_CC`) and
 `test_pops_external.py` (it includes the progressive suite). So the
-comparisons against built EE images did not run that day.
+comparisons against built EE images did not run in those passes.
 
-Resident image without a full build (compiled this way once on 2026-11-11
-with ps2build's EE GCC 15.3.1; 6,688-byte image; the checker passed its 12
-sections):
+After the correction pass of the same day (documents, the new
+`tools/test_pops_doc_claims.py` and its workflow step; no C source
+changed) the list was run again: 27 files, all exited 0 in both passes,
+with the same three files skipping three tests each in the second pass.
+Those three files were then run once more with the reference inputs plus
+`POPS_EE_CC` set to ps2build's EE GCC 15.3.1 and `POPS_RESIDENT_BIN` /
+`POPS_TRAMPOLINE_BIN` pointing at images made by hand with that compiler
+(the resident image by the recipe below; the trampoline `.text` from
+`launcher/src/pops_trampoline.S` with `gcc -c -G0 -Icommon/include
+-Ilauncher/include` and `objcopy -O binary -j .text`, 260 bytes):
+`test_pops_launch_hooks.py` 46 tests, none skipped;
+`test_pops_progressive.py` and `test_pops_external.py` one skip each, the
+built progressive bridge, because that test looks for
+`mips64r5900el-ps2-elf-objcopy` without the `.exe` suffix the Windows
+toolchain has. These images are not CMake's and the compiler is not CI's.
+All of it is host work. NOT TESTED on a console.
+
+Resident image without a full build (compiled this way on 2026-11-11 with
+ps2build's EE GCC 15.3.1, by the first pass, the review and the correction
+pass; 6,688-byte image each time; the checker passed its 12 sections):
 
 ```sh
 TC=/c/Users/natha/AppData/Local/ps2build/toolchain/ee/bin; OUT=<a scratch directory>
@@ -138,7 +179,7 @@ From section 16 of the gap audit; details, dependencies and effort are
 there.
 
 1. Fix files the original would skip must not end the launch; then TROJAN
-   parity. Waits on the re-verification of the corpus result.
+   parity. The corpus result it rests on has been re-run (gap audit, S27).
 2. One path table measured from the original for every per-folder file,
    and a written decision on how each original folder maps to launcHER's
    (HDD `hdd0:__common` included). No behaviour change.

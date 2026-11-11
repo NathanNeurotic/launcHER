@@ -37,11 +37,19 @@ Confidence labels, used on every statement:
 | `read` | read from disassembly or source, not executed |
 | `inferred` | a conclusion drawn from the above, not observed |
 
-`S1`..`S19` after a label refers to the spot checks in section 2. "Host" in a
-table says whether the statement, or the launcHER code that would implement
-it, can be checked on a host without a console: `yes`, `partly`, or `no`.
+`S1`..`S29` after a label refers to the spot checks in sections 2 and 2a.
+"Host" in a table says whether the statement, or the launcHER code that
+would implement it, can be checked on a host without a console: `yes`,
+`partly`, or `no`.
 
 launcHER line numbers are for commit `cfebe01`.
+
+`S1`..`S19` were made for the first version of this document. An
+independent review of that version re-derived most of it with its own
+scripts and found statements that were wrong, too strong or stale, here
+and in the status documents corrected with it. A correction pass on the
+same day reproduced each finding and added `S20`..`S29` (section 2a).
+Where a row below was changed by that pass it cites one of those numbers.
 
 ## 2. Spot checks made for this document
 
@@ -67,12 +75,47 @@ The scripts are throwaway and not in the repository.
 | S15 | headers of every `TROJAN_n.BIN` / `PATCH_n.BIN` under REPOP `popstarter/` | 3,952 TROJAN files, 509 unique; 870 PATCH files, 10 unique; details in section 12 |
 | S16 | launcHER `pops_fix_stage` (sources at `cfebe01`, host gcc) on each unique corpus file over a fresh pristine core | TROJAN: `-3` for 509 of 509. PATCH: `0` for 10 of 10 |
 | S17 | launcHER source lines cited in this document | all found at the cited lines; one correction, see S19 |
-| S18 | REPOP heads and `python tools/parity_report.py popstarter` | worktree HEAD = `origin/main` = `bc258e48`; `feat/psxcore-validation` (`d3452068`) is an ancestor of `claude/popstarter-validation`; `0d5ca939` is in main; report prints 466 / 138,664 / 434 / 93.1% / 90.2% |
+| S18 | REPOP heads and `python tools/parity_report.py popstarter` | `origin/main` = `bc258e48`; `feat/psxcore-validation` (`d3452068`) is an ancestor of `claude/popstarter-validation`; `0d5ca939` is in main; report prints 466 / 138,664 / 434 / 93.1% / 90.2%. The first version of this row also said the worktree `REPOP.worktrees/pr23` was at `bc258e48`. That stopped being true before this document was committed: see S20 |
 | S19 | where launcHER's `$USBDELAY` sleep runs | `handler_pops.c:1751-1753`, which is after `SifIopRebootBuffer` at `:1665`. One mapping report said "before the IOP reset"; that is wrong |
 
-Not checked here: any emulation of the original's handlers. The handler
-behaviour below rests on the mapping agents' runs and the critic's re-runs
-as labelled.
+S1..S19 include no emulation of the original's handlers. Except where a
+row cites S22, S23 or S27, the handler behaviour below rests on the mapping
+agents' runs and the critic's re-runs as labelled.
+
+### 2a. Checks added by the correction pass
+
+Made on 2026-11-11 after the review, with scripts separate from the mapping
+agents', the critic's and the reviewer's (throwaway, not in the
+repository). The emulated ones run one function of the original under
+Unicorn with its file, folder and print calls replaced by models; memory
+effects were found by comparing snapshots. All of it is host work. NOT
+TESTED on a console.
+
+| # | Check | Result |
+|---|---|---|
+| S20 | REPOP heads again | `origin/main` is still `bc258e48`. The worktree `REPOP.worktrees/pr23` is not at that commit. It is on a local working branch (not in `main`), created from `origin/main` at 04:26:42 (-0800) on 2026-11-11; the branch's reflog shows it at `bc258e48` until its first local commit at 06:25:53 (the first version of this document was committed at 06:28:19). When looked at again it was six commits past `bc258e48`, head `0a440b01`, with one uncommitted change. `python tools/parity_report.py popstarter` on a `git archive` export of `bc258e48`: 466 / 138,664 / 434 / 93.1% / 90.2% |
+| S21 | every `jal 0x915708` (the print call) classed by a pattern: is there, in the 12 instructions before it, a `lw v1,0x38b0(gp)` / `li v0,1` / `beq v1,v0` that jumps past the call. A pattern scan, not a flow analysis | BIOS handler: 14 call sites, 2 without the test (`0x8805b4`, format `DONE\n`; `0x880984`, format `\n`). OSD handler: 41, 3 without (`0x87eee0`, `0x87f27c`, `0x87f3a8`). IGR skin function: 15, 0 without. TROJAN loader: 20, 1 without (`0x881cec`). `main`: 295, 21 without. Whole code area `0x870000..0x915000`: 2,031, 145 without |
+| S22 | BIOS handler `0x88019c` emulated: 20 inputs (scope x `pfs1`/`mass` x no file and four sizes), each with `gp+0x38b0` 1 and 0; 8 more with the game folder present or missing; 4 more with `gp+0x38e0` already 1 | With `gp+0x38b0 = 1`: 18 print calls, in 14 of the 20 inputs, all from the two sites S21 names. With 0: 84 calls. Every game-scope run changes `gp+0x38e0` from 0 to 1 (10 of 10); no all-games run does (0 of 10). Game folder missing: return -666, `gp+0x3460 = 1`, nothing opened, POPS unchanged (4 of 4, both backends). With `gp+0x38e0` already 1 the folder is not checked and the file loads (4 of 4) |
+| S23 | IGR skin function `0x87e464` emulated: 32 runs with `gp+0x3868 = 1` (backend x `gp+0x38dc` x four file sets x in-limit/oversize), 16 runs with `gp+0x3868 = 0` and the folder check `FUN_008d8958` forced to return 1, 0, 2 or -1, 2 runs with preset byte `0x10002d` 0 and 2 | `gp+0x38dc = 1`: return 0, nothing opened, POPS unchanged (24 of 24). `gp+0x38dc = 0`, `gp+0x3868 = 1`: return 1 (16 of 16, whatever the files). `gp+0x38dc = 0`, `gp+0x3868 = 0`: folder check 1 gives the normal load and return 1 (2 of 2); any other result gives return -666, `gp+0x38dc = 1`, nothing opened (6 of 6). The preset byte does not matter inside the function (2 of 2 still open the three files). Instructions: `0x87e474..0x87e488`, `0x87e48c..0x87e4c4`, `0x87eb04..0x87eb0c` |
+| S24 | `main` `0x8712c8..0x8712ec` and `0x876a84..0x876b24` | preset `0x10002d` equal to 1 sets the frame word `0x1108(fp)` (its only writers are `0x870ce8`, zero, and `0x8712ec`). The call at `0x876b18` is skipped when `gp+0x38dc` is nonzero (`0x876a84`) or that word is not 1 (`0x876a90`, its only reader). After the call `main` reads `gp+0x38dc` (`0x876b20`), not the return value |
+| S25 | `$USBDELAY_` handler address | `tools/popstarter_r13_commands.py` prints `0x89dbe0`, the `lbu` that fetches the first character; the compare with `$` (`li v0,0x24`) is the next instruction, `0x89dbe4`; the block starts at `0x89dbd4`. This document and the inventory now use `0x89dbe0` only |
+| S26 | the original's always-live block (source `0x983150`, `0x738` bytes, running at `0x232790..0x232ec8`) scanned for the word pair `10000001 00000000` (`b +8` / `nop`) | 60 pairs: 5 at `0x2327d0..0x2327f0` and 55 at `0x232d08..0x232eb8`, which is the end of the block |
+| S27 | the fix-file corpus again: the original's loaders `0x880a24` / `0x881de8` emulated on every unique file, and launcHER's `pops_fix_stage` (host gcc, sources at `cfebe01`) on the same files over a fresh pristine core | Original, TROJAN: 509 of 509 return 1, the payload is found at its load address, the slot word changes from `b +8` to `jal entry`, nothing else in POPS changes, no "Invalid" or "Skipped" message. Original, PATCH: 10 of 10 return 1. launcHER: TROJAN -3 for 509 of 509 with the core unchanged; PATCH 0 for 10 of 10, and for each of the 10 the changed core bytes and their values equal the original's. One PATCH file (a `PATCH_5.BIN` of 327,360 bytes, payload 327,296 bytes) loads at `0x2feff0..0x34ee70`, exactly the three IGR skin slots. One config-only PATCH (a `PATCH_6.BIN`) changes the halfword `0x2525b0`, which lies in the ROM copy. No corpus PATCH file changes a byte in the OSD areas |
+| S28 | the embedded PFS wrapper IRX at `0x91f680`: first read statically (import tables and `.text`), then its callbacks run on a host | the routine at `.text` 0 calls `thsemap` import 8, tests a flag word at `0x540`, reads the word at `0x420` (the only `DLAY` in the image), uses 5 instead if it still reads `DLAY`, multiplies by 1,000,000 (shifts and adds), calls `thbase` import 33, clears the flag, calls `thsemap` import 6. Its only caller is `.text` `0x124`, inside the function at `0xd4`, which is the fourth pointer of the 17-pointer table at `0x544`. The five words after the table are `0x430`, `0x10`, `1`, `0x410`, `0x544`: the shape of an ioman device record whose last word points back at the table. Then the wrapper's own callbacks were run under Unicorn through the classes of `tools/trace_original_pops_io.py`, every import call recorded in order. Word left as `DLAY`: the first call of table entry 3 makes the import calls `sysclib` 23, `thsemap` 8, `thbase` 33 with argument 5,000,000, `thsemap` 6, then `ioman` 4 (open of `mass:/POPS/IMAGE.VCD`); the following read, seek, close, second open and close make no `thbase` call. Word replaced by `n, 0, 0, 0` for n = 0..9: the same sequence with argument n x 1,000,000, once, before the first backend open, and none in six later callbacks (10 of 10). Read, seek and close called before any open make no `thbase` call; the first open after them does (1 of 1) |
+| S29 | `.github/workflows/*.yml` against `tools/test_*.py` at `cfebe01` | 26 test files. `build.yml` job `host-tests` runs 23. `launch-args.yml` runs `test_launch_args.py` on push and pull request. `test_pops_builtin_db.py` and `test_pops_progressive.py` are named in no workflow |
+
+Part of this is now repeated by a test, `tools/test_pops_doc_claims.py`,
+added with the correction. Without the reference inputs (as in CI) it
+checks S29 against the list in `CLOUD_CONTINUATION.md`, that the documents
+cite one address for the `$USBDELAY_` handler, that every `S` number cited
+here is defined, and that six withdrawn sentences are gone. With
+`POPSTARTER_TEST_ELF` it also recomputes S21, S25, S26, the static parts of
+S23, S24 and the `gp+0x38e0` sites from the original's bytes, repeats the
+wrapper run of S28, and compares each with the wording of this document.
+It does not repeat the emulated runs S22, S23 and S27. Thirteen deliberate
+changes to the documents or the workflow were tried against it: with the
+reference inputs it failed for 13 of 13, without them for 7 of 13 (the
+other six contradict only the original's bytes).
 
 ## 3. Order of the original's launch function, and launcHER's
 
@@ -147,7 +190,8 @@ All are words at `gp + offset`.
 | `0x3704` | the OSD is currently off (mode 6 was applied) | `2x` |
 | `0x38a4`, `0x3b98` | user `BIOS.BIN` loaded: all games, current game | `2x S11` |
 | `0x343c` + `0x3430`, `0x3878` + `0x344c` | `OSD.BIN` loaded: all games, current game | `2x` |
-| `0x38b0` | quiet: 1 when preset `0x100010` is 0 (MAIN). Every banner `printf` is skipped while it is 1; an `SB.` launch clears it at `0x871634` | `1x` |
+| `0x38b0` | quiet: 1 when preset `0x100010` is 0 (MAIN). Most print calls are skipped while it is 1, not all: by the pattern scan of S21, 1,886 of the 2,031 call sites stand behind this test and 145 do not. Two of the 145 are in the BIOS handler (`DONE\n` at `0x8805b4`, `\n` at `0x880984`) and were seen printing with the flag set. An `SB.` launch clears the flag at `0x871634` | `1x` for the meaning and the `SB.` clear; `2x S21 S22` for "not all" (the reviewer's run and S22); the counts are `1x S21` |
+| `0x38e0` | once-flag of the current-game loaders: cleared at `0x870c58`; read and then set to 1 at seven places (`0x87ee18` OSD handler, `0x8804ec` BIOS handler, `0x880c90` TROJAN loader, `0x882050` PATCH loader, `0x88348c` in the `CHEATS.TXT` parser, `0x8d5204` in the `VMCDIR.TXT` reader `0x8d4f84`, `0x8d5f04` in the function `0x8d5cf8..0x8d6b70` that builds the `DISCS.TXT` name). In the BIOS handler the first game-scope call sets it and checks that the game folder exists; a missing folder sets `gp+0x3460` and returns -666 | `2x S22` for the BIOS handler (the reviewer's run and S22); `read` for the other six sites (the same `lw`/`sw` pair, not executed here) |
 | `0x385c` | auto-patch level from preset `0x10002f` | `read` |
 
 ## 4. User BIOS.BIN
@@ -162,7 +206,8 @@ Handler `FUN_0088019c(scope, name)`, `0x88019c..0x880a20`; callers
 | Only test: signed file size > `0x7ff8e` (minimum 524,175 bytes). No upper limit, no checksum, no content check | `2x S4` | yes |
 | Then `read(fd, 0x24bc20, 0x7ff90)`: the file's first `0x7ff90` bytes replace POPS's ROM copy `0x24bc20..0x2cbbb0`. A normal `0x80000`-byte dump loses its last `0x70` bytes | `2x` | yes |
 | On accept: flag `gp+0x38a4` (all games) or `gp+0x3b98` (game), and halfword `0x20079a = 0x1000`, which turns POPS's `bnez v0` at `0x200798` into an unconditional branch past its "xCdInit failed" exit | `2x S5 S12` | yes |
-| Missing file or too small: return 0, nothing written | `2x` | yes |
+| Missing file or too small: return 0, nothing written to POPS and no BIOS flag set | `2x` | yes |
+| Game scope only, before the file is opened: the handler reads the once-flag `gp+0x38e0` (`0x8804ec`). If it is not 1 it sets it to 1 and checks that the game folder exists (`FUN_008d7e78` on `pfs1:`, the stat call `0x91bf80` on `mass:`). A missing folder sets `gp+0x3460 = 1` and returns -666 with nothing opened. If the flag is already 1 the folder is not checked. So a game-scope call always leaves `gp+0x38e0 = 1`, also when the file is missing or too small | `2x S22` (the reviewer's run and S22) | yes |
 | Gates inside the handler: any scope `gp+0x38dc`; all games `gp+0x343c`, `gp+0x344c`, `gp+0x3430`; game `gp+0x3878`, `gp+0x344c`, `gp+0x3460`. A game BIOS is not blocked by an all-games OSD, and loads over an all-games BIOS | `2x` | yes |
 | Extra gate in `main` (`0x876bb4..0x876cd8`, `0x876ea8..0x876fd8`): skipped when any of the eight preset compat slots (`0x100018..0x10001f`) equals 6. They are all 0 in the four profiles, so this never fires there | `1x`; preset values `2x S2` | yes |
 | Readers of the two BIOS flags: the shell edits, the eight region groups, the three `$UNDO_` handlers (`0x8948f0`, `0x894d4c`, `0x895088`), `FUN_008db97c` (`0x8db98c`), mode 6 in `FUN_008dc2c4` (`0x8dc75c..0x8dc83c`). The `$RESET_WARMBOOT` pass reads none, so it scans a user BIOS too | `2x S11` | yes |
@@ -239,11 +284,15 @@ Function `FUN_0087e464`, `0x87e464..0x87eb20`, single caller `0x876b18`.
 | Order BG, NO, YES. Per file: open; size by seek; BG rejected above `0x4c300` bytes, NO and YES rejected from `0x1dbd` (largest accepted 7,612); otherwise the slot is zeroed, the file read into it, and the rest zero | `2x S7` | yes |
 | Slots: BG `0x2feff0`, `0x4c300` bytes; NO `0x34b2f0` and YES `0x34d0b0`, `0x1dc0` bytes each. These hold Sony's own TIM2 files in `POPS.ELF`, and the limits equal Sony's file sizes | `2x S9` | yes |
 | The file is copied raw. No TIM2 check of any kind. A zero-length file is accepted and wipes Sony's image | `2x` | yes |
-| Nothing else in POPS changes; no outcome is fatal; the function returns 1 | `2x` | yes |
-| Gates: preset byte `0x10002d` must be 1 (it is in all four profiles) and `gp+0x38dc` must be 0 | `2x S2` | yes |
+| Nothing else in POPS changes. No file outcome (missing, too big, accepted) is an error: the function then returns 1 | `2x S23` | yes |
+| Two other return values exist. With `gp+0x38dc` equal to 1 the function returns 0 at once and opens nothing (`0x87e474..0x87e488`). With `gp+0x3868` not 1 it first runs the POPS folder check `FUN_008d8958`; a result other than 1 sets the abort flag `gp+0x38dc = 1` and returns -666, again opening nothing (`0x87e48c..0x87e4c4`). The first version of this row said only "the function returns 1" | return 0: `2x S23` (the reviewer's run and S23). The -666 path: `1x S23`, with the folder check's result forced, the check itself not run. Whether `gp+0x3868` can still be 0 when `main` reaches the call was not examined | yes |
+| `main` does not use the return value. It tests `gp+0x38dc` before the call (`0x876a84`) and reads it again after (`0x876b20`), so the function's own `gp+0x38dc` test repeats one that `main` has just made | `read S24` | yes |
+| Gates: preset byte `0x10002d` must be 1 (it is in all four profiles) and `gp+0x38dc` must be 0. Both are tested in `main` before the call (`0x876a84..0x876a98`); the function itself repeats only the `gp+0x38dc` test, and called directly with the preset byte 0 or 2 it still opens the three files | preset values `2x S2`; where the tests sit `read S24`, `1x S23` | yes |
 | The skin loads before any config file is parsed, so `$IGRn` and `$NOIGR` do not affect loading | `read` | yes |
 | POPS re-uploads the three files from those addresses on each frame the dialog is shown (`0x226768`, `0x226d60`); it reads picture count, header size, width, height and type from the file and never compares the `TIM2` magic. With a wiped slot it takes an "Illegal image no." path with no NULL check | `read` | no |
 | A negative seek result is not rejected and would make the second zero fill start below the slot | `read`, not executed; do not copy | yes |
+| The three `IGR_*.TM2` files are not the only way these pictures change. One fix file in the community corpus, a `PATCH_5.BIN` of 327,360 bytes, carries a 327,296-byte payload for `0x2feff0..0x34ee70`, which is exactly the three slots. The original's PATCH loader writes it there, and so does launcHER's `pops_fix_stage` today (same bytes) | `2x S27` (the reviewer's census and S27) | yes |
+| In the original the skin call (`0x876b18`) comes before both PATCH passes (`0x876e00`, `0x877118`), so such a PATCH file overwrites whatever the skin loader put there | `inferred` from the call-site order (`2x S6`) and the row above; the two were not run in sequence | yes |
 
 launcHER: no skin code; `TM2` does not occur in `common/` or `launcher/`
 (S17). Before this audit README.md and `docs/pops-setup.html` told users to
@@ -303,12 +352,14 @@ PS1 image mounted.
 
 | Statement | Label | Host |
 |---|---|---|
-| Handler `0x89dbe4`: `$USBDELAY_` + exactly one digit + a terminator, then byte `0x100017` = digit | `2x S14` for the write; the exact terminator set (NUL, CR, LF, space, `$`) `1x` each from two agents, not re-derived by the critic | yes |
+| Handler `0x89dbe0` (S25): `$USBDELAY_` + exactly one digit + a terminator, then byte `0x100017` = digit | `2x S14` for the write; the exact terminator set (NUL, CR, LF, space, `$`) `1x` each from two agents, not re-derived by the critic | yes |
 | `$USBDELAY_12` and `$USBDELAY5` are not commands in the original | `1x` | yes |
 | Shipped default of byte `0x100017` is 1 in all four profiles | `2x S2` | yes |
 | Only consumer: `0x879d04..0x879e58`. Only when `gp+0x3448 != 0` (`XX.` or `SB.`) it replaces the bytes `DLAY` in the embedded PFS wrapper image (image `0x91f680`, the word at `0x91fb30`) with that byte and three zeros | `2x S3 S13` | yes |
-| The wrapper (IRX `.text` 0, one caller at `.text` `0x124`) on its first use reads that word, substitutes 5 if it still says `DLAY`, multiplies by 1,000,000 and calls its delay import once | `2x` for the arithmetic and the first-use flag; that the import is `DelayThread` and that the caller is the open path is `inferred` from ordinals and code shape | partly |
-| So: a one-time delay of n seconds on the IOP at the wrapper's first call, 1 second with no command, on `XX.`/`SB.` launches only | `inferred` from the rows above | no |
+| The wrapper (IRX `.text` 0, one caller at `.text` `0x124`) on its first use reads that word, substitutes 5 if it still says `DLAY`, multiplies by 1,000,000 and calls one import once | `2x` for the arithmetic and the first-use flag | partly |
+| That import is `thbase` number 33. It is called from device-table entry 3 only, once, on that entry's first call, before the wrapper's own backend open, with n x 1,000,000 as its argument (5,000,000 if the word still reads `DLAY`). Later calls of entry 3 and the read, seek and close entries do not call it | `1x S28`: the wrapper's code run on a host under Unicorn with its imports modelled (unpatched, n = 0..9, and one sequence with other entries first). Not an IOP kernel, not a console | yes |
+| `thbase` 33 is `DelayThread` with an argument in microseconds, and device-table entry 3 is `open` | `inferred` from the PS2SDK import numbering and the ioman device-table layout. The in-repo `tools/trace_original_pops_io.py` makes the same two assumptions (it routes Sony's `ioman` open to entry 3 and models `thbase` 33 as `DelayThread`) | no |
+| So: a one-time delay of n seconds on the IOP at the wrapper's first open, 1 second with no command, on `XX.`/`SB.` launches only | `inferred` from the rows above. Nobody has observed the wait itself: no IOP kernel was involved in any run | no |
 
 launcHER: `common/src/pops_config.c:479-486` accepts `$USBDELAY_<any
 digits>` and `$USBDELAY<digits>`; default 0; `handler_pops.c:1751-1753`
@@ -493,9 +544,10 @@ is not exhaustive.
 |---|---|
 | 3,952 TROJAN files, 509 unique by content; 870 PATCH files, 10 unique | `2x S15` |
 | All 509 unique TROJANs load outside the POPS core image: load addresses `0x1431000..0x1470300`, payloads 48 to 770,240 bytes, highest end `0x152c3c0`. 507 are format 1; 2 are format 3 with header byte `0x0a` = 6 | `2x S15` |
-| Each hooks one of ten fixed call slots, one per file number: 0 `0x2327d8`, 1 `0x2327e0`, 2 `0x2327e8`, 3 `0x2327f0`, 4 `0x232d08`, 5 `0x232d10`, 6 `0x232d18`, 7 `0x2327d0`, 8 `0x232d20`, 9 `0x232d28`. These are inside the original's own always-live block (copied to `0x232790`), not in Sony's code | `2x S15` for the header values; `read` for what the slots are |
+| Each hooks one of ten fixed call slots, one per file number: 0 `0x2327d8`, 1 `0x2327e0`, 2 `0x2327e8`, 3 `0x2327f0`, 4 `0x232d08`, 5 `0x232d10`, 6 `0x232d18`, 7 `0x2327d0`, 8 `0x232d20`, 9 `0x232d28`. These are inside the original's own always-live block (copied to `0x232790`), not in Sony's code. Each slot is a `b +8` / `nop` pair that the loader turns into `jal entry`. The block holds 60 such pairs (5 at `0x2327d0..0x2327f0`, 55 at `0x232d08..0x232eb8`); the corpus uses these ten. Whether the loader would accept a hook address other than these ten was not examined | `2x S15` for the header values; `2x S27` for the slot word before and after; `1x S26` for the count of 60 |
 | launcHER's `pops_fix_stage` returns `POPS_FILE_RANGE` (-3) for all 509, and 0 for all 10 PATCH files | `2x S16` |
-| The original's loader accepts all 509 TROJANs and all 10 PATCH files | `1x`: one agent ran `FUN_00880a24` / `FUN_00881de8` on a scratch extension of the in-repo R5900 interpreter with file calls modelled. **Not independently re-run; re-verification is in progress on another track.** Until it lands, treat "the original accepts them" as measured once |
+| The original's loader accepts all 509 TROJANs and all 10 PATCH files | `2x S27`. Three host runs with three separate harnesses agree: the mapping agent's (a scratch extension of the in-repo R5900 interpreter), the reviewer's (Unicorn, 509 of 509 and 10 of 10 as reported by the review) and S27 (Unicorn). The first version of this row said "measured once". In all three the file calls are models, and no payload was executed |
+| The PATCH files launcHER accepts change the same bytes as in the original: for each of the 10 unique corpus PATCH files, the set of changed core bytes and their values are equal | `1x S27` |
 | In launcHER a rejected fix file ends the launch: `pops_stage_fix_files` returns on any nonzero result (`handler_pops.c:316-318`, `:1456-1457`). The original prints "Invalid" or "Skipped (outdated)", closes the file and goes on to the next slot | `read S17` for launcHER; `read` plus probe runs (`1x`) for the original |
 
 Taken together: with a real-world TROJAN file in the game's folder (or in
@@ -661,8 +713,11 @@ closely or executed; strings-only passes do not count.
 - Sony's side of the new features: POPS with a foreign BIOS or OSD body,
   the v2 OSD's `jal` in a delay slot, POPS's TIM2 upload with odd files,
   IOPCD real-disc reads. Read or modelled only.
-- TROJAN/PATCH loaders and the parser were not re-examined by the critic
-  (section 12 is `1x`).
+- The TROJAN/PATCH loaders and the parser were not re-examined by the
+  critic. The loaders have since been re-run on the whole corpus twice
+  (the review and S27); the rule-difference table of section 12 and
+  sections 11 and 13 are still `1x` in this document's own terms (the
+  review reports re-running parts of them, see the end of section 19).
 - Embedded data never touched: icon data at `0x9639b4`, the second copied
   block (`0xd60` bytes to `0x238a90`, refs `0x87476c` and `0x896084`), the
   inner unpacker `0x99de44`/`0x99df08`, the crt0 entry. The block
@@ -673,11 +728,16 @@ closely or executed; strings-only passes do not count.
   `PopsFixContext` guards against a replaced ROM range; trampoline
   preflight hashing; whether `plan.core_size` covers offset `0x14ee70` for
   every accepted package.
-- Whether any of the 625 built-in entries, the always-on pokes or
-  TROJAN/PATCH payloads write inside the ROM range `0x24bc20..0x2cbbb0`,
-  the OSD areas `0x262b80..0x2afc20` or the skin slots
-  `0x2feff0..0x34ee70`. This decides whether staging order matters, and is
-  cheap to measure from the generated list.
+- Whether any of the 625 built-in entries or the always-on pokes write
+  inside the ROM range `0x24bc20..0x2cbbb0`, the OSD areas
+  `0x262b80..0x2afc20` or the skin slots `0x2feff0..0x34ee70`. This decides
+  whether staging order matters, and is cheap to measure from the generated
+  list. For the corpus fix files the answer is now known (S27): one PATCH
+  file covers the three skin slots exactly, one config-only PATCH changes
+  the halfword `0x2525b0` in the ROM range, no PATCH file touches the OSD
+  areas, and every TROJAN payload loads outside the core, changing only
+  its slot word at load time. What a TROJAN payload writes once it runs was
+  not examined.
 - Documents no report cross-checked: the device rows of
   `POPS_PARITY_AUDIT_2026-10-28.md`, `POPSTARTER_REPLACEMENT.md`.
 
@@ -696,7 +756,7 @@ document's proposal, not the critic's.
 | # | Increment | Source | Host-verifiable | Effort | Depends on |
 |---|---|---|---|---|---|
 | 1 | Correct the status documents (this commit) | C1 | n/a | small | none |
-| 2 | Fix files the original would skip must not end the launch: treat its "Invalid" and "Skipped (outdated)" outcomes as skip-and-continue in `pops_stage_fix_files`. Then TROJAN parity proper: the original's header rules, payloads outside the core written at their EE address at handoff (after checking them against launcHER's own regions), and the fifteen call slots in the resident GP1 work | D A | yes for classification and slot order (add the corpus classifier to `tools/test_pops_fix_files.py`, skipped without the external corpus); a payload actually running needs a console | large | the re-verification of the corpus result |
+| 2 | Fix files the original would skip must not end the launch: treat its "Invalid" and "Skipped (outdated)" outcomes as skip-and-continue in `pops_stage_fix_files`. Then TROJAN parity proper: the original's header rules, payloads outside the core written at their EE address at handoff (after checking them against launcHER's own regions), and the call slots in the resident GP1 work: at least the ten the corpus uses (section 12). An earlier wording said "fifteen"; it came from one mapping report's reading of the block as five slots plus ten, which the count in S26 (5 plus 55 empty pairs) does not support | D A | yes for classification and slot order (add the corpus classifier to `tools/test_pops_fix_files.py`, skipped without the external corpus); a payload actually running needs a console | large | none (the corpus result has been re-run, S27) |
 | 3 | One path table measured from the original: a tool that records every open for backend x scope x suffix x name, a pure function that returns the same strings, and a written decision of how each original folder maps to launcHER's per device, HDD included. No behaviour change | C2 | yes | medium | owner decision on HDD mapping |
 | 4 | IGR skin staging: `pops_igr_skin_stage`, size checked before reading, never fatal, staged after the always-on pokes; default exit unchanged | C3 | yes | small | 3 for the folder |
 | 5 | The six loader flags and the three downstream gates (section 5a, `$UNDO_`, mode 6, launcHER's `$NOBOOT` path), then `BIOS.BIN` with a partial reader | C4 | yes | medium | 3; one home for the flags |
@@ -719,9 +779,9 @@ source, not a runnable r13.
 
 | Statement | Label |
 |---|---|
-| The live line is `origin/main` at `bc258e48` (2026-11-02). The worktree `REPOP.worktrees/pr23` is at that commit | `2x S18` |
+| The live line is `origin/main` at `bc258e48` (2026-11-02). To reproduce the numbers in this section use a clean checkout or a `git archive` export of that commit. The worktree `REPOP.worktrees/pr23` is not a stable reference: it is on a local working branch that was at `bc258e48` early on 2026-11-11 and has had newer local commits since 06:25 (-0800) that day; the tool prints other numbers there (the review got 440 / 94.4% / 91.2% at `e161e957`) | `2x S18 S20` for `origin/main`; `2x S20` for the worktree having moved (the review and S20); the 440 figure is the review's, not re-run |
 | `feat/psxcore-validation` (`d3452068`) is fully superseded: it is an ancestor of the head of PR #53, which was squash-merged as `0d5ca939`. The older checkout `C:/Users/natha/Github/REPOP` is still on that branch and must not be used | `2x S18` for the ancestry; `1x` for "no file exists only on the branch" |
-| `python tools/parity_report.py popstarter`: 434 of 466 functions (93.1%), 125,048 of 138,664 bytes (90.2%); size parity not measured (snapshot invalidated) | `2x S18` (three runs in all) |
+| `python tools/parity_report.py popstarter` at `bc258e48`: 434 of 466 functions (93.1%), 125,048 of 138,664 bytes (90.2%); size parity not measured (snapshot invalidated) | `2x S18 S20` (also the review's run on its own export of `bc258e48`) |
 | That ground truth omits four real functions, 597,012 bytes, because `tools/ghidra/ForceFunctions.java` drops anything of 32 KB or more as data: `main` `0x870b78` (46,752), the config/command/cheat parser `0x883270` (335,124), the built-in per-game routine `0x8e00d0` (126,996), the built-in lookup `0x8ff0e4` (88,140). REPOP's documents acknowledge only `main` | `2x S8` |
 | Counting them, byte coverage is 125,048 / (138,664 + 597,012 - 968) = 125,048 / 734,708 = 17.0%, not 90.2%, and not the 67.5% in REPOP's README | arithmetic `2x`; it assumes the four functions replace six fragment entries (968 bytes) in the denominator |
 | 32 functions (13,616 bytes) are unclaimed. Six of them are pieces of larger functions and can never be claimed (`FUN_0087c1e0`, `FUN_008d4e30`, `FUN_008e034c`, `FUN_008ff000`, `FUN_008ff064`, `FUN_00914800`); 26 real ones remain, the largest being the POPS loader `FUN_0087cf68` | `1x`; the `FUN_00914800` point `2x` |
@@ -742,6 +802,15 @@ REPOP documentation errors found (for a separate REPOP pull request):
 - `docs/POPSTARTER_CONTINUATION.md` (item 6 of its list near line 255) asks
   for an AI co-author trailer on every commit. The owner's rule is no AI
   attribution anywhere; do not add it.
+
+Later the same day the working branch in `REPOP.worktrees/pr23` (local,
+not in `main`) gained
+commits whose subjects name the first three items: "correct three config
+table entries from the files and r13" (`a10b3319`), "the word at
+$gp+0x38DC is a shared abort flag" (`8f57231d`), "record batch 26 and the
+four functions the ground truth omits" (`33a0554a`). Only the subjects were
+read for this document (S20); the changes themselves were not reviewed
+here.
 
 ## 18. Contradictions between the reports, as settled
 
@@ -764,7 +833,30 @@ REPOP documentation errors found (for a separate REPOP pull request):
 - No console run, no whole-machine emulator run, no full PS2 target build.
 - No change to any source file. The host test list was run before and
   after the documentation change only to show nothing else moved.
-- The original's fix-file loaders, parser, SMB parsers and `VMCDIR.TXT`
-  reader were not re-run for this document; sections 11 to 13 are measured
-  once.
+- The original's parser, SMB parsers and `VMCDIR.TXT` reader were not
+  re-run for this document, neither for its first version nor by the
+  correction pass; sections 11 and 13 and the rule-difference table of
+  section 12 are measured once in this document's own terms. The fix-file
+  loaders were re-run on the corpus (S27).
 - `main` was not executed end to end.
+- The correction pass ran four functions of the original (`0x88019c`,
+  `0x87e464` and the two fix-file loaders `0x880a24` and `0x881de8`) and
+  read the rest statically.
+  It did not re-run the OSD handler, the region pass, the physical-disc
+  block or the device scan.
+
+What the independent review reports having re-run with its own scripts,
+with results matching this document (recorded as reported; the correction
+pass repeated only the items marked S): the static checks S1..S13; the BIOS
+handler on 48 cases (S22 repeats part); the IGR skin function on 22 cases
+(S23 repeats part); the corpus census and both loaders on every unique file
+(S27 repeats); `pops_fix_stage` on the corpus (S27 repeats); the
+rule-difference table of section 12 on synthetic files; the config-text
+rules of section 13 on 19 probe texts and the `VMCDIR.TXT` rules on 11; the
+region pass of section 5a on 48 flag combinations; the single-site
+construction of `0x20c0a4`, `0x2362fc`, `0x200794` and the 33 sites that
+build `0x228a20..0x228a6b`, all inside the `$IGR0..5` / `$NOIGR` handlers.
+The review did not re-derive the OSD handler, the physical-disc block, the
+`XX.`/`SB.` scan, the SMB parsers, the launch-type parser, the wrapper on
+the IOP side, or most `read` statements of section 10. All of it is host
+work. NOT TESTED on a console.
