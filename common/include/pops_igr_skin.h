@@ -12,11 +12,13 @@
  *   IGR_YES.TM2   0x0034d0b0     0x1dc0      0x1dbc  (7,612)
  *
  * A file that fits has its whole slot zero-filled and is then read into it.
- * A larger file is refused with the slot untouched ("TOO BIG !"), a missing
- * one leaves Sony's image, and nothing is ever fatal. The original checks
+ * A larger file is refused with the slot untouched ("TOO BIG !") and a
+ * missing one leaves Sony's image; neither stops the launch. (The loader's
+ * one fatal path is its POPS-folder check, which returns -666 before any
+ * file is opened; launcHER does not have that check.) The original checks
  * nothing but the size: not the TIM2 magic, the picture count, the
  * dimensions or what the slot held before. A zero-length file therefore
- * wipes the slot. All of that is copied here.
+ * wipes the slot. The table, the limits and that copy are what is here.
  * See docs/POPSTARTER_IGR_SKIN.md. Not tested on a console. */
 
 #include <stddef.h>
@@ -46,7 +48,8 @@ const PopsIgrSkinSlot *pops_igr_skin_slot(int which);
 /* Put one skin file into the staged core (a flat image of POPS from
  * 0x00200000): the slot becomes `size` bytes of `data` followed by zeros.
  * `size` is the number of bytes actually read; fewer than the file holds
- * leaves what the original's unchecked read leaves (data, then zeros).
+ * leaves data, then zeros, which is what the original's one unchecked read
+ * leaves when the device delivered that much and no more.
  * Returns 0, or with the core untouched:
  *   -EINVAL  no core, an unknown `which`, or no data with a nonzero size
  *   -ERANGE  the core ends before the slot does
