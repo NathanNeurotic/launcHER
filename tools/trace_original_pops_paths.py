@@ -881,9 +881,12 @@ class Original:
                 "written": {name: len(data) for name, data in self.files.written.items()}}
 
 
-# Library entry -> model. Every library address the program's own code calls
-# (74 targets, found by scanning every `jal` in 0x870000..0x914930) is here
-# or is one of the two byte/word store helpers below, which are run as is.
+# Library entry -> model. The program's own code calls 72 library addresses
+# (every `jal` in 0x870000..0x914930 with a target in the library). 67 are
+# modelled here, two byte/word store helpers are run as they are (below), and
+# three (0x91ca48, 0x91cbf8, 0x91ccb0) are called only by crt0 at 0x8700d8,
+# 0x8700e0 and 0x870130, which is not run: a trace starts at main. A call to
+# a library address with no model stops the run with an error.
 LIBRARY = {
     0x914998: "smem_read",                  # copies from IOP RAM at 0xbc000000+a0
     0x914AA8: "smod_get_next_mod",          # IOP module list walk; modelled as empty
@@ -958,6 +961,14 @@ _SILENT = {"sbv_patch_enable_lmb", "sbv_patch_disable_prefix_check",
 _LOOP_DIGIT = re.compile(r"(?:(?<=POPS)\d(?=/|$)|(?<=_)\d(?=\.(?:BIN|IRX)$))")
 
 
+def _loop_digit(subject):
+    """The last loop digit of a path (in POPS4/TROJAN_7.BIN that is the 7)."""
+    match = None
+    for match in _LOOP_DIGIT.finditer(subject):
+        pass
+    return match
+
+
 def _line(event):
     """One event -> (subject, result text) or None when it is not listed."""
     op = event["op"]
@@ -1002,7 +1013,8 @@ def summary(report, focus=None):
     TROJAN_0..9, PATCH_0..9, MODULE_0..9) and have the same result are folded
     into one line with the digit range in braces; when their call sites
     differ, the first and last site are given. Consecutive writes to one file
-    are added up, and a call repeated unchanged is listed once with its count. Descriptor numbers are not shown (an open is "ok").
+    are added up, and a call repeated unchanged is listed once with its
+    count. Descriptor numbers are not shown (an open is "ok").
 
     The last line says how the run ended: the fatal handler's caller, Exit,
     ExecPS2, or "stop" with the address the run was told to stop at.
@@ -1022,14 +1034,14 @@ def summary(report, focus=None):
             if op in ("fioWrite", "fileXioWrite") and last[1] == op and last[2] == subject:
                 last[3] = "%#x bytes" % (int(last[3].split()[0], 16) + event["size"])
                 continue
-            match = _LOOP_DIGIT.search(subject)
+            match = _loop_digit(subject)
             if match and last[4] and last[1] == op and last[3] == result:
                 pattern = subject[:match.start()] + "#" + subject[match.end():]
                 if pattern == last[5] and int(match.group()) == last[4][-1] + 1:
                     last[0].append(site)
                     last[4].append(int(match.group()))
                     continue
-        match = _LOOP_DIGIT.search(subject)
+        match = _loop_digit(subject)
         rows.append([[site], op, subject, result,
                      [int(match.group())] if match else None,
                      subject[:match.start()] + "#" + subject[match.end():] if match else None])

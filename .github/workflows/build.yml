@@ -60,6 +60,8 @@ jobs:
         run: python tools/test_pops_igr_skin.py
       - name: Test POPStarter's always-on launch hooks (guards, pokes, BIOS edits, final clears)
         run: python tools/test_pops_launch_hooks.py
+      - name: Test POPStarter launch paths against launcHER's resolver (expected differences)
+        run: python tools/test_pops_paths.py
 
   build:
     runs-on: ubuntu-latest
