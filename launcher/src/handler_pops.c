@@ -1917,7 +1917,11 @@ int launchPOPS(int argc, char *argv[]) {
         {POPS_RESIDENT_BASE, POPS_BUILTIN_BREAK_LIMIT},
         {(uint32_t)(uintptr_t)POPS_TROJAN_HOLD_BUF, 0x02000000u},
         {0, 0x00200000u}};
-    res = pops_trojan_copy_out(&trojanSet, (uint8_t *)0, 0, 0x02000000u, keep,
+    /* The arena itself is the memory handed over, never address 0: the
+     * function refuses a null pointer, and no payload is placed outside
+     * the arena anyway. */
+    res = pops_trojan_copy_out(&trojanSet, (uint8_t *)(uintptr_t)POPS_TROJAN_ARENA_BASE,
+                               POPS_TROJAN_ARENA_BASE, POPS_TROJAN_ARENA_LIMIT, keep,
                                sizeof(keep) / sizeof(keep[0]));
     if (res < 0) {
       msg("POPS: TROJAN payload install failed: %d\n", res);

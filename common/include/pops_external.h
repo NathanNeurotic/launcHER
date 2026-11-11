@@ -408,9 +408,12 @@ typedef struct {
 /* Copies every held payload to its address, in the order the files were
  * read (a later file wins where two overlap, as with the original's
  * memcpy). `ram` is the memory at address `ram_base`, valid up to
- * `ram_limit`. Before the first byte is written every record is checked
- * again: inside the arena, inside the given memory, off every `keep`
- * range, and inside the holding memory, which no destination may touch.
+ * `ram_limit`; a null `ram` is refused, so on the console the caller hands
+ * over the arena (POPS_TROJAN_ARENA_BASE as pointer and as base), never all
+ * of RAM from address 0. Before the first byte is written every record is
+ * checked again: inside the arena, inside the given memory, off every
+ * `keep` range, and inside the holding memory, which no destination may
+ * touch.
  * Returns the number of payloads copied, or POPS_FILE_INVALID with nothing
  * written. */
 int pops_trojan_copy_out(const PopsTrojanSet *set, uint8_t *ram, uint32_t ram_base,
