@@ -199,7 +199,7 @@ endif()
 
 # CDROM support
 if(LAUNCHER_SMB)
-  list(APPEND EE_SOURCES src/handler_smb.c ../common/src/network_config.c)
+  list(APPEND EE_SOURCES src/handler_smb.c ../common/src/network_config.c ../common/src/pops_smb_config.c)
   list(APPEND IRX_FILES netman.irx smap_tcpip.irx ps2ip-nm.irx launcher_smbman.irx)
   add_compile_definitions(SMB)
   set(DEV9 ON)

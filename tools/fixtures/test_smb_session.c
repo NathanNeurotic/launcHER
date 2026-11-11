@@ -24,6 +24,8 @@ int fileXioRead(int fd, void *buffer, int size) {
 }
 int fileXioClose(int fd) { assert(fd==7);return 0; }
 void msg(const char *fmt,...) { (void)fmt; }
+/* Not an SB. launch: the launcher's own rules (tools/test_pops_smb_config.py covers the other). */
+int pops_get_active_sb_launch(void) { return 0; }
 int fileXioDevctl(const char *name,int cmd,void *arg,unsigned arglen,void *out,unsigned outlen) {
     (void)out;(void)outlen;
     assert(!strcmp(name,"smb:"));assert(calls<8);commands[calls++]=cmd;
