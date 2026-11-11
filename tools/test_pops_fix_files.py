@@ -33,6 +33,8 @@ class TrojanSet(c.Structure):
                 ('payload_count', c.c_uint8), ('refs', c.c_uint32),
                 ('hold', c.c_void_p), ('hold_size', c.c_uint32), ('hold_used', c.c_uint32),
                 ('work', c.c_void_p), ('work_size', c.c_uint32),
+                ('chain_offered', c.c_uint8), ('chain', c.c_uint8),
+                ('slot_word', c.c_uint32 * 10 * 2),
                 ('payload', c.c_uint32 * 3 * 20)]
 
 

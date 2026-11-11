@@ -1480,8 +1480,13 @@ int launchPOPS(int argc, char *argv[]) {
    * $VCDID_n is parsed after the fix files there. */
   PopsFixContext fixContext;
   PopsTrojanSet trojanSet;
-  memset(&trojanSet, 0, sizeof(trojanSet));
-  trojanSet.fingerprint_id = POPS_BUILTIN_ID(fingerprintId);
+  /* A fingerprint entry's breakpoint call is in POPStarter's slot at
+   * 0x232d08 before it reads the first TROJAN file. The slots are offered
+   * when the two runs still hold POPS's own bytes. */
+  pops_trojan_set_init(&trojanSet, POPS_BUILTIN_ID(fingerprintId),
+                       fingerprintId && builtinPlan.break_call);
+  trojanSet.chain_offered = (uint8_t)pops_resident_slot_chain_possible(
+      (void *)stagedCore, plan.core_size, &residentHdr);
   trojanSet.hold = POPS_TROJAN_HOLD_BUF;
   trojanSet.hold_size = POPS_TROJAN_HOLD_SIZE;
   trojanSet.work = POPS_TROJAN_WORK_BUF;
@@ -1542,6 +1547,7 @@ int launchPOPS(int argc, char *argv[]) {
    * when it finds the SystemErrorExit stub, makes the in-game reset jump
    * there; that store takes over the slot its breakpoint handler would use,
    * so the handler is dropped, as there (quirk 25). */
+  int resetStore = 0;
   if (cfg.reset_warmboot) {
     uint32_t exitVector = 0;
     res = pops_apply_reset_warmboot((void *)stagedCore, plan.core_size, &exitVector);
@@ -1554,6 +1560,40 @@ int launchPOPS(int argc, char *argv[]) {
     if (exitVector) {
       cfg.reset_vector = exitVector;
       cfg.builtin_break_call = 0;
+      resetStore = 1;
+    }
+  }
+
+  /* POPStarter's ten TROJAN slots, only when a hosted TROJAN file hooks or
+   * names one: the two runs of five go into the core at its addresses and
+   * the GP1 hook is pointed at the entry that runs them where its chain
+   * does. What ends up in the slot at 0x232d08 follows its write order:
+   * the fingerprint entry's breakpoint call, then a TROJAN file's hook,
+   * then the call again from $BREAKPOINT0/1 or a $VCDID_n entry (both are
+   * parsed after the fix files there), then $RESET_WARMBOOT's store. From
+   * here the call is that slot's word, not a flag of the resident code. */
+  {
+    unsigned slot4 = POPS_SLOT4_AS_FILES;
+    const uint32_t filesWord = trojanSet.slot_word[1][0];
+    if (resetStore)
+      slot4 = POPS_SLOT4_RESET_STORE;
+    else if ((cfg.breakpoint & (POPS_BREAKPOINT_0 | POPS_BREAKPOINT_1)) ||
+             (!fingerprintId && builtinId && builtinPlan.break_call))
+      slot4 = POPS_SLOT4_BREAK_CALL;
+    res = pops_resident_hook_slot_chain((void *)stagedCore, plan.core_size, &residentHdr,
+                                        &trojanSet, slot4);
+    if (res < 0) {
+      msg("POPS: TROJAN slots cannot be installed: %d\n", res);
+      return res;
+    }
+    if (res) {
+      if (filesWord != trojanSet.slot_word[1][0] && filesWord != POPS_TROJAN_SLOT_EMPTY &&
+          filesWord != POPS_TROJAN_BREAK_CALL)
+        msg("POPS: the TROJAN hook at 0x232d08 is replaced by %s, as in POPStarter\n",
+            resetStore ? "$RESET_WARMBOOT" : "the breakpoint handler call");
+      cfg.builtin_break_call = trojanSet.slot_word[1][0] == POPS_TROJAN_BREAK_CALL;
+      DPRINTF("POPS: TROJAN slots installed, 0x232d08 = 0x%08x\n",
+              (unsigned)trojanSet.slot_word[1][0]);
     }
   }
 
@@ -1880,12 +1920,10 @@ int launchPOPS(int argc, char *argv[]) {
     res = pops_trojan_copy_out(&trojanSet, (uint8_t *)0, 0, 0x02000000u, keep,
                                sizeof(keep) / sizeof(keep[0]));
     if (res < 0) {
-      msg("POPS: TROJAN payload install failed: %d
-", res);
+      msg("POPS: TROJAN payload install failed: %d\n", res);
       return -EFAULT;
     }
-    DPRINTF("POPS: %d TROJAN payload(s) placed above the image
-", res);
+    DPRINTF("POPS: %d TROJAN payload(s) placed above the image\n", res);
   }
 
   /* Last write before handoff: nothing of launcHER's lives at the resident

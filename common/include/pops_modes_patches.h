@@ -59,8 +59,12 @@ int pops_fix_finalize_video(PopsFixContext *context, void *staged_core,
  * matches the session (the launch must then be discarded). A payload inside
  * the POPS core is copied into the staged core; one in the arena above the
  * image is copied into the set's holding memory and recorded, for
- * pops_trojan_copy_out at handoff. With a null `set` only the verdict is
- * given: a file POPStarter would apply is reported as not hosted. */
+ * pops_trojan_copy_out at handoff. A hook on one of POPStarter's ten slots
+ * is written to the set's copy of the slots (set->slot_word), not to the
+ * core, and only when the launch offers them (set->chain_offered); the
+ * launcher installs the copy with pops_resident_hook_slot_chain. With a
+ * null `set` only the verdict is given: a file POPStarter would apply is
+ * reported as not hosted. */
 #define POPS_FIX_SKIP_INVALID  1 /* POPStarter: "Invalid" */
 #define POPS_FIX_SKIP_OUTDATED 2 /* POPStarter: "Skipped (outdated)" */
 #define POPS_FIX_SKIP_UNHOSTED 3 /* POPStarter applies it; launcHER does not */

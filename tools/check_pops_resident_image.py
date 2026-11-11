@@ -19,7 +19,9 @@ POPSTARTER_TEST_ELF the original's stubs run against the same model in
 tools/test_pops_launch_hooks.py). The recompiler hook and the
 $RECOMPILER_ADDON_3/4 emit code (common/src/pops_resident_recompiler.S) must
 likewise be the assembled words and do what tools/pops_recompiler_model.py
-says the original's code does. Passing here is not a console test."""
+says the original's code does. The TROJAN slot chain entry is run by
+tools/pops_trojan_chain.py (with POPSTARTER_TEST_ELF against the original's
+chain). Passing here is not a console test."""
 import os, struct, sys
 from unicorn import *
 from unicorn.mips_const import *
@@ -32,8 +34,9 @@ BASE = 0x0143A000
  gp1_entry) = struct.unpack_from('<IHHIIIIIIIIIIII', img, 0)
 guard_entries = list(struct.unpack_from('<9I', img, 56))
 recompiler_entry, *recompiler_emit = struct.unpack_from('<5I', img, 92)
+gp1_chain_entry, gp1_resume_a, gp1_resume_b = struct.unpack_from('<3I', img, 112)
 assert magic == 0x5352484C and fsz == len(img), (hex(magic), fsz, len(img))
-assert ver == 15 and hs == 112, (ver, hs)
+assert ver == 16 and hs == 124, (ver, hs)
 
 mu = Uc(UC_ARCH_MIPS, UC_MODE_MIPS64 + UC_MODE_LITTLE_ENDIAN)
 # The R5900 has MIPS IV's movz/movn, which unicorn's default R4000 model
@@ -614,3 +617,17 @@ _emits = _RC.check_emit(_recompiler_load, _save + 0x30, ((_save, _save + 0x40),)
                         _random.Random(0x454D4954), 40)
 print('resident recompiler hook: PASS (%d words as assembled, %d block passes vs the model, '
       '%d runaway cases skipped, %d emits)' % (len(_words), _runs, _skipped, _emits))
+
+# 10. The GP1 entry for a launch with TROJAN files on POPStarter's slots
+# (pops_resident_gp1_chain; pops_resident_hook_slot_chain points the jal at
+# 0x21a63c at it). Run on tools/r5900_mini.py with a stub on every slot:
+# the slots run in the original's order, each finds POPS's registers with
+# k0, k1 and ra as the original's instructions around the slots leave them,
+# and the entry returns to the di at 0x21a640 with k0 and k1 restored whole.
+# With POPSTARTER_TEST_ELF the original's own chain (its two resident parts
+# as the launch places them) runs the same cases and must give the same
+# registers and stores; POPS_TEST_ELF adds POPS's image under both.
+import pops_trojan_chain as _TC
+for _entry in (gp1_chain_entry, gp1_resume_a, gp1_resume_b):
+    assert _entry % 4 == 0 and BASE + hs <= _entry < BASE + fsz, hex(_entry)
+_TC.report(img)

@@ -293,6 +293,8 @@ int pops_trojan_verdict(const void *file, size_t size, unsigned slot,
 #define POPS_TROJAN_SLOTS_B      UINT32_C(0x00232d08)
 #define POPS_TROJAN_SLOTS_SPAN   0x30u /* five slots and the two words after them */
 #define POPS_TROJAN_SLOTS_HOOKS  0x28u /* the five slots */
+#define POPS_TROJAN_SLOT_EMPTY   UINT32_C(0x10000001) /* beq zero,zero,+1: on to the next slot */
+#define POPS_TROJAN_BREAK_CALL   UINT32_C(0x0c518000) /* jal 0x01460000, a built-in entry's word at 0x232d08 */
 #define POPS_TROJAN_MAIN_BASE    UINT32_C(0x00870000) /* POPStarter's own program */
 #define POPS_TROJAN_MAIN_LIMIT   UINT32_C(0x00b00000)
 #define POPS_TROJAN_BUILTIN_BASE UINT32_C(0x01410000) /* a built-in entry's fix code */
@@ -343,7 +345,7 @@ enum {
   POPS_TROJAN_NO_RANGE,     /* payload not wholly in the core or in the arena, or over POPStarter's parts */
   POPS_TROJAN_NO_HOOK,      /* hook outside the POPS core, inside the payload, or in POPStarter's parts but not a slot */
   POPS_TROJAN_NO_SPACE,     /* more payloads or payload bytes than one launch can hold */
-  POPS_TROJAN_NO_SLOT,      /* needs the slot chain and it cannot be offered */
+  POPS_TROJAN_NO_SLOT,      /* needs the slot chain and it cannot be offered, or its hook words run past the slots */
   POPS_TROJAN_NO_480P,      /* names POPStarter's 480p handler */
   POPS_TROJAN_NO_BLOCK2,    /* names POPStarter's second part */
   POPS_TROJAN_NO_BUILTIN,   /* names a built-in entry's fix code */
@@ -365,9 +367,14 @@ typedef struct {
 } PopsTrojanPayload;
 
 /* One launch's TROJAN state, shared by every TROJAN_n.BIN of both scopes.
- * Zero it, then set fingerprint_id, the holding memory and the work
+ * pops_trojan_set_init it, then set the holding memory and the work
  * memory. Without holding memory no payload above the image is hosted;
- * without work memory (POPS_TROJAN_SCAN_WORK of the payload) no file is. */
+ * without work memory (POPS_TROJAN_SCAN_WORK of the payload) no file is.
+ * slot_word is what POPStarter would have in its two runs of slots after
+ * the files so far: a file that hooks a slot changes the copy here, never
+ * the POPS core, and the launcher installs the copy when the launch can
+ * offer the chain (chain_offered, set by the caller before the first file;
+ * pops_resident_hook_slot_chain installs it). */
 typedef struct {
   uint16_t fingerprint_id; /* built-in entry picked by the disc's fingerprint, 0: none */
   uint8_t reason;          /* POPS_TROJAN_NO_* of the last unhosted file */
@@ -378,8 +385,16 @@ typedef struct {
   uint32_t hold_used;
   void *work;
   uint32_t work_size;
+  uint8_t chain_offered;   /* the launch can install the slot chain */
+  uint8_t chain;           /* a hosted file hooks a slot or names one */
+  uint32_t slot_word[2][POPS_TROJAN_SLOTS_HOOKS / 4]; /* from 0x2327d0, from 0x232d08 */
   PopsTrojanPayload payload[POPS_TROJAN_MAX_PAYLOADS];
 } PopsTrojanSet;
+
+/* Zeroes the set and fills both runs with empty slots. fingerprint_break:
+ * the fingerprint's built-in entry has a breakpoint handler, whose call
+ * POPStarter writes at 0x232d08 before it reads any TROJAN file. */
+void pops_trojan_set_init(PopsTrojanSet *set, unsigned fingerprint_id, int fingerprint_break);
 
 /* Whether [address, address + size) is arena memory launcHER can give a payload. */
 int pops_trojan_in_arena(uint32_t address, uint32_t size);

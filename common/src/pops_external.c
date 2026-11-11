@@ -194,7 +194,8 @@ const char *pops_trojan_reason_text(unsigned reason) {
   case POPS_TROJAN_NO_SPACE:
     return "the payloads of this launch do not fit launcHER's holding memory";
   case POPS_TROJAN_NO_SLOT:
-    return "it needs POPStarter's slot chain, which launcHER cannot offer here";
+    return "it needs POPStarter's slots, which launcHER cannot offer on this POPS, or its hook "
+           "words run past them";
   case POPS_TROJAN_NO_480P:
     return "it uses POPStarter's 480p handler, which launcHER does not have";
   case POPS_TROJAN_NO_BLOCK2:
@@ -210,6 +211,18 @@ const char *pops_trojan_reason_text(unsigned reason) {
   default:
     return "unknown reason";
   }
+}
+
+void pops_trojan_set_init(PopsTrojanSet *set, unsigned fingerprint_id, int fingerprint_break) {
+  if (!set)
+    return;
+  memset(set, 0, sizeof(*set));
+  set->fingerprint_id = (uint16_t)fingerprint_id;
+  for (unsigned run = 0; run < 2; ++run)
+    for (unsigned slot = 0; slot < POPS_TROJAN_SLOTS_HOOKS / 8; ++slot)
+      set->slot_word[run][2 * slot] = POPS_TROJAN_SLOT_EMPTY;
+  if (fingerprint_break)
+    set->slot_word[1][0] = POPS_TROJAN_BREAK_CALL;
 }
 
 static int trojan_within(uint32_t address, uint32_t base, uint32_t limit) {

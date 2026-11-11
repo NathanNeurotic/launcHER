@@ -33,6 +33,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "pops_config.h"
+#include "pops_external.h"
 #include "pops_resident_abi.h"
 
 #ifdef __cplusplus
@@ -42,7 +43,7 @@ extern "C" {
 #define POPS_RESIDENT_BASE        UINT32_C(0x0143a000)
 #define POPS_RESIDENT_LIMIT       UINT32_C(0x01460000)
 #define POPS_RESIDENT_MAGIC       UINT32_C(0x5352484c) /* "LHRS" */
-#define POPS_RESIDENT_VERSION     15
+#define POPS_RESIDENT_VERSION     16
 
 /* POPStarter's always-on guards (pops_resident_guards.S): the POPS words
  * that become "j stub", in the order the original writes them
@@ -131,7 +132,17 @@ typedef struct {
   uint32_t guard_entry[POPS_GUARD_COUNT]; /* always-on guards, no C call ABI */
   uint32_t recompiler_entry; /* jumped to from 0x2075e8, no C call ABI */
   uint32_t recompiler_emit[POPS_EMIT_COUNT]; /* POPS_EMIT_*, no C call ABI */
+  /* TROJAN slot chain (pops_resident_hook_slot_chain): the GP1 entry that
+   * runs POPStarter's ten slots where they are in its chain, and where the
+   * word after each run of five jumps back to. No C call ABI. */
+  uint32_t gp1_chain_entry;
+  uint32_t gp1_resume_a; /* from 0x2327f8 */
+  uint32_t gp1_resume_b; /* from 0x232d30 */
 } PopsResidentHeader;
+
+/* POPStarter's chain returns to the di at 0x21a640, which then runs a
+ * second time; the slot chain entry does the same. */
+#define POPS_GP1_CHAIN_RETURN_ADDR UINT32_C(0x0021a640)
 
 #define POPS_RES_F_CHEATS         (1u << 0)
 #define POPS_RES_F_DISPLAY        (1u << 1)
@@ -306,6 +317,10 @@ typedef struct {
  * POPS_RES_F_NOVMC1, the low byte of card 0's / card 1's state word becomes
  * 0. Every check reads the buttons again, as the original does. */
 void pops_resident_hotkeys(PopsResidentConfig *cfg, const PopsHotkeyMemory *mem);
+/* Its two halves: the emode checks, which come before POPStarter's first
+ * five slots, and everything after those slots. */
+void pops_resident_hotkeys_emode(const PopsHotkeyMemory *mem);
+void pops_resident_hotkeys_rest(PopsResidentConfig *cfg, const PopsHotkeyMemory *mem);
 
 /* Where the codes write. ps1 is PS1 RAM (2 MiB); ee is EE address 0 and
  * ee_size how much of EE RAM PS2-format codes may touch (0: none); spr is
@@ -393,6 +408,35 @@ int pops_resident_hook_core(void *staged_core, size_t core_size, uint32_t entry)
  * words around it (lui $v1,1 before, di / sync.p / mfc0 Status after, and
  * the and/bnez that read $v1). Idempotent; anything else is -EILSEQ. */
 int pops_resident_hook_gp1(void *staged_core, size_t core_size, uint32_t entry);
+
+/* POPStarter's ten TROJAN slots, for a launch whose TROJAN files need them
+ * (set->chain). POPStarter overwrites POPS's function at 0x232790 with code
+ * of its own that holds the slots; nothing in the POPS image refers to that
+ * function. launcHER writes only the two runs, at POPStarter's addresses,
+ * each five slots and "j resume; nop" back into the resident image, and
+ * points the GP1 hook at the chain entry, which runs what POPStarter runs
+ * before, between and after the runs.
+ *
+ * What is at 0x232d08, the first slot of the second run, in POPStarter's
+ * write order: a fingerprint entry's breakpoint call, then a TROJAN file's
+ * hook, then a breakpoint call from $BREAKPOINT0/1 or a $VCDID_n entry,
+ * then $RESET_WARMBOOT's store, which takes the slot. */
+enum {
+  POPS_SLOT4_AS_FILES = 0,  /* what the set holds: empty, a file's hook or the fingerprint's call */
+  POPS_SLOT4_BREAK_CALL,    /* $BREAKPOINT0/1 or a $VCDID_n entry: jal 0x01460000 */
+  POPS_SLOT4_RESET_STORE    /* $RESET_WARMBOOT found its stub: no slot there */
+};
+/* 1 when both runs still hold POPS's own bytes, the GP1 hook is the jal to
+ * header->gp1_entry and the image has the chain entries; 0 otherwise. */
+int pops_resident_slot_chain_possible(const void *staged_core, size_t core_size,
+                                      const PopsResidentHeader *header);
+/* Returns 0 with nothing written when set->chain is 0, 1 when the chain was
+ * installed, or a negative errno with nothing written: -EILSEQ when a run
+ * no longer holds POPS's own bytes or the GP1 hook is not the expected jal.
+ * On 1, set->slot_word[1][0] is the word installed at 0x232d08. */
+int pops_resident_hook_slot_chain(void *staged_core, size_t core_size,
+                                  const PopsResidentHeader *header, PopsTrojanSet *set,
+                                  unsigned slot4);
 
 /* POPStarter's always-on guards: point the nine POPS_GUARD_* sites at the
  * image's stubs, "j stub" plus a nop over the word after it (at 0x204160

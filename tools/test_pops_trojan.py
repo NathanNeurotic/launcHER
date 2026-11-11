@@ -7,6 +7,9 @@ Original: the same files through the original's loader FUN_00880a24 under
   POPS_TEST_ELF and unicorn; skipped otherwise.
 Source: the launcher's own loop (launcher/src/handler_pops.c), compiled for
   the host with its file reads.
+Chain: the built resident image's slot chain entry (POPS_RESIDENT_BIN), on
+  tools/r5900_mini.py; with the two inputs above also against the original's
+  own chain, and from file bytes to what a payload finds at its slot.
 
 Every file here is generated. Nothing is a console run.
 """
@@ -28,6 +31,11 @@ import pops_trojan_model as model  # noqa: E402
 from test_pops_fix_files import BASE, SIZE, Context, pristine  # noqa: E402
 
 HAVE_ORIGINAL = bool(os.environ.get('POPSTARTER_TEST_ELF') and os.environ.get('POPS_TEST_ELF'))
+HAVE_IMAGE = bool(os.environ.get('POPS_RESIDENT_BIN'))
+EMPTY_RUNS = [[0x10000001, 0] * 5, [0x10000001, 0] * 5]
+BREAK_CALL = 0x0c518000
+SLOT4_AS_FILES, SLOT4_BREAK_CALL, SLOT4_RESET_STORE = 0, 1, 2
+GP1_HOOK = 0x21a63c
 APPLY, INVALID, OUTDATED = 0, 1, 2
 SKIP_INVALID, SKIP_OUTDATED, SKIP_UNHOSTED = 1, 2, 3
 (NO_UNALIGNED, NO_ENTRY, NO_RANGE, NO_HOOK, NO_SPACE, NO_SLOT, NO_480P, NO_BLOCK2, NO_BUILTIN,
@@ -68,7 +76,8 @@ def code(*words):
     return struct.pack('<%dI' % len(words), *words)
 WORDS = {APPLY: 'APPLIED', INVALID: 'INVALID', OUTDATED: 'OUTDATED'}
 COMMON = ['pops_modes_patches.c', 'pops_resident_engine.c', 'pops_builtin_db.c',
-          'pops_builtin_db_data.c', 'pops_external.c']
+          'pops_builtin_db_data.c', 'pops_external.c', 'pops_resident.c', 'pops_config.c',
+          'pops_compat_db.c', 'pops_vcd.c']
 
 
 class Info(c.Structure):
@@ -86,7 +95,26 @@ class TrojanSet(c.Structure):
                 ('payload_count', c.c_uint8), ('refs', c.c_uint32),
                 ('hold', c.c_void_p), ('hold_size', c.c_uint32), ('hold_used', c.c_uint32),
                 ('work', c.c_void_p), ('work_size', c.c_uint32),
+                ('chain_offered', c.c_uint8), ('chain', c.c_uint8),
+                ('slot_word', c.c_uint32 * 10 * 2),
                 ('payload', Payload * 20)]
+
+
+class ResidentHeader(c.Structure):
+    _fields_ = [('magic', c.c_uint32), ('version', c.c_uint16), ('header_size', c.c_uint16),
+                ('file_size', c.c_uint32), ('image_size', c.c_uint32),
+                ('vblank_entry', c.c_uint32), ('config_addr', c.c_uint32),
+                ('display_entry', c.c_uint32), ('progressive_entry', c.c_uint32),
+                ('pad_read_entry', c.c_uint32), ('pad_read_exit', c.c_uint32),
+                ('gte', c.c_uint32 * 3), ('gp1_entry', c.c_uint32),
+                ('guard_entry', c.c_uint32 * 9), ('recompiler_entry', c.c_uint32),
+                ('recompiler_emit', c.c_uint32 * 4), ('gp1_chain_entry', c.c_uint32),
+                ('gp1_resume_a', c.c_uint32), ('gp1_resume_b', c.c_uint32)]
+
+
+def fake_header(gp1=0x0143a100, chain=0x0143a200, resume_a=0x0143a240, resume_b=0x0143a280):
+    return ResidentHeader(gp1_entry=gp1, gp1_chain_entry=chain, gp1_resume_a=resume_a,
+                          gp1_resume_b=resume_b)
 
 
 class Keep(c.Structure):
@@ -202,24 +230,43 @@ def build(directory, extra=''):
     lib.pops_trojan_in_arena.argtypes = [c.c_uint32, c.c_uint32]
     lib.pops_trojan_copy_out.argtypes = [c.POINTER(TrojanSet), c.c_void_p, c.c_uint32, c.c_uint32,
                                          c.POINTER(Keep), c.c_uint]
+    lib.pops_trojan_set_init.argtypes = [c.POINTER(TrojanSet), c.c_uint, c.c_int]
+    lib.pops_trojan_set_init.restype = None
+    lib.pops_resident_check_image.argtypes = [c.c_void_p, c.c_size_t, c.POINTER(ResidentHeader)]
+    lib.pops_resident_hook_gp1.argtypes = [c.c_void_p, c.c_size_t, c.c_uint32]
+    lib.pops_resident_slot_chain_possible.argtypes = [c.c_void_p, c.c_size_t,
+                                                      c.POINTER(ResidentHeader)]
+    lib.pops_resident_hook_slot_chain.argtypes = [c.c_void_p, c.c_size_t, c.POINTER(ResidentHeader),
+                                                  c.POINTER(TrojanSet), c.c_uint]
     return lib
 
 
 class Session:
     """A staged core, its fix-file context and one launch's TROJAN set."""
 
-    def __init__(self, test, core, builtin=0, hold=0x40000, work=0x10000):
+    def __init__(self, test, core, builtin=0, hold=0x40000, work=0x10000, offered=False,
+                 fingerprint_break=False):
         self.test, self.lib = test, test.lib
         self.memory = bytearray(core)
         self.pointer = (c.c_ubyte * len(self.memory)).from_buffer(self.memory)
         self.hold = (c.c_ubyte * hold)() if hold else None
         self.work = (c.c_ubyte * work)() if work else None
         self.context = Context()
-        self.state = TrojanSet(fingerprint_id=builtin, hold_size=hold, work_size=work,
-                               hold=c.cast(self.hold, c.c_void_p) if hold else None,
-                               work=c.cast(self.work, c.c_void_p) if work else None)
+        self.state = TrojanSet()
+        self.lib.pops_trojan_set_init(c.byref(self.state), builtin, int(fingerprint_break))
+        self.state.chain_offered = int(offered)
+        self.state.hold_size, self.state.work_size = hold, work
+        self.state.hold = c.cast(self.hold, c.c_void_p) if hold else None
+        self.state.work = c.cast(self.work, c.c_void_p) if work else None
         test.assertEqual(self.lib.pops_fix_context_init(c.byref(self.context), self.pointer,
                                                         len(self.memory), 0), 0)
+
+    def slot_words(self):
+        return [list(run) for run in self.state.slot_word]
+
+    def install(self, header, slot4=SLOT4_AS_FILES):
+        return self.lib.pops_resident_hook_slot_chain(self.pointer, len(self.memory),
+                                                      c.byref(header), c.byref(self.state), slot4)
 
     def stage(self, data, slot=0):
         return self.lib.pops_fix_stage_trojan(c.byref(self.context), c.byref(self.state),
@@ -273,10 +320,10 @@ static ssize_t test_read(int fd, void *buffer, size_t size) {
 #define read test_read
 %s
 int test_fix_files(void *core, size_t size, const char *root, const char *title,
-                   unsigned fingerprint, PopsTrojanSet *set) {
+                   unsigned fingerprint, PopsTrojanSet *set, int offered) {
   PopsFixContext state;
-  memset(set, 0, sizeof(*set));
-  set->fingerprint_id = (uint16_t)fingerprint;
+  pops_trojan_set_init(set, fingerprint, 0);
+  set->chain_offered = (uint8_t)offered;
   set->hold = host_hold;
   set->hold_size = sizeof(host_hold);
   set->work = host_work;
@@ -738,6 +785,125 @@ class Native(Built):
             self.assertEqual(session.stage(trojan(hook=hook)), SKIP_UNHOSTED)
             self.assertEqual(session.state.reason, NO_SLOT)
             self.assertEqual(session.memory, pristine())
+            self.assertEqual((session.state.chain, session.state.payload_count), (0, 0))
+            self.assertEqual(session.slot_words(), EMPTY_RUNS)
+
+    def test_a_new_set_holds_ten_empty_slots(self):
+        state = TrojanSet(reason=9, payload_count=3, chain=1, chain_offered=1)
+        self.lib.pops_trojan_set_init(c.byref(state), 321, 0)
+        self.assertEqual(bytes(state)[2:8], bytes(6))
+        self.assertEqual((state.fingerprint_id, state.chain, state.chain_offered), (321, 0, 0))
+        self.assertEqual([list(run) for run in state.slot_word], EMPTY_RUNS)
+        # A fingerprint entry with a breakpoint handler: its call is in the
+        # first slot of the second run before any file is read.
+        self.lib.pops_trojan_set_init(c.byref(state), 7, 1)
+        self.assertEqual([list(run) for run in state.slot_word],
+                         [EMPTY_RUNS[0], [BREAK_CALL, 0] + EMPTY_RUNS[1][2:]])
+        self.lib.pops_trojan_set_init(None, 0, 0)
+
+    def test_a_slot_hook_goes_to_the_set_and_never_to_the_core(self):
+        for slot, hook in model.SLOT_HOOKS.items():
+            with self.subTest(slot=slot):
+                session = Session(self, pristine(), offered=True)
+                self.assertEqual(session.stage(trojan(hook=hook)), 0)
+                self.assertEqual(session.memory, pristine())
+                self.assertEqual((session.state.chain, session.state.payload_count), (1, 1))
+                expected = [list(run) for run in EMPTY_RUNS]
+                run, index = (0, hook - 0x2327d0) if hook < 0x232d08 else (1, hook - 0x232d08)
+                expected[run][index // 4] = jal(E)
+                self.assertEqual(session.slot_words(), expected)
+
+    def test_format_2_zero_words_and_the_end_of_a_run(self):
+        # Width 2 and 3 write zero words after the jump, as the original
+        # does: over the slot's own second word, then over the next slot's
+        # first, which then falls through. Past the fifth slot they would
+        # land on what follows the slots: not hosted.
+        for base in (0x2327d0, 0x232d08):
+            run = 0 if base == 0x2327d0 else 1
+            for position in range(5):
+                for width in (1, 2, 3):
+                    with self.subTest(base=hex(base), position=position, width=width):
+                        session = Session(self, pristine(), offered=True)
+                        result = session.stage(trojan(fmt=2, ba=width, hook=base + 8 * position))
+                        fits = 2 * position + width <= 10
+                        self.assertEqual(result, 0 if fits else SKIP_UNHOSTED)
+                        expected = [list(r) for r in EMPTY_RUNS]
+                        if fits:
+                            expected[run][2 * position:2 * position + width] = \
+                                [jump(E)] + [0] * (width - 1)
+                        else:
+                            self.assertEqual(session.state.reason, NO_SLOT)
+                        self.assertEqual(session.slot_words(), expected)
+                        self.assertEqual((session.state.chain, session.state.payload_count),
+                                         (int(fits), int(fits)))
+                        self.assertEqual(session.memory, pristine())
+
+    def test_the_last_file_on_a_slot_wins(self):
+        session = Session(self, pristine(), offered=True, fingerprint_break=True)
+        self.assertEqual(session.slot_words()[1][0], BREAK_CALL)
+        for slot, load in ((0, 0x01500000), (3, 0x01510000), (9, 0x01520000)):
+            self.assertEqual(session.stage(trojan(slot=slot, load=load, hook=0x232d08), slot), 0)
+            self.assertEqual(session.slot_words()[1][:2], [jal(load), 0])
+        self.assertEqual(session.stage(trojan(fmt=2, ba=3, load=0x01530000, hook=0x232d08)), 0)
+        self.assertEqual(session.slot_words(),
+                         [EMPTY_RUNS[0], [jump(0x01530000), 0, 0, 0] + EMPTY_RUNS[1][4:]])
+        self.assertEqual(session.state.payload_count, 4)
+        self.assertEqual(session.memory, pristine())
+
+    def test_a_payload_that_names_a_slot_needs_the_chain_too(self):
+        payload = code(lui(K0, 0x23), ori(K0, K0, 0x27d8), lw(K1, 0, K0), *JR_RA)
+        self.assertEqual(self.scan(payload, E), model.REF_SLOT)
+        for offered in (False, True):
+            session = Session(self, pristine(), offered=offered)
+            result = session.stage(trojan(hook=0x2f0100, payload=payload))
+            self.assertEqual((result, session.state.reason, session.state.chain),
+                             (0, 0, 1) if offered else (SKIP_UNHOSTED, NO_SLOT, 0))
+            expected = pristine()
+            if offered:  # its hook is ordinary POPS code: written as before
+                struct.pack_into('<I', expected, 0xf0100, jal(E))
+            self.assertEqual(session.memory, expected)
+            self.assertEqual(session.slot_words(), EMPTY_RUNS)
+
+    def test_the_slot_chain_is_not_installed_on_anything_but_pops(self):
+        header = fake_header()
+        core = pristine()
+        struct.pack_into('<I', core, GP1_HOOK - BASE, jal(header.gp1_entry))
+        pointer = (c.c_ubyte * SIZE).from_buffer(core)
+        self.assertEqual(self.lib.pops_resident_slot_chain_possible(pointer, SIZE, c.byref(header)), 0)
+        self.assertEqual(self.lib.pops_resident_slot_chain_possible(None, SIZE, c.byref(header)), 0)
+        self.assertEqual(self.lib.pops_resident_slot_chain_possible(pointer, SIZE, None), 0)
+        del pointer
+        session = Session(self, core, offered=True)
+        self.assertEqual(session.stage(trojan(hook=0x2327d8)), 0)
+        before = bytes(session.memory)
+        # Not POPS's bytes in the two runs.
+        self.assertEqual(session.install(header), -errno.EILSEQ)
+        for bad in (fake_header(chain=0x0143a202), fake_header(resume_a=0x01439ffc),
+                    fake_header(resume_b=0x01460000), fake_header(gp1=0)):
+            self.assertEqual(session.install(bad), -errno.EINVAL)
+        self.assertEqual(session.install(header, 3), -errno.EINVAL)
+        self.assertEqual(self.lib.pops_resident_hook_slot_chain(None, SIZE, c.byref(header),
+                                                                c.byref(session.state), 0),
+                         -errno.EINVAL)
+        self.assertEqual(self.lib.pops_resident_hook_slot_chain(session.pointer, SIZE, None,
+                                                                c.byref(session.state), 0),
+                         -errno.EINVAL)
+        self.assertEqual(self.lib.pops_resident_hook_slot_chain(session.pointer, SIZE,
+                                                                c.byref(header), None, 0),
+                         -errno.EINVAL)
+        self.assertEqual(self.lib.pops_resident_hook_slot_chain(
+            session.pointer, 0x232d08 + 0x30 - BASE - 1, c.byref(header), c.byref(session.state), 0),
+            -errno.ERANGE)
+        # Needed but never offered: a caller's mistake, not a skip.
+        session.state.chain_offered = 0
+        self.assertEqual(session.install(header), -errno.EINVAL)
+        self.assertEqual(bytes(session.memory), before)
+        # No file needs it: nothing to do, whatever the core holds.
+        idle = Session(self, core, offered=True)
+        self.assertEqual(idle.install(header), 0)
+        self.assertEqual(idle.install(header, SLOT4_BREAK_CALL), 0)
+        self.assertEqual(bytes(idle.memory), bytes(core))
+        self.assertEqual(idle.slot_words(), EMPTY_RUNS)
 
 
 @unittest.skipUnless(HAVE_ORIGINAL, 'POPSTARTER_TEST_ELF and POPS_TEST_ELF are optional inputs')
@@ -824,10 +990,280 @@ class Original(Built):
                 self.assertEqual(staged, after[BASE:BASE + SIZE])
 
 
+def stub_file(chain, index, style):
+    # A TROJAN file whose payload is tools/pops_trojan_chain.py's stub for
+    # slot `index` (chain order), hooked the way that style is: format 1
+    # writes `jal entry`, format 2 width 1 writes `j entry`.
+    arguments = dict(fmt=1) if style == 'jal' else dict(fmt=2, ba=1)
+    return trojan(slot=index, load=chain.STUBS + 0x40 * index, hook=chain.SLOTS[index],
+                  payload=chain.stub_bytes(style, index), **arguments)
+
+
+STYLE_SETS = [('jal',) * 10, ('j',) * 10, ('jra',) * 10,
+              ('jal', 'empty', 'j', 'empty', 'jra', 'jra', 'empty', 'j', 'empty', 'jal'),
+              ('empty', 'j', 'empty', 'jra', 'empty', 'empty', 'jal', 'empty', 'jra', 'empty'),
+              ('empty',) * 4 + ('jra',) + ('empty',) * 4 + ('j',)]
+
+
+@unittest.skipUnless(HAVE_ORIGINAL, 'POPSTARTER_TEST_ELF and POPS_TEST_ELF are optional inputs')
+class OriginalSlots(Built):
+    '''POPStarter's ten slots: what its loader leaves in them, and what a
+    payload finds there, against launcHER's copy of the slots and (with
+    POPS_RESIDENT_BIN) its chain. Emulated; not a console.'''
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        try:
+            import unicorn  # noqa: F401
+        except ImportError:
+            raise unittest.SkipTest('unicorn is not installed')
+        import pops_trojan_chain as chain
+        import trace_original_pops_trojan as tracer
+        from trace_original_pops_io import decode_main
+        cls.chain, cls.tracer = chain, tracer
+        cls.main = decode_main(Path(os.environ['POPSTARTER_TEST_ELF']).read_bytes())
+        cls.core = tracer.pops_core()
+        # The loader on a core that already holds POPStarter's two parts,
+        # as the launch places them, and the jump between them.
+        cls.loader = tracer.Loader()
+        baseline = bytearray(cls.loader.baseline)
+        for source, target, size in (chain.BLOCK1, chain.BLOCK2):
+            baseline[target:target + size] = cls.main[source - 0x870000:source - 0x870000 + size]
+        struct.pack_into('<I', baseline, 0x232d30, chain.j(chain.BLOCK2[1]))
+        cls.loader.baseline = bytes(baseline)
+        cls.image = Path(os.environ['POPS_RESIDENT_BIN']).read_bytes() if HAVE_IMAGE else None
+
+    def original_runs(self, after):
+        return [list(struct.unpack_from('<10I', after, base)) for base in (0x2327d0, 0x232d08)]
+
+    def header(self):
+        header = ResidentHeader()
+        image = bytearray(self.image)
+        self.assertEqual(self.lib.pops_resident_check_image(
+            (c.c_ubyte * len(image)).from_buffer(image), len(image), c.byref(header)), 0)
+        return header
+
+    def hooked_core(self, header):
+        core = bytearray(self.core)
+        pointer = (c.c_ubyte * len(core)).from_buffer(core)
+        self.assertEqual(self.lib.pops_resident_hook_gp1(pointer, len(core), header.gp1_entry), 0)
+        self.assertEqual(self.lib.pops_resident_slot_chain_possible(pointer, len(core),
+                                                                    c.byref(header)), 1)
+        del pointer
+        return core
+
+    def test_the_shipped_slots_are_ten_empty_pairs(self):
+        at = self.chain.BLOCK1[0] - 0x870000
+        for base in (0x2327d0, 0x232d08):
+            words = struct.unpack_from('<10I', self.main, at + base - 0x232790)
+            self.assertEqual(list(words), EMPTY_RUNS[0], hex(base))
+        # The real core's bytes there are what the launcher's check expects,
+        # and only with the GP1 hook already written.
+        header = fake_header()
+        core = bytearray(self.core)
+        pointer = (c.c_ubyte * len(core)).from_buffer(core)
+        possible = self.lib.pops_resident_slot_chain_possible
+        self.assertEqual(possible(pointer, len(core), c.byref(header)), 0)
+        self.assertEqual(self.lib.pops_resident_hook_gp1(pointer, len(core), header.gp1_entry), 0)
+        self.assertEqual(possible(pointer, len(core), c.byref(header)), 1)
+        for address in (0x2327d0, 0x2327f7, 0x2327ff, 0x232d08, 0x232d37):
+            core[address - BASE] ^= 1
+            self.assertEqual(possible(pointer, len(core), c.byref(header)), 0, hex(address))
+            core[address - BASE] ^= 1
+        self.assertEqual(possible(pointer, len(core), c.byref(header)), 1)
+
+    FILE_SETS = [
+        ('one format 1 file per slot', [dict(slot=n, hook=h, load=E + 0x1000 * n)
+                                        for n, h in sorted(model.SLOT_HOOKS.items())]),
+        ('format 2 widths on the first run', [dict(slot=0, fmt=2, ba=1, hook=0x2327d0),
+                                              dict(slot=1, fmt=2, ba=2, hook=0x2327d8),
+                                              dict(slot=2, fmt=2, ba=3, hook=0x2327e0)]),
+        ('format 2 width 3 before a format 1 file on the next slot',
+         [dict(slot=0, fmt=2, ba=3, hook=0x232d08), dict(slot=1, hook=0x232d10, load=E + 0x1000)]),
+        ('format 1 before a width 3 file on the slot before it',
+         [dict(slot=0, hook=0x232d10, load=E + 0x1000), dict(slot=1, fmt=2, ba=3, hook=0x232d08)]),
+        ('width 2 on the fifth slot of each run', [dict(slot=3, fmt=2, ba=2, hook=0x2327f0),
+                                                   dict(slot=9, fmt=2, ba=2, hook=0x232d28,
+                                                        load=E + 0x1000)]),
+        ('three files on one slot', [dict(slot=0, hook=0x232d08),
+                                     dict(slot=5, hook=0x232d08, load=E + 0x1000),
+                                     dict(slot=9, fmt=2, ba=1, hook=0x232d08, load=E + 0x2000)]),
+        ('an invalid and an outdated file among them', [dict(slot=0, be=0, hook=0x2327d0),
+                                                        dict(slot=1, hook=0x2327d8),
+                                                        dict(slot=2, fmt=3, ba=0, hook=0x2327e0)]),
+        ('format 2 width 0 and width 4', [dict(slot=0, fmt=2, ba=0, hook=0x2327d0),
+                                          dict(slot=1, fmt=2, ba=4, hook=0x2327d8)]),
+        ('byte 0x0e = 2', [dict(slot=6, be=2, hook=0x232d18)]),
+    ]
+
+    def test_slot_words_are_the_loaders(self):
+        for label, files in self.FILE_SETS:
+            for builtin in (0, 7):
+                with self.subTest(label, builtin=builtin):
+                    data = {f['slot']: trojan(**f) for f in files}
+                    _, events, after = self.loader.run(
+                        {b'mass:/POPS/TROJAN_%d.BIN' % n: d for n, d in data.items()},
+                        builtin=builtin)
+                    session = Session(self, self.core, builtin, offered=True)
+                    results = [session.stage(data[n], n) for n in sorted(data)]
+                    self.assertEqual([{0: 'APPLIED', SKIP_INVALID: 'INVALID',
+                                       SKIP_OUTDATED: 'OUTDATED'}[r] for r in results],
+                                     self.tracer.verdicts(events))
+                    self.assertEqual(session.slot_words(), self.original_runs(after))
+                    self.assertEqual(bytes(session.memory), self.core)
+                    # The payloads: held here, copied there, the same bytes.
+                    ram = bytes(0x200000)
+                    count, ram = session.copy_out(ram, 0x01420000, keep=[(0x0143a000, 0x01460200)])
+                    self.assertEqual(count, results.count(0))
+                    for address, size, _ in session.records():
+                        self.assertEqual(ram[address - 0x01420000:address - 0x01420000 + size],
+                                         after[address:address + size])
+
+    def test_root_then_title_scope(self):
+        # One loader call per scope; the launcher's loop reads the root
+        # folder's ten files, then the title folder's.
+        root = {0: trojan(hook=0x2327d0), 4: trojan(slot=4, hook=0x232d08, load=E + 0x1000)}
+        title = {2: trojan(slot=2, fmt=2, ba=2, hook=0x232d08, load=E + 0x2000),
+                 3: trojan(slot=3, hook=0x232d28, load=E + 0x3000)}
+        _, _, after = self.loader.run({b'mass:/POPS/TROJAN_%d.BIN' % n: d for n, d in root.items()})
+        runs = self.original_runs(after)
+        names = []
+        _, events, after = self.loader.run({}, scope=1, title=b'GAME')
+        names = [e[1] for e in events if e[0] == 'open']
+        _, _, after = self.loader.run({names[n]: d for n, d in title.items()}, scope=1, title=b'GAME')
+        for run, words in enumerate(self.original_runs(after)):
+            for i, word in enumerate(words):
+                if word != EMPTY_RUNS[run][i]:
+                    runs[run][i] = word
+        session = Session(self, self.core, offered=True)
+        for files in (root, title):
+            for n in sorted(files):
+                self.assertEqual(session.stage(files[n], n), 0)
+        self.assertEqual(session.slot_words(), runs)
+        self.assertEqual(runs[1][:2], [jump(E + 0x2000), 0])
+
+    @unittest.skipUnless(HAVE_IMAGE, 'POPS_RESIDENT_BIN not set')
+    def test_installing_the_slots_changes_three_places(self):
+        header = self.header()
+        for slot4, first in ((SLOT4_AS_FILES, jal(E)), (SLOT4_BREAK_CALL, BREAK_CALL),
+                             (SLOT4_RESET_STORE, 0x10000001)):
+            with self.subTest(slot4=slot4):
+                core = self.hooked_core(header)
+                session = Session(self, core, offered=True)
+                self.assertEqual(session.stage(trojan(hook=0x232d08)), 0)
+                self.assertEqual(session.stage(trojan(slot=1, fmt=2, ba=2, hook=0x2327e8,
+                                                      load=E + 0x1000), 1), 0)
+                self.assertEqual(bytes(session.memory), bytes(core))
+                self.assertEqual(session.install(header, slot4), 1)
+                expected = bytearray(core)
+                struct.pack_into('<12I', expected, 0x2327d0 - BASE,
+                                 *(EMPTY_RUNS[0][:6] + [jump(E + 0x1000), 0] + EMPTY_RUNS[0][8:]),
+                                 jump(header.gp1_resume_a), 0)
+                struct.pack_into('<12I', expected, 0x232d08 - BASE, first, 0, *EMPTY_RUNS[1][2:],
+                                 jump(header.gp1_resume_b), 0)
+                struct.pack_into('<I', expected, GP1_HOOK - BASE, jal(header.gp1_chain_entry))
+                self.assertEqual(bytes(session.memory), bytes(expected))
+                self.assertEqual(session.slot_words()[1][0], first)
+                # Once: the runs no longer hold POPS's bytes.
+                self.assertEqual(session.install(header, slot4), -errno.EILSEQ)
+                self.assertEqual(bytes(session.memory), bytes(expected))
+        # The fingerprint entry's call stays when no file takes the slot.
+        core = self.hooked_core(header)
+        session = Session(self, core, 7, offered=True, fingerprint_break=True)
+        self.assertEqual(session.stage(trojan(hook=0x2327d0)), 0)
+        self.assertEqual(session.install(header), 1)
+        self.assertEqual(struct.unpack_from('<2I', session.memory, 0x232d08 - BASE), (BREAK_CALL, 0))
+        # Without the GP1 jal the launcher wrote: refused, nothing written.
+        session = Session(self, self.core, offered=True)
+        self.assertEqual(session.stage(trojan(hook=0x2327d0)), 0)
+        self.assertEqual(session.install(header), -errno.EILSEQ)
+        self.assertEqual(bytes(session.memory), self.core)
+
+    @unittest.skipUnless(HAVE_IMAGE, 'POPS_RESIDENT_BIN not set')
+    def test_the_chain_gives_a_payload_what_the_originals_does(self):
+        cases, slots = self.chain.compare(self.image, self.main, self.core)
+        self.assertEqual((cases, slots), (71, 350))
+        print('Original slot chain PASS: %d cases, %d slot records, 34 registers and the '
+              'chain\'s stores at each' % (cases, slots))
+
+    @unittest.skipUnless(HAVE_IMAGE, 'POPS_RESIDENT_BIN not set')
+    def test_the_disc_swap_frame_is_the_known_difference(self):
+        # On the frame POPStarter's block calls POPS's disc init, between
+        # the two runs, the original leaves that call's v0, a0 and ra in the
+        # registers; launcHER's C code keeps POPS's. Pinned so that a change
+        # shows up; nothing else may differ.
+        for styles in (('j',) * 10, ('jal',) * 10, ('jra',) * 10):
+            at_slots, at_return, stores = self.chain.swap_frame(self.image, self.main, self.core,
+                                                                styles)
+            self.assertTrue(stores)
+            self.assertEqual(at_return, {'v0', 'a0'})
+            self.assertEqual(sorted(at_slots), [4, 5, 6, 8, 9])
+            for slot, names in at_slots.items():
+                self.assertLessEqual(names, {'v0', 'a0', 'ra'}, slot)
+                self.assertLessEqual({'v0', 'a0'}, names, slot)
+
+    @unittest.skipUnless(HAVE_IMAGE, 'POPS_RESIDENT_BIN not set')
+    def test_from_file_bytes_to_what_the_payload_finds(self):
+        # The same generated TROJAN files through both: the original's
+        # loader and then its chain; launcHER's staging, slot install and
+        # payload copy and then the built chain.
+        header = self.header()
+        records = 0
+        for styles in STYLE_SETS:
+            files = {index: stub_file(self.chain, index, style)
+                     for index, style in enumerate(styles) if style != 'empty'}
+            _, events, after = self.loader.run(
+                {b'mass:/POPS/TROJAN_%d.BIN' % n: d for n, d in files.items()})
+            self.assertEqual(self.tracer.verdicts(events), ['APPLIED'] * len(files))
+            session = Session(self, self.hooked_core(header), offered=True)
+            for index in sorted(files):
+                self.assertEqual(session.stage(files[index], index), 0, (styles, index))
+            self.assertEqual(session.install(header), 1 if files else 0)
+            if not files:
+                continue
+            count, arena = session.copy_out(bytes(0x200000), 0x01420000,
+                                            keep=[(0x0143a000, 0x01460200)])
+            self.assertEqual(count, len(files))
+            for pad in (0xffff, 0xf6fe, 0xf9fe, 0xbcfe, 0xecfe):
+                with self.subTest(styles=styles, pad=hex(pad)):
+                    want = self.chain.original_launched(after[BASE:BASE + SIZE],
+                                                        after[0x01420000:0x01620000], pad, styles)
+                    got = self.chain.launched(self.image, bytes(session.memory), arena, pad, styles)
+                    self.assertEqual([r[0] for r in want[0]],
+                                     [i for i, style in enumerate(styles) if style != 'empty'])
+                    self.assertEqual(got, want)
+                    records += len(want[0])
+        print('Original file-to-slot PASS: %d style sets x 5 pad states, %d slot records'
+              % (len(STYLE_SETS) - 1, records))
+
+
+@unittest.skipUnless(HAVE_IMAGE, 'POPS_RESIDENT_BIN not set')
+class Chain(Built):
+    '''The built image's slot chain entry on its own (tools/pops_trojan_chain.py).'''
+
+    def test_the_built_chain(self):
+        import pops_trojan_chain as chain
+        image = Path(os.environ['POPS_RESIDENT_BIN']).read_bytes()
+        header = ResidentHeader()
+        copy = bytearray(image)
+        self.assertEqual(self.lib.pops_resident_check_image(
+            (c.c_ubyte * len(copy)).from_buffer(copy), len(copy), c.byref(header)), 0)
+        self.assertEqual(chain.header(image)[2:],
+                         (header.gp1_chain_entry, header.gp1_resume_a, header.gp1_resume_b))
+        cases, slots = chain.self_check(image)
+        self.assertEqual((cases, slots), (142, 700))
+        # A damaged image is noticed: the two resume entries swapped.
+        damaged = bytearray(image)
+        struct.pack_into('<2I', damaged, 116, header.gp1_resume_b, header.gp1_resume_a)
+        with self.assertRaises(AssertionError):
+            chain.self_check(bytes(damaged))
+
+
 class Source(Built):
     def setUp(self):
         self.lib.test_fix_files.argtypes = [c.c_void_p, c.c_size_t, c.c_char_p, c.c_char_p,
-                                            c.c_uint, c.POINTER(TrojanSet)]
+                                            c.c_uint, c.POINTER(TrojanSet), c.c_int]
         self.lib.test_log.restype = c.c_char_p
         self.lib.test_fail_reads(0)
         self.folder = tempfile.TemporaryDirectory()
@@ -842,11 +1278,69 @@ class Source(Built):
         del self.pointer
         self.folder.cleanup()
 
-    def run_files(self, fingerprint=0):
+    def run_files(self, fingerprint=0, offered=0):
         result = self.lib.test_fix_files(self.pointer, SIZE, (str(self.root) + '/').encode(),
                                          (str(self.title) + '/').encode(), fingerprint,
-                                         c.byref(self.state))
+                                         c.byref(self.state), offered)
         return result, self.lib.test_log().decode()
+
+    def test_slot_hooks_are_collected_root_first_then_title(self):
+        (self.root / 'TROJAN_0.BIN').write_bytes(trojan(hook=0x2327d0))
+        (self.root / 'TROJAN_4.BIN').write_bytes(trojan(slot=4, load=0x01510000, hook=0x232d08))
+        (self.root / 'TROJAN_7.BIN').write_bytes(trojan(slot=7, fmt=2, ba=3, load=0x01520000,
+                                                        hook=0x2327f0))
+        (self.title / 'TROJAN_2.BIN').write_bytes(trojan(slot=2, fmt=2, ba=2, load=0x01530000,
+                                                         hook=0x232d08))
+        (self.title / 'TROJAN_3.BIN').write_bytes(trojan(slot=3, load=0x01540000, hook=0x232d28))
+        result, log = self.run_files(offered=1)
+        self.assertEqual(result, 0)
+        self.assertEqual(self.memory, pristine())
+        self.assertEqual([list(run) for run in self.state.slot_word],
+                         [[jal(E)] + EMPTY_RUNS[0][1:],
+                          [jump(0x01530000), 0] + EMPTY_RUNS[1][2:8] + [jal(0x01540000), 0]])
+        self.assertEqual((self.state.chain, self.state.payload_count), (1, 4))
+        self.assertEqual(len(log.splitlines()), 1)
+        self.assertIn('TROJAN_7.BIN is valid for POPStarter but NOT loaded by launcHER', log)
+        # Not offered: every one of them is skipped with a line, and the launch goes on.
+        result, log = self.run_files(offered=0)
+        self.assertEqual(result, 0)
+        self.assertEqual(len(log.splitlines()), 5)
+        self.assertEqual([list(run) for run in self.state.slot_word], EMPTY_RUNS)
+        self.assertEqual((self.state.chain, self.state.payload_count), (0, 0))
+
+    def test_slot_chain_text(self):
+        source = (ROOT / 'launcher/src/handler_pops.c').read_text()
+        gp1 = source.index('res = pops_resident_hook_gp1((void *)stagedCore, plan.core_size, '
+                           'residentHdr.gp1_entry);')
+        init = source.index('pops_trojan_set_init(&trojanSet, POPS_BUILTIN_ID(fingerprintId),')
+        offered = source.index('trojanSet.chain_offered = (uint8_t)pops_resident_slot_chain_possible(')
+        staged = source.index('res = pops_stage_fix_files(')
+        warmboot = source.index('res = pops_apply_reset_warmboot(')
+        install = source.index('res = pops_resident_hook_slot_chain((void *)stagedCore, '
+                               'plan.core_size, &residentHdr,')
+        # The GP1 jal the check expects is written first; the slots are
+        # offered before the first file; installed after the last thing
+        # that decides the slot at 0x232d08, and before the resident flags
+        # are built and POPStarter's opcode pass runs over the core.
+        self.assertLess(gp1, init)
+        self.assertLess(init, offered)
+        self.assertLess(offered, staged)
+        self.assertLess(staged, warmboot)
+        self.assertLess(warmboot, install)
+        self.assertLess(install, source.index('int residentNeeded = pops_resident_build_config('))
+        self.assertLess(install, source.index('pops_apply_opcode_pass((void *)stagedCore'))
+        block = source[source.rindex('unsigned slot4 = POPS_SLOT4_AS_FILES;', 0, install):install]
+        self.assertLess(block.index('if (resetStore)'), block.index('slot4 = POPS_SLOT4_RESET_STORE;'))
+        self.assertIn('(!fingerprintId && builtinId && builtinPlan.break_call)', block)
+        after = source[install:install + 900]
+        self.assertIn('cfg.builtin_break_call = trojanSet.slot_word[1][0] == POPS_TROJAN_BREAK_CALL;',
+                      after)
+        self.assertLess(after.index('if (res < 0) {'), after.index('return res;'))
+        engine = (ROOT / 'common/src/pops_resident_engine.c').read_text()
+        chain = engine[engine.index('.globl pops_resident_gp1_chain'):]
+        self.assertLess(chain.index('j 0x002327d0'), chain.index('.globl pops_resident_gp1_resume_a'))
+        self.assertLess(chain.index('.globl pops_resident_gp1_resume_a'), chain.index('j 0x00232d08'))
+        self.assertLess(chain.index('j 0x00232d08'), chain.index('.globl pops_resident_gp1_resume_b'))
 
     def test_invalid_and_outdated_files_are_skipped_and_the_rest_is_read(self):
         (self.root / 'TROJAN_0.BIN').write_bytes(trojan(be=0))

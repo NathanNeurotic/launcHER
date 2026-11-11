@@ -392,12 +392,13 @@ static int fix_ranges_meet(uint32_t address, uint32_t length, uint32_t base, uin
   return length && address < limit && (uint64_t)address + length > base;
 }
 
-/* One of POPStarter's ten TROJAN slots: the first word of a pair. */
-static int fix_slot_hook(uint32_t hook) {
+/* One of POPStarter's ten TROJAN slots, the first word of a pair: its word
+ * index in the set's copy of the two runs, plus 1; 0 for any other address. */
+static unsigned fix_slot_hook(uint32_t hook) {
   for (unsigned i = 0; i < 2; ++i) {
     uint32_t base = i ? POPS_TROJAN_SLOTS_B : POPS_TROJAN_SLOTS_A;
     if (hook >= base && hook - base < POPS_TROJAN_SLOTS_HOOKS && !((hook - base) & 7))
-      return 1;
+      return 1 + i * (POPS_TROJAN_SLOTS_HOOKS / 4) + (hook - base) / 4;
   }
   return 0;
 }
@@ -444,7 +445,8 @@ int pops_fix_stage_trojan(PopsFixContext *context, PopsTrojanSet *set, void *sta
    * outside itself, and names nothing of POPStarter's that launcHER lacks. */
   const uint8_t *payload = (const uint8_t *)file + POPS_CONTAINER_HEADER_SIZE;
   uint32_t hook_bytes = (uint32_t)info.hook_words * 4;
-  int in_core = 0, slot_hook = 0;
+  int in_core = 0;
+  unsigned slot_hook = 0;
   if ((info.load | info.entry | info.hook | info.size) & 3)
     reason = POPS_TROJAN_NO_UNALIGNED;
   else if (info.entry < info.load || info.entry - info.load >= info.size)
@@ -493,8 +495,15 @@ int pops_fix_stage_trojan(PopsFixContext *context, PopsTrojanSet *set, void *sta
         reason = POPS_TROJAN_NO_BLOCK1;
       else if (refs & POPS_TROJAN_REF_MAIN)
         reason = POPS_TROJAN_NO_MAIN;
-      else if (slot_hook || (refs & POPS_TROJAN_REF_SLOT))
+      else if ((slot_hook || (refs & POPS_TROJAN_REF_SLOT)) && !set->chain_offered)
         reason = POPS_TROJAN_NO_SLOT;
+      /* Format 2's zero words after the jump may cover the next slot, as
+       * in the original, but not the two words after the fifth. */
+      else if (slot_hook && (slot_hook - 1) % (POPS_TROJAN_SLOTS_HOOKS / 4) + info.hook_words >
+                                POPS_TROJAN_SLOTS_HOOKS / 4)
+        reason = POPS_TROJAN_NO_SLOT;
+      else if (slot_hook || (refs & POPS_TROJAN_REF_SLOT))
+        set->chain = 1;
     }
   }
   if (reason == POPS_TROJAN_HOSTED && !in_core &&
@@ -522,8 +531,12 @@ int pops_fix_stage_trojan(PopsFixContext *context, PopsTrojanSet *set, void *sta
     memcpy(set->hold + set->hold_used, payload, info.size);
     set->hold_used += info.size;
   }
-  for (unsigned i = 0; i < info.hook_words; ++i)
-    write_u32(bytes, core_size, info.hook + 4 * i, info.hook_word[i]);
+  for (unsigned i = 0; i < info.hook_words; ++i) {
+    if (slot_hook)
+      (&set->slot_word[0][0])[slot_hook - 1 + i] = info.hook_word[i];
+    else
+      write_u32(bytes, core_size, info.hook + 4 * i, info.hook_word[i]);
+  }
   fix_context_refresh(context, bytes);
   return 0;
 }
