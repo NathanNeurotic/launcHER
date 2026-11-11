@@ -174,13 +174,24 @@ screen messages on. `XX.` is looked for only when no `SB.` was found.
   images of the driver's structures exactly as the original leaves them;
   `handler_smb.c` has static assertions that the images are the size of
   `smbLogOn_in_t`, `smbOpenShare_in_t` and `smbEcho_in_t`.
-- `launcher/src/handler_smb.c` has two hunks in existing functions, each a
-  test of `pops_get_active_sb_launch()` (`common/src/launch_args.c`):
-  `initTCPIPArguments` returns `sb_tcpip_arguments(length)` and
-  `launcher_smb_connect` returns `sb_connect()` after its "already
-  connected" test. Everything else in the file is new static code reached
-  only through those two tests.
-- `main.c`, `init.c` and `handler_pops.c` are not touched.
+- The switch is `sb_rules()` in `launcher/src/handler_smb.c`: the launch
+  target is a PS1 disc image **and** the name carries `SB.`
+  (`pops_get_active_sb_launch()`, `common/src/launch_args.c`). Both are
+  needed because the `SB.` flag alone is also set when the launcher's own
+  file name starts with `SB.`, whatever it then launches (`main.c`,
+  `handler_quickboot.c`, existing code).
+- `handler_smb.c` has two hunks in existing functions, each a test of
+  `sb_rules()`: `initTCPIPArguments` returns `sb_tcpip_arguments(length)`
+  and `launcher_smb_connect` returns `sb_connect()` after its "already
+  connected" test. Everything else new in the file is static code reached
+  only through those two tests, plus the setter below.
+- `launcher/src/common.c` has one hunk in `launchPath` (and one `#include`):
+  in `case Device_SMB:`, inside `#ifdef SMB`,
+  `launcher_smb_set_pops_target(isPopsTarget(argv[0]));` before the existing
+  `handleGenericPath` call. For a target that is not a `.VCD` it stores 0 in
+  a variable only `sb_rules()` reads.
+- `main.c`, `init.c`, `handler_pops.c` and `handler_quickboot.c` are not
+  touched.
 
 ### Where the files are looked up
 
@@ -201,11 +212,21 @@ readers of `SB.` network files can be routed through the same function.
 
 ### Outside an `SB.` launch
 
-Unchanged. `Unchanged.test_same_calls_as_before` builds `handler_smb.c` as
-it was at `d31d4a7` and as it is now and compares every open, read, close,
-`devctl` (name, command, bytes) and message over 900 seeded random sessions
-with the `SB.` flag off; they are identical, and more than 150 of the
-sessions reach a full connect.
+Unchanged, and that includes a launch that is not a PS1 game but carries an
+`SB.` name, and a PS1 game launched from `smb:` without one.
+`Unchanged.test_same_calls_as_before` builds `handler_smb.c` as it was at
+`d31d4a7` and as it is now and compares every open, read, close, `devctl`
+(name, command, bytes) and message over 900 seeded random sessions spread
+over the three cases (neither, `SB.` name only, PS1 target only); they are
+identical, and more than 150 of the sessions reach a full connect.
+`Handler.test_an_sb_name_and_a_ps1_target_are_both_needed` says the same
+without needing the old revision: 300 seeded file sets give the same calls
+in the three cases, and more than 150 of them give different calls on an
+`SB.` launch of a PS1 game.
+
+Module loads that happen before a target is dispatched (the quickboot
+configuration file's own device, the all-devices probe) are in the "no PS1
+target" case and so use launcHER's own rules, as before this work.
 
 ## Copied as it is
 
@@ -263,12 +284,13 @@ sessions reach a full connect.
 - The post-reset sequence is launcHER's: `init.c` calls
   `launcher_smb_reset` and then `launcher_smb_connect` again each time it
   loads the module list, so both files are read and parsed again.
-- A launch whose VCD is on `smb:` but whose ELF name has no `SB.` keeps
-  launcHER's own parser (the switch is the `SB.` flag alone).
+- A launch whose VCD is on `smb:` but whose name has no `SB.` keeps
+  launcHER's own parser.
 
 ## Evidence
 
-`tools/test_pops_smb_config.py` (in CI), 36 tests; 23 need no inputs.
+`tools/test_pops_smb_config.py` (in CI), 37 tests; 24 need no inputs (2 of
+those need revision `d31d4a7` in the checkout).
 `tools/trace_original_pops_smb_config.py` runs the original's blocks.
 
 The texts: 552 for `IPCONFIG.DAT` (52 fixed, 500 seeded random; 545
@@ -308,8 +330,10 @@ own parser accepts 69 (a text of 1024 bytes or more counted as refused, as
 its reader does); 67 are accepted by both, and for 47 of those the server,
 port, share, user and password are the same.
 
-Mutation check, done once by hand: changing the port search from 17 to 16
-bytes makes both the Native and the Original comparison fail.
+Mutation checks, each done once by hand: changing the port search from 17
+to 16 bytes makes both the Native and the Original comparison fail; dropping
+the PS1-target half of the switch makes the two Unchanged tests and
+`Handler.test_an_sb_name_and_a_ps1_target_are_both_needed` fail.
 
 ## Not measured
 

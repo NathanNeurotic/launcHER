@@ -403,9 +403,13 @@ def candidates(name):
 
 
 def session(lib, files, sb, steps=("tcpip", "connect"), results=(), chunk=0, read_error=0,
-            close_error=0):
-    """Run handler_smb.c entry points; returns (trace lines, tcpip bytes or None)."""
+            close_error=0, pops=None):
+    """Run handler_smb.c entry points; returns (trace lines, tcpip bytes or None).
+    `sb` is the SB. name flag, `pops` whether the target is a PS1 disc image
+    (the same as `sb` unless given)."""
     lib.host_reset()
+    if hasattr(lib, "launcher_smb_set_pops_target"):
+        lib.launcher_smb_set_pops_target(sb if pops is None else pops)
     for name, data in files.items():
         assert lib.host_add_file(name.encode(), bytes(data), len(data)) >= 0
     lib.host_set_sb(sb)
@@ -719,6 +723,25 @@ class Handler(unittest.TestCase):
                 self.assertEqual(trace[-1], "tcpip NULL" if step == "tcpip" else "connect -5")
                 self.assertFalse(devctls(trace))
 
+    def test_an_sb_name_and_a_ps1_target_are_both_needed(self):
+        """An SB. name on something that is not a PS1 launch, or a PS1 launch
+        from the share without an SB. name: the launcher's own rules, call
+        for call what it does with neither."""
+        ips, smbs = ip_texts(), smb_texts()
+        rng = random.Random(0x53422E21)
+        differ = 0
+        for n in range(300):
+            files = {"mc0:/POPSTARTER/IPCONFIG.DAT": rng.choice([self.GOOD_IP, rng.choice(ips)]),
+                     rng.choice(["mc0:/POPSTARTER/SMBCONFIG.DAT", "mc1:/POPS/smbconfig.dat"]):
+                         rng.choice([self.GOOD_SMB, rng.choice(smbs)[:1500]])}
+            if n % 5 == 0:
+                del files["mc0:/POPSTARTER/IPCONFIG.DAT"]
+            plain = session(HANDLER, files, 0, pops=0)
+            self.assertEqual(session(HANDLER, files, 1, pops=0), plain, files)
+            self.assertEqual(session(HANDLER, files, 0, pops=1), plain, files)
+            differ += session(HANDLER, files, 1, pops=1) != plain
+        self.assertGreater(differ, 150)
+
     def test_other_smb_launches_keep_the_launchers_parser(self):
         """Not an SB. launch: the launcher's own rules and places, unchanged."""
         files = {"mc0:/POPSTARTER/SMBCONFIG.DAT": b"my-nas.local SHARE\nuser\npass\n",  # the original accepts this
@@ -784,20 +807,25 @@ class Unchanged(unittest.TestCase):
                   "chunk": rng.choice([0, 0, 1, 16, 1000]),
                   "results": rng.choice([(), (), (), [(LOGON, -13)], [(OPENSHARE, -5)]]),
                   "read_error": rng.choice([0] * 9 + [-5]), "close_error": rng.choice([0] * 9 + [-5])}
-            now = session(HANDLER, files, 0, **kw)
-            before = session(BASE, files, 0, **kw)
+            # Not an SB. launch of a PS1 game: no SB. name, or no PS1 target.
+            sb, pops = rng.choice([(0, 0), (0, 0), (1, 0), (0, 1)])
+            now = session(HANDLER, files, sb, pops=pops, **kw)
+            before = session(BASE, files, sb, **kw)
             self.assertEqual(now, before, (files, kw))
             runs += 1
             connected += "connect 0" in now[0]
         self.assertGreater(connected, 150)
         self.assertEqual(runs, 900)
 
-    def test_the_sb_flag_is_the_only_switch(self):
-        """The same files give different calls on an SB. launch, so the
-        comparison above is not vacuous."""
+    def test_the_switch_is_an_sb_name_on_a_ps1_launch(self):
+        """The same files give different calls on an SB. launch of a PS1
+        game, so the comparison above is not vacuous."""
         files = {"mc0:/POPSTARTER/SMBCONFIG.DAT": b"my-nas.local SHARE\nuser\npass\n"}
-        self.assertEqual(session(BASE, files, 1), session(BASE, files, 0))
-        self.assertNotEqual(session(HANDLER, files, 1), session(HANDLER, files, 0))
+        before = session(BASE, files, 0)
+        self.assertEqual(session(BASE, files, 1), before)
+        for sb, pops in ((0, 0), (1, 0), (0, 1)):
+            self.assertEqual(session(HANDLER, files, sb, pops=pops), before, (sb, pops))
+        self.assertNotEqual(session(HANDLER, files, 1, pops=1), before)
 
 
 def _image_text(addr):
@@ -1047,13 +1075,28 @@ class Source(unittest.TestCase):
 
     def test_sb_launches_use_the_originals_rules(self):
         tcpip = self.body("char *initTCPIPArguments(uint32_t *length) {")
-        self.assertLess(tcpip.index("if (pops_get_active_sb_launch())\n    return sb_tcpip_arguments(length);"),
+        self.assertLess(tcpip.index("if (sb_rules())\n    return sb_tcpip_arguments(length);"),
                         tcpip.index('read_config("IPCONFIG.DAT"'))
         connect = self.body("int launcher_smb_connect(void) {")
-        gate = connect.index("if (pops_get_active_sb_launch())\n    return sb_connect();")
+        gate = connect.index("if (sb_rules())\n    return sb_connect();")
         self.assertLess(connect.index("if (connected) return 0;"), gate)
         self.assertLess(gate, connect.index('read_config("SMBCONFIG.DAT"'))
-        self.assertEqual(self.src.count("pops_get_active_sb_launch()"), 2)
+        # The switch: a PS1 target and an SB. name, both.
+        self.assertIn("static int sb_rules(void) { return popsTarget && pops_get_active_sb_launch(); }",
+                      self.src)
+        self.assertEqual(self.src.count("pops_get_active_sb_launch()"), 1)
+        self.assertEqual(self.src.count("sb_rules()"), 2)
+        self.assertEqual(self.src.count("popsTarget"), 3)
+        # Whether the target is a PS1 disc image is decided in one place,
+        # where a launch from the share is dispatched.
+        common = (ROOT / "launcher/src/common.c").read_text()
+        self.assertEqual(common.count("launcher_smb_set_pops_target("), 1)
+        self.assertIn("  case Device_SMB:\n#ifdef SMB\n"
+                      "    /* Only a PS1 launch may read the network files by POPStarter's rules. */\n"
+                      "    launcher_smb_set_pops_target(isPopsTarget(argv[0]));\n#endif\n"
+                      "    ret = handleGenericPath(Device_SMB, argc, argv);", common)
+        for other in ("main.c", "init.c", "handler_pops.c", "handler_quickboot.c"):
+            self.assertNotIn("launcher_smb_set_pops_target", (ROOT / "launcher/src" / other).read_text())
         self.assertIn("pops_parse_ipconfig(text, n, &size)", self.body("static char *sb_tcpip_arguments("))
         sb = self.body("static int sb_connect(void) {")
         self.assertIn("pops_parse_smbconfig(text, result, (unsigned char *)&logon, (unsigned char *)&share)", sb)
