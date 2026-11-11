@@ -396,6 +396,7 @@ add_custom_command(
           "${POPS_RESIDENT_RECOMPILER}"
           "${CMAKE_SOURCE_DIR}/common/include/pops_progressive.h"
           "${CMAKE_SOURCE_DIR}/common/include/pops_resident.h"
+          "${CMAKE_SOURCE_DIR}/common/include/pops_external.h"
           "${CMAKE_SOURCE_DIR}/common/include/pops_resident_abi.h"
           "${CMAKE_SOURCE_DIR}/common/include/pops_config.h"
   COMMENT "Building POPS resident image"

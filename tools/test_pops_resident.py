@@ -75,6 +75,9 @@ class Header(c.Structure):
         ("guard_entry", c.c_uint32 * 9),
         ("recompiler_entry", c.c_uint32),
         ("recompiler_emit", c.c_uint32 * 4),
+        ("gp1_chain_entry", c.c_uint32),
+        ("gp1_resume_a", c.c_uint32),
+        ("gp1_resume_b", c.c_uint32),
     ]
 
 
@@ -827,13 +830,14 @@ class HookGp1(unittest.TestCase):
             self.assertEqual(struct.unpack_from("<I", data, 0x1000 + addr - 0x200000)[0], word, hex(addr))
 
 
-def image(file_size=0xC0, image_size=0x2000, entry=BASE + 0x70, config=BASE + 0xC0, magic=0x5352484C):
+def image(file_size=0xD0, image_size=0x2000, entry=BASE + 0x80, config=BASE + 0xD0, magic=0x5352484C):
     img = bytearray(file_size)
-    struct.pack_into("<IHHIIIIIIIIIIII9II4I", img, 0, magic, 15, 112, file_size, image_size, entry, config,
-                     BASE + 0x74, BASE + 0x78, BASE + 0x7C, BASE + 0x80, BASE + 0x84, BASE + 0x88,
-                     BASE + 0x8C, BASE + 0x70, *[BASE + 0x90 + 4 * i for i in range(9)],
-                     BASE + 0xB4, BASE + 0xB8, BASE + 0xBC, BASE + 0x70, BASE + 0x74)
-    img[0x70:0x74] = b"\x08\x00\xe0\x03"
+    struct.pack_into("<IHHIIIIIIIIIIII9II4I3I", img, 0, magic, 16, 124, file_size, image_size, entry, config,
+                     BASE + 0x84, BASE + 0x88, BASE + 0x8C, BASE + 0x90, BASE + 0x94, BASE + 0x98,
+                     BASE + 0x9C, BASE + 0x80, *[BASE + 0xA0 + 4 * i for i in range(9)],
+                     BASE + 0xC4, BASE + 0xC8, BASE + 0xCC, BASE + 0x80, BASE + 0x84,
+                     BASE + 0x88, BASE + 0x8C, BASE + 0x90)
+    img[0x80:0x84] = b"\x08\x00\xe0\x03"
     return img
 
 
@@ -846,37 +850,41 @@ class Install(unittest.TestCase):
     def test_valid_image(self):
         res, h = self.check(image())
         self.assertEqual(res, 0)
-        self.assertEqual((h.file_size, h.image_size, h.vblank_entry), (0xC0, 0x2000, BASE + 0x70))
-        self.assertEqual(list(h.guard_entry), [BASE + 0x90 + 4 * i for i in range(9)])
+        self.assertEqual((h.file_size, h.image_size, h.vblank_entry), (0xD0, 0x2000, BASE + 0x80))
+        self.assertEqual(list(h.guard_entry), [BASE + 0xA0 + 4 * i for i in range(9)])
         self.assertEqual((h.recompiler_entry, list(h.recompiler_emit)),
-                         (BASE + 0xB4, [BASE + 0xB8, BASE + 0xBC, BASE + 0x70, BASE + 0x74]))
+                         (BASE + 0xC4, [BASE + 0xC8, BASE + 0xCC, BASE + 0x80, BASE + 0x84]))
+        self.assertEqual((h.gp1_chain_entry, h.gp1_resume_a, h.gp1_resume_b),
+                         (BASE + 0x88, BASE + 0x8C, BASE + 0x90))
 
     def test_rejects_bad_images(self):
         self.assertEqual(self.check(image(magic=0))[0], -errno.EINVAL)
         self.assertEqual(self.check(image(image_size=0xB0))[0], -errno.ERANGE)
         self.assertEqual(self.check(image(image_size=LIMIT - BASE + 4))[0], -errno.ERANGE)
-        self.assertEqual(self.check(image(entry=BASE + 0xC0))[0], -errno.ERANGE)
-        self.assertEqual(self.check(image(entry=BASE + 0x72))[0], -errno.ERANGE)
+        self.assertEqual(self.check(image(entry=BASE + 0xD0))[0], -errno.ERANGE)
+        self.assertEqual(self.check(image(entry=BASE + 0x82))[0], -errno.ERANGE)
         self.assertEqual(self.check(image(entry=BASE + 0x10))[0], -errno.ERANGE)
         self.assertEqual(self.check(image(config=BASE + 0x2000 - 8))[0], -errno.ERANGE)
-        self.assertEqual(self.check(image(config=BASE + 0xC4))[0], -errno.ERANGE)
+        self.assertEqual(self.check(image(config=BASE + 0xD4))[0], -errno.ERANGE)
         # 16-byte aligned: POPS DMAs the disc names straight from the slots.
-        self.assertEqual(self.check(image(config=BASE + 0xC8))[0], -errno.ERANGE)
-        # Every entry, the nine guard stubs and the recompiler code included,
-        # must be code in the image (after the header).
-        for offset in range(24, 112, 4):
-            for bad in (BASE + len(img_ok := image()), BASE + 0x6C, BASE + 0x72):
+        self.assertEqual(self.check(image(config=BASE + 0xD8))[0], -errno.ERANGE)
+        # Every entry, the nine guard stubs, the recompiler code and the
+        # TROJAN slot chain's three included, must be code in the image
+        # (after the header).
+        for offset in range(24, 124, 4):
+            for bad in (BASE + len(img_ok := image()), BASE + 0x78, BASE + 0x82):
                 img = image()
                 struct.pack_into('<I', img, offset, bad)
                 self.assertEqual(self.check(img)[0], -errno.ERANGE, (offset, hex(bad)))
             self.assertEqual(self.check(img_ok)[0], 0)
-        for version in (13, 14, 16):
+        for version in (14, 15, 17):
             img = image()
             struct.pack_into('<H', img, 4, version)
             self.assertEqual(self.check(img)[0], -errno.EINVAL, version)
         img = image()
-        struct.pack_into('<H', img, 6, 56)
-        self.assertEqual(self.check(img)[0], -errno.EINVAL)
+        for size in (56, 112):
+            struct.pack_into('<H', img, 6, size)
+            self.assertEqual(self.check(img)[0], -errno.EINVAL)
         img = image()
         buf = (c.c_uint8 * len(img)).from_buffer(img)
         self.assertEqual(L.pops_resident_check_image(buf, len(img) - 4, None), -errno.ERANGE)
@@ -890,10 +898,10 @@ class Install(unittest.TestCase):
         buf = (c.c_uint8 * len(img)).from_buffer(img)
         self.assertEqual(L.pops_resident_install(dest, 0x3000, BASE, buf, len(img), c.byref(cfg)), 0)
         raw = bytes(dest)
-        self.assertEqual(raw[:0xC0], bytes(img))
-        got = ResidentConfig.from_buffer_copy(raw[0xC0:0xC0 + c.sizeof(ResidentConfig)])
+        self.assertEqual(raw[:0xD0], bytes(img))
+        got = ResidentConfig.from_buffer_copy(raw[0xD0:0xD0 + c.sizeof(ResidentConfig)])
         self.assertEqual((got.flags, got.cheat_count, got.cheats[0].value), (1, 1, 0x7F))
-        end = 0xC0 + c.sizeof(ResidentConfig)
+        end = 0xD0 + c.sizeof(ResidentConfig)
         self.assertEqual(raw[end:0x2000], bytes(0x2000 - end))
         self.assertEqual(raw[0x2000:], b"\xcc" * (0x3000 - 0x2000))
 
@@ -1805,9 +1813,11 @@ class Hotkeys(unittest.TestCase):
 
 class Layout(unittest.TestCase):
     def test_config_fits_in_the_reserved_range(self):
-        self.assertEqual(c.sizeof(Header), 112)
+        self.assertEqual(c.sizeof(Header), 124)
         self.assertEqual(Header.guard_entry.offset, 56)
         self.assertEqual((Header.recompiler_entry.offset, Header.recompiler_emit.offset), (92, 96))
+        self.assertEqual((Header.gp1_chain_entry.offset, Header.gp1_resume_a.offset,
+                          Header.gp1_resume_b.offset), (112, 116, 120))
         self.assertEqual(ResidentConfig.cheats.offset, 32)
         self.assertLess(c.sizeof(ResidentConfig) + 0x1000, LIMIT - BASE)
 

@@ -475,6 +475,175 @@ int pops_fix_context_rom_loaded(PopsFixContext *context, const void *staged_core
   return 0;
 }
 
+/* The sites the session tracks, as they are after an explicit payload write. */
+static void fix_context_refresh(PopsFixContext *context, const uint8_t *bytes) {
+  for (unsigned i = 0; i < POPS_COMPAT_SITE_COUNT; ++i)
+    context->expected[i] = compat_read(bytes, &compat_patches[i]);
+  for (unsigned i = 0; i < POPS_PATCH_PAL_SITE_COUNT; ++i)
+    context->video_expected[i] = fix_pal_read(bytes, i);
+  if (context->resident_entry)
+    for (unsigned i = 0; i < POPS_PATCH_RESIDENT_SITE_COUNT; ++i)
+      context->resident_expected[i] = fix_resident_read(bytes, i);
+}
+
+static int fix_in_core(uint32_t address, uint32_t length, size_t core_size) {
+  return address >= POPS_CORE_BASE_ADDR && address - POPS_CORE_BASE_ADDR <= core_size &&
+         length <= core_size - (address - POPS_CORE_BASE_ADDR);
+}
+
+static int fix_ranges_meet(uint32_t address, uint32_t length, uint32_t base, uint32_t limit) {
+  return length && address < limit && (uint64_t)address + length > base;
+}
+
+/* One of POPStarter's ten TROJAN slots, the first word of a pair: its word
+ * index in the set's copy of the two runs, plus 1; 0 for any other address. */
+static unsigned fix_slot_hook(uint32_t hook) {
+  for (unsigned i = 0; i < 2; ++i) {
+    uint32_t base = i ? POPS_TROJAN_SLOTS_B : POPS_TROJAN_SLOTS_A;
+    if (hook >= base && hook - base < POPS_TROJAN_SLOTS_HOOKS && !((hook - base) & 7))
+      return 1 + i * (POPS_TROJAN_SLOTS_HOOKS / 4) + (hook - base) / 4;
+  }
+  return 0;
+}
+
+/* pops_external.h cannot see these headers; the numbers must agree. */
+_Static_assert(POPS_TROJAN_BUILTIN_BASE == POPS_BUILTIN_FIX_ADDR &&
+               POPS_TROJAN_ARENA_BASE == POPS_BUILTIN_FIX_LIMIT &&
+               POPS_TROJAN_OWNED_BASE == POPS_RESIDENT_BASE &&
+               POPS_RESIDENT_LIMIT == POPS_BUILTIN_BREAK_ADDR &&
+               POPS_TROJAN_OWNED_LIMIT == POPS_BUILTIN_BREAK_LIMIT,
+               "TROJAN arena constants");
+
+int pops_fix_stage_trojan(PopsFixContext *context, PopsTrojanSet *set, void *staged_core,
+                          size_t core_size, const void *file, size_t file_size,
+                          unsigned slot) {
+  PopsTrojanInfo info;
+  uint8_t *bytes = staged_core;
+  uint8_t reason = POPS_TROJAN_HOSTED;
+  if (!context || !bytes || !file || slot > 9 ||
+      fix_alias(context, sizeof(*context), bytes, core_size) ||
+      fix_alias(context, sizeof(*context), file, file_size) ||
+      fix_alias(file, file_size, bytes, core_size) ||
+      (set && (fix_alias(set, sizeof(*set), bytes, core_size) ||
+               fix_alias(set, sizeof(*set), file, file_size) ||
+               (set->hold && (fix_alias(set->hold, set->hold_size, bytes, core_size) ||
+                              fix_alias(set->hold, set->hold_size, file, file_size))) ||
+               (set->work && (fix_alias(set->work, set->work_size, bytes, core_size) ||
+                              fix_alias(set->work, set->work_size, file, file_size) ||
+                              (set->hold && fix_alias(set->work, set->work_size, set->hold,
+                                                      set->hold_size)))))))
+    return -EINVAL;
+  /* POPStarter's verdict first: nothing of an Invalid or outdated file is
+   * looked at further, and neither stops the files after it. */
+  int verdict = pops_trojan_verdict(file, file_size, slot, set ? set->fingerprint_id : 0, &info);
+  if (verdict < 0)
+    return -EINVAL;
+  if (verdict == POPS_TROJAN_INVALID)
+    return POPS_FIX_SKIP_INVALID;
+  if (verdict == POPS_TROJAN_OUTDATED)
+    return POPS_FIX_SKIP_OUTDATED;
+  /* The original copies the payload and writes the hook wherever the header
+   * says. launcHER hosts a payload that lies inside the POPS core image or
+   * in the arena above it, is entered inside itself, hooks a core word
+   * outside itself, and names nothing of POPStarter's that launcHER lacks. */
+  const uint8_t *payload = (const uint8_t *)file + POPS_CONTAINER_HEADER_SIZE;
+  uint32_t hook_bytes = (uint32_t)info.hook_words * 4;
+  int in_core = 0;
+  unsigned slot_hook = 0;
+  if ((info.load | info.entry | info.hook | info.size) & 3)
+    reason = POPS_TROJAN_NO_UNALIGNED;
+  else if (info.entry < info.load || info.entry - info.load >= info.size)
+    reason = POPS_TROJAN_NO_ENTRY;
+  else if (fix_in_core(info.load, info.size, core_size))
+    in_core = 1;
+  else if (!set || !set->hold || !pops_trojan_in_arena(info.load, info.size))
+    reason = POPS_TROJAN_NO_RANGE;
+  if (reason == POPS_TROJAN_HOSTED && in_core &&
+      (fix_ranges_meet(info.load, info.size, POPS_TROJAN_BLOCK1_BASE, POPS_TROJAN_BLOCK1_LIMIT) ||
+       fix_ranges_meet(info.load, info.size, POPS_TROJAN_BLOCK2_BASE, POPS_TROJAN_BLOCK2_LIMIT)))
+    reason = POPS_TROJAN_NO_RANGE;
+  if (reason == POPS_TROJAN_HOSTED) {
+    if (!fix_in_core(info.hook, hook_bytes, core_size) ||
+        fix_ranges_meet(info.hook, hook_bytes, info.load, info.load + info.size))
+      reason = POPS_TROJAN_NO_HOOK;
+    else if (fix_ranges_meet(info.hook, hook_bytes, POPS_TROJAN_BLOCK1_BASE,
+                             POPS_TROJAN_BLOCK1_LIMIT) ||
+             fix_ranges_meet(info.hook, hook_bytes, POPS_TROJAN_BLOCK2_BASE,
+                             POPS_TROJAN_BLOCK2_LIMIT)) {
+      /* POPStarter's own code is there, and none of launcHER's: a word
+       * written there would never run. Only its ten slots are hooks. */
+      slot_hook = fix_slot_hook(info.hook);
+      if (!slot_hook)
+        reason = POPS_TROJAN_NO_HOOK;
+    }
+  }
+  if (reason == POPS_TROJAN_HOSTED) {
+    /* What the payload's code names. No work memory: nothing is hosted. */
+    uint32_t refs = 0;
+    if (!set || !set->work ||
+        pops_trojan_scan(payload, info.size, info.load, info.entry, set->work,
+                         set->work_size, &refs))
+      reason = POPS_TROJAN_NO_SPACE;
+    else {
+      set->refs = refs;
+      if (refs & POPS_TROJAN_REF_480P)
+        reason = POPS_TROJAN_NO_480P;
+      else if (refs & POPS_TROJAN_REF_BLOCK2)
+        reason = POPS_TROJAN_NO_BLOCK2;
+      else if (refs & POPS_TROJAN_REF_BUILTIN)
+        reason = POPS_TROJAN_NO_BUILTIN;
+      else if (refs & POPS_TROJAN_REF_OWNED)
+        reason = POPS_TROJAN_NO_OWNED;
+      else if (refs & POPS_TROJAN_REF_BLOCK1)
+        reason = POPS_TROJAN_NO_BLOCK1;
+      else if (refs & POPS_TROJAN_REF_MAIN)
+        reason = POPS_TROJAN_NO_MAIN;
+      else if ((slot_hook || (refs & POPS_TROJAN_REF_SLOT)) && !set->chain_offered)
+        reason = POPS_TROJAN_NO_SLOT;
+      /* Format 2's zero words after the jump may cover the next slot, as
+       * in the original, but not the two words after the fifth. */
+      else if (slot_hook && (slot_hook - 1) % (POPS_TROJAN_SLOTS_HOOKS / 4) + info.hook_words >
+                                POPS_TROJAN_SLOTS_HOOKS / 4)
+        reason = POPS_TROJAN_NO_SLOT;
+      else if (slot_hook || (refs & POPS_TROJAN_REF_SLOT))
+        set->chain = 1;
+    }
+  }
+  if (reason == POPS_TROJAN_HOSTED && !in_core &&
+      (set->payload_count >= POPS_TROJAN_MAX_PAYLOADS || set->hold_used > set->hold_size ||
+       info.size > set->hold_size - set->hold_used))
+    reason = POPS_TROJAN_NO_SPACE;
+  if (reason != POPS_TROJAN_HOSTED) {
+    if (set)
+      set->reason = reason;
+    return POPS_FIX_SKIP_UNHOSTED;
+  }
+  int result = compat_context_check(context, bytes, core_size);
+  if (result)
+    return result;
+  /* Every check is done. The hook words have no profile of their own: the
+   * session's tracked sites are the guard, as before. A payload above the
+   * image waits in the holding memory; pops_trojan_copy_out places it. */
+  if (in_core) {
+    memcpy(bytes + (info.load - POPS_CORE_BASE_ADDR), payload, info.size);
+  } else {
+    PopsTrojanPayload *held = &set->payload[set->payload_count++];
+    held->address = info.load;
+    held->size = info.size;
+    held->hold = set->hold_used;
+    memcpy(set->hold + set->hold_used, payload, info.size);
+    set->hold_used += info.size;
+  }
+  for (unsigned i = 0; i < info.hook_words; ++i) {
+    if (slot_hook)
+      (&set->slot_word[0][0])[slot_hook - 1 + i] = info.hook_word[i];
+    else
+      write_u32(bytes, core_size, info.hook + 4 * i, info.hook_word[i]);
+  }
+  fix_context_refresh(context, bytes);
+  return 0;
+}
+
 int pops_fix_stage(PopsFixContext *context, void *staged_core, size_t core_size,
                     const void *file, size_t file_size, unsigned slot,
                     int expected_trojan) {
@@ -489,7 +658,8 @@ int pops_fix_stage_rom(PopsFixContext *context, void *staged_core, size_t core_s
   int mode6_skipped = 0;
   PopsPatchOptions options = {{0}, POPS_PATCH_VIDEO_NONE};
   uint8_t *bytes = staged_core;
-  uint32_t hook[3];
+  if (expected_trojan)
+    return -EINVAL;
   if (!context || !bytes || !file || slot > 9 ||
       fix_alias(context, sizeof(*context), bytes, core_size) ||
       fix_alias(context, sizeof(*context), file, file_size) ||
@@ -499,26 +669,23 @@ int pops_fix_stage_rom(PopsFixContext *context, void *staged_core, size_t core_s
                                     core_size, &plan);
   if (result)
     return result;
-  if (plan.container.slot != slot ||
-      (plan.container.kind == POPS_CONTAINER_TROJAN) != !!expected_trojan)
+  if (plan.container.slot != slot || plan.container.kind == POPS_CONTAINER_TROJAN)
     return -EINVAL;
-  if (!expected_trojan) {
-    /* Only the original PATCH format-1 record is grounded by this loader. */
-    if (plan.container.flags != 0x00010001)
+  /* Only the original PATCH format-1 record is grounded by this loader. */
+  if (plan.container.flags != 0x00010001)
+    return -ENOTSUP;
+  result = pops_patch_options(&plan.container, &options);
+  if (result)
+    return result;
+  /* Actions 6/7 require an explicitly bound owned image entry. */
+  if (options.video == POPS_PATCH_VIDEO_CONTROL6 && !context->resident_entry)
+    return -ENOTSUP;
+  if (options.video == POPS_PATCH_VIDEO_PAL &&
+      core_size < (size_t)(0x00502770 - POPS_CORE_BASE_ADDR + 4))
+    return -ERANGE;
+  for (unsigned i = 0; i < 4; ++i)
+    if (options.modes[i] > 7)
       return -ENOTSUP;
-    result = pops_patch_options(&plan.container, &options);
-    if (result)
-      return result;
-    /* Actions 6/7 require an explicitly bound owned image entry. */
-    if (options.video == POPS_PATCH_VIDEO_CONTROL6 && !context->resident_entry)
-      return -ENOTSUP;
-    if (options.video == POPS_PATCH_VIDEO_PAL &&
-        core_size < (size_t)(0x00502770 - POPS_CORE_BASE_ADDR + 4))
-      return -ERANGE;
-    for (unsigned i = 0; i < 4; ++i)
-      if (options.modes[i] > 7)
-        return -ENOTSUP;
-  }
   result = compat_context_check(context, bytes, core_size);
   if (result)
     return result;
@@ -541,16 +708,11 @@ int pops_fix_stage_rom(PopsFixContext *context, void *staged_core, size_t core_s
     if (delay != 0x3c031200)
       return -EILSEQ;
   }
-  /* All bounds/options/guards precede the first payload write. Trojan hooks
-   * retain the existing snapshot guards; they are not independent pristine
-   * profiles. Explicit payload changes become the next session's expectation. */
+  /* All bounds/options/guards precede the first payload write. Explicit
+   * payload changes become the next session's expectation. */
   if (plan.container.kind != POPS_CONTAINER_CONFIG) {
-    size_t count = plan.hook_size > 8 ? 3 : 2;
-    if (expected_trojan)
-      memcpy(hook, bytes + plan.hook_offset, count * sizeof(hook[0]));
     result = pops_container_stage(file, file_size, POPS_CORE_BASE_ADDR, bytes,
-                                    core_size, expected_trojan ? hook : NULL,
-                                    expected_trojan ? count : 0);
+                                    core_size, NULL, 0);
     if (result)
       return result;
   }
@@ -599,13 +761,7 @@ int pops_fix_stage_rom(PopsFixContext *context, void *staged_core, size_t core_s
     }
     break;
   }
-  for (unsigned i = 0; i < POPS_COMPAT_SITE_COUNT; ++i)
-    context->expected[i] = compat_read(bytes, &compat_patches[i]);
-  for (unsigned i = 0; i < POPS_PATCH_PAL_SITE_COUNT; ++i)
-    context->video_expected[i] = fix_pal_read(bytes, i);
-  if (context->resident_entry)
-    for (unsigned i = 0; i < POPS_PATCH_RESIDENT_SITE_COUNT; ++i)
-      context->resident_expected[i] = fix_resident_read(bytes, i);
+  fix_context_refresh(context, bytes);
   return mode6_skipped ? POPS_MODE6_SKIPPED : 0;
 }
 

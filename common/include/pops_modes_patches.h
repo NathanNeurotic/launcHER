@@ -2,6 +2,7 @@
 #define POPS_MODES_PATCHES_H
 
 #include "pops_config.h"
+#include "pops_external.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -112,7 +113,29 @@ int pops_fix_require_progressive(const PopsFixContext *context, const void *stag
  * licence can use UNKNOWN here: this function never changes region letters. */
 int pops_fix_finalize_video(PopsFixContext *context, void *staged_core,
                              size_t core_size, int region, uint8_t video_mode);
-/* expected_trojan selects TROJAN versus PATCH; slot must match the filename.
+/* A TROJAN_n.BIN the way POPStarter treats it: the files it calls Invalid or
+ * Skipped (outdated) are skipped, never an error, and so is a file it would
+ * apply but launcHER cannot host (set->reason says why). Returns 0 when the
+ * file was applied, one of these when it was skipped without any write, and
+ * a negative errno only for a bad call or a staged core that no longer
+ * matches the session (the launch must then be discarded). A payload inside
+ * the POPS core is copied into the staged core; one in the arena above the
+ * image is copied into the set's holding memory and recorded, for
+ * pops_trojan_copy_out at handoff. A hook on one of POPStarter's ten slots
+ * is written to the set's copy of the slots (set->slot_word), not to the
+ * core, and only when the launch offers them (set->chain_offered); the
+ * launcher installs the copy with pops_resident_hook_slot_chain. With a
+ * null `set` only the verdict is given: a file POPStarter would apply is
+ * reported as not hosted. */
+#define POPS_FIX_SKIP_INVALID  1 /* POPStarter: "Invalid" */
+#define POPS_FIX_SKIP_OUTDATED 2 /* POPStarter: "Skipped (outdated)" */
+#define POPS_FIX_SKIP_UNHOSTED 3 /* POPStarter applies it; launcHER does not */
+int pops_fix_stage_trojan(PopsFixContext *context, PopsTrojanSet *set, void *staged_core,
+                          size_t core_size, const void *file, size_t file_size,
+                          unsigned slot);
+
+/* A PATCH_n.BIN; slot must match the filename. expected_trojan must be 0: a
+ * TROJAN_n.BIN goes through pops_fix_stage_trojan.
  * PATCH data precedes its four mode bytes, in recorded order. Video actions
  * (PAL, disable-auto) and mode 6 are supported. Video actions 6/7 still need
  * verified resident/session dispatch; they and mode 8 fail before writes.

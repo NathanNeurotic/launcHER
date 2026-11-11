@@ -316,15 +316,22 @@ void pops_resident_d2ls(uint8_t *pad, uint32_t bytes) {
  * (0x2327d0..0x2327f0) do nothing in r13 and have no counterpart here. */
 #define HOTKEY_BUTTONS(mem) (*(volatile uint16_t *)((mem)->pad + 2))
 
-void pops_resident_hotkeys(PopsResidentConfig *cfg, const PopsHotkeyMemory *mem) {
+void pops_resident_hotkeys_emode(const PopsHotkeyMemory *mem) {
   volatile uint8_t *emode = (volatile uint8_t *)mem->emode;
-  volatile uint16_t *lid = (volatile uint16_t *)mem->lid;
   uint16_t buttons = HOTKEY_BUTTONS(mem);
   if (buttons == POPS_COMBO_EMODE_0)
     *emode = 0;
   else if (buttons == POPS_COMBO_EMODE_1)
     *emode = 1;
+}
 
+void pops_resident_hotkeys(PopsResidentConfig *cfg, const PopsHotkeyMemory *mem) {
+  pops_resident_hotkeys_emode(mem);
+  pops_resident_hotkeys_rest(cfg, mem);
+}
+
+void pops_resident_hotkeys_rest(PopsResidentConfig *cfg, const PopsHotkeyMemory *mem) {
+  volatile uint16_t *lid = (volatile uint16_t *)mem->lid;
   if (HOTKEY_BUTTONS(mem) == POPS_COMBO_LID_OPEN)
     *lid = POPS_LID_OPEN;
   *(volatile uint8_t *)(mem->pad + POPS_PAD_STATE_FLAG) = 1;
@@ -434,6 +441,11 @@ void pops_resident_pad_read_done(int32_t bytes);
 int pops_resident_vblank(int cause);
 void pops_resident_gp1(void);
 void pops_resident_gp1_work(void);
+void pops_resident_gp1_chain(void);
+void pops_resident_gp1_resume_a(void);
+void pops_resident_gp1_resume_b(void);
+void pops_resident_chain_b(void);
+void pops_resident_chain_c(void);
 void pops_resident_display(void);
 void pops_resident_progressive(void);
 extern char _pops_resident_file_end[];
@@ -603,6 +615,9 @@ const PopsResidentHeader pops_resident_header = {
     (uint32_t)pops_resident_recompiler_addon4_206318,
     (uint32_t)pops_resident_recompiler_addon4_205d1c,
   },
+  (uint32_t)pops_resident_gp1_chain,
+  (uint32_t)pops_resident_gp1_resume_a,
+  (uint32_t)pops_resident_gp1_resume_b,
 };
 
 /* No longer hooked by the launcher: everything it did now runs from the GP1
@@ -699,6 +714,167 @@ void pops_resident_gp1_work(void) {
     *(volatile uint32_t *)POPS_SCRATCHPAD_ADDR = cfg->reset_vector;
   if (cfg->flags & POPS_RES_F_BREAK_CALL)
     ((PopsBuiltinCode)POPS_BUILTIN_BREAK_ADDR)();
+  pops_resident_timings(cfg, 0, POPS_SCRATCHPAD_ADDR);
+  if (cfg->flags & POPS_RES_F_LIBCRYPT2)
+    ((PopsBuiltinCode)cfg->libcrypt2_code)();
+  if (cfg->flags & POPS_RES_F_FIX_CALL)
+    ((PopsBuiltinCode)POPS_BUILTIN_FIX_ADDR)();
+  PopsCheatMemory mem = {base, 0, 0x02000000u, POPS_CHEAT_SPR_ADDR, POPS_CHEAT_PS1SPR_ADDR};
+  pops_resident_frame_mem(cfg, &mem);
+}
+
+/* The GP1 entry for a launch with TROJAN files on POPStarter's slots
+ * (pops_resident_hook_slot_chain). Same work in the same order as
+ * pops_resident_gp1, with the two runs of five slots run where the
+ * original has them, in the POPS core at its addresses: after the emode
+ * checks (0x2327d0) and after the reset check (0x232d08). The pieces
+ * around the slots that leave k0, k1 and ra for a payload to find are the
+ * original's instructions:
+ *   0x239490..0x2394a7  k0 and k1 saved whole (sq), ra = 0x21a640
+ *   0x232790..0x2327cf  the emode checks
+ *   0x232ce8..0x232d07  the reset check, its word read from the
+ *                       configuration ($RESET_WARMBOOT changes it)
+ *   0x2394b0..0x2394cf  k0 and k1 restored (lq), return to the di at 0x21a640
+ * The rest is the C code of pops_resident_gp1_work, in two parts
+ * (pops_resident_chain_b, pops_resident_chain_c: keep the three in step),
+ * called with every caller-saved register, HI and LO kept, so a payload
+ * finds POPS's registers as it does under POPStarter. The breakpoint handler call is
+ * not made here: it is the word in the slot at 0x232d08, as in the
+ * original. ra is kept across the first C call (in the original it is
+ * whatever the slots left); k0 and k1 are not kept across the second
+ * (the original's $SET_TIMINGS and cheat code use them too). */
+uint64_t pops_resident_chain_save[6] __attribute__((aligned(16)));
+uint32_t pops_resident_chain_vector;
+
+__asm__(".set push\n.set noreorder\n.set noat\n.text\n.align 2\n"
+        ".globl pops_resident_gp1_chain\npops_resident_gp1_chain:\n"
+        "lui $31, %hi(pops_resident_chain_save)\n"
+        "sq $26, %lo(pops_resident_chain_save)($31)\n"
+        "sq $27, %lo(pops_resident_chain_save+16)($31)\n"
+        "nop\n"
+        "lui $31, 0x22\n"
+        "addiu $31, $31, -0x59c0\n"
+        "lui $26, 0x50\n"
+        "addiu $27, $0, -0x902\n"
+        "lh $26, 0x7002($26)\n"
+        "beq $26, $27, 1f\n"
+        "nop\n"
+        "addiu $27, $0, -0x602\n"
+        "bne $26, $27, 2f\n"
+        "nop\n"
+        "lui $26, 0x7000\n"
+        "ori $27, $0, 1\n"
+        "sb $27, 0x3390($26)\n"
+        "nop\n"
+        "b 2f\n"
+        "nop\n"
+        "1:\n"
+        "lui $26, 0x7000\n"
+        "sb $0, 0x3390($26)\n"
+        "2:\n"
+        "j 0x002327d0\n"
+        "nop\n"
+        ".globl pops_resident_gp1_resume_a\npops_resident_gp1_resume_a:\n"
+        "lui $26, %hi(pops_resident_chain_save)\n"
+        "sd $31, %lo(pops_resident_chain_save+32)($26)\n"
+        "lui $26, %hi(pops_resident_chain_b)\n"
+        "jal pops_resident_chain_call\n"
+        "addiu $26, $26, %lo(pops_resident_chain_b)\n"
+        "lui $26, %hi(pops_resident_chain_save)\n"
+        "ld $31, %lo(pops_resident_chain_save+32)($26)\n"
+        "lui $26, 0x50\n"
+        "addiu $27, $0, -0x4302\n"
+        "lh $26, 0x7002($26)\n"
+        "bne $26, $27, 3f\n"
+        "nop\n"
+        "lui $26, 0x7000\n"
+        "lui $27, %hi(pops_resident_chain_vector)\n"
+        "lw $27, %lo(pops_resident_chain_vector)($27)\n"
+        "sw $27, 0($26)\n"
+        "3:\n"
+        "j 0x00232d08\n"
+        "nop\n"
+        ".globl pops_resident_gp1_resume_b\npops_resident_gp1_resume_b:\n"
+        "lui $26, %hi(pops_resident_chain_c)\n"
+        "jal pops_resident_chain_call\n"
+        "addiu $26, $26, %lo(pops_resident_chain_c)\n"
+        "lui $31, %hi(pops_resident_chain_save)\n"
+        "lq $26, %lo(pops_resident_chain_save)($31)\n"
+        "lq $27, %lo(pops_resident_chain_save+16)($31)\n"
+        "nop\n"
+        "lui $31, 0x22\n"
+        "addiu $31, $31, -0x59c0\n"
+        "jr $31\n"
+        "nop\n"
+        /* Calls the C function in k0 with POPS's registers kept. */
+        "pops_resident_chain_call:\n"
+        "addiu $sp, $sp, -0xa0\n"
+        "sd $1, 0x00($sp)\n"
+        "sd $2, 0x08($sp)\n"
+        "sd $3, 0x10($sp)\n"
+        "sd $4, 0x18($sp)\n"
+        "sd $5, 0x20($sp)\n"
+        "sd $6, 0x28($sp)\n"
+        "sd $7, 0x30($sp)\n"
+        "sd $8, 0x38($sp)\n"
+        "sd $9, 0x40($sp)\n"
+        "sd $10, 0x48($sp)\n"
+        "sd $11, 0x50($sp)\n"
+        "sd $12, 0x58($sp)\n"
+        "sd $13, 0x60($sp)\n"
+        "sd $14, 0x68($sp)\n"
+        "sd $15, 0x70($sp)\n"
+        "sd $24, 0x78($sp)\n"
+        "sd $25, 0x80($sp)\n"
+        "sd $31, 0x88($sp)\n"
+        "mfhi $8\n"
+        "mflo $9\n"
+        "sd $8, 0x90($sp)\n"
+        "jalr $26\n"
+        "sd $9, 0x98($sp)\n"
+        "ld $8, 0x90($sp)\n"
+        "ld $9, 0x98($sp)\n"
+        "mthi $8\n"
+        "mtlo $9\n"
+        "ld $1, 0x00($sp)\n"
+        "ld $2, 0x08($sp)\n"
+        "ld $3, 0x10($sp)\n"
+        "ld $4, 0x18($sp)\n"
+        "ld $5, 0x20($sp)\n"
+        "ld $6, 0x28($sp)\n"
+        "ld $7, 0x30($sp)\n"
+        "ld $8, 0x38($sp)\n"
+        "ld $9, 0x40($sp)\n"
+        "ld $10, 0x48($sp)\n"
+        "ld $11, 0x50($sp)\n"
+        "ld $12, 0x58($sp)\n"
+        "ld $13, 0x60($sp)\n"
+        "ld $14, 0x68($sp)\n"
+        "ld $15, 0x70($sp)\n"
+        "ld $24, 0x78($sp)\n"
+        "ld $25, 0x80($sp)\n"
+        "ld $31, 0x88($sp)\n"
+        "jr $31\n"
+        "addiu $sp, $sp, 0xa0\n"
+        ".set pop\n");
+
+/* After the first five slots: the rest of the always-live block and the
+ * controller IDs. The reset check that follows is in the entry above. */
+void pops_resident_chain_b(void) {
+  PopsResidentConfig *cfg = &pops_resident_config;
+  PopsHotkeyMemory keys = {POPS_PAD_STATE_ADDR, POPS_EMODE_ADDR, POPS_LID_ADDR,
+                           POPS_SCANLINES_ADDR, POPS_BOOT_PATH_ADDR, POPS_CARD_STATE_ADDR,
+                           (int (*)(const char *))POPS_CD_INIT_ADDR};
+  pops_resident_hotkeys_rest(cfg, &keys);
+  if (cfg->flags & POPS_RES_F_PAD_ID)
+    pops_resident_pad_ids(cfg, (uint8_t *)POPS_PAD_STATE_ADDR);
+  pops_resident_chain_vector = cfg->reset_vector;
+}
+
+/* After the second five: from the $SET_TIMINGS check to the cheat codes. */
+void pops_resident_chain_c(void) {
+  PopsResidentConfig *cfg = &pops_resident_config;
+  uint32_t base = *(volatile uint32_t *)cfg->ram_base_ptr;
   pops_resident_timings(cfg, 0, POPS_SCRATCHPAD_ADDR);
   if (cfg->flags & POPS_RES_F_LIBCRYPT2)
     ((PopsBuiltinCode)cfg->libcrypt2_code)();

@@ -28,6 +28,16 @@ class Context(c.Structure):
                 ('progressive_set', c.c_uint8)]
 
 
+class TrojanSet(c.Structure):
+    _fields_ = [('fingerprint_id', c.c_uint16), ('reason', c.c_uint8),
+                ('payload_count', c.c_uint8), ('refs', c.c_uint32),
+                ('hold', c.c_void_p), ('hold_size', c.c_uint32), ('hold_used', c.c_uint32),
+                ('work', c.c_void_p), ('work_size', c.c_uint32),
+                ('chain_offered', c.c_uint8), ('chain', c.c_uint8),
+                ('slot_word', c.c_uint32 * 10 * 2),
+                ('payload', c.c_uint32 * 3 * 20)]
+
+
 def pristine():
     data = bytearray(SIZE)
     for address, value, width in [(0x210318, 0x8f828228, 4), (0x21032c, 0x1443fffa, 4),
@@ -58,9 +68,12 @@ def patch(slot=1, modes=(), payload=b'', address=0, control=None):
 
 
 def trojan(slot=0, payload=b'ABCD', address=0x220000, hook=0x220100):
+    # Byte 0x20, the first of the name, must be nonzero: POPStarter calls a
+    # nameless file Invalid.
     header = bytearray(64)
     header[:8] = f'TROJAN_{slot}'.encode()
     struct.pack_into('<6I', header, 8, 0, 0x10001, address, address, hook, len(payload))
+    header[32:37] = b'owned'
     return bytes(header) + payload
 
 
@@ -86,8 +99,10 @@ class FixFiles(unittest.TestCase):
 #include <unistd.h>
 #define PATH_MAX 1024
 #define DPRINTF(...) ((void)0)
-#define msg(...) ((void)0)
+static void msg(const char *format, ...) { (void)format; }
 static char host_fix_buffer[0x100000];
+static unsigned char host_work[0x8000];
+#define HOST_SET {.work = host_work, .work_size = sizeof(host_work)}
 static int fail_reads, fail_closes;
 static ssize_t test_read(int fd, void *buffer, size_t size) {
   if (fail_reads) { errno=EIO; return -1; }
@@ -103,20 +118,24 @@ static int test_close(int fd) {
 ''' + functions + '''
 int test_directory(void *core, size_t size, const char *root, const char *title) {
   PopsFixContext state;
-  int result = pops_stage_fix_files(core, size, root, title, 0, 0, 0, 0, 0, NULL, &state);
+  PopsTrojanSet set = HOST_SET;
+  int result = pops_stage_fix_files(core, size, root, title, 0, 0, 0, 0, 0, NULL, &state, &set);
   return !result && state.video_auto_disabled > 1 ? -1000 : result;
 }
 int test_directory_video(void *core, size_t size, const char *root, const char *title,
                            unsigned video_mode) {
   PopsFixContext state;
-  int result = pops_stage_fix_files(core, size, root, title, 0, 0, video_mode, 0, 0, NULL, &state);
+  PopsTrojanSet set = HOST_SET;
+  int result = pops_stage_fix_files(core, size, root, title, 0, 0, video_mode, 0, 0, NULL, &state,
+                                    &set);
   return result ? result : state.video_auto_disabled;
 }
 int test_directory_resident(void *core, size_t size, const char *root, const char *title,
                               unsigned video_mode) {
   PopsFixContext state;
+  PopsTrojanSet set = HOST_SET;
   int result = pops_stage_fix_files(core, size, root, title, 0, 0, video_mode,
-                                    0x143a5d8, 0x32240001, NULL, &state);
+                                    0x143a5d8, 0x32240001, NULL, &state, &set);
   if (!result) result = pops_fix_require_progressive(&state, core, size);
   return result ? result : state.progressive_set;
 }
@@ -142,6 +161,9 @@ void test_io_failures(int reads, int closes) { fail_reads=reads; fail_closes=clo
         cls.lib.pops_fix_require_progressive.argtypes = [c.POINTER(Context), c.c_void_p, c.c_size_t]
         cls.lib.pops_fix_stage.argtypes = [c.POINTER(Context), c.c_void_p, c.c_size_t,
                                           c.c_void_p, c.c_size_t, c.c_uint, c.c_int]
+        cls.lib.pops_fix_stage_trojan.argtypes = [c.POINTER(Context), c.POINTER(TrojanSet),
+                                                 c.c_void_p, c.c_size_t, c.c_void_p,
+                                                 c.c_size_t, c.c_uint]
         cls.lib.pops_fix_finalize_video.argtypes = [c.POINTER(Context), c.c_void_p,
                                                     c.c_size_t, c.c_int, c.c_uint8]
         cls.lib.pops_apply_region.argtypes = [c.c_void_p, c.c_size_t, c.c_int,
@@ -167,8 +189,14 @@ void test_io_failures(int reads, int closes) { fail_reads=reads; fail_closes=clo
         self.lib.test_io_failures(0, 0)
 
     def stage(self, blob, slot=1, is_trojan=0):
+        if is_trojan:
+            # No holding memory: only payloads inside the core are hosted here.
+            work = (c.c_ubyte * 0x8000)()
+            state = TrojanSet(work=c.cast(work, c.c_void_p), work_size=len(work))
+            return self.lib.pops_fix_stage_trojan(c.byref(self.context), c.byref(state),
+                                                  self.pointer, SIZE, blob, len(blob), slot)
         return self.lib.pops_fix_stage(c.byref(self.context), self.pointer, SIZE,
-                                       blob, len(blob), slot, is_trojan)
+                                       blob, len(blob), slot, 0)
 
     def bind(self, initial_arg=0x32240001):
         for address, value in ((0x21a094, 0xde050010), (0x21a098, 0x3c031200),
@@ -177,9 +205,14 @@ void test_io_failures(int reads, int closes) { fail_reads=reads; fail_closes=clo
         self.assertEqual(self.lib.pops_fix_bind_progressive(c.byref(self.context), self.pointer,
                                                             SIZE, 0x143a5d8, initial_arg), 0)
 
-    def assert_rejected_without_writes(self, blob, slot=1, is_trojan=0):
+    def assert_rejected_without_writes(self, blob, slot=1, is_trojan=0, skipped=None):
+        # A PATCH that cannot be applied is an error (negative). A TROJAN the
+        # original calls Invalid is skipped (positive), as there.
         before = bytes(self.memory), bytes(self.context)
-        self.assertLess(self.stage(blob, slot, is_trojan), 0)
+        if skipped is None:
+            self.assertLess(self.stage(blob, slot, is_trojan), 0)
+        else:
+            self.assertEqual(self.stage(blob, slot, is_trojan), skipped)
         self.assertEqual((bytes(self.memory), bytes(self.context)), before)
 
     def test_ordered_modes_and_repeated_files(self):
@@ -234,10 +267,14 @@ void test_io_failures(int reads, int closes) { fail_reads=reads; fail_closes=clo
                                   (patch(modes=(255,)), 1, 0),
                                   (patch(control=8), 1, 0),
                                   (patch(modes=(1,)), 2, 0),
-                                  (patch(modes=(1,)), 1, 1), (trojan(), 0, 0),
+                                  (trojan(), 0, 0),
                                   (patch(payload=b'DATA', address=0x800000), 1, 0),
                                   (patch(payload=b'DATA', address=0x220000)[:-1], 1, 0)]:
             self.assert_rejected_without_writes(blob, slot, kind)
+        # Read as a TROJAN, a PATCH file is what POPStarter calls Invalid; so
+        # is a TROJAN under another slot's name. Skipped, nothing written.
+        self.assert_rejected_without_writes(patch(modes=(1,)), 1, 1, skipped=1)
+        self.assert_rejected_without_writes(trojan(slot=0), 1, 1, skipped=1)
 
     def test_slot_zero_supported_and_aliasing_rejected(self):
         self.assertEqual(self.stage(patch(slot=0, modes=(4,)), 0), 0)
