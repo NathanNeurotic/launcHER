@@ -25,8 +25,10 @@ pass (0x89e884), and reports what the pass recognised:
            holds before; POPStarter ships 1 there).
 
 The pass, as its code reads (0x883aa8..0x89e75c):
-  * the text is upper-cased in place (a..z only) and the buffer holds as
-    many zero bytes after the text as the text is long;
+  * the text is upper-cased in place (a..z only) and the second half of
+    its malloc(2 * size) buffer is zeroed (0x883aa8); scan_commands puts
+    0xA5 bytes there first, so a result that depended on them would show;
+    `beyond` is what follows the buffer;
   * at each index: a cheat code's columns are stepped over (0x885a20,
     0x885ccc, 0x885e28, 0x8860b4, 0x886360); otherwise each command's
     compare chain is tried in turn and the first that holds runs, zeroes
