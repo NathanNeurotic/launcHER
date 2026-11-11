@@ -278,13 +278,19 @@ static int readPopsDependency(const char *path, void *buffer, size_t max_size,
 /* The archived MAIN calls root TROJAN, root PATCH, title TROJAN, title PATCH
  * (0x876d6c/0x876e00/0x877078/0x877118). Slot order is 0..9 in both loaders.
  * These are explicit external fix files, never files from VMCDIR redirection.
- * The staged executable is discarded by the caller on any failure. */
+ * A TROJAN the original calls "Invalid" or "Skipped (outdated)" is skipped
+ * with its words and the next slot is read, as there (its loader returns 1
+ * whatever happened and its callers ignore that). A TROJAN it would apply
+ * and launcHER cannot host is skipped too, with a line that says so: the
+ * game then runs without that fix. Any other failure, a read error included
+ * (the original reads every open failure as NOT FOUND), still stops the
+ * launch, and the staged executable is discarded by the caller. */
 static int pops_stage_fix_files(void *stagedCore, size_t coreSize,
                                  const char *vcdDir, const char *titleDir,
                                  uint16_t builtinId, uint8_t initialModes,
                                  uint8_t initialVideo,
                                  uint32_t progressiveEntry, uint32_t initialInterlace,
-                                 PopsFixContext *finalContext) {
+                                 PopsFixContext *finalContext, PopsTrojanSet *trojanSet) {
   PopsFixContext context;
   int result = pops_fix_context_init_builtin(&context, stagedCore, coreSize, builtinId,
                                               initialModes, initialVideo);
@@ -311,8 +317,22 @@ static int pops_stage_fix_files(void *stagedCore, size_t coreSize,
         if (result == -ENOENT)
           continue;
         if (!result)
-          result = pops_fix_stage(&context, stagedCore, coreSize, buffer, size,
-                                   slot, !kind);
+          result = kind ? pops_fix_stage(&context, stagedCore, coreSize, buffer, size, slot, 0)
+                        : pops_fix_stage_trojan(&context, trojanSet, stagedCore, coreSize,
+                                                buffer, size, slot);
+        if (result == POPS_FIX_SKIP_INVALID) {
+          msg("POPS: %s: Invalid\n", path);
+          continue;
+        }
+        if (result == POPS_FIX_SKIP_OUTDATED) {
+          msg("POPS: %s: Skipped (outdated)\n", path);
+          continue;
+        }
+        if (result == POPS_FIX_SKIP_UNHOSTED) {
+          msg("POPS: %s is valid for POPStarter but NOT loaded by launcHER: %s\n", path,
+              pops_trojan_reason_text(trojanSet->reason));
+          continue;
+        }
         if (result) {
           msg("POPS: Fix file rejected %s (%d)\n", path, result);
           return result;
@@ -913,6 +933,8 @@ int launchPOPS(int argc, char *argv[]) {
     DPRINTF("POPS: Built-in list fingerprint %s, entry %u\n", sigOk ? "read" : "unreadable",
             (unsigned)builtinId);
   }
+  /* What the fingerprint alone picked: the TROJAN "outdated" rule reads it. */
+  const uint16_t fingerprintId = builtinId;
   if (builtinId) {
     res = pops_builtin_apply(builtinId, NULL, 0, NULL, 0, 0, &builtinPlan);
     if (res) {
@@ -1445,14 +1467,19 @@ int launchPOPS(int argc, char *argv[]) {
             compat->patch_offset, compat->patch_val);
   }
 
-  /* Preserve original root/title and TROJAN/PATCH ordering. */
+  /* Preserve original root/title and TROJAN/PATCH ordering. The original's
+   * "outdated" rule reads the entry its fingerprint matcher picked: a
+   * $VCDID_n is parsed after the fix files there. */
   PopsFixContext fixContext;
+  PopsTrojanSet trojanSet;
+  memset(&trojanSet, 0, sizeof(trojanSet));
+  trojanSet.fingerprint_id = POPS_BUILTIN_ID(fingerprintId);
   res = pops_stage_fix_files((void *)stagedCore, plan.core_size, vcdDir,
                               gameConfigDir, builtinId, cfg.compat_modes,
                               cfg.progressive_requested ? POPS_VMODE_480P : cfg.video_mode,
                               residentHdr.progressive_entry,
                               cfg.hdtv_fix ? 0x24040001 : 0x32240001,
-                              &fixContext);
+                              &fixContext, &trojanSet);
   if (res)
     return res;
   res = pops_fix_require_progressive(&fixContext, (void *)stagedCore, plan.core_size);

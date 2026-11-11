@@ -2,6 +2,7 @@
 #define POPS_MODES_PATCHES_H
 
 #include "pops_config.h"
+#include "pops_external.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -50,7 +51,23 @@ int pops_fix_require_progressive(const PopsFixContext *context, const void *stag
  * licence can use UNKNOWN here: this function never changes region letters. */
 int pops_fix_finalize_video(PopsFixContext *context, void *staged_core,
                              size_t core_size, int region, uint8_t video_mode);
+/* A TROJAN_n.BIN the way POPStarter treats it: the files it calls Invalid or
+ * Skipped (outdated) are skipped, never an error, and so is a file it would
+ * apply but launcHER cannot host (set->reason says why). Returns 0 when the
+ * file was applied, one of these when it was skipped without any write, and
+ * a negative errno only for a bad call or a staged core that no longer
+ * matches the session (the launch must then be discarded). `set` may be
+ * null: no fingerprint entry, reason not reported. */
+#define POPS_FIX_SKIP_INVALID  1 /* POPStarter: "Invalid" */
+#define POPS_FIX_SKIP_OUTDATED 2 /* POPStarter: "Skipped (outdated)" */
+#define POPS_FIX_SKIP_UNHOSTED 3 /* POPStarter applies it; launcHER does not */
+int pops_fix_stage_trojan(PopsFixContext *context, PopsTrojanSet *set, void *staged_core,
+                          size_t core_size, const void *file, size_t file_size,
+                          unsigned slot);
+
 /* expected_trojan selects TROJAN versus PATCH; slot must match the filename.
+ * A TROJAN goes through pops_fix_stage_trojan with no set and can return its
+ * positive skip codes.
  * PATCH data precedes its four mode bytes, in recorded order. Video actions
  * (PAL, disable-auto) and mode 6 are supported. Video actions 6/7 still need
  * verified resident/session dispatch; they and mode 8 fail before writes.

@@ -206,7 +206,9 @@ typedef struct {
 #define POPS_CONTAINER_HEADER_SIZE 64u
 
 /* Recognizes TROJAN_0..9 and PATCH_1..9 containers, including data-only PATCHes.
- * Output is unchanged on error. A CONFIG success is not an executable payload. */
+ * Output is unchanged on error. A CONFIG success is not an executable payload.
+ * Its TROJAN rules are launcHER's own strict ones, not POPStarter's: the fix
+ * file path (pops_fix_stage_trojan) uses pops_trojan_verdict below. */
 int pops_container_inspect(const void *file, size_t size, PopsContainer *out);
 
 typedef struct {
@@ -231,6 +233,68 @@ int pops_container_plan(const void *file, size_t size, uint32_t base,
 int pops_container_stage(const void *file, size_t size, uint32_t base,
                          void *memory, size_t span, const uint32_t *expected_hook,
                          size_t expected_count);
+
+/* TROJAN_n.BIN as POPStarter r13's loader reads it (FUN_00880a24), in its
+ * rule order. A file is "Invalid" when: it is shorter than 0x44 bytes; bytes
+ * 0..7 are not "TROJAN_" plus the digit of the file being read; byte 0x0c
+ * (format) is not 1, 2 or 3; any of bytes 0x08, 0x09, 0x0b, 0x0d, 0x0f, 0x1f
+ * or 0x34..0x3f is nonzero; the load or the entry address is zero; 0x40 plus
+ * the 24-bit size at 0x1c is not the file size; byte 0x0e is zero (any other
+ * value passes); byte 0x20, the first of the name, is zero; or the format is
+ * 1 and byte 0x0a is nonzero. A format 3 file whose byte 0x0a is below
+ * POPS_TROJAN_REVISION is "Skipped (outdated)" when the disc matched an
+ * entry of the built-in list by fingerprint (a $VCDID_n is read later and
+ * does not count). Alignment, ranges, a hook of 0 and where the entry lies
+ * are not checked there; whether launcHER can host such a file is a
+ * separate question (pops_fix_stage_trojan). */
+#define POPS_TROJAN_MIN_FILE 0x44u
+#define POPS_TROJAN_REVISION 6u /* the original's gp+0x345c, set at 0x870d9c */
+enum {
+  POPS_TROJAN_APPLY = 0,
+  POPS_TROJAN_INVALID = 1,
+  POPS_TROJAN_OUTDATED = 2
+};
+
+typedef struct {
+  uint8_t slot;
+  uint8_t format;     /* byte 0x0c */
+  uint8_t width;      /* byte 0x0a: format 2 hook width, format 3 revision */
+  uint8_t hook_words; /* words written at the hook: 1, 2 or 3 */
+  uint32_t load;
+  uint32_t entry;
+  uint32_t hook;
+  uint32_t size;      /* payload bytes, from file offset 0x40 */
+  /* What the original writes at the hook: "jal entry", or for format 2 with
+   * width 1, 2 or 3 "j entry" followed by width - 1 zero words. */
+  uint32_t hook_word[3];
+} PopsTrojanInfo;
+
+/* POPS_TROJAN_APPLY, POPS_TROJAN_INVALID or POPS_TROJAN_OUTDATED; negative
+ * for a null argument or a slot above 9. `out` is written unless the file
+ * is Invalid. fingerprint_builtin_id: the built-in entry the disc's
+ * fingerprint selected, 0 for none. */
+int pops_trojan_verdict(const void *file, size_t size, unsigned slot,
+                        unsigned fingerprint_builtin_id, PopsTrojanInfo *out);
+
+/* Why launcHER does not load a file POPStarter would apply. POPStarter
+ * copies any payload to any address and writes any hook; launcHER loads
+ * only what it can place without damaging POPS or itself. */
+enum {
+  POPS_TROJAN_HOSTED = 0,
+  POPS_TROJAN_NO_UNALIGNED, /* load, entry, hook or size not a multiple of 4 */
+  POPS_TROJAN_NO_ENTRY,     /* entry outside the payload */
+  POPS_TROJAN_NO_RANGE,     /* payload outside what launcHER can host */
+  POPS_TROJAN_NO_HOOK       /* hook outside the POPS core, or inside the payload */
+};
+
+/* A short English clause for a POPS_TROJAN_NO_* value, for the launch log. */
+const char *pops_trojan_reason_text(unsigned reason);
+
+/* One launch's TROJAN state, shared by every TROJAN_n.BIN of both scopes. */
+typedef struct {
+  uint16_t fingerprint_id; /* built-in entry picked by the disc's fingerprint, 0: none */
+  uint8_t reason;          /* POPS_TROJAN_NO_* of the last unhosted file */
+} PopsTrojanSet;
 
 typedef enum {
   POPS_PATCH_VIDEO_NONE,

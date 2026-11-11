@@ -135,6 +135,67 @@ int pops_container_inspect(const void *file, size_t size, PopsContainer *out) {
   return POPS_FILE_OK;
 }
 
+int pops_trojan_verdict(const void *file, size_t size, unsigned slot,
+                        unsigned fingerprint_builtin_id, PopsTrojanInfo *out) {
+  const uint8_t *h = file;
+  PopsTrojanInfo info = {0};
+  uint32_t jump;
+  if (!h || !out || slot > 9)
+    return POPS_FILE_INVALID;
+  if (size < POPS_TROJAN_MIN_FILE)
+    return POPS_TROJAN_INVALID;
+  if (memcmp(h, "TROJAN_", 7) || h[7] != '0' + slot)
+    return POPS_TROJAN_INVALID;
+  if (h[0x0c] < 1 || h[0x0c] > 3)
+    return POPS_TROJAN_INVALID;
+  if (h[0x08] | h[0x09] | h[0x0b] | h[0x0d] | h[0x0f] | h[0x1f])
+    return POPS_TROJAN_INVALID;
+  for (unsigned i = 0x34; i < 0x40; ++i)
+    if (h[i])
+      return POPS_TROJAN_INVALID;
+  info.load = le32(h + 0x10);
+  info.entry = le32(h + 0x14);
+  info.hook = le32(h + 0x18);
+  info.size = le32(h + 0x1c) & UINT32_C(0x00ffffff);
+  if (!info.load || !info.entry)
+    return POPS_TROJAN_INVALID;
+  if ((uint64_t)info.size + HEADER_SIZE != size)
+    return POPS_TROJAN_INVALID;
+  if (!h[0x0e] || !h[0x20])
+    return POPS_TROJAN_INVALID;
+  if (h[0x0c] == 1 && h[0x0a])
+    return POPS_TROJAN_INVALID;
+  info.slot = (uint8_t)slot;
+  info.format = h[0x0c];
+  info.width = h[0x0a];
+  jump = (info.entry >> 2) & UINT32_C(0x03ffffff);
+  info.hook_words = 1;
+  info.hook_word[0] = UINT32_C(0x0c000000) | jump;
+  if (info.format == 2 && info.width >= 1 && info.width <= 3) {
+    info.hook_words = info.width;
+    info.hook_word[0] = UINT32_C(0x08000000) | jump;
+  }
+  *out = info;
+  if (info.format == 3 && info.width < POPS_TROJAN_REVISION && fingerprint_builtin_id)
+    return POPS_TROJAN_OUTDATED;
+  return POPS_TROJAN_APPLY;
+}
+
+const char *pops_trojan_reason_text(unsigned reason) {
+  switch (reason) {
+  case POPS_TROJAN_NO_UNALIGNED:
+    return "an address or the size is not a multiple of 4";
+  case POPS_TROJAN_NO_ENTRY:
+    return "its entry is outside its payload";
+  case POPS_TROJAN_NO_RANGE:
+    return "its payload loads outside the memory launcHER can host";
+  case POPS_TROJAN_NO_HOOK:
+    return "its hook is not a word launcHER can patch";
+  default:
+    return "unknown reason";
+  }
+}
+
 static int window_offset(uint32_t address, uint32_t length, uint32_t base,
                          size_t span, size_t *offset) {
   if (address < base || address - base > span || length > span - (address - base))
