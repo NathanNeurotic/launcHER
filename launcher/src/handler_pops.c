@@ -292,7 +292,9 @@ static int readPopsDependency(const char *path, void *buffer, size_t max_size,
  * and launcHER cannot host is skipped too, with a line that says so: the
  * game then runs without that fix. Any other failure, a read error included
  * (the original reads every open failure as NOT FOUND), still stops the
- * launch, and the staged executable is discarded by the caller. */
+ * launch, and the staged executable is discarded by the caller. So does a
+ * file larger than the 1 MiB read buffer, which the original has no limit
+ * for. */
 static int pops_stage_fix_files(void *stagedCore, size_t coreSize,
                                  const char *vcdDir, const char *titleDir,
                                  uint16_t builtinId, uint8_t initialModes,
@@ -324,6 +326,18 @@ static int pops_stage_fix_files(void *stagedCore, size_t coreSize,
         result = readFullFile(path, buffer, 0x100000, &size);
         if (result == -ENOENT)
           continue;
+        if (result == -EINVAL && !kind) {
+          /* readFullFile refuses an empty file and one too large alike. The
+           * original calls an empty TROJAN file "Invalid", as it does every
+           * one under 0x44 bytes, and reads the next slot. */
+          int fd = open(path, O_RDONLY);
+          if (fd >= 0) {
+            off_t end = lseek(fd, 0, SEEK_END);
+            close(fd);
+            if (end == 0)
+              result = POPS_FIX_SKIP_INVALID;
+          }
+        }
         if (!result)
           result = kind ? pops_fix_stage(&context, stagedCore, coreSize, buffer, size, slot, 0)
                         : pops_fix_stage_trojan(&context, trojanSet, stagedCore, coreSize,

@@ -1114,6 +1114,19 @@ class Original(Built):
         self.assertEqual(struct.unpack_from('<I', after, 0x2327e0)[0], jal(E))
         self.assertEqual(struct.unpack_from('<I', after, 0x232d28)[0], jal(0x01510000))
 
+    def test_files_under_0x44_bytes_are_invalid_and_the_next_slot_is_read(self):
+        good = trojan(slot=1, hook=0x2327e0)
+        for data in (b'', b'T', trojan(size=0)[:0x40], trojan(size=0, filesize=0x43)):
+            with self.subTest(len(data)):
+                returned, events, after = self.loader.run({b'mass:/POPS/TROJAN_0.BIN': data,
+                                                           b'mass:/POPS/TROJAN_1.BIN': good})
+                self.assertEqual(returned, 1)
+                self.assertEqual(self.tracer.verdicts(events), ['INVALID', 'APPLIED'])
+                self.assertEqual(len([e for e in events if e[0] == 'open']), 10)
+                self.assertEqual(struct.unpack_from('<I', after, 0x2327e0)[0], jal(E))
+        returned, events, after = self.loader.run({b'mass:/POPS/TROJAN_0.BIN': trojan(size=4)})
+        self.assertEqual(self.tracer.verdicts(events), ['APPLIED'])
+
     def test_title_scope_reads_ten_files_of_another_folder(self):
         # How the caller forms the folder name it passes is not examined here.
         _, events, _ = self.loader.run({}, scope=1, title=b'GAME')
@@ -1507,6 +1520,37 @@ class Source(Built):
         self.assertTrue(lines[1].endswith('TROJAN_2.BIN: Skipped (outdated)'), lines[1])
         self.assertIn('TROJAN_3.BIN is valid for POPStarter but NOT loaded by launcHER: '
                       'an address or the size is not a multiple of 4', lines[2])
+
+    def test_an_empty_or_short_file_is_invalid_and_one_too_large_stops(self):
+        # Measured on the original's loader (Original class, the same sizes):
+        # 0, 1, 0x40 and 0x43 bytes are "Invalid" and the next slot is read.
+        good = trojan(slot=4, load=0x2f0000, hook=0x2f0100)
+        for slot, data in enumerate((b'', b'T', trojan(size=0)[:0x40],
+                                     trojan(size=0, filesize=0x43))):
+            (self.root / ('TROJAN_%d.BIN' % slot)).write_bytes(data)
+        (self.root / 'TROJAN_4.BIN').write_bytes(good)
+        result, log = self.run_files()
+        self.assertEqual(result, 0)
+        lines = log.splitlines()
+        self.assertEqual(len(lines), 4)
+        for slot, line in enumerate(lines):
+            self.assertTrue(line.endswith('TROJAN_%d.BIN: Invalid' % slot), line)
+        self.assertEqual(struct.unpack_from('<I', self.memory, 0xf0100)[0], jal(0x2f0000))
+        # An empty PATCH file is not this rule: PATCH reading is unchanged.
+        self.memory[:] = pristine()
+        (self.root / 'PATCH_0.BIN').write_bytes(b'')
+        result, log = self.run_files()
+        self.assertEqual(result, -errno.EINVAL)
+        self.assertIn('Fix file rejected', log)
+        (self.root / 'PATCH_0.BIN').unlink()
+        # Larger than the read buffer: launcHER stops (the original has no
+        # such limit; a known difference).
+        self.memory[:] = pristine()
+        (self.root / 'TROJAN_0.BIN').write_bytes(trojan(size=0x100000))
+        result, log = self.run_files()
+        self.assertEqual(result, -errno.EINVAL)
+        self.assertIn('Fix file rejected', log)
+        self.assertEqual(self.memory, pristine())
 
     def test_the_outdated_rule_needs_a_fingerprint_entry(self):
         (self.root / 'TROJAN_2.BIN').write_bytes(trojan(slot=2, fmt=3, ba=5, load=0x2f1000,
