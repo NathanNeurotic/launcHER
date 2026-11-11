@@ -284,7 +284,7 @@ static int pops_stage_fix_files(void *stagedCore, size_t coreSize,
                                  uint16_t builtinId, uint8_t initialModes,
                                  uint8_t initialVideo,
                                  uint32_t progressiveEntry, uint32_t initialInterlace,
-                                 PopsFixContext *finalContext) {
+                                 PopsUserRomState *rom, PopsFixContext *finalContext) {
   PopsFixContext context;
   int result = pops_fix_context_init_builtin(&context, stagedCore, coreSize, builtinId,
                                               initialModes, initialVideo);
@@ -311,11 +311,15 @@ static int pops_stage_fix_files(void *stagedCore, size_t coreSize,
         if (result == -ENOENT)
           continue;
         if (!result)
-          result = pops_fix_stage(&context, stagedCore, coreSize, buffer, size,
-                                   slot, !kind);
-        if (result) {
+          result = pops_fix_stage_rom(&context, stagedCore, coreSize, buffer, size,
+                                       slot, !kind, rom);
+        if (result < 0) {
           msg("POPS: Fix file rejected %s (%d)\n", path, result);
           return result;
+        }
+        if (result == POPS_MODE6_SKIPPED) {
+          DPRINTF("POPS: %s asks for compatibility mode 6, which is not applied over "
+                  "a user BIOS.BIN\n", path);
         }
         DPRINTF("POPS: Applied %s\n", path);
       }
@@ -1415,11 +1419,20 @@ int launchPOPS(int argc, char *argv[]) {
     return -ERANGE;
   }
 
+  /* POPStarter's loader state (pops_modes_patches.h): the built-in entry's
+   * mode 6 has set gp+0x3704 by now, so a later mode 6 does nothing. */
+  PopsUserRomState romState;
+  memset(&romState, 0, sizeof(romState));
+  romState.osd_off = (builtinPlan.compat_modes & (1 << 5)) != 0;
+
   /* Apply compatibility modes and user directive patches */
-  res = pops_apply_all_config_patches((void *)stagedCore, plan.core_size, &cfg);
-  if (res) {
+  res = pops_apply_all_config_patches_rom((void *)stagedCore, plan.core_size, &cfg, &romState);
+  if (res < 0) {
     msg("POPS: Applying config patches failed: %d\n", res);
     return res;
+  }
+  if (res == POPS_MODE6_SKIPPED) {
+    DPRINTF("POPS: Compatibility mode 6 is not applied over a user BIOS.BIN\n");
   }
 
   /* $RECOMPILER_ADDON_3/4: the original's handlers write these jumps into
@@ -1452,7 +1465,7 @@ int launchPOPS(int argc, char *argv[]) {
                               cfg.progressive_requested ? POPS_VMODE_480P : cfg.video_mode,
                               residentHdr.progressive_entry,
                               cfg.hdtv_fix ? 0x24040001 : 0x32240001,
-                              &fixContext);
+                              &romState, &fixContext);
   if (res)
     return res;
   res = pops_fix_require_progressive(&fixContext, (void *)stagedCore, plan.core_size);
@@ -1478,10 +1491,10 @@ int launchPOPS(int argc, char *argv[]) {
   }
 
   /* POPStarter's edits to the PS1 BIOS shell inside POPS (0x878f94): made
-   * unless a user BIOS.BIN or OSD replacement was loaded, which launcHER
-   * never does; after the fix files and the user's commands and before the
-   * region pass, as there. */
-  res = pops_apply_bios_shell_edits((void *)stagedCore, plan.core_size);
+   * unless the loader state says a user BIOS.BIN or OSD replacement was
+   * loaded (0x878f64..0x878f90); after the fix files and the user's
+   * commands and before the region pass, as there. */
+  res = pops_apply_bios_shell_edits_rom((void *)stagedCore, plan.core_size, &romState);
   if (res) {
     msg("POPS: BIOS shell edits failed: %d\n", res);
     return res;
@@ -1489,9 +1502,11 @@ int launchPOPS(int argc, char *argv[]) {
 
   /* POPStarter's region pass: European auto PAL and region letters. An
    * unreadable licence leaves POPS as shipped rather than "unknown". */
-  res = regionRead ? pops_apply_region((void *)stagedCore, plan.core_size, cfg.disc_region,
-                                       cfg.video_mode,
-                                       fixContext.video_auto_disabled || builtinPlan.no_auto_pal)
+  res = regionRead ? pops_apply_region_rom((void *)stagedCore, plan.core_size, cfg.disc_region,
+                                           cfg.video_mode,
+                                           fixContext.video_auto_disabled ||
+                                               builtinPlan.no_auto_pal,
+                                           &romState)
                    : 0;
   if (res) {
     msg("POPS: Region patch failed: %d\n", res);

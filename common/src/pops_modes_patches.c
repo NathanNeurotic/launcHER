@@ -72,6 +72,25 @@ typedef struct {
   uint32_t address, expected, replacement;
   uint8_t width;
 } CompatPatch;
+/* Loader state tests, as the original makes them (`bnez` on each word). */
+int pops_user_rom_replaced(const PopsUserRomState *rom) {
+  return rom && (rom->bios_game || rom->bios_all);
+}
+
+int pops_user_rom_keeps_shell(const PopsUserRomState *rom) {
+  return rom && (rom->bios_game || rom->bios_all || rom->osd_game_b || rom->osd_all_b);
+}
+
+/* FUN_008dc2c4's mode 6 arm (0x8dc74c..0x8dc874): 0 = write 0x2525b0 and
+ * set gp+0x3704 (FUN_008db97c), POPS_MODE6_SKIPPED = a user BIOS.BIN is
+ * loaded (the original only prints a notice), -1 = gp+0x3704 already set,
+ * nothing happens. */
+static int mode6_gate(const PopsUserRomState *rom) {
+  if (pops_user_rom_replaced(rom))
+    return POPS_MODE6_SKIPPED;
+  return rom && rom->osd_off ? -1 : 0;
+}
+
 static const CompatPatch compat_patches[] = {
   {1, 0x00210314, 0x00000000, 0x3c02005a, 4},
   {1, 0x00210318, 0x8f828228, 0x24030082, 4},
@@ -305,6 +324,17 @@ int pops_fix_context_init_builtin(PopsFixContext *context, const void *staged_co
         compat_read(staged_core, patch) == patch->replacement)
       candidate.expected[i] = patch->replacement;
   }
+  /* All three $UNDO_ handlers write 0x2525b0 = 0x1bfc after the built-in
+   * entry, and mode 6 writes nothing there under a user BIOS.BIN or once
+   * gp+0x3704 is set, whatever the entry or the mask asked for. Accept
+   * exactly POPS's own value. */
+  for (unsigned i = 0; i < POPS_COMPAT_SITE_COUNT; ++i) {
+    const CompatPatch *patch = &compat_patches[i];
+    if (patch->address == 0x002525b0 &&
+        patch->address - POPS_CORE_BASE_ADDR + patch->width <= core_size &&
+        compat_read(staged_core, patch) == patch->expected)
+      candidate.expected[i] = patch->expected;
+  }
   int result = compat_context_check(&candidate, staged_core, core_size);
   if (result)
     return result;
@@ -375,7 +405,15 @@ int pops_fix_require_progressive(const PopsFixContext *context, const void *stag
 int pops_fix_stage(PopsFixContext *context, void *staged_core, size_t core_size,
                     const void *file, size_t file_size, unsigned slot,
                     int expected_trojan) {
+  return pops_fix_stage_rom(context, staged_core, core_size, file, file_size, slot,
+                            expected_trojan, NULL);
+}
+
+int pops_fix_stage_rom(PopsFixContext *context, void *staged_core, size_t core_size,
+                        const void *file, size_t file_size, unsigned slot,
+                        int expected_trojan, PopsUserRomState *rom) {
   PopsContainerPlan plan;
+  int mode6_skipped = 0;
   PopsPatchOptions options = {{0}, POPS_PATCH_VIDEO_NONE};
   uint8_t *bytes = staged_core;
   uint32_t hook[3];
@@ -446,6 +484,15 @@ int pops_fix_stage(PopsFixContext *context, void *staged_core, size_t core_size,
   for (unsigned mode = 0; mode < 4; ++mode) {
     if (!options.modes[mode])
       continue;
+    if (options.modes[mode] == 6) {
+      int gate = mode6_gate(rom);
+      if (gate) {
+        mode6_skipped |= gate == POPS_MODE6_SKIPPED;
+        continue;
+      }
+      if (rom)
+        rom->osd_off = 1;
+    }
     for (unsigned i = 0; i < POPS_COMPAT_SITE_COUNT; ++i) {
       const CompatPatch *patch = &compat_patches[i];
       if (patch->mode == options.modes[mode])
@@ -486,7 +533,7 @@ int pops_fix_stage(PopsFixContext *context, void *staged_core, size_t core_size,
   if (context->resident_entry)
     for (unsigned i = 0; i < POPS_PATCH_RESIDENT_SITE_COUNT; ++i)
       context->resident_expected[i] = fix_resident_read(bytes, i);
-  return 0;
+  return mode6_skipped ? POPS_MODE6_SKIPPED : 0;
 }
 
 static int compat_site_value_known(uint32_t address, uint32_t value) {
@@ -597,10 +644,18 @@ int pops_apply_always_on_pokes(void *staged_core, size_t core_size) {
 }
 
 int pops_apply_bios_shell_edits(void *staged_core, size_t core_size) {
+  return pops_apply_bios_shell_edits_rom(staged_core, core_size, NULL);
+}
+
+int pops_apply_bios_shell_edits_rom(void *staged_core, size_t core_size,
+                                    const PopsUserRomState *rom) {
   if (!staged_core)
     return -EINVAL;
   if (core_size < (size_t)(0x00263ed6 + 1 - POPS_CORE_BASE_ADDR))
     return -ERANGE;
+  /* 0x878f64..0x878f90: any of the four words set skips all three pokes. */
+  if (pops_user_rom_keeps_shell(rom))
+    return 0;
   /* The original's order: poke8, poke16, poke32. */
   write_u8(staged_core, core_size, 0x00263ed6, 0x20);
   write_u16(staged_core, core_size, 0x00263d56, 0x1000);
@@ -764,13 +819,26 @@ int pops_apply_reset_warmboot(void *staged_core, size_t core_size, uint32_t *exi
 }
 
 int pops_apply_compat_modes(void *staged_core, size_t core_size, uint8_t modes_mask) {
+  return pops_apply_compat_modes_rom(staged_core, core_size, modes_mask, NULL);
+}
+
+int pops_apply_compat_modes_rom(void *staged_core, size_t core_size, uint8_t modes_mask,
+                                PopsUserRomState *rom) {
   uint8_t *bytes = staged_core;
   size_t i;
   unsigned j;
+  int mode6 = 0;
   if (!bytes)
     return -EINVAL;
   if (modes_mask & (1 << 7))
     return -ENOTSUP;
+  /* Mode 6 under a user BIOS.BIN, or after an earlier mode 6, writes
+   * nothing, so its site is not checked either. */
+  if (modes_mask & (1 << 5)) {
+    mode6 = mode6_gate(rom);
+    if (mode6)
+      modes_mask &= (uint8_t)~(1 << 5);
+  }
   /* Validate all sites before changing any. Overlapping modes deliberately
    * retain original ascending dispatch order, with later writes winning. */
   for (i = 0; i < sizeof(compat_patches) / sizeof(compat_patches[0]); ++i) {
@@ -797,7 +865,9 @@ int pops_apply_compat_modes(void *staged_core, size_t core_size, uint8_t modes_m
     for (j = 0; j < p->width; ++j)
       bytes[p->address - POPS_CORE_BASE_ADDR + j] = (uint8_t)(p->replacement >> (8 * j));
   }
-  return 0;
+  if (rom && (modes_mask & (1 << 5)))
+    rom->osd_off = 1;
+  return mode6 == POPS_MODE6_SKIPPED ? POPS_MODE6_SKIPPED : 0;
 }
 
 /* POPStarter MAIN: SMOOTH at 0x886664, LEFTADJ at 0x8909c8,
@@ -925,11 +995,23 @@ int pops_region_from_licence(const char tag[4]) {
   return POPS_REGION_UNKNOWN;
 }
 
-/* POPStarter r13 region pass (0x879034..0x8795f0). 0x2649a0 is the region
- * check of the PS1 BIOS inside POPS; the original skips those writes only
- * when a user BIOS/OSD replacement was loaded, which launcHER never does. */
+/* POPStarter r13 region pass (0x879034..0x8795f0). 0x264994..0x2649a0 is
+ * the region check of the PS1 BIOS inside POPS. With a user BIOS.BIN or an
+ * OSD replacement of the second kind loaded (the four words the shell edits
+ * test, read again in each arm here) the original leaves that check alone,
+ * and for an unknown licence also leaves 0x20f6cc/d8/dc/e0 alone; the POPS
+ * letter at 0x2cbb72, a known licence's letter at 0x20f6cc and the PAL
+ * change are made either way. */
 int pops_apply_region(void *staged_core, size_t core_size, int region,
                       uint8_t video_mode, int auto_video_disabled) {
+  return pops_apply_region_rom(staged_core, core_size, region, video_mode,
+                               auto_video_disabled, NULL);
+}
+
+int pops_apply_region_rom(void *staged_core, size_t core_size, int region,
+                          uint8_t video_mode, int auto_video_disabled,
+                          const PopsUserRomState *rom) {
+  int keep = pops_user_rom_keeps_shell(rom);
   static const uint8_t pops_letter[] = {'T', 'E', 'A', 'J'};
   static const uint8_t cd_letter[] = {0, 'E', 'A', 'I'};
   static const uint32_t bios_li[] = {0, 0x34040045, 0x34040041, 0x34040049};
@@ -950,11 +1032,14 @@ int pops_apply_region(void *staged_core, size_t core_size, int region,
   /* $FORCEPAL reports Europe to POPS whatever the disc says. */
   write_u8(staged_core, core_size, 0x002cbb72,
            force_pal ? 'E' : pops_letter[region]);
-  if (!force_pal)
-    write_u8(staged_core, core_size, 0x0020f6cc, cd_letter[region]);
   if (region != POPS_REGION_UNKNOWN) {
-    write_u32(staged_core, core_size, 0x002649a0, bios_li[region]);
-  } else {
+    if (!force_pal)
+      write_u8(staged_core, core_size, 0x0020f6cc, cd_letter[region]);
+    if (!keep)
+      write_u32(staged_core, core_size, 0x002649a0, bios_li[region]);
+  } else if (!keep) {
+    if (!force_pal)
+      write_u8(staged_core, core_size, 0x0020f6cc, 0);
     write_u32(staged_core, core_size, 0x00264994, 0x34050000);
     write_u32(staged_core, core_size, 0x00264998, 0x34020000);
     write_u32(staged_core, core_size, 0x0026499c, 0x34030000);
@@ -1089,6 +1174,14 @@ static const TokenWrite undo_writes[] = {
 };
 
 int pops_apply_undo_tokens(void *staged_core, size_t core_size, uint32_t tokens) {
+  return pops_apply_undo_tokens_rom(staged_core, core_size, tokens, NULL);
+}
+
+int pops_apply_undo_tokens_rom(void *staged_core, size_t core_size, uint32_t tokens,
+                               const PopsUserRomState *rom) {
+  /* Each handler tests gp+0x3b98 and gp+0x38a4 around its 0x2525b0 poke
+   * only (0x8948f0, 0x894d4c, 0x895088); its other writes are made. */
+  int keep_osd = pops_user_rom_replaced(rom);
   if (!staged_core)
     return -EINVAL;
   if (tokens >> POPS_TOK_COUNT)
@@ -1099,7 +1192,8 @@ int pops_apply_undo_tokens(void *staged_core, size_t core_size, uint32_t tokens)
             POPS_CORE_BASE_ADDR + core_size)
       return -ERANGE;
   for (size_t i = 0; i < sizeof(undo_writes) / sizeof(undo_writes[0]); ++i)
-    if (tokens & undo_writes[i].flag)
+    if ((tokens & undo_writes[i].flag) &&
+        !(keep_osd && undo_writes[i].address == 0x002525b0))
       write_width(staged_core, core_size, undo_writes[i].address,
                   undo_writes[i].value, undo_writes[i].width);
   return 0;
@@ -1467,8 +1561,14 @@ int pops_apply_exception_hook(void *staged_core, size_t core_size) {
 }
 
 int pops_apply_all_config_patches(void *staged_core, size_t core_size, const PopsConfig *cfg) {
+  return pops_apply_all_config_patches_rom(staged_core, core_size, cfg, NULL);
+}
+
+int pops_apply_all_config_patches_rom(void *staged_core, size_t core_size, const PopsConfig *cfg,
+                                      PopsUserRomState *rom) {
   int result;
   int video_requested;
+  int mode6_skipped = 0;
   if (!staged_core || !cfg)
     return -EINVAL;
 
@@ -1498,7 +1598,7 @@ int pops_apply_all_config_patches(void *staged_core, size_t core_size, const Pop
     return result;
 
   if (cfg->original_tokens & POPS_TOK_UNDO_MASK) {
-    result = pops_apply_undo_tokens(staged_core, core_size, cfg->original_tokens);
+    result = pops_apply_undo_tokens_rom(staged_core, core_size, cfg->original_tokens, rom);
     if (result)
       return result;
   }
@@ -1511,9 +1611,10 @@ int pops_apply_all_config_patches(void *staged_core, size_t core_size, const Pop
       return result;
   }
   if (cfg->compat_modes) {
-    result = pops_apply_compat_modes(staged_core, core_size, cfg->compat_modes);
-    if (result)
+    result = pops_apply_compat_modes_rom(staged_core, core_size, cfg->compat_modes, rom);
+    if (result < 0)
       return result;
+    mode6_skipped = result == POPS_MODE6_SKIPPED;
   }
   if (video_requested) {
     result = pops_apply_video_overrides(staged_core, core_size,
@@ -1576,10 +1677,15 @@ int pops_apply_all_config_patches(void *staged_core, size_t core_size, const Pop
     size_t off = 0x002525b0 - POPS_CORE_BASE_ADDR;
     uint8_t *b = (uint8_t *)staged_core;
     uint16_t cur = (uint16_t)b[off] | ((uint16_t)b[off + 1] << 8);
-    if (cfg->no_boot && cur == 0x0648) {
+    /* $NOBOOT/$BIOS is launcHER's own command. Under a user BIOS.BIN it
+     * leaves 0x2525b0 alone, like every writer of that site in the
+     * original; otherwise it is FUN_008dba20, which also clears gp+0x3704. */
+    if (cfg->no_boot && !pops_user_rom_replaced(rom) && cur == 0x0648) {
       result = pops_apply_bios_osd_enable(staged_core, core_size);
       if (result) return result;
+      if (rom)
+        rom->osd_off = 0;
     }
   }
-  return 0;
+  return mode6_skipped ? POPS_MODE6_SKIPPED : 0;
 }

@@ -144,7 +144,7 @@ def assert_gp1_hook_always(test, src):
     at = body.index(hook)
     test.assertLess(body.index("res = pops_core_patches_stage("), at)
     test.assertLess(at, body.index("res = pops_builtin_apply(builtinId, (void *)stagedCore"))
-    test.assertLess(at, body.index("res = pops_apply_all_config_patches("))
+    test.assertLess(at, body.index("res = pops_apply_all_config_patches_rom("))
     test.assertIn("\n  res = pops_resident_install((void *)POPS_RESIDENT_BASE,", body)
     test.assertNotIn("if (residentNeeded) {\n    res = pops_resident_install(", body)
 

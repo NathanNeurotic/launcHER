@@ -58,6 +58,8 @@ jobs:
         run: python tools/test_pops_breakpoint.py
       - name: Test POPStarter's always-on launch hooks (guards, pokes, BIOS edits, final clears)
         run: python tools/test_pops_launch_hooks.py
+      - name: Test POPStarter's user BIOS.BIN and the gates its loader flags drive
+        run: python tools/test_pops_user_bios.py
 
   build:
     runs-on: ubuntu-latest

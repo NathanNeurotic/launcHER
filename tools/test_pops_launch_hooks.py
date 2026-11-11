@@ -844,12 +844,12 @@ class Source(unittest.TestCase):
                  "res = pops_resident_hook_guards(",
                  "res = pops_apply_always_on_pokes(",
                  "res = pops_builtin_apply(builtinId, (void *)stagedCore",
-                 "res = pops_apply_all_config_patches(",
+                 "res = pops_apply_all_config_patches_rom(",
                  "res = pops_resident_hook_recompiler_emit(",
                  "res = pops_stage_fix_files(",
                  "res = pops_fix_finalize_video(",
-                 "res = pops_apply_bios_shell_edits(",
-                 "res = regionRead ? pops_apply_region(",
+                 "res = pops_apply_bios_shell_edits_rom(",
+                 "res = regionRead ? pops_apply_region_rom(",
                  "res = pops_apply_reset_warmboot(",
                  "res = pops_apply_opcode_pass(",
                  "SifIopRebootBuffer(",
@@ -862,12 +862,22 @@ class Source(unittest.TestCase):
         # Every POPStarter-mode launch: no flag gates the hooks or the install.
         for s in ("res = pops_resident_hook_gp1(", "res = pops_resident_hook_recompiler(",
                   "res = pops_resident_hook_guards(", "res = pops_resident_hook_recompiler_emit(",
-                  "res = pops_apply_always_on_pokes(", "res = pops_apply_bios_shell_edits(",
+                  "res = pops_apply_always_on_pokes(", "res = pops_apply_bios_shell_edits_rom(",
                   "res = pops_resident_install("):
             line = body[body.rindex("\n", 0, body.index(s)) + 1:body.index(s)]
             self.assertIn(line, ("  ", "    "), s)
             prev = body[:body.index(s)].rstrip().splitlines()[-1].strip()
             self.assertFalse(prev.startswith("if (residentNeeded") or "flags &" in prev, (s, prev))
+        # The shell edits, the region pass and the user's commands are called on
+        # every launch too, but with POPStarter's loader state: what they skip
+        # under a user BIOS.BIN is decided inside them (tools/test_pops_user_bios.py),
+        # and the ungated names are no longer called from the launch.
+        for s in ("pops_apply_bios_shell_edits(", "pops_apply_region(",
+                  "pops_apply_all_config_patches(", "pops_apply_compat_modes(",
+                  "pops_apply_undo_tokens("):
+            self.assertNotIn(s, src, s)
+        self.assertIn("res = pops_apply_bios_shell_edits_rom((void *)stagedCore, plan.core_size, "
+                      "&romState);", body)
 
     def test_ember_never_reaches_the_pops_launch(self):
         common = (ROOT / "launcher/src/common.c").read_text()

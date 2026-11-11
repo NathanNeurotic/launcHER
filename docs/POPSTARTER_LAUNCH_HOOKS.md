@@ -45,7 +45,7 @@ POPSTARTER.ELF MAIN.
 | `0x874878..0x874998` | the nine misaligned-read guards (below) | `pops_resident_hook_guards` |
 | `0x8749ac..0x874a18` | the exit and byte-copy pokes (below) | `pops_apply_always_on_pokes` |
 | `0x876a50`, `0x876a7c` | copies its exit program to `0x1450000` and writes `j 0x1450000` at `0x2362fc` (POPS's `ExecOSD` tail call) | not copied: launcHER keeps its own exit, which the owner confirmed on a console (Tekken) |
-| `0x878f9c..0x878fbc` | three edits to the PS1 BIOS shell inside POPS (below), skipped only when a user `BIOS.BIN` or OSD replacement was loaded | `pops_apply_bios_shell_edits`; launcHER loads neither, so it always makes them |
+| `0x878f9c..0x878fbc` | three edits to the PS1 BIOS shell inside POPS (below), skipped only when a user `BIOS.BIN` or OSD replacement was loaded | `pops_apply_bios_shell_edits_rom` with the loader state: skipped after a user `BIOS.BIN` ([POPSTARTER_USER_BIOS.md](POPSTARTER_USER_BIOS.md)); launcHER has no OSD loader |
 | `0x87c0f8` | `memset(0x70000000, 0, 0x4000)`: the whole scratchpad | the trampoline, step 1 (it cleared POPS's `0x3c30` bytes only) |
 | `0x87c130` | `memset(0x502e60, 0, 0x36d1a0)`: POPS's BSS and on up to `0x870000`, where POPStarter's own code starts | the trampoline, step 2: up to `0x870000` too (it stopped at POPS's BSS end, `0x865940`) |
 | `0x87c140` | `memset(0x100000, 0, 0x100000)` | the trampoline, step 3 (already the same) |
@@ -127,9 +127,11 @@ these bytes belong to its shell, which runs from PS1 RAM `0x80030000`:
 
 They are made after the fix files and the user's commands and before the
 region pass, without checking the words first, as in the original. What
-they change in the shell's behaviour was not worked out. When launcHER
-gains `BIOS.BIN` or OSD support, they must be skipped for those, as the
-original does (`gp+0x3b98`, `gp+0x38a4`, `gp+0x344c`, `gp+0x3430`).
+they change in the shell's behaviour was not worked out. They are skipped
+when any of `gp+0x3b98`, `gp+0x38a4`, `gp+0x344c`, `gp+0x3430` is set, as in
+the original: the first two are a loaded user `BIOS.BIN`
+([POPSTARTER_USER_BIOS.md](POPSTARTER_USER_BIOS.md)); the other two belong to
+the original's OSD loader, which launcHER does not have.
 
 ## The pad hotkeys and the in-game disc swap
 
