@@ -285,7 +285,27 @@ typedef struct {
 /* Initialize configuration with factory defaults */
 void pops_config_init(PopsConfig *cfg);
 
-/* Parse a single configuration line (from PATCHES.TXT, MODES.TXT, or CHEATS.TXT) */
+/* What pops_config_parse_text reports, in file order: a command the pass
+ * took at `offset` (`name` is the literal its compare chain starts with,
+ * e.g. "$SMOOTH", "$DX_", "$480", "$PAD", "$?POS_"; `effect` is nonzero
+ * when it changed something), or, with name NULL, a cheat code whose
+ * `effect` columns (14 or 18) the pass stepped over. */
+typedef void (*PopsConfigTrace)(void *context, size_t offset, const char *name, int effect);
+
+/* One CHEATS.TXT, the way POPStarter r13 reads it (FUN_00883270): `size`
+ * bytes scanned as one run, case folded, with no lines, comments or
+ * tokens. A command is taken at any '$' outside a cheat code's columns when
+ * its name is followed by CR, LF, NUL, a space or '$'; see pops_config.c
+ * and docs/POPSTARTER_CONFIG_TEXT.md for each command's exact form. `value`
+ * is what the original's shared number temporary starts at: 0, or the
+ * length of the game's folder name plus one for the game's own file (the
+ * original's string is the name and a '/'). launcHER's own tokens
+ * ($NOBOOT, MODE n, ...) are also read here, by launcHER's line rules.
+ * trace may be NULL. */
+int pops_config_parse_text(PopsConfig *cfg, const char *text, size_t size, uint32_t value,
+                           PopsConfigTrace trace, void *trace_context);
+
+/* pops_config_parse_text for one NUL-terminated string. */
 int pops_config_parse_line(PopsConfig *cfg, const char *line);
 
 /* Parse a text file into configuration */

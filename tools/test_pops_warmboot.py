@@ -210,17 +210,17 @@ class Original(unittest.TestCase):
 
         same = ["$RESET_WARMBOOT", "$reset_warmboot", "$RESET_WARMBOOT\n", "$RESET_WARMBOOT\r\n",
                 "$RESET_WARMBOOT $NOPAD0", "$NOPAD0 $RESET_WARMBOOT", "$RESET_WARMBOOTX",
-                "$RESET_WARMBOO"]
+                "$RESET_WARMBOO",
+                # The original ends the name at a space, CR, LF, NUL or '$'
+                # (a tab does not end it), starts a command at any '$', and
+                # a '#' does not hide one. These four were launcHER
+                # differences until its reader became the original's
+                # (tools/test_pops_config_text.py).
+                "$RESET_WARMBOOT\t", "x$RESET_WARMBOOT", "$RESET_WARMBOOT$NOPAD0",
+                "# $RESET_WARMBOOT"]
         for text in same:
             self.assertEqual(launcher(text), original(text), repr(text))
-        # Known differences (quirk 22): the original ends the name at a
-        # space, CR, LF, NUL or '$' (a tab does not end it), starts a command
-        # at any '$', and a '#' does not hide one; launcHER's parser splits
-        # on white space and skips a '#' line.
-        self.assertEqual((original("$RESET_WARMBOOT\t"), launcher("$RESET_WARMBOOT\t")), (0, 1))
-        self.assertEqual((original("x$RESET_WARMBOOT"), launcher("x$RESET_WARMBOOT")), (1, 0))
-        self.assertEqual((original("$RESET_WARMBOOT$NOPAD0"), launcher("$RESET_WARMBOOT$NOPAD0")), (1, 0))
-        self.assertEqual((original("# $RESET_WARMBOOT"), launcher("# $RESET_WARMBOOT")), (1, 0))
+        self.assertEqual([original(text) for text in same[-4:]], [0, 1, 1, 1])
 
 
 if __name__ == "__main__":

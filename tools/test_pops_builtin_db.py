@@ -414,11 +414,11 @@ class VcdidCommand(unittest.TestCase):
             self.assertEqual(self.launcher(text), self.effective(text), repr(text))
         # $VCDID_0 runs entry 0 and leaves the id free for the next one.
         self.assertEqual(self.original_calls("$VCDID_0\n$VCDID_5"), [0, 5])
-        # Known difference (quirk 22): the original starts a command at any
-        # '$'; launcHER's parser needs the '$' at the start of a white-space
-        # delimited token, so a '$' glued to other text is not a command.
+        # The original starts a command at any '$', so a '$' glued to other
+        # text is a command; launcHER's reader does the same
+        # (tools/test_pops_config_text.py).
         self.assertEqual(self.original_calls("x$VCDID_9999"), [9999])
-        self.assertEqual(self.launcher("x$VCDID_9999"), [])
+        self.assertEqual(self.launcher("x$VCDID_9999"), [9999])
 
     def test_random_cases(self):
         LIB.pops_config_init.argtypes = [c.c_void_p]
@@ -561,17 +561,17 @@ class FakelcCommand(unittest.TestCase):
         text = "$UNDO_LIBCRYPT_FIX\n$VCDID_6"
         self.assertEqual(self.original(text), (self.entry_lc[6, 0], (6, 0)))
         self.assertEqual(self.launcher(text), (POPS_LC, (6, 0)))
-        # Quirk 22: the original ends the name only at a space, CR, LF, NUL
-        # or '$', and starts a command at any '$', also inside a '#' line;
-        # launcHER splits on any white space and needs the '$' to start a
-        # token outside a comment.
-        for text, original, launcher in (
-                ("$FAKELC\t", POPS_LC, FAKELC_LC),
-                ("$FAKELC$NOPAD0", FAKELC_LC, POPS_LC),
-                ("x$FAKELC", FAKELC_LC, POPS_LC),
-                ("#$FAKELC", FAKELC_LC, POPS_LC)):
+        # The original ends the name only at a space, CR, LF, NUL or '$', and
+        # starts a command at any '$', also inside a '#' line. launcHER's
+        # reader is now the same (tools/test_pops_config_text.py); these
+        # were differences before.
+        for text, original in (
+                ("$FAKELC\t", POPS_LC),
+                ("$FAKELC$NOPAD0", FAKELC_LC),
+                ("x$FAKELC", FAKELC_LC),
+                ("#$FAKELC", FAKELC_LC)):
             self.assertEqual(self.original(text), (original, None), repr(text))
-            self.assertEqual(self.launcher(text), (launcher, None), repr(text))
+            self.assertEqual(self.launcher(text), (original, None), repr(text))
 
     def test_random_orders(self):
         rng = random.Random(23)

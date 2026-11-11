@@ -695,7 +695,11 @@ class BuildConfig(unittest.TestCase):
         self.assertEqual(out.ram_base_ptr, 0x70003364)
 
     def test_safe_mode_commands(self):
-        for lines, want in ((["$SAFEMODE2"], 2), (["$SAFEMODE $SAFEMODE2"], 3),
+        # The original tries neither handler once one of the two is on, so
+        # the first decides (tools/test_pops_config_text.py measures it).
+        for lines, want in ((["$SAFEMODE2"], 2), (["$SAFEMODE $SAFEMODE2"], 1),
+                            (["$SAFEMODE2 $SAFEMODE"], 2),
+                            (["$SAFEMODE $NOSAFEMODE $SAFEMODE2"], 2),
                             (["$SAFEMODE", "$NOSAFEMODE"], 0), (["$NOSAFEMODE $SAFEMODE2"], 2),
                             (["$SAFEMODE2X", "$XSAFEMODE"], 0)):
             out = ResidentConfig()
