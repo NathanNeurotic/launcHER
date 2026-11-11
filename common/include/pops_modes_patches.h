@@ -9,8 +9,70 @@
 extern "C" {
 #endif
 
+/* POPStarter r13's loader state that later stages test: what its BIOS.BIN
+ * and OSD loaders (FUN_0088019c, FUN_0087f768) left behind, and whether
+ * compatibility mode 6 already ran. One byte per original word; nonzero is
+ * "set". See docs/POPSTARTER_USER_BIOS.md for who sets and who reads each.
+ * launcHER has no OSD loader, so the four osd_* fields stay 0 in a launch;
+ * they are here so the gates are the original's. A NULL state means all 0. */
+typedef struct {
+  uint8_t bios_all;   /* gp+0x38a4: BIOS.BIN of the all-games folder loaded */
+  uint8_t bios_game;  /* gp+0x3b98: BIOS.BIN of the game's folder loaded */
+  uint8_t osd_all_a;  /* gp+0x343c: all-games OSD replacement, first kind */
+  uint8_t osd_all_b;  /* gp+0x3430: all-games OSD replacement, second kind */
+  uint8_t osd_game_a; /* gp+0x3878: the game's OSD replacement, first kind */
+  uint8_t osd_game_b; /* gp+0x344c: the game's OSD replacement, second kind */
+  uint8_t osd_off;    /* gp+0x3704: mode 6 wrote 0x2525b0 (FUN_008db97c) */
+} PopsUserRomState;
+
+/* gp+0x3b98 or gp+0x38a4: the ROM copy is the user's, so every writer of
+ * 0x2525b0 ($UNDO_*, compatibility mode 6) leaves it alone. */
+int pops_user_rom_replaced(const PopsUserRomState *rom);
+/* Those two, gp+0x344c or gp+0x3430: the shell edits and the region pass's
+ * BIOS writes are skipped. */
+int pops_user_rom_keeps_shell(const PopsUserRomState *rom);
+
+/* POPStarter's BIOS.BIN loader (FUN_0088019c, docs/POPSTARTER_USER_BIOS.md).
+ * It reads the first POPS_USER_BIOS_READ bytes of the file over the PS1 ROM
+ * inside POPS, 0x24bc20..0x2cbbaf, when the file's size is at least
+ * POPS_USER_BIOS_MIN_SIZE; there is no check of the content. */
+#define POPS_USER_BIOS_ADDR 0x0024bc20
+#define POPS_USER_BIOS_READ 0x0007ff90
+#define POPS_USER_BIOS_MIN_SIZE 0x0007ff8f
+
+/* The entry gates, the launch function's and the loader's own together:
+ * nonzero = the file is not opened. per_game 0 is the all-games folder
+ * (gp+0x343c, 0x3430 set; gp+0x344c equal to 1), 1 the game's folder
+ * (gp+0x3878, 0x344c set). */
+int pops_user_bios_skipped(int per_game, const PopsUserRomState *state);
+
+/* The size test (0x8803d0): the size as a signed 32-bit value must be more
+ * than 0x7ff8e. A failed or negative lseek result is "too small". */
+int pops_user_bios_size_ok(int64_t file_size);
+
+/* One call of the loader on a file that opened. data holds the size_read
+ * bytes a read of POPS_USER_BIOS_READ bytes returned and file_size is the
+ * lseek(END) result. Returns 1 when loaded: the bytes are copied to
+ * POPS_USER_BIOS_ADDR, 0x1000 is written at 0x20079a (unchecked, as there)
+ * and bios_game or bios_all is set. Returns 0 with nothing written when a
+ * gate holds or the file is too small, negative with nothing written on a
+ * bad argument. */
+int pops_user_bios_stage(void *staged_core, size_t core_size, const void *data,
+                         size_t size_read, int64_t file_size, int per_game,
+                         PopsUserRomState *state);
+
+/* A positive result of the *_rom functions below that run compatibility
+ * modes: mode 6 was asked for and not applied because a user BIOS.BIN is
+ * loaded. The original prints a notice ("delete BIOS.BIN") and goes on. */
+#define POPS_MODE6_SKIPPED 1
+
 /* Apply Compatibility Modes 1..8 to the staged POPS core */
 int pops_apply_compat_modes(void *staged_core, size_t core_size, uint8_t modes_mask);
+/* The same with the loader state (FUN_008dc2c4's mode 6 arm): mode 6 writes
+ * nothing under a user BIOS.BIN (returns POPS_MODE6_SKIPPED) or once
+ * rom->osd_off is set (returns 0), and sets rom->osd_off when it writes. */
+int pops_apply_compat_modes_rom(void *staged_core, size_t core_size, uint8_t modes_mask,
+                                PopsUserRomState *rom);
 
 /* Fix-file session after the identified core and initial config patches.
  * Retains expected bytes across ordered/repeated mode dispatch and explicit
@@ -58,6 +120,18 @@ int pops_fix_finalize_video(PopsFixContext *context, void *staged_core,
 int pops_fix_stage(PopsFixContext *context, void *staged_core, size_t core_size,
                     const void *file, size_t file_size, unsigned slot,
                     int expected_trojan);
+/* The same with the loader state: a PATCH file's mode 6 follows
+ * pops_apply_compat_modes_rom's rule; the rest of the file is staged either
+ * way. Returns 0, POPS_MODE6_SKIPPED, or a negative error. */
+/* After pops_user_bios_stage returned 1: the compat sites inside the
+ * replaced ROM range (only mode 6's 0x2525b0) now hold the user's bytes, so
+ * their expected values are taken from the core. Every other tracked site
+ * must still match; on a mismatch nothing changes. */
+int pops_fix_context_rom_loaded(PopsFixContext *context, const void *staged_core,
+                                size_t core_size);
+int pops_fix_stage_rom(PopsFixContext *context, void *staged_core, size_t core_size,
+                        const void *file, size_t file_size, unsigned slot,
+                        int expected_trojan, PopsUserRomState *rom);
 
 /* Direct $FORCEPAL (POPS_VMODE_NTSC2PAL) and $HDTVFIX writes. $480p uses the
  * separate resident installer; progressive/unsupported modes and nonzero
@@ -74,6 +148,12 @@ int pops_region_from_licence(const char tag[4]);
  * Run after the fix files. */
 int pops_apply_region(void *staged_core, size_t core_size, int region,
                       uint8_t video_mode, int auto_video_disabled);
+/* The same with the loader state. With pops_user_rom_keeps_shell(rom): a
+ * known licence keeps 0x2649a0; an unknown one keeps 0x264994..0x2649a3 and
+ * 0x20f6cc/d8/dc/e0. Everything else is written as without it. */
+int pops_apply_region_rom(void *staged_core, size_t core_size, int region,
+                          uint8_t video_mode, int auto_video_disabled,
+                          const PopsUserRomState *rom);
 
 /* Fixed-value POPStarter commands (POPS_TOK_* mask) */
 int pops_apply_original_tokens(void *staged_core, size_t core_size, uint32_t tokens);
@@ -83,6 +163,10 @@ int pops_apply_original_tokens(void *staged_core, size_t core_size, uint32_t tok
  * original makes inside its own resident blob are not POPS code here and
  * are left out. */
 int pops_apply_undo_tokens(void *staged_core, size_t core_size, uint32_t tokens);
+/* The same with the loader state: under a user BIOS.BIN the three handlers
+ * leave 0x2525b0 alone and make their other writes. */
+int pops_apply_undo_tokens_rom(void *staged_core, size_t core_size, uint32_t tokens,
+                               const PopsUserRomState *rom);
 
 /* $FAKELC (handler 0x89caf0): the 21 bytes it copies to 0x210cf8, POPS's
  * scratchpad clear loop. They are the built-in entries' LibCrypt template
@@ -269,9 +353,10 @@ int pops_apply_always_on_pokes(void *staged_core, size_t core_size);
 /* POPStarter r13's edits to the PS1 BIOS shell inside POPS (0x878f94..
  * 0x878fc0; the ROM copy at POPS_WARMBOOT_ROM_BASE is PS1 0xbfc00000 and
  * this code runs from PS1 RAM 0x80030000), made unless a user BIOS.BIN or
- * OSD replacement was loaded (gp+0x3b98, gp+0x38a4, gp+0x344c, gp+0x3430),
- * which launcHER never does. Written without checks, after the fix files
- * and the user's commands and before the region pass, as there:
+ * an OSD replacement of the second kind was loaded (gp+0x3b98, gp+0x38a4,
+ * gp+0x344c, gp+0x3430: pops_user_rom_keeps_shell). Written without checks,
+ * after the fix files and the user's commands and before the region pass,
+ * as there:
  *  - byte 0x263ed6 = 0x20: "sw $v0,0xad0($at)" at 0x263ed4 stores $zero,
  *    so PS1 0x80050ad0 gets 0 instead of 1;
  *  - halfword 0x263d56 = 0x1000: "bnez $v0" at 0x263d54 becomes "b", so the
@@ -279,6 +364,8 @@ int pops_apply_always_on_pokes(void *staged_core, size_t core_size);
  *  - word 0x263db0 = 0: removes a "jal 0x3e260" in that function.
  * Returns 0, -EINVAL, -ERANGE. */
 int pops_apply_bios_shell_edits(void *staged_core, size_t core_size);
+int pops_apply_bios_shell_edits_rom(void *staged_core, size_t core_size,
+                                    const PopsUserRomState *rom);
 
 /* MODULE_0..9.IRX: POPStarter r13 reads each from the game device's POPS
  * folder before its IOP reset (0x8777c4..), ignores one under
@@ -338,6 +425,13 @@ int pops_apply_exception_hook(void *staged_core, size_t core_size);
 
 /* Apply all settings from a PopsConfig structure to the staged core */
 int pops_apply_all_config_patches(void *staged_core, size_t core_size, const PopsConfig *cfg);
+/* The same with the loader state as it is once every BIOS.BIN is loaded
+ * (the original runs the user's commands after its loaders): the $UNDO_*
+ * 0x2525b0 row and compatibility mode 6 follow the rules above, and
+ * launcHER's own $NOBOOT/$BIOS leaves 0x2525b0 alone under a user BIOS.BIN.
+ * Returns 0, POPS_MODE6_SKIPPED, or a negative error. */
+int pops_apply_all_config_patches_rom(void *staged_core, size_t core_size, const PopsConfig *cfg,
+                                      PopsUserRomState *rom);
 
 #ifdef __cplusplus
 }
