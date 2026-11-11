@@ -17,6 +17,10 @@
 #include <io_common.h>
 #include "handler_smb.h"
 
+/* Not an SB. launch: handler_smb.c keeps the launcher's own rules for the
+ * two network files here. */
+int pops_get_active_sb_launch(void) { return 0; }
+
 #define IRX(n) extern unsigned char n##_irx[]; extern unsigned int size_##n##_irx
 IRX(iomanX); IRX(fileXio); IRX(sio2man); IRX(mcman); IRX(mcserv);
 IRX(ps2dev9); IRX(netman); IRX(smap_tcpip); IRX(ps2ip_nm); IRX(launcher_smbman);

@@ -59,8 +59,8 @@ int DelayThread(int);
         "launcher/iop/udpfs/common", "launcher/iop/udpfs/ministack/include", "launcher/iop/udpfs/smap/include"]),
       ("udpbd", ["tools/fixtures/test_udpbd.c"], ["launcher/iop/udpfs/udpbd/include",
         "launcher/iop/udpfs/common", "launcher/iop/udpfs/ministack/include", "launcher/iop/udpfs/smap/include"]),
-      ("smb_session", ["tools/fixtures/test_smb_session.c", "launcher/src/handler_smb.c", "common/src/network_config.c"],
-        ["launcher/include", "launcher/iop/smbman/include"]),
+      ("smb_session", ["tools/fixtures/test_smb_session.c", "launcher/src/handler_smb.c", "common/src/network_config.c",
+        "common/src/pops_smb_config.c"], ["launcher/include", "launcher/iop/smbman/include", "common/include"]),
       ("udpfs_close", ["tools/fixtures/test_udpfs_close.c"], ["launcher/iop/udpfs/udpfs/include",
         "launcher/iop/udpfs/common", "launcher/iop/udpfs/ministack/include"]),
     ]:

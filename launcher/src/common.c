@@ -4,6 +4,7 @@
 #include "game_id.h"
 #include "handlers.h"
 #include "handler_pops.h"
+#include "handler_smb.h"
 #include "init.h"
 #include "loader.h"
 #include <ctype.h>
@@ -177,6 +178,10 @@ int launchPath(int argc, char *argv[]) {
     break;
 #endif
   case Device_SMB:
+#ifdef SMB
+    /* Only a PS1 launch may read the network files by POPStarter's rules. */
+    launcher_smb_set_pops_target(isPopsTarget(argv[0]));
+#endif
     ret = handleGenericPath(Device_SMB, argc, argv);
     break;
   case Device_ROM:

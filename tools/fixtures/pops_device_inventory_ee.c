@@ -20,6 +20,10 @@
 #include "pops_config.h"
 #include "network_config.h"
 #include "handler_smb.h"
+
+/* Not an SB. launch: handler_smb.c keeps the launcher's own rules for the
+ * two network files here. */
+int pops_get_active_sb_launch(void) { return 0; }
 static int screen_printf(const char *format, ...) {
   char text[512]; va_list ap; va_start(ap, format);
   int n = vsnprintf(text, sizeof(text), format, ap); va_end(ap);

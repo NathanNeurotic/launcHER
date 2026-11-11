@@ -26,6 +26,9 @@ def prepare(build,out):
     for name in ('network_config.h','ipconfig_smap.h','handler_smb.h','common.h'):
         shutil.copyfile(ROOT/'launcher/include'/name,out/name)
     shutil.copyfile(ROOT/'common/include/loader.h',out/'loader.h')
+    for name in ('launch_args.h','pops_smb_config.h'):
+        shutil.copyfile(ROOT/'common/include'/name,out/name)
+    shutil.copyfile(ROOT/'common/src/pops_smb_config.c',out/'pops_smb_config.c')
     shutil.copyfile(ROOT/'launcher/iop/smbman/include/ps2smb.h',out/'ps2smb.h')
     shutil.copyfile(ROOT/'launcher/src/handler_smb.c',out/'handler_smb.c')
     shutil.copyfile(ROOT/'common/src/network_config.c',out/'network_config.c')
@@ -34,7 +37,7 @@ def prepare(build,out):
     end=fixture.index('\nint main(',start)
     (out/'fixture_io.h').write_text(fixture[start:end])
     for name,data in modules.items():(out/f'{name}_irx.c').write_text(array(name,data))
-    target={'name':'network','type':'ee','sources':['network_transport_ee.c','handler_smb.c','network_config.c']+
+    target={'name':'network','type':'ee','sources':['network_transport_ee.c','handler_smb.c','network_config.c','pops_smb_config.c']+
             [f'{name}_irx.c' for name in modules], 'include_dirs':['.'],
             'embed_irx':['udptty'],'libs':['patches','filexio','debug'],'debug':True}
     (out/'ps2.yaml').write_text(json.dumps({'project':'network-transport-probe','targets':[target]},indent=2)+'\n')

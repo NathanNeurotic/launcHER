@@ -57,6 +57,9 @@ def prepare(launcher_build, out):
         shutil.copyfile(ROOT / "common/include" / name, out / name)
     shutil.copyfile(ROOT / "common/src/pops_config.c", out / "pops_config.c")
     shutil.copyfile(ROOT / "common/src/network_config.c", out / "network_config.c")
+    shutil.copyfile(ROOT / "common/src/pops_smb_config.c", out / "pops_smb_config.c")
+    for name in ("launch_args.h", "pops_smb_config.h"):
+        shutil.copyfile(ROOT / "common/include" / name, out / name)
     for name in ("network_config.h", "ipconfig_smap.h", "handler_smb.h", "common.h"):
         shutil.copyfile(ROOT / "launcher/include" / name, out / name)
     shutil.copyfile(ROOT / "launcher/src/handler_smb.c", out / "handler_smb.c")
@@ -67,7 +70,7 @@ def prepare(launcher_build, out):
     (out / "production_names.h").write_text("\n".join(
         f"#define MODULE_NAME_{name} {json.dumps(module_name(data))}" for name, data in modules.items()) + "\n")
     config = {"project": "pops-device-inventory", "targets": [
-        {"name": "inventory", "type": "ee", "sources": ["pops_device_inventory_ee.c", "pops_vcd.c", "pops_config.c", "network_config.c", "handler_smb.c"] +
+        {"name": "inventory", "type": "ee", "sources": ["pops_device_inventory_ee.c", "pops_vcd.c", "pops_config.c", "network_config.c", "pops_smb_config.c", "handler_smb.c"] +
          [f"{name}_irx.c" for name in modules], "include_dirs": ["."],
          "libs": ["patches", "filexio", "debug"], "defines": ["ENABLE_PRINTF=1"], "debug": True}]}
     (out / "ps2.yaml").write_text(json.dumps(config, indent=2) + "\n")

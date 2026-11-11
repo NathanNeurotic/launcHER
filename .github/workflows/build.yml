@@ -38,6 +38,8 @@ jobs:
         run: python tools/test_smap_ipconfig.py
       - name: Test network configuration, SMB creation and UDPFS reliability
         run: python tools/test_network_transports.py
+      - name: Test POPStarter's SB. network files (IPCONFIG.DAT, SMBCONFIG.DAT)
+        run: python tools/test_pops_smb_config.py
       - name: Test SubQ bridge contracts
         run: python tools/test_subq_bridge.py
       - name: Test POPS read trace
