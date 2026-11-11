@@ -17,7 +17,10 @@ zeroes launcHER, so:
 Native: the C function against a model of the kernel's thread table and
 free-slot queue, and the trampoline's source assembled and run by
 tools/r5900_mini.py. Original (POPSTARTER_TEST_ELF): the facts about r13
-this rests on, read from its MAIN image. Source: where the launcher calls
+this rests on, read from its MAIN image. Differential (POPSTARTER_TEST_ELF
+and unicorn): r13's own handoff tail, run as shipped by
+tools/trace_original_pops_handoff.py, against launcHER's trampoline, both
+under Unicorn over one memory image. Source: where the launcher calls
 it. With POPS_HANDOFF_ELF (a linked launcher_unc.elf) the layout checker
 tools/check_pops_handoff_layout.py must pass on it. The kernel behaviour the
 model copies was read from the SCPH-39001 kernel and seen in an emulator
@@ -559,6 +562,162 @@ class Original(unittest.TestCase):
         _type, offset, vaddr = struct.unpack_from("<III", elf, phoff)
         self.assertEqual(vaddr, 0x00100000)
         self.assertEqual(elf[offset + 0x0C], 0)
+
+
+def have_unicorn():
+    try:
+        import unicorn  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
+# POPS.ELF's plan as launcHER reads it (pops_trampoline_args_init): BSS at
+# 0x502e60, 0x362ae0 bytes; a core of 0x302e60 bytes from 0x200000.
+BSS_ADDR, BSS_SIZE, CORE_SIZE = 0x00502E60, 0x00362AE0, 0x00302E60
+FILL = 0xA5
+ARGV_R13 = 0x01FE9000
+
+
+def run_launcher_trampoline_unicorn(core):
+    """launcHER's trampoline, assembled from its source, under Unicorn with
+    PopsTrampolineArgs as pops_trampoline_args_init writes them, over memory
+    filled with FILL. di, mfc0 Status, sync.p and syscall are modelled at
+    their addresses (Unicorn has no EE COP0); everything else runs as is.
+    Returns (calls, read) with calls [(name, args...)] up to ExecPS2."""
+    from unicorn import Uc, UC_ARCH_MIPS, UC_MODE_MIPS64, UC_MODE_LITTLE_ENDIAN, UC_HOOK_CODE
+    from unicorn import mips_const as K
+    words, _ = R.assemble(TRAMPOLINE.read_text(), TRAMP_ADDR)
+    uc = Uc(UC_ARCH_MIPS, UC_MODE_MIPS64 + UC_MODE_LITTLE_ENDIAN)
+    try:
+        uc.ctl_set_cpu_model(5)
+    except Exception:
+        pass
+    uc.mem_map(0, 0x02000000)
+    uc.mem_map(0x70000000, 0x10000)
+    uc.mem_write(0x00080000, bytes([FILL]) * (0x00870000 - 0x00080000))
+    uc.mem_write(0x70000000, bytes([FILL]) * 0x10000)
+    uc.mem_write(TRAMP_ADDR, b"".join(w.to_bytes(4, "little") for w in words))
+    args = struct.pack("<IIIIIIIi4I", 0x00200008, BSS_ADDR, BSS_SIZE, 0x3C30, STAGING, CORE,
+                       len(core), 1, TRAMP_ARGS + 48, 0, 0, 0)
+    uc.mem_write(TRAMP_ARGS, args + b"pops0:IMAGE.VCD\0".ljust(128, b"\0"))
+    uc.mem_write(STAGING, core)
+    state = {"status": 0x70030C11, "calls": [], "done": False}
+
+    def gpr(n):
+        return uc.reg_read(getattr(K, "UC_MIPS_REG_%d" % n)) & R.M32
+
+    def skip(addr):
+        uc.reg_write(K.UC_MIPS_REG_PC, addr + 4)
+
+    def hook(_uc, addr, _size, _user):
+        w = words[(addr - TRAMP_ADDR) // 4]
+        if w == DI:
+            state["status"] &= ~EIE
+            state["calls"].append(("di",))
+            skip(addr)
+        elif w == 0x40086000:                     # mfc0 $t0, Status
+            uc.reg_write(K.UC_MIPS_REG_T0, state["status"])
+            skip(addr)
+        elif w == 0x0000040F:                     # sync.p
+            skip(addr)
+        elif w == SYSCALL:
+            number = gpr(3)
+            state["calls"].append(("syscall", number, gpr(4), gpr(5), gpr(6), gpr(7),
+                                   state["status"] & EIE, gpr(29)))
+            if number == 7:
+                state["done"] = True
+                uc.emu_stop()
+            else:
+                skip(addr)
+
+    for i, w in enumerate(words):
+        if w in (DI, 0x40086000, 0x0000040F, SYSCALL):
+            uc.hook_add(UC_HOOK_CODE, hook, begin=TRAMP_ADDR + 4 * i, end=TRAMP_ADDR + 4 * i)
+    uc.reg_write(K.UC_MIPS_REG_A0, TRAMP_ARGS)
+    uc.emu_start(TRAMP_ADDR, TRAMP_ADDR + 4 * len(words), count=50_000_000)
+    if not state["done"]:
+        raise RuntimeError("the trampoline did not reach ExecPS2")
+    return state["calls"], lambda lo, hi: bytes(uc.mem_read(lo, hi - lo))
+
+
+@unittest.skipUnless(os.environ.get("POPSTARTER_TEST_ELF") and have_unicorn(),
+                     "POPSTARTER_TEST_ELF not set or unicorn missing")
+class Differential(unittest.TestCase):
+    """r13's own tail (MAIN 0x87c0d4..0x87c1d0, run as shipped by
+    tools/trace_original_pops_handoff.py) against launcHER's trampoline, both
+    under Unicorn over the same memory image: what each leaves in memory
+    below r13's code and in the scratchpad when it calls ExecPS2, and the
+    calls it makes on the way."""
+
+    @classmethod
+    def setUpClass(cls):
+        import trace_original_pops_handoff as T
+        cls.core = random.Random(0x434F5245).randbytes(CORE_SIZE)
+        tail = T.Tail()
+        # r13 read POPS.ELF to its final place long before this tail, so the
+        # core area itself is not compared; launcHER's copy is checked alone.
+        cls.r13 = tail.run(fill=FILL, argv=ARGV_R13)
+        cls.lh_calls, read = run_launcher_trampoline_unicorn(cls.core)
+        cls.lh_read = staticmethod(read)
+
+    def r13_mem(self, lo, hi):
+        return self.r13["mem"](lo, hi)
+
+    def test_same_memory_below_the_original_when_execps2_is_called(self):
+        # 0x00090000..0x00200000: low RAM and launcHER's / r13's 0x100000 clear.
+        # 0x00080000..0x00090000 holds launcHER's trampoline, its arguments and
+        # its stack; r13 has nothing there and leaves it as found.
+        for lo, hi in ((0x00090000, 0x00200000), (0x00200000 + CORE_SIZE, 0x00870000)):
+            self.assertEqual(self.lh_read(lo, hi), self.r13_mem(lo, hi), "%#x..%#x" % (lo, hi))
+        self.assertEqual(self.lh_read(0x70000000, 0x70010000), self.r13_mem(0x70000000, 0x70010000))
+        # The pieces both clear, and what is outside them kept by both.
+        zero = lambda lo, hi: bytes(hi - lo)
+        self.assertEqual(self.r13_mem(0x00100000, 0x00200000), zero(0x00100000, 0x00200000))
+        self.assertEqual(self.r13_mem(BSS_ADDR, 0x00870000), zero(BSS_ADDR, 0x00870000))
+        self.assertEqual(self.r13_mem(0x70000000, 0x70004000), zero(0x70000000, 0x70004000))
+        self.assertEqual(self.r13_mem(0x70004000, 0x70004100), bytes([FILL]) * 0x100)
+        self.assertEqual(self.r13_mem(0x000FFF00, 0x00100000), bytes([FILL]) * 0x100)
+        # The core: launcHER copies it from the staging area; r13 loaded it
+        # in place before (this run did not), so the area is launcHER's copy.
+        self.assertEqual(self.lh_read(0x00200000, 0x00200000 + CORE_SIZE), self.core)
+
+    def test_same_calls_up_to_execps2_apart_from_the_service_reinit(self):
+        r13 = [e for e in self.r13["log"] if e[0] in ("FlushCache", "ExecPS2")]
+        self.assertEqual(r13, [("FlushCache", 0), ("FlushCache", 2), ("ExecPS2", 0x00200000, 0, 1, ARGV_R13)])
+        lh = [e for e in self.lh_calls if e[0] == "syscall"]
+        self.assertEqual([(e[1], e[2]) for e in lh], [(0x64, 0), (0x64, 2), (7, 0x00200008)])
+        self.assertEqual(lh[2][3:6], (0, 1, TRAMP_ARGS + 32))   # gp 0, argc 1, argv
+        # What launcHER does not do: r13 closes and opens the file and SIF
+        # services again between FlushCache(2) and ExecPS2, and clears its own
+        # staging buffer (at 0x972390, in its own memory).
+        between = [e[0] for e in self.r13["log"][self.r13["log"].index(("FlushCache", 2)) + 1:-1]]
+        self.assertEqual(between, ["fioExit", "SifExitRpc", "SifInitRpc", "SifLoadFileInit",
+                                   "SifInitCmd", "fioInit"])
+        self.assertIn(("memset", 0x00972390, 0, 0x1000, 0x70030C11), self.r13["log"])
+        # Its scratchpad clear runs in kernel mode (Status & ~0x18), the
+        # others in user mode; the bytes it leaves are the same.
+        self.assertEqual(self.r13["log"][:3], [("status_get",), ("status_set", 0x70030C01),
+                                               ("memset", 0x70000000, 0, 0x4000, 0x70030C01)])
+        self.assertEqual(self.r13["status"], 0x70030C11)
+
+    def test_interrupts(self):
+        # r13 calls ExecPS2 with interrupts on and never turns them off;
+        # launcHER turns them off once, first, and calls everything after it
+        # with them off. The kernel's ExecPS2 returns through di (0x80002fa8)
+        # either way, so POPS's first instruction sees EIE = 0 after both.
+        self.assertNotIn("di", [e[0] for e in self.r13["log"]])
+        self.assertEqual(self.lh_calls[0], ("di",))
+        self.assertTrue(all(e[6] == 0 for e in self.lh_calls if e[0] == "syscall"))
+        self.assertTrue(all(e[7] == 0x0008FFF0 for e in self.lh_calls if e[0] == "syscall"))
+
+    @unittest.skipUnless(os.environ.get("POPS_TEST_ELF"), "POPS_TEST_ELF not set")
+    def test_the_entry_eight_bytes_on_is_the_same_code(self):
+        # r13 enters at 0x200000, launcHER at 0x200008 (the ELF's e_entry);
+        # the two words in between are nops in POPS.ELF.
+        from trace_original_pops_warmboot import core_image
+        core = core_image(os.environ["POPS_TEST_ELF"])
+        self.assertEqual(bytes(core[0:8]), bytes(8))
 
 
 class Source(unittest.TestCase):
