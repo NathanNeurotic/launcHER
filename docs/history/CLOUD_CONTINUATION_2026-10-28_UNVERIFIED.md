@@ -7,7 +7,9 @@
 Continue draft PR [#23](https://github.com/NathanNeurotic/launcHER/pull/23)
 on `codex/popstarter-replacement`. Do not merge. Fetch before editing and
 preserve newer work. Publish validated incremental commits on this branch.
-Include `Co-authored-by: ChatGPT <chatgpt@openai.com>` in new commits.
+(Corrected 2026-11-11: a line here used to ask for an AI co-author trailer
+in new commits. That instruction is withdrawn; the owner's rule is no AI or
+assistant attribution in commits, pull requests or documents.)
 
 ## October 27 parity audit and next-agent handoff
 
@@ -150,7 +152,7 @@ Do not claim full 1:1 drop-in replacement parity while stubs remain. While physi
    - `pops_jit_hook_009a07a8` (`FUN_009a07a8`, 132B)
    - `pops_jit_hook_009a0e60` (`FUN_009a0e60`, 128B)
    - `pops_core_runtime_0091c9c8` (`FUN_0091c9c8`, 128B)
-3. **Preserve Rules:** Keep all 15 `launcHER` host test suites and 220 `REPOP` unit tests passing at 100%. Ensure every commit carries `Co-authored-by: ChatGPT <chatgpt@openai.com>`.
+3. **Preserve Rules:** Keep all 15 `launcHER` host test suites and 220 `REPOP` unit tests passing at 100%. (Corrected 2026-11-11: the instruction that stood here, to put an AI co-author trailer on every commit, is withdrawn.)
 
 
 ## October 20 source and CI continuation
