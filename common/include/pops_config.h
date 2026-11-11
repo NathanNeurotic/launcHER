@@ -138,7 +138,7 @@ typedef struct {
   uint8_t no_igr;       /* $NOIGR: POPStarter's IGR-off writes */
   uint8_t igr_type;     /* 0 = launcHER direct exit, 1..6 = $IGR0..$IGR5 */
   uint8_t safe_mode;    /* POPS_SAFE_MODE_* bits: $SAFEMODE, $SAFEMODE2; $NOSAFEMODE clears */
-  uint8_t usb_delay;    /* $USBDELAY_# seconds */
+  uint8_t usb_delay;    /* $USBDELAY_n: the digit n (see usb_delay_set) */
   /* $NOVMC0 / $NOVMC1 (handlers 0x896568 / 0x896718): every pass, the
    * resident code clears the low byte of POPS's card 0 / card 1 state word,
    * so the game finds no card there (POPS_RES_F_NOVMC0/1); $NOVMC1 also
@@ -254,6 +254,11 @@ typedef struct {
    * (the entry's FUN_008dc12c(2), gp+0x38bc = 2). Only the core write of
    * $NOVMC1, no per-pass store, and no SLOT1.VMC is made. */
   uint8_t builtin_no_vmc1;
+  /* A $USBDELAY_n was taken (handler 0x89dbd4..0x89e13c): usb_delay is the
+   * digit the original stores in the byte at 0x100017. Without one the
+   * original keeps the byte its ELF ships with (1), which launcHER does not
+   * model: usb_delay stays 0. */
+  uint8_t usb_delay_set;
 } PopsConfig;
 
 /* PopsConfig.fakelc */

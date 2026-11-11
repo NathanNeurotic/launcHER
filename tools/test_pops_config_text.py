@@ -59,7 +59,7 @@ PLAIN = [
     "$HDTVFIX", "$NOHDTVFIX", "$LOAD_PADMAN", "$KILL_PADMAN", "$ORIGINAL_OPCODES", "$480P",
 ]
 NUMBERED = ["$DX_", "$DY_", "$MAGH_", "$MAGV_", "$DW_", "$DH_", "$LEFTADJ_", "$VCDID_",
-            "$XPOS_", "$YPOS_", "$ZPOS_", "$DWSTRETCH_", "$DWCROP_"]
+            "$XPOS_", "$YPOS_", "$ZPOS_", "$DWSTRETCH_", "$DWCROP_", "$USBDELAY_"]
 HEXED = ["$PAD0ID_0X", "$PAD1ID_0X", "$PAD2ID_0X", "$COMPATIBILITY_0X"]
 LAUNCHER_ONLY = ["$NOBOOT", "$BIOS", "MODE 3", "$MODE 4", "$MODE5", "7", "$DITHER_OFF",
                  "$FASTMIPS", "$PAL2NTSC", "$NTSC2PAL", "$FIX_ALL", "$480i"]
@@ -92,7 +92,7 @@ def launcher(text, number=0, cfg=None):
 
 def original(text, number=0):
     import trace_original_pops_config_text as T
-    scan = T.scan_commands(text, number=number)
+    scan = T.scan_commands(text, usb_delay=USB_BEFORE, number=number)
     return scan, [(offset, name, effects > 0) for offset, name, _, effects in scan.events], scan.skips
 
 
@@ -169,7 +169,26 @@ FIXED = [
     "\r\n".join(PLAIN) + "\r\n",
     "".join(PLAIN),
     "\t".join(PLAIN) + "\t",
+    # $USBDELAY_: exactly one digit and a terminator; the last one wins.
+    "$USBDELAY_5", "$USBDELAY_5 ", "$USBDELAY_12 ", "$USBDELAY_ ", "$USBDELAY_A ", "$USBDELAY_5\t",
+    "$USBDELAY_5$SMOOTH", "$usbdelay_9\r\n", "$USBDELAY5 ", "$USBDELAY_0 ", "$USBDELAY_3 $USBDELAY_8 ",
+    "$LEFTADJ_12 $USBDELAY_7 $XPOS_Q ", "$USBDELAY_7 $XPOS_Q ", "$USBDELAY_ 5 ", "$USBDELAY_05 ",
+    "x$USBDELAY_4\n", "#$USBDELAY_6\n", "$USBDELAY_-1 ", "$USBDELAY_9\0", "$USBDELAY_2 $USBDELAY_44 ",
 ]
+
+# What the byte at 0x100017 holds before the original's pass in these tests:
+# nothing the $USBDELAY_ handler can write (it writes one digit, 0..9).
+USB_BEFORE = 0xEE
+# The $USBDELAY_ texts above: the digit the original left in 0x100017, or
+# None where it left the byte alone.
+USB_EXPECTED = {
+    "$USBDELAY_5": 5, "$USBDELAY_5 ": 5, "$USBDELAY_12 ": None, "$USBDELAY_ ": None,
+    "$USBDELAY_A ": None, "$USBDELAY_5\t": None, "$USBDELAY_5$SMOOTH": 5, "$usbdelay_9\r\n": 9,
+    "$USBDELAY5 ": None, "$USBDELAY_0 ": 0, "$USBDELAY_3 $USBDELAY_8 ": 8,
+    "$LEFTADJ_12 $USBDELAY_7 $XPOS_Q ": 7, "$USBDELAY_7 $XPOS_Q ": 7, "$USBDELAY_ 5 ": None,
+    "$USBDELAY_05 ": None, "x$USBDELAY_4\n": 4, "#$USBDELAY_6\n": 6, "$USBDELAY_-1 ": None,
+    "$USBDELAY_9\0": 9, "$USBDELAY_2 $USBDELAY_44 ": 2,
+}
 
 # What the original's pass did with each FIXED text, in the same order:
 # (commands [(offset, name, it changed something)], cheat codes [(offset, columns)]).
@@ -306,6 +325,26 @@ EXPECTED = [
     True), (515, '$HDTVFIX', True), (523, '$NOHDTVFIX', True), (533, '$LOAD_PADMAN', True), (545,
     '$KILL_PADMAN', True), (574, '$480', True)], []),
     ([], []),
+    ([(0, '$USBDELAY_', True)], []),
+    ([(0, '$USBDELAY_', True)], []),
+    ([], []),
+    ([], []),
+    ([], []),
+    ([], []),
+    ([(0, '$USBDELAY_', True), (11, '$SMOOTH', True)], []),
+    ([(0, '$USBDELAY_', True)], []),
+    ([], []),
+    ([(0, '$USBDELAY_', True)], []),
+    ([(0, '$USBDELAY_', True), (12, '$USBDELAY_', True)], []),
+    ([(0, '$LEFTADJ_', True), (12, '$USBDELAY_', True), (24, '$?POS_', True)], []),
+    ([(0, '$USBDELAY_', True), (12, '$?POS_', True)], []),
+    ([], []),
+    ([], []),
+    ([(1, '$USBDELAY_', True)], []),
+    ([(1, '$USBDELAY_', True)], []),
+    ([], []),
+    ([(0, '$USBDELAY_', True)], []),
+    ([(0, '$USBDELAY_', True)], []),
 ]
 
 
@@ -398,6 +437,22 @@ class Native(unittest.TestCase):
             expected = launcher(want)[1].video_mode
             self.assertEqual(launcher(text)[1].video_mode, expected, text)
 
+    def test_usb_delay(self):
+        """$USBDELAY_n: one digit and a terminator, nothing else."""
+        for text in USB_EXPECTED:
+            self.assertIn(text, FIXED)
+        for text, want in USB_EXPECTED.items():
+            result, cfg, _, _ = launcher(text)
+            self.assertEqual(result, 0, repr(text))
+            self.assertEqual((cfg.usb_delay_set, cfg.usb_delay),
+                             (0, 0) if want is None else (1, want), repr(text))
+        # Without the command nothing is asked for: no delay is added.
+        cfg = F.PopsConfig()
+        LIB.pops_config_init(c.byref(cfg))
+        self.assertEqual((cfg.usb_delay_set, cfg.usb_delay), (0, 0))
+        # It leaves the shared number alone.
+        self.assertEqual(launcher_positions(launcher("$LEFTADJ_12 $USBDELAY_7 $XPOS_Q ")[1]), (12, None))
+
     def test_parse_line_is_the_same_reader(self):
         cfg = F.PopsConfig()
         LIB.pops_config_init(c.byref(cfg))
@@ -406,6 +461,15 @@ class Native(unittest.TestCase):
 
 
 class Source(unittest.TestCase):
+    def test_usb_delay_use_is_unchanged(self):
+        """The parsed digit matches the original; what launcHER does with it
+        (an EE sleep before the launch, only when it is above 0) is as it was."""
+        handler = (ROOT / "launcher/src/handler_pops.c").read_text(encoding="utf-8").replace("\r\n", "\n")
+        self.assertIn("  if (cfg.usb_delay > 0) {\n", handler)
+        self.assertIn("    sleep(cfg.usb_delay);\n", handler)
+        self.assertEqual(handler.count("usb_delay"), 3)
+        self.assertNotIn("strtol(token + 10", SOURCE)
+
     def test_no_line_reader_is_left(self):
         self.assertNotIn("parse_directives", SOURCE)
         self.assertNotIn("length > 254", SOURCE)
@@ -446,7 +510,7 @@ class Original(unittest.TestCase):
         import trace_original_pops_config_text as T
         handlers = T.handlers()
         names = [handlers[address] for address in sorted(handlers)]
-        self.assertEqual(table_names(), [name for name in names if name != "$USBDELAY_"])
+        self.assertEqual(table_names(), names)
         self.assertEqual(len(names), 66)
 
     def test_table_is_the_original(self):
@@ -458,6 +522,7 @@ class Original(unittest.TestCase):
         print("original command pass: %d fixed texts match the table" % len(FIXED))
 
     launcher_modes = 0
+    usb_delays = 0
 
     def compare(self, text, number=0):
         scan, commands, codes = original(text, number)
@@ -476,11 +541,37 @@ class Original(unittest.TestCase):
             self.launcher_modes += 1
         ids = [a0 for name, a0, _ in scan.calls if name == "vcdid"]
         self.assertEqual(cfg.vcdid, ids[-1] if ids else 0, repr(text))
+        # The byte at 0x100017: the digit, or untouched.
+        self.assertEqual(cfg.usb_delay if cfg.usb_delay_set else USB_BEFORE, scan.usb_delay, repr(text))
+        if not cfg.usb_delay_set:
+            self.assertEqual(cfg.usb_delay, 0, repr(text))
+        self.usb_delays += cfg.usb_delay_set
         return len(commands), len(codes)
 
     def test_fixed_texts(self):
         for text in FIXED:
             self.compare(text)
+
+    def test_usb_delay_byte(self):
+        """$USBDELAY_n: the byte at 0x100017 after the original's pass."""
+        for text, want in USB_EXPECTED.items():
+            scan, _, _ = original(text)
+            self.assertEqual(scan.usb_delay, USB_BEFORE if want is None else want, repr(text))
+            self.compare(text)
+        print("original $USBDELAY_n: %d texts, byte at 0x100017 matches" % len(USB_EXPECTED))
+
+    def test_random_usb_delay(self):
+        rng = random.Random(0x100017)
+        for _ in range(300):
+            text = "".join(
+                rng.choice(("", "", "x", "#", "$SMOOTH ", "$LEFTADJ_9 ", "$XPOS_Q ", "\r\n")) +
+                rng.choice(("$USBDELAY_", "$usbdelay_", "$USBDELAY", "$USBDELAY_")) +
+                "".join(rng.choice("0123456789 \t\r\n$_-xX\0") for _ in range(rng.randrange(0, 4))) +
+                rng.choice(ENDS)
+                for _ in range(rng.randrange(1, 4)))
+            self.compare(text)
+        print("original $USBDELAY_n: 300 random texts match, the byte at 0x100017 was written in %d"
+              % self.usb_delays)
 
     def test_shared_number_start(self):
         for text in ("$XPOS_ ", "$YPOS_Q $XPOS_ ", "$XPOS_123456 $YPOS_5 ", "$LEFTADJ_7 $XPOS_ ",
@@ -494,13 +585,12 @@ class Original(unittest.TestCase):
         count = commands = codes = 0
         for _ in range(1500):
             text = random_text(rng)
-            if "$USBDELAY" in text.upper():
-                continue
             found = self.compare(text)
             count, commands, codes = count + 1, commands + found[0], codes + found[1]
         print("original command pass: %d random texts match (%d commands, %d cheat codes; "
-              "%d texts also had a launcHER-only MODE token)"
-              % (count, commands, codes, self.launcher_modes))
+              "%d texts also had a launcHER-only MODE token; the byte at 0x100017 was "
+              "written in %d)"
+              % (count, commands, codes, self.launcher_modes, self.usb_delays))
 
     def test_compat_function(self):
         """FUN_008dc2c4, as the pass calls it: which modes poke anything."""

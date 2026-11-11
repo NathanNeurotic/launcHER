@@ -413,6 +413,7 @@ enum {
   CMD_CROP,     /* 1..4 digits */
   CMD_SAFEMODE, /* $SAFEMODE / $SAFEMODE2: only while neither is on */
   CMD_NOSAFEMODE, /* only while one is on */
+  CMD_USBDELAY, /* "$USBDELAY_", one digit, terminator */
   CMD_COMPAT,   /* "$COMPATIBILITY_0X", two bytes, terminator */
 };
 
@@ -492,6 +493,7 @@ static const PopsCommand pops_commands[] = {
   CMD("$NOHDTVFIX", CMD_PLAIN, 0),                /* 0x89d75c */
   CMD("$LOAD_PADMAN", CMD_PLAIN, 0),              /* 0x89d994 */
   CMD("$KILL_PADMAN", CMD_PLAIN, 0),              /* 0x89dbcc */
+  CMD("$USBDELAY_", CMD_USBDELAY, 0),             /* 0x89e13c */
   CMD("$COMPATIBILITY_0X", CMD_COMPAT, 0),        /* 0x89e734 */
 };
 
@@ -642,6 +644,17 @@ static int run_command(PopsConfig *cfg, const PopsCommand *command, const unsign
     cfg->safe_mode = 0;
     *effect = 1;
     return 1;
+  case CMD_USBDELAY:
+    /* Exactly one digit and a terminator; the original stores the digit
+     * in the byte at 0x100017 and leaves fp+0x90 alone. The last one in
+     * the files wins. Anything else ("$USBDELAY_12", "$USBDELAY5") is not
+     * a command. */
+    if (rest[0] < '0' || rest[0] > '9' || !command_end(rest[1]))
+      return 0;
+    cfg->usb_delay = (uint8_t)(rest[0] - '0');
+    cfg->usb_delay_set = 1;
+    *effect = 1;
+    return 1;
   case CMD_COMPAT: {
     int mode;
     if (!command_end(rest[2]))
@@ -695,14 +708,6 @@ static void apply_launcher_token(PopsConfig *cfg, const char *token) {
   }
   if (!strcasecmp(token, "$NOBOOT") || !strcasecmp(token, "$BIOS")) {
     cfg->no_boot = 1;
-    return;
-  }
-  if (!strncasecmp(token, "$USBDELAY_", 10)) {
-    cfg->usb_delay = (uint8_t)strtol(token + 10, NULL, 10);
-    return;
-  }
-  if (!strncasecmp(token, "$USBDELAY", 9) && isdigit((unsigned char)token[9])) {
-    cfg->usb_delay = (uint8_t)strtol(token + 9, NULL, 10);
     return;
   }
   if (!strncasecmp(token, "$MODE", 5) && isdigit((unsigned char)token[5])) {

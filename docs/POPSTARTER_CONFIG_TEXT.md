@@ -95,6 +95,68 @@ terminator does nothing (the scan still moves one byte on). The exception is
 - **`$COMPATIBILITY_0X08`..`0XFF` and `0X00` do nothing**, as does a
   one-digit `$COMPATIBILITY_0X5`.
 - **Nothing is a comment.** `#` and `;` hide nothing.
+- **`$USBDELAY_` takes one digit only.** `$USBDELAY_12`, `$USBDELAY_05`,
+  `$USBDELAY5` and `$USBDELAY_` are not commands.
+
+## `$USBDELAY_n`
+
+### The command (run under emulation)
+
+Handler `0x89dbd4..0x89e13c`: `$USBDELAY_` + one digit `0`..`9` + a
+terminator. It stores the digit in the byte at `0x100017` and nothing
+else; the shared number temporary is left alone. The last one in the files
+wins. 20 fixed texts and the random texts of
+`tools/test_pops_config_text.py` compare that byte with launcHER's
+`usb_delay` / `usb_delay_set`.
+
+`0x100017` is file offset `0x417` of POPSTARTER.ELF. It is `0x01` as shipped
+in the four profiles looked at (MAIN, DEBUG, USBDELAY, USBDELAY_DEBUG), so a
+launch with no `$USBDELAY_n` has 1 there. The USBDELAY profiles differ from
+MAIN at `0x100013` (`0x06` against `0x02`), which is another byte.
+
+### What the original does with the byte (read from the code, not run)
+
+All in `main` (`0x870b78`):
+
+- `0x879cf0..0x879e58`: if `gp+0x3888` is 1 the byte is set to 0 first (the
+  stores to `gp+0x3888` found in the image write 0 or 3, never 1). Then, only
+  when `gp+0x3448` is not 0, the embedded module at image `0x91f680`
+  (`gp+0x2890` = `0xa45` bytes) is searched four bytes at a time for the
+  bytes `D` `L` `A` `Y`; where they stand, the word becomes the byte from
+  `0x100017` followed by three zero bytes. The module has one such word, at
+  image `0x91fb30` (module address `0x420`).
+- `0x87c030..0x87c054`: only when `gp+0x3448` is 1, that module is started
+  from memory (`0x91c248`), then wiped.
+- `gp+0x3448` is set to 1 in two places only: `0x871618` (the launch name
+  after the last `:`, `/` or `\` starts with `SB.` or `sb.`) and `0x8719a4`
+  (`XX.` or `xx.`). So the word is patched and the module is started for
+  the USB (`XX.`) and SMB (`SB.`) launch names and for no other; an HDD
+  launch does neither, and `$USBDELAY_n` then changes nothing but the byte.
+  That every `XX.` / `SB.` launch reaches both places was not traced.
+
+The module is an IOP module named `PFS Wrapper r6a`. Its code at module
+address 0: `WaitSema`; if the word at `0x540` (1 as shipped) is not 0: take
+the word at `0x420`; if it is still the four letters `DLAY`
+(`0x59414c44`), use 5; `DelayThread(value * 1000000)`; clear the word at
+`0x540`; `SignalSema`. So the delay happens once, in the IOP module, the
+first time that code runs: n seconds after a patch (1 as shipped, 0 for
+`$USBDELAY_0`), 5 seconds had the word never been patched. What calls that
+code (which file operation) was not traced.
+
+### launcHER
+
+- The parsed value is the original's: `usb_delay` is the digit and
+  `usb_delay_set` says one was taken. Without the command `usb_delay` stays
+  0; the original's shipped 1 is not modelled.
+- What launcHER does with it is NOT the original's and was not changed
+  here: `handler_pops.c` calls `sleep(cfg.usb_delay)` on the EE before the
+  launch when the value is above 0, for every device. There is no patched
+  wrapper word and no delay in an IOP module. Matching the original's
+  timing (a one-time IOP delay on USB and SMB launches only, 1 second when
+  no command is given) needs a console to judge and is a follow-up.
+- `pops_config_load_table` / `pops_config_export_table` (used by tests
+  only) put `usb_delay` in table byte 3 (`0x100013`). `$USBDELAY_n` writes
+  `0x100017`, which is table byte 7. Reported, not changed.
 
 ## launcHER
 
@@ -128,12 +190,15 @@ terminator does nothing (the scan still moves one byte on). The exception is
 
 `python tools/test_pops_config_text.py` with `POPSTARTER_TEST_ELF`:
 
-- the handler names and their order, read from the image, equal
+- the 66 handler names and their order, read from the image, equal
   `pops_commands[]`;
-- 100 fixed texts: the original's pass and launcHER's reader report the
+- 120 fixed texts: the original's pass and launcHER's reader report the
   same commands at the same offsets, the same codes stepped over, and the
-  same X, Y, compatibility-mode and game-id values;
-- 1500 seeded random texts: the same;
+  same X, Y, compatibility-mode, game-id and `0x100017` values;
+- 1500 seeded random texts: the same (2876 commands, 399 codes stepped
+  over; 96 texts also had a launcHER-only `MODE` token, 20 wrote
+  `0x100017`);
+- 300 seeded random `$USBDELAY` texts: the same (84 wrote `0x100017`);
 - 30 text/start-value pairs for the shared number temporary;
 - `FUN_008dc2c4`: 21 modes, with and without `$SUBCDSTATUS`.
 

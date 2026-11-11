@@ -81,6 +81,7 @@ class PopsConfig(c.Structure):
         ("recompiler_addons", c.c_uint8),
         ("fakelc", c.c_uint8),
         ("builtin_no_vmc1", c.c_uint8),
+        ("usb_delay_set", c.c_uint8),
     ]
 
 class PopsCompatEntry(c.Structure):
