@@ -131,6 +131,18 @@ they change in the shell's behaviour was not worked out. When launcHER
 gains `BIOS.BIN` or OSD support, they must be skipped for those, as the
 original does (`gp+0x3b98`, `gp+0x38a4`, `gp+0x344c`, `gp+0x3430`).
 
+Added 2026-11-11 from
+[the gap audit](POPSTARTER_GAP_AUDIT_2026-11-11.md) (host measurements, no
+console run): the same four flags also change the region pass that follows,
+and by more than one write (known licence: only `0x2649a0` is skipped;
+unknown licence: `0x264994..0x2649a0` and the four zero bytes at `0x20f6cc`,
+`0x20f6d8`, `0x20f6dc`, `0x20f6e0`); the two OSD flags `gp+0x343c` and
+`gp+0x3878` alone skip nothing. Also, within "after the fix files and the
+user's commands" the two orders differ: the original runs the fix files
+first and `CHEATS.TXT` second, launcHER the other way round
+(`handler_pops.c:1419`, `:1450`). Whether any input ends differently because
+of that has not been measured.
+
 ## The pad hotkeys and the in-game disc swap
 
 The first thing the GP1 hook runs, on every GP1 write, is the always-live

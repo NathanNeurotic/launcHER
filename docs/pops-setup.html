@@ -251,8 +251,8 @@ arg=-dev9=NIC</code></pre>
 </p>
 
 <ul>
-  <li><code>PATCHES.TXT</code>: General directives, video modes, and memory patches.</li>
-  <li><code>MODES.TXT</code>: Compatibility modes 1 through 8.</li>
+  <li><code>PATCHES.TXT</code>: General directives, video modes, and memory patches. (launcHER's own file name; POPStarter takes commands from <code>CHEATS.TXT</code>, which launcHER also reads.)</li>
+  <li><code>MODES.TXT</code>: Compatibility modes 1 through 8. (launcHER's own file name.)</li>
   <li><code>CHEATS.TXT</code>: GameShark and Action Replay cheat codes.</li>
   <li><code>DISCS.TXT</code>: The disc file names of a multi-disc game (up to 4), for POPStarter's in-game disc swap.</li>
   <li><code>VMCDIR.TXT</code>: Custom folder path for Virtual Memory Cards.</li>
@@ -303,8 +303,8 @@ arg=-dev9=NIC</code></pre>
   <li><code>$IGR0</code> to <code>$IGR5</code>: POPStarter's In-Game Reset combos; 3 to 5 exit straight away instead of asking. <code>$NOIGR</code> turns In-Game Reset off. Without any of these, launcHER exits straight to the browser.</li>
   <li><code>$NOPAD0</code>, <code>$NOPAD1</code>: the game sees no controller in that port. <code>$PAD0ID_0Xhh</code>, <code>$PAD1ID_0Xhh</code>: the port reports controller ID <code>hh</code> (for example <code>0X41</code> digital, <code>0X73</code> analog). <code>$D2LS</code>: swaps the D-pad and the left stick and presents both ports as digital pads. <code>$D2LS_ALT</code>: swaps them and keeps the real controller type. Not yet tested on a console.</li>
   <li><code>$SAFEMODE</code>: cheats wait while the PS1 BIOS boot is still running, as in POPStarter. <code>$SAFEMODE2</code>: POPStarter's second cheat gate. <code>$NOSAFEMODE</code>: turns both off. Not yet tested on a console.</li>
-  <li><code>$USBDELAY_#</code>: waits the given number of seconds for slow USB drives.</li>
-  <li><code>$NOBOOT</code> or <code>$BIOS</code>: keeps the PS1 BIOS boot logo.</li>
+  <li><code>$USBDELAY_#</code>: launcHER pauses the given number of seconds once before starting POPS, on any device, and not at all without the command. This is not yet what POPStarter does: read from its code (not run on a console), POPStarter accepts a single digit, delays inside its USB/SMB file driver on first use, and uses 1 second without the command. Not tested on a console.</li>
+  <li><code>$NOBOOT</code> or <code>$BIOS</code>: keeps the PS1 BIOS boot logo. These are launcHER's own commands; POPStarter r13 has neither.</li>
   <li><code>$WIDESCREEN</code> (16:9), <code>$ULTRA_WIDESCREEN</code> (about 21:9), <code>$EYEFINITY</code> (three 16:9 screens): squeeze 3D geometry horizontally, as in POPStarter; set the TV to stretch. The last one listed wins. Not yet tested on a console.</li>
   <li><code>$SET_TIMINGS</code>: while the game runs, controller 1 alone holding L1/L2 or R1/R2 nudges two of POPS's timing values, and controller 2 alone holding L1/L2 (small steps) or R1/R2 (big steps) nudges a third. Like POPStarter, it keeps the values on the slot 0 memory card (a small entry in the card's header area) and loads them next time. Not yet tested on a console.</li>
   <li><code>$SMOOTH</code>, <code>$XPOS_&lt;n&gt;</code>, <code>$YPOS_&lt;n&gt;</code>, <code>$DWSTRETCH_&lt;n&gt;</code>, <code>$DWCROP_&lt;n&gt;</code>, <code>$LEFTADJ_&lt;n&gt;</code>: POPStarter's picture adjustments. Not yet tested on a console.</li>
@@ -549,20 +549,17 @@ $8009A200 0010</code></pre>
   </table>
 </div>
 
-<h3>Custom IGR Background Graphics</h3>
+<h3>Custom IGR Background Graphics: not implemented</h3>
 <p>
-  Place TIM2 image files in your game directory or VMC folder to customize the exit confirmation interface:
+  POPStarter can replace the pictures of the exit confirmation screen with <code>IGR_BG.TM2</code>, <code>IGR_YES.TM2</code> and <code>IGR_NO.TM2</code> from the device's <code>POPS</code> folder. This branch of launcHER has no code that reads these files, so placing them has no effect. (Corrected November 11, 2026: this section used to say they were supported.)
 </p>
 
-<ul>
-  <li><code>IGR_BG.TM2</code>: Background wallpaper image.</li>
-  <li><code>IGR_YES.TM2</code>: Selected confirmation button texture.</li>
-  <li><code>IGR_NO.TM2</code>: Selected cancellation button texture.</li>
-</ul>
-
-<h3>Custom Game Fixes (TROJAN_*.BIN)</h3>
+<h3>Custom Game Fixes (TROJAN_*.BIN, PATCH_*.BIN)</h3>
 <p>
-  If a community patch requires code injection hooks, place <code>TROJAN_0.BIN</code> through <code>TROJAN_9.BIN</code> alongside the game. launcHER verifies the container header, checks the hook address, stages the payload, and applies the injection before starting execution.
+  launcHER reads <code>TROJAN_0.BIN</code> through <code>TROJAN_9.BIN</code> and <code>PATCH_0.BIN</code> through <code>PATCH_9.BIN</code> from beside the game and from the game's subfolder, checks the container header and applies the files it accepts.
+</p>
+<p>
+  <b>TROJAN files from community fix packs do not work yet and stop the launch.</b> On a host, this branch rejected all 509 distinct TROJAN files found in a collection of community fix packs, and a rejected fix file ends the launch with "Fix file rejected". If a launch stops with that message, take the TROJAN files out of the game's folders. The 10 distinct PATCH files in the same collection were accepted. The rejection was measured on a host and the stop was read from the launch code on November 11, 2026; neither was tested on a console.
 </p>
 
 <h2 id="step-11-custom-irx">Step 11: Custom IRX Modules &amp; Peripherals</h2>
