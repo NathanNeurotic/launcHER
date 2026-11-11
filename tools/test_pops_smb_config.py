@@ -454,7 +454,7 @@ class Native(unittest.TestCase):
             "share": b"", "share_password": b"", "share_password_type": -1})
         echo = (c.c_uint8 * ECHO_SIZE)(*([0xEE] * ECHO_SIZE))
         P.pops_smb_echo_request(echo)
-        self.assertEqual(bytes(echo), b"ALIVE ECHO TEST".ljust(256, b"\0") + struct.pack("<i", 15))
+        self.assertEqual(bytes(echo), ECHO_REQUEST)
 
     def test_ipconfig_examples(self):
         """What the original was measured to hand its network module."""
@@ -618,6 +618,9 @@ class Native(unittest.TestCase):
         self.assertEqual(out.raw[:30], b"mc0:/POPSTARTER/IPCONFIG.DAT\0\x7f")
 
 
+ECHO_REQUEST = b"ALIVE ECHO TEST".ljust(256, b"\0") + struct.pack("<i", 15)
+
+
 class Handler(unittest.TestCase):
     """handler_smb.c on an SB. launch."""
     GOOD_IP = b"192.168.1.10 255.255.255.0 192.168.1.1"
@@ -674,8 +677,10 @@ class Handler(unittest.TestCase):
                 self.assertEqual(len([line for line in trace if line.startswith("msg ")]), 1)
                 continue
             self.assertEqual(trace[-1], "connect 0", text[:60])
-            self.assertEqual([call[:2] for call in calls], [("smb:", LOGON), ("smb:", OPENSHARE)])
+            self.assertEqual([call[:2] for call in calls],
+                             [("smb:", LOGON), ("smb:", ECHO), ("smb:", OPENSHARE)])
             self.assertEqual((calls[0][2], calls[-1][2]), (logon, share), text[:60])
+            self.assertEqual(calls[1][2], ECHO_REQUEST)
 
     def test_missing_smbconfig(self):
         trace, _ = session(HANDLER, {}, 1, ("connect",))
@@ -686,16 +691,25 @@ class Handler(unittest.TestCase):
     def test_failures_and_reconnect(self):
         files = {"mc0:/POPSTARTER/SMBCONFIG.DAT": self.GOOD_SMB}
         trace, _ = session(HANDLER, files, 1, ("connect", "connect"))
-        self.assertEqual([call[1] for call in devctls(trace)], [LOGON, OPENSHARE])
+        self.assertEqual([call[1] for call in devctls(trace)], [LOGON, ECHO, OPENSHARE])
         self.assertEqual(trace[-2:], ["connect 0", "connect 0"])       # the second does nothing
         trace, _ = session(HANDLER, files, 1, ("connect", "reset", "connect"))
-        self.assertEqual([call[1] for call in devctls(trace)], [LOGON, OPENSHARE] * 2)
+        self.assertEqual([call[1] for call in devctls(trace)], [LOGON, ECHO, OPENSHARE] * 2)
+        # A negative result stops it, as in the original; the launcher then
+        # logs off (the original stops the whole launch there).
         trace, _ = session(HANDLER, files, 1, ("connect",), results=[(LOGON, -13)])
         self.assertEqual([call[1] for call in devctls(trace)], [LOGON])
         self.assertEqual(trace[-1], "connect -13")
+        trace, _ = session(HANDLER, files, 1, ("connect",), results=[(ECHO, -5)])
+        self.assertEqual([call[1] for call in devctls(trace)], [LOGON, ECHO, LOGOFF])
+        self.assertEqual(trace[-1], "connect -5")
         trace, _ = session(HANDLER, files, 1, ("connect", "connect"), results=[(OPENSHARE, -13)])
-        self.assertEqual([call[1] for call in devctls(trace)], [LOGON, OPENSHARE, LOGOFF] * 2)
+        self.assertEqual([call[1] for call in devctls(trace)], [LOGON, ECHO, OPENSHARE, LOGOFF] * 2)
         self.assertEqual(trace[-1], "connect -13")
+        # Only a negative result is a failure.
+        trace, _ = session(HANDLER, files, 1, ("connect",),
+                           results=[(LOGON, 1), (ECHO, 7), (OPENSHARE, 0x1001)])
+        self.assertEqual(trace[-1], "connect 0")
 
     def test_read_errors(self):
         for step, name, good in (("tcpip", "IPCONFIG.DAT", self.GOOD_IP),
@@ -718,6 +732,7 @@ class Handler(unittest.TestCase):
         del files["mc0:/POPSTARTER/SMBCONFIG.DAT"]
         trace, args = session(HANDLER, files, 0, ("connect",))
         calls = devctls(trace)
+        # No echo outside an SB. launch.
         self.assertEqual([call[:2] for call in calls], [("smb:", LOGON), ("smb:", OPENSHARE)])
         got = fields(calls[0][2], calls[1][2])
         self.assertEqual((got["server"], got["port"], got["user"], got["password"], got["share"],
@@ -933,9 +948,9 @@ class Original(unittest.TestCase):
 
     def test_which_card(self):
         good = b"10.0.0.1 S1"
-        for name, paths, ok, size0, size1, missing in (
-                ("ip", T.IP_PATHS, None, "ip-size-mc0", "ip-size-mc1", None),
-                ("smb", T.SMB_PATHS, None, "smb-size-mc0", "smb-size-mc1", "smb-missing")):
+        for name, paths, size0, size1, missing in (
+                ("ip", T.IP_PATHS, "ip-size-mc0", "ip-size-mc1", None),
+                ("smb", T.SMB_PATHS, "smb-size-mc0", "smb-size-mc1", "smb-missing")):
             base = {} if name == "smb" else {T.SMB_PATHS[0]: good}
             text = good if name == "smb" else b"1.1.1.1 2.2.2.2 3.3.3.3"
 
@@ -1022,7 +1037,12 @@ class Source(unittest.TestCase):
         self.assertIn("pops_parse_smbconfig(text, result, (unsigned char *)&logon, (unsigned char *)&share)", sb)
         self.assertIn("_Static_assert(sizeof(logon) == POPS_SMB_LOGON_SIZE", sb)
         self.assertIn("_Static_assert(sizeof(share) == POPS_SMB_SHARE_SIZE", sb)
-        self.assertLess(sb.index("SMB_DEVCTL_LOGON,"), sb.index("SMB_DEVCTL_OPENSHARE,"))
+        self.assertLess(sb.index("SMB_DEVCTL_LOGON,"), sb.index("pops_smb_echo_request((unsigned char *)&echo);"))
+        self.assertLess(sb.index("pops_smb_echo_request("), sb.index("SMB_DEVCTL_ECHO, &echo, sizeof(echo)"))
+        self.assertLess(sb.index("SMB_DEVCTL_ECHO,"), sb.index("SMB_DEVCTL_OPENSHARE,"))
+        self.assertIn("_Static_assert(sizeof(echo) == POPS_SMB_ECHO_SIZE", sb)
+        # Only the SB. path sends it.
+        self.assertEqual(self.src.count("SMB_DEVCTL_ECHO"), 1)
         reader = self.body("static int read_sb_config(")
         self.assertIn("pops_netconfig_path(i, name, path, sizeof(path))", reader)
 

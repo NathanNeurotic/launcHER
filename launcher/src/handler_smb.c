@@ -113,8 +113,10 @@ static int sb_connect(void) {
   unsigned char text[POPS_SMBCONFIG_BUFFER];
   smbLogOn_in_t logon;
   smbOpenShare_in_t share;
+  smbEcho_in_t echo;
   _Static_assert(sizeof(logon) == POPS_SMB_LOGON_SIZE, "smbLogOn_in_t layout");
   _Static_assert(sizeof(share) == POPS_SMB_SHARE_SIZE, "smbOpenShare_in_t layout");
+  _Static_assert(sizeof(echo) == POPS_SMB_ECHO_SIZE, "smbEcho_in_t layout");
   int result = read_sb_config("SMBCONFIG.DAT", text, sizeof(text));
   if (result == -ENOENT)
     msg("SMB: SMBCONFIG.DAT not found on a memory card\n");
@@ -127,9 +129,14 @@ static int sb_connect(void) {
     msg("SMB: SMBCONFIG.DAT: %s\n", sb_config_error(error));
     return -EINVAL;
   }
+  /* The original's order (0x874128..0x8741a0): log on, echo, open the share,
+   * each stopping the launch on a negative result. NOT TESTED on a console. */
   result = fileXioDevctl("smb:", SMB_DEVCTL_LOGON, &logon, sizeof(logon), NULL, 0);
   if (result >= 0) {
-    result = fileXioDevctl("smb:", SMB_DEVCTL_OPENSHARE, &share, sizeof(share), NULL, 0);
+    pops_smb_echo_request((unsigned char *)&echo);
+    result = fileXioDevctl("smb:", SMB_DEVCTL_ECHO, &echo, sizeof(echo), NULL, 0);
+    if (result >= 0)
+      result = fileXioDevctl("smb:", SMB_DEVCTL_OPENSHARE, &share, sizeof(share), NULL, 0);
     if (result < 0)
       fileXioDevctl("smb:", SMB_DEVCTL_LOGOFF, NULL, 0, NULL, 0);
   }
