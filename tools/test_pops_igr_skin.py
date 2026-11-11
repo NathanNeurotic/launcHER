@@ -721,11 +721,11 @@ class Source(unittest.TestCase):
         at = body.index(call)
         # A bare statement: no result, nothing gates it, nothing fails on it.
         self.assertEqual(body[body.rindex("\n", 0, at) + 1:at], "  ")
-        before = ["res = pops_core_patches_stage(", "res = pops_resident_hook_guards(",
+        before = ["res = pops_core_patches_stage(", "pops_core_runtime_corrections_stage(",
+                  "res = pops_resident_hook_guards(",
                   "res = pops_apply_always_on_pokes(",
                   'msg("POPS: POPStarter launch hooks failed: %d\\n", res);']
-        after = ["pops_core_runtime_corrections_stage(",
-                 "res = pops_builtin_apply(builtinId, (void *)stagedCore",
+        after = ["res = pops_builtin_apply(builtinId, (void *)stagedCore",
                  "res = pops_apply_all_config_patches(",
                  "res = pops_resident_hook_recompiler_emit(",
                  "res = pops_stage_fix_files(",

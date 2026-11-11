@@ -1417,6 +1417,20 @@ int launchPOPS(int argc, char *argv[]) {
     return res;
   }
 
+  /* launcHER's own opt-in runtime corrections ($FIX_*, not POPStarter's).
+   * They go here, straight after the core patches: the stage accepts only
+   * the pristine or the core-patched POPS image as a whole, and every write
+   * below (the always-on hooks first) makes the image neither. */
+  if (cfg.runtime_corrections) {
+    res = pops_core_runtime_corrections_stage(POPS_CORE_ADDR, (void *)stagedCore,
+                                              plan.core_size, cfg.runtime_corrections);
+    if (res) {
+      msg("POPS: Runtime corrections staging failed: %d\n", res);
+      return res;
+    }
+    DPRINTF("POPS: Applied runtime corrections mask=0x%02X\n", (unsigned)cfg.runtime_corrections);
+  }
+
   /* POPStarter's always-on changes (its launch function, 0x874790..
    * 0x874a18): no command skips them, and they come before the built-in
    * entry and the user's commands. Its GP1 hook (0x21a63c; the reset combo,
@@ -1453,17 +1467,6 @@ int launchPOPS(int argc, char *argv[]) {
    * is only shown under $IGR0..2: without a command launcHER's own direct
    * exit is used. */
   pops_stage_igr_skin((void *)stagedCore, plan.core_size, vcdDir);
-
-  /* Stage opt-in runtime core corrections when configured */
-  if (cfg.runtime_corrections) {
-    res = pops_core_runtime_corrections_stage(POPS_CORE_ADDR, (void *)stagedCore,
-                                              plan.core_size, cfg.runtime_corrections);
-    if (res) {
-      msg("POPS: Runtime corrections staging failed: %d\n", res);
-      return res;
-    }
-    DPRINTF("POPS: Applied runtime corrections mask=0x%02X\n", (unsigned)cfg.runtime_corrections);
-  }
 
   /* The built-in entry's core writes come first, as in the original; the
    * user's commands below can undo them ($UNDO_*). Its EE code is copied

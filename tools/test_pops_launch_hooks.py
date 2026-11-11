@@ -656,6 +656,36 @@ class Original(unittest.TestCase):
         self.assertGreater(L.pops_apply_opcode_pass(buf(core), len(core)), 0)
         self.assertEqual({a: u32(core, a) for a in hooks}, hooks)
 
+    @unittest.skipUnless(os.environ.get("POPS_TEST_ELF"), "POPS_TEST_ELF not set")
+    def test_runtime_corrections_fit_only_before_the_hooks(self):
+        """launcHER's $FIX_* corrections on the real core: accepted straight
+        after the core patches, and the hooks then go in unchanged; refused
+        (-4, nothing written) once the hooks are in. launchPOPS has to keep
+        the first order."""
+        L.pops_core_runtime_corrections_stage.argtypes = [c.c_uint32, c.c_void_p, c.c_size_t,
+                                                         c.c_uint32]
+        sites = {1: 0x0021D6A4, 2: 0x0020AC5C, 4: 0x0020EAD4, 8: 0x00213C20, 16: 0x0024A94C}
+
+        def hooks(core):
+            return [L.pops_resident_hook_gp1(buf(core), len(core), BASE + 0x80),
+                    L.pops_resident_hook_recompiler(buf(core), len(core), RECOMPILER_ENTRY),
+                    L.pops_resident_hook_guards(buf(core), len(core), header(ENTRIES)),
+                    L.pops_apply_always_on_pokes(buf(core), len(core))]
+
+        plain = bytearray(real_core())
+        self.assertEqual(L.pops_core_patches_stage(CORE, buf(plain), len(plain), (1 << 7) - 1), 0)
+        patched = bytes(plain)
+        self.assertEqual(hooks(plain), [0, 0, 0, 0])
+        for mask in (1, 2, 4, 8, 16, 31):
+            core = bytearray(patched)
+            self.assertEqual(L.pops_core_runtime_corrections_stage(CORE, buf(core), len(core), mask), 0)
+            self.assertEqual(hooks(core), [0, 0, 0, 0], mask)
+            differing = {CORE + i for i in range(0, len(core), 4) if core[i:i + 4] != plain[i:i + 4]}
+            self.assertEqual(differing, {a for bit, a in sites.items() if mask & bit}, mask)
+            late = bytearray(plain)
+            self.assertEqual(L.pops_core_runtime_corrections_stage(CORE, buf(late), len(late), mask), -4)
+            self.assertEqual(late, plain, mask)
+
     @unittest.skipUnless(HAVE_MAIN, "POPSTARTER_TEST_ELF not set")
     def test_original_recompiler_code_does_what_the_model_says(self):
         load = RC.original_loader(main_image())
@@ -838,6 +868,7 @@ class Source(unittest.TestCase):
         src = (ROOT / "launcher/src/handler_pops.c").read_text()
         body = src[src.index("int launchPOPS("):]
         order = ["res = pops_core_patches_stage(",
+                 "res = pops_core_runtime_corrections_stage(",
                  "res = pops_resident_check_image(",
                  "res = pops_resident_hook_gp1(",
                  "res = pops_resident_hook_recompiler(",
@@ -857,7 +888,7 @@ class Source(unittest.TestCase):
                  "memcpy((void *)POPS_TRAMPOLINE_ADDR"]
         at = [body.index(s) for s in order]
         self.assertEqual(at, sorted(at), [s for s, _ in sorted(zip(order, at), key=lambda x: x[1])])
-        for s in order[:6] + order[8:9] + order[11:12]:
+        for s in order[:7] + order[9:10] + order[12:13]:
             self.assertEqual(body.count(s), 1, s)
         # Every POPStarter-mode launch: no flag gates the hooks or the install.
         for s in ("res = pops_resident_hook_gp1(", "res = pops_resident_hook_recompiler(",
@@ -868,6 +899,20 @@ class Source(unittest.TestCase):
             self.assertIn(line, ("  ", "    "), s)
             prev = body[:body.index(s)].rstrip().splitlines()[-1].strip()
             self.assertFalse(prev.startswith("if (residentNeeded") or "flags &" in prev, (s, prev))
+
+    def test_runtime_corrections_come_before_any_other_core_write(self):
+        """The stage takes only the pristine or the core-patched image as a
+        whole, so nothing else may write the staged core before it."""
+        src = (ROOT / "launcher/src/handler_pops.c").read_text()
+        body = src[src.index("int launchPOPS("):]
+        patches = body.index("res = pops_core_patches_stage(")
+        call = body.index("res = pops_core_runtime_corrections_stage(")
+        self.assertEqual(body.count("pops_core_runtime_corrections_stage("), 1)
+        between = body[patches + len("res = pops_core_patches_stage("):call]
+        self.assertNotIn("stagedCore", between.replace(
+            "POPS_CORE_ADDR, (void *)stagedCore, plan.core_size, POPS_CORE_ALL);", "", 1))
+        self.assertNotIn("pops_resident_hook", between)
+        self.assertNotIn("pops_stage_igr_skin(", between)
 
     def test_ember_never_reaches_the_pops_launch(self):
         common = (ROOT / "launcher/src/common.c").read_text()
