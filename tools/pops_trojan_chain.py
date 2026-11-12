@@ -52,11 +52,8 @@ BREAK_HANDLER, BREAK_COUNT, F_BREAK_CALL = 0x01460000, 0x1204, 1 << 8
 NAMES = ("zero at v0 v1 a0 a1 a2 a3 a4 a5 a6 a7 t0 t1 t2 t3 "
          "s0 s1 s2 s3 s4 s5 s6 s7 t8 t9 k0 k1 gp sp fp ra HI LO").split()
 K0, K1, RA = 26, 27, 31
-# POPStarter's emode checks, 0x232790..0x2327cf (the first 16 words of its
-# first part): launcHER's entry has them word for word before the first run.
-EMODE_WORDS = (0x3C1A0050, 0x241BF6FE, 0x875A7002, 0x135B000A, 0x00000000, 0x241BF9FE,
-               0x175B0009, 0x00000000, 0x3C1A7000, 0x341B0001, 0xA35B3390, 0x00000000,
-               0x10000003, 0x00000000, 0x3C1A7000, 0xA3403390)
+# Offset of the emode checks in the chain entry (after its k0/k1 save).
+EMODE_AT = 0x18
 STYLES = ("jal", "j", "jra", "empty")
 
 
@@ -384,8 +381,13 @@ def compare(image, main, core=None):
     AssertionError naming the first difference."""
     names = NAMES
     total = 0
-    assert struct.unpack_from("<16I", main, BLOCK1[0] - MAIN_BASE) == EMODE_WORDS, \
-        "EMODE_WORDS are not the original's"
+    # The entry's emode checks (its 16 words after the k0/k1 save) are the
+    # original's first 16 words of its first part, 0x232790..0x2327cf. Read
+    # from the user's POPSTARTER.ELF here; nothing of it is kept in the tree.
+    entry = header(image)[2] - BASE + EMODE_AT
+    start = BLOCK1[0] - MAIN_BASE
+    assert image[entry:entry + 64] == main[start:start + 64], \
+        "the entry's emode checks are not the original's words"
     for pad, styles, lid, emode in cases():
         want = original(main, core, pad, styles, lid, emode)
         got = built(image, core, pad, styles, lid, emode)
@@ -439,9 +441,6 @@ def self_check(image, core=None):
     against the original itself). Returns (cases, slot records)."""
     total = 0
     vector = 0xBFC0D8D0
-    chain_entry = header(image)[2]
-    assert struct.unpack_from("<16I", image, chain_entry - BASE + 0x18) == EMODE_WORDS, \
-        "the entry's emode checks are not the original's words"
     for pad, styles, lid, emode in cases():
         for cheat in (False, True):
             records, final, given = built(image, core, pad, styles, lid, emode, vector, cheat)

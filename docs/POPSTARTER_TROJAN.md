@@ -77,8 +77,11 @@ file calls (`Original.test_device_failures`): a failed open, whatever the
 error, prints `NOT FOUND` and the next number is read; a failed size query
 (the `lseek` to the end) leaves a size below `0x44`, so the file is
 Invalid; the rewind and the header read are not checked, and the header
-buffer is cleared after every file, so a header that does not arrive reads
-as zeros and is Invalid; the payload read is not checked either, so a file
+buffer is cleared after every file, so a header that does not arrive after
+an earlier file reads as zeros and is Invalid (measured for a failed header
+read of the second file only; for the first file the buffer is the
+original's stack, which is zero in the model and was not measured on a
+console); the payload read is not checked either, so a file
 whose payload read fails is still applied, with whatever the buffer held.
 The check addresses (open `0x88115c`, size and header `0x881188..0x881230`,
 payload `0x881a1c`, clearing `0x881d24`) are from the disassembly. A file of
@@ -255,10 +258,15 @@ which a loaded file hooks a slot or names one, it:
 - re-points the GP1 hook at `0x21a63c` from the usual resident entry to
   the chain entry (`gp1_chain_entry` in the resident header).
 
-Both runs are checked first: their `0x30` bytes must still be POPS's own
-(an FNV-1a sum of each), and the GP1 hook must be the expected `jal`.
-Otherwise nothing is written; a file that needs a slot is then skipped with
-the line above. A launch with no such file is not touched: no run is
+Both runs are checked when the slots are offered, after the commands and
+the emit jumps and before the first fix file: their `0x30` bytes must still
+be POPS's own (an FNV-1a sum of each), and the GP1 hook must be the
+expected `jal`. If that check fails, nothing is written and a file that
+needs a slot is skipped with the line above. The same check is made again
+when the slots are installed, after every fix file. If a later file (a
+`PATCH_n.BIN`, say) has changed a run or the hook in between, that second
+check fails and the launch stops (`TROJAN slots cannot be installed`); see
+known difference 9. A launch with no such file is not touched: no run is
 written and the GP1 hook keeps its usual target.
 
 The chain entry (`pops_resident_gp1_chain` in
@@ -359,6 +367,11 @@ in code this work did not change.
    reproduced; launcHER allocates nothing.
 8. PATCH files that the original would call Invalid still stop the launch.
    Only TROJAN reading was changed.
+9. A slot file accepted when the slots were offered can still stop the
+   launch: if a later fix file changes one of the two runs or the GP1 hook
+   before the slots are installed, the install check fails and the launch
+   stops. The original would run. Found by reading the code; not measured,
+   and no file in the corpus does this.
 
 ## Not done, not known
 

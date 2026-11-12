@@ -246,8 +246,10 @@ def build(directory, extra=''):
     wrapper = Path(directory) / 'wrapper.c'
     wrapper.write_text(extra or 'int unused_wrapper;\n')
     library = Path(directory) / ('trojan.dll' if os.name == 'nt' else 'trojan.so')
-    subprocess.run(['gcc', '-shared', '-fPIC', '-std=c99', '-Wall', '-Wextra', '-Werror',
-                    '-I', str(ROOT / 'common/include'), str(wrapper)] +
+    # _DEFAULT_SOURCE: glibc hides strcasecmp/strncasecmp (pops_config.c,
+    # pops_compat_db.c, pops_vcd.c) under strict C99; MinGW does not.
+    subprocess.run(['gcc', '-shared', '-fPIC', '-std=c99', '-D_DEFAULT_SOURCE', '-Wall', '-Wextra',
+                    '-Werror', '-I', str(ROOT / 'common/include'), str(wrapper)] +
                    [str(ROOT / 'common/src' / name) for name in COMMON] +
                    ['-o', str(library)], check=True)
     lib = c.CDLL(str(library))
@@ -370,6 +372,9 @@ SOURCE_WRAPPER = '''
 #include <unistd.h>
 #define PATH_MAX 1024
 #define DPRINTF(...) ((void)0)
+#ifndef O_BINARY
+#define O_BINARY 0
+#endif
 static char host_fix_buffer[0x100000];
 static unsigned char host_hold[0x1000], host_work[0x10000];
 static char log_text[0x4000];
@@ -406,9 +411,6 @@ static int test_close(int fd) {
   if (fd == fault_fd) fault_fd = -1;
   return close(fd);
 }
-#ifndef O_BINARY
-#define O_BINARY 0
-#endif
 #define read test_read
 #define open test_open
 #define lseek test_lseek
@@ -1661,7 +1663,7 @@ class Source(Built):
         self.assertIn('TROJAN_3.BIN is valid for POPStarter but NOT loaded by launcHER: '
                       'an address or the size is not a multiple of 4', lines[2])
 
-    def test_an_empty_or_short_file_is_invalid_and_one_too_large_stops(self):
+    def test_an_empty_or_short_file_is_invalid_and_an_empty_patch_stops(self):
         # Measured on the original's loader (Original class, the same sizes):
         # 0, 1, 0x40 and 0x43 bytes are "Invalid" and the next slot is read.
         good = trojan(slot=4, load=0x2f0000, hook=0x2f0100)
