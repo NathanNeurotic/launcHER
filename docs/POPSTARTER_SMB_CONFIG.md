@@ -174,24 +174,51 @@ screen messages on. `XX.` is looked for only when no `SB.` was found.
   images of the driver's structures exactly as the original leaves them;
   `handler_smb.c` has static assertions that the images are the size of
   `smbLogOn_in_t`, `smbOpenShare_in_t` and `smbEcho_in_t`.
-- The switch is `sb_rules()` in `launcher/src/handler_smb.c`: the launch
-  target is a PS1 disc image **and** the name carries `SB.`
-  (`pops_get_active_sb_launch()`, `common/src/launch_args.c`). Both are
-  needed because the `SB.` flag alone is also set when the launcher's own
-  file name starts with `SB.`, whatever it then launches (`main.c`,
-  `handler_quickboot.c`, existing code).
-- `handler_smb.c` has two hunks in existing functions, each a test of
-  `sb_rules()`: `initTCPIPArguments` returns `sb_tcpip_arguments(length)`
-  and `launcher_smb_connect` returns `sb_connect()` after its "already
-  connected" test. Everything else new in the file is static code reached
-  only through those two tests, plus the setter below.
-- `launcher/src/common.c` has one hunk in `launchPath` (and one `#include`):
-  in `case Device_SMB:`, inside `#ifdef SMB`,
-  `launcher_smb_set_pops_target(isPopsTarget(argv[0]));` before the existing
-  `handleGenericPath` call. For a target that is not a `.VCD` it stores 0 in
-  a variable only `sb_rules()` reads.
-- `main.c`, `init.c`, `handler_pops.c` and `handler_quickboot.c` are not
-  touched.
+- The switch is `sb_rules()` in `launcher/src/handler_smb.c`. It returns
+  the rule set decided for the target being dispatched from the share
+  (`targetRules`, set by `launcher_smb_set_target`).
+- The decision is made in `launchPath`'s `case Device_SMB:`
+  (`launcher/src/common.c`), **before** `handleGenericPath` loads the
+  share's modules. POPStarter's rules need both:
+  - the target is a PS1 disc image (`isPopsTarget(argv[0])`);
+  - its `SB.` state is on, decided the way `launchPOPS` will decide it: an
+    `SB.` prefix on the target (`pops_is_sb_prefix`) turns it on, an `XX.`
+    prefix (`pops_is_xx_prefix`) turns it off, otherwise the state set
+    before dispatch stays (`pops_get_active_sb_launch()`). That state is set
+    by an `SB.`-named launcher (`main.c`, `handler_quickboot.c`, existing
+    code), whatever it then launches, which is why the PS1-target half is
+    needed.
+
+  So an `SB.` VCD named in a quickboot CNF or an OSDM path gets POPStarter's
+  rules in the first stage too, not only after the IOP reboot (review
+  finding 2).
+- `handler_smb.c` also records the rule set that the loaded network
+  module's arguments and session were set up with (`liveRules`). It is set
+  in `initTCPIPArguments` and cleared by `launcher_smb_reset`, which
+  `loadModuleList` calls on every module load.
+  `launcher_smb_set_target` returns nonzero when the target needs the other
+  rule set. `case Device_SMB:` then calls `initModulesReload()`
+  (`launcher/src/init.c`, one line: `forceIOPReset = 1`). The next
+  `initModules` reboots the IOP and loads the share's modules again, under
+  the target's rules, instead of returning early because they are already
+  loaded. A setup made for an `SB.` PS1 attempt that went no further (VCD
+  missing, `launchPOPS` stopping before the IOP reboot) is therefore never
+  reused for a later ELF on the share in the same boot, Ember included.
+  The same applies the other way round (review finding 1). A setup made
+  under the rules the target needs is reused as before.
+- `handler_smb.c` has three hunks in existing functions:
+  - `initTCPIPArguments` records `liveRules`, then returns
+    `sb_tcpip_arguments(length)` under `sb_rules()`;
+  - `launcher_smb_connect` returns `sb_connect()` under `sb_rules()`, after
+    its "already connected" test;
+  - `launcher_smb_reset` also clears `liveRules`.
+
+  Everything else new in the file is static code reached only through
+  those tests, plus the setter.
+- `launcher/src/common.c` has that one hunk in `launchPath` and two
+  `#include` lines (`handler_smb.h`, `launch_args.h`). `launcher/src/init.c`
+  has `initModulesReload`, declared in `init.h`. `main.c`, `handler_pops.c`
+  and `handler_quickboot.c` are not touched.
 
 ### Where the files are looked up
 
@@ -227,6 +254,29 @@ in the three cases, and more than 150 of them give different calls on an
 Module loads that happen before a target is dispatched (the quickboot
 configuration file's own device, the all-devices probe) are in the "no PS1
 target" case and so use launcHER's own rules, as before this work.
+
+Several targets in one boot (the quickboot CNF and OSDM path loops try one
+after another): when the share's modules were set up for an `SB.` PS1
+attempt, the next target that is not one gets a fresh module load. Its
+calls are the ones `d31d4a7` makes when it loads the modules for that
+target (`Unchanged.test_a_launch_after_an_sb_launch`, the review's
+sequence: an SB.-named launcher, `smb:/POPS/Game.VCD` that is not there,
+then `smb:/EMBER/ember.elf`; and an `SB.` VCD whose `launchPOPS` stops
+before the IOP reboot, then the ELF). What is new for such a target is the
+reload itself: an IOP reboot that `d31d4a7` did not do there, because its
+modules were already loaded. It happens only after a setup under
+POPStarter's rules, which only an `SB.` PS1 launch makes. Two targets
+needing the same rules keep the loaded setup, as before
+(`Dispatch.test_the_same_rules_keep_the_setup`).
+
+`popsTarget`'s old stickiness is kept in another form: `targetRules` is set
+only in `case Device_SMB:`. An `SB.` VCD on another device (`mass:`, the
+`mass0:/POPS/` fallback) that reaches `pops_load_smb_stack` without the
+share's modules loaded is connected under the rules of the last target
+dispatched from the share (0 on a fresh boot). Before this fix it was the
+last target's PS1 flag combined with the current `SB.` state. Either way
+the `smb:` driver is not loaded for that device, so at most the failure
+message differs. Not changed further here.
 
 ## Copied as it is
 
@@ -289,7 +339,7 @@ target" case and so use launcHER's own rules, as before this work.
 
 ## Evidence
 
-`tools/test_pops_smb_config.py` (in CI), 37 tests; 24 need no inputs (2 of
+`tools/test_pops_smb_config.py` (in CI), 43 tests; 30 need no inputs (3 of
 those need revision `d31d4a7` in the checkout).
 `tools/trace_original_pops_smb_config.py` runs the original's blocks.
 
@@ -322,8 +372,32 @@ distinct).
   structures are the parser's for all 552 and 1052 texts; first-file-decides
   at each of the 12 places; missing file; read and close errors; failures
   and reconnect.
+- Dispatch (no inputs): launch attempts in one boot through the host build
+  of `handler_smb.c`, with `init.c`'s module cache and reload,
+  `case Device_SMB:`'s decision and `launchPOPS`'s `SB.` update modelled
+  in Python. The prefix tests are `common/src/launch_args.c` itself, built
+  for the host; `isPopsTarget`, the `case Device_SMB:` text, the cache test
+  in `loadModules`, `initModulesReload` and `launchPOPS`'s prefix override
+  are pinned by Source. `common.c`, `init.c` and `handler_pops.c` are not
+  run on the host. Results:
+  - Finding 1: after `smb:/POPS/Game.VCD` (SB.-named launcher) or
+    `smb:/POPS/SB.Game.VCD` with `launchPOPS` stopping before the reboot,
+    `smb:/EMBER/ember.elf` gets the calls of a fresh launch of it
+    (`tcpip 32`, LOGON password type -1, OPENSHARE, no echo).
+  - Finding 2: for `smb:/POPS/SB.Game.VCD` and `smb:/POPS/sb.Game.vcd` from
+    a launcher that is not SB.-named, with four file sets (no
+    `IPCONFIG.DAT`, a fourth `SMBCONFIG.DAT` line, a host name, the plain
+    one), the first stage makes the calls of an `SB.` launch and the load
+    after the IOP reboot makes the same calls.
+  - An `XX.` VCD from an SB.-named launcher uses launcHER's rules in both
+    stages. Before the fix its first stage used POPStarter's rules and the
+    second launcHER's.
+  - On `pr23/integ` (`4e90fda`) with only this test file changed, 5 tests
+    fail: three Dispatch tests, `Unchanged.test_a_launch_after_an_sb_launch`
+    and the Source pin. `Dispatch.test_the_same_rules_keep_the_setup` and
+    `test_the_decision` pass there.
 - Unchanged (needs revision `d31d4a7` in the checkout): above.
-- Source: the two hunks, the CMake list and the CI step.
+- Source: the hunks, the CMake list and the CI step.
 
 For scale: of the 1052 texts, the original's rules accept 415 and launcHER's
 own parser accepts 69 (a text of 1024 bytes or more counted as refused, as
@@ -333,19 +407,33 @@ port, share, user and password are the same.
 Mutation checks, each done once by hand: changing the port search from 17
 to 16 bytes makes both the Native and the Original comparison fail; dropping
 the PS1-target half of the switch makes the two Unchanged tests and
-`Handler.test_an_sb_name_and_a_ps1_target_are_both_needed` fail.
+`Handler.test_an_sb_name_and_a_ps1_target_are_both_needed` fail (both done
+before the dispatch fix, when the switch was `popsTarget &&
+pops_get_active_sb_launch()`). After it: removing the `liveRules` record in
+`initTCPIPArguments`, or making `launcher_smb_set_target` always return 0,
+makes `Dispatch.test_a_setup_under_popstarters_rules_is_not_reused`,
+`Unchanged.test_a_launch_after_an_sb_launch` and the Source pin fail.
 
 ## Not measured
 
 Anything on a console. In particular:
 
 - that launcHER's `ps2ip_nm` comes up with the original's short argument
-  block, and what address it takes with no `IPCONFIG.DAT`;
+  block, and what address it takes with no `IPCONFIG.DAT`. Open question
+  (review finding 3, minor): for `10.0.0.9 255.255.255.0 10.0.0.1` the
+  block is 29 bytes and ends with `10.0.0.`, the first 7 bytes of the
+  gateway, with no NUL after them. The original gives the same block to its own `ps2smap.irx`;
+  launcHER gives it to `ps2ip_nm`, whose own rule always gets three
+  terminated strings. What `ps2ip_nm` reads past the block, or does with
+  no arguments, is not known and its source is not in the repository.
+  Every `SB.` launch with an `IPCONFIG.DAT` depends on it;
 - that `launcher_smbman` answers the ECHO `devctl` as the original's
   `smbman` does;
 - a guest share (no user and password lines, password type -1) and a share
   with a password;
-- the whole `SB.` launch through to a running game.
+- the whole `SB.` launch through to a running game;
+- the IOP reboot and module reload that `initModulesReload` asks for
+  between two launch attempts.
 
 The module set, the `smbman` rename, the share's `iomanx.irx` and
 `filexio.irx`, and the post-reset sequence were read, not run, and are not
