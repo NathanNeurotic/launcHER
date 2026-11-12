@@ -9,7 +9,10 @@ zeroes launcHER, so:
     before the trampoline runs (the EE kernel's ExecPS2 would otherwise
     rewrite each one's initial frame at stack + size - 0x2a0, in memory that
     is POPS's by then) and puts the kernel's free thread slots back in the
-    order they had, so POPS's threads get the ids they get after POPStarter;
+    order they had before launcHER's threads existed, so POPS's threads get
+    ids from 2 again (PCSX2, ATA). That these are the ids POPStarter gives is
+    INFERRED from the queue model: the only POPStarter control with a kernel
+    dump ran from USB (ids from 2, one thread fewer);
   - launcher/src/pops_trampoline.S turns interrupts off before its first
     store (launcHER's timer and SIF handlers are still registered while their
     code is zeroed).
@@ -383,6 +386,21 @@ class Native(unittest.TestCase):
         self.assertIn("#define POPS_STAGING_BASE        UINT32_C(0x01000000)", boot)
         self.assertIn("#define POPS_STAGING_CAPACITY    UINT32_C(0x00800000)", boot)
 
+    def test_the_pieces_below_1_mib_are_kept_apart_at_compile_time(self):
+        # The layout checker reads the linked ELF; the order of the
+        # trampoline, its arguments, the report words and the trampoline's
+        # stack is fixed by static asserts in the C file both the EE build and
+        # this test's gcc build compile.
+        src = (ROOT / "common/src/pops_handoff.c").read_text()
+        for expr in ("_Static_assert(POPS_TRAMPOLINE_ADDR + 0x180 <= POPS_TRAMPOLINE_ARGS,",
+                     "_Static_assert(POPS_TRAMPOLINE_ARGS + sizeof(PopsTrampolineArgs) <= POPS_HANDOFF_REPORT_ADDR,",
+                     "_Static_assert(POPS_HANDOFF_REPORT_ADDR + 8 * sizeof(int32_t) <= UINT32_C(0x0008fff0),"):
+            self.assertEqual(src.count(expr), 1, expr)
+        # PopsTrampolineArgs is 7 words, argc, argv[4] and 128 bytes: it ends at
+        # 0x842b0, before the report words at 0x84300..0x84320.
+        self.assertEqual(TRAMP_ARGS + struct.calcsize("<IIIIIIIi4I") + 128, 0x000842B0)
+        self.assertLessEqual(0x000842B0, 0x00084300)
+
 
 TRAMPOLINE = ROOT / "launcher/src/pops_trampoline.S"
 TRAMP_ADDR, TRAMP_ARGS, STAGING, CORE = 0x00084000, 0x00084200, 0x01000000, 0x00200000
@@ -417,7 +435,7 @@ def trampoline_machine(misses=0):
     core = bytes(range(256)) * 4
     # PopsTrampolineArgs as pops_trampoline_args_init writes them, with a
     # short BSS so the run stays small (the clears are tools/test_pops_launch_hooks.py's).
-    args = struct.pack("<IIIIIIIi4I", 0x00200008, 0x0086FF00, 0x100, 0x3C30, STAGING, CORE, len(core),
+    args = struct.pack("<IIIIIIIi4I", 0x00200000, 0x0086FF00, 0x100, 0x3C30, STAGING, CORE, len(core),
                        1, TRAMP_ARGS + 48, 0, 0, 0)
     m.write(TRAMP_ARGS, args + b"pops0:IMAGE.VCD\0")
     m.write(STAGING, core)
@@ -598,7 +616,7 @@ def run_launcher_trampoline_unicorn(core):
     uc.mem_write(0x00080000, bytes([FILL]) * (0x00870000 - 0x00080000))
     uc.mem_write(0x70000000, bytes([FILL]) * 0x10000)
     uc.mem_write(TRAMP_ADDR, b"".join(w.to_bytes(4, "little") for w in words))
-    args = struct.pack("<IIIIIIIi4I", 0x00200008, BSS_ADDR, BSS_SIZE, 0x3C30, STAGING, CORE,
+    args = struct.pack("<IIIIIIIi4I", 0x00200000, BSS_ADDR, BSS_SIZE, 0x3C30, STAGING, CORE,
                        len(core), 1, TRAMP_ARGS + 48, 0, 0, 0)
     uc.mem_write(TRAMP_ARGS, args + b"pops0:IMAGE.VCD\0".ljust(128, b"\0"))
     uc.mem_write(STAGING, core)
@@ -686,7 +704,9 @@ class Differential(unittest.TestCase):
         r13 = [e for e in self.r13["log"] if e[0] in ("FlushCache", "ExecPS2")]
         self.assertEqual(r13, [("FlushCache", 0), ("FlushCache", 2), ("ExecPS2", 0x00200000, 0, 1, ARGV_R13)])
         lh = [e for e in self.lh_calls if e[0] == "syscall"]
-        self.assertEqual([(e[1], e[2]) for e in lh], [(0x64, 0), (0x64, 2), (7, 0x00200008)])
+        self.assertEqual([(e[1], e[2]) for e in lh], [(0x64, 0), (0x64, 2), (7, 0x00200000)])
+        # The same entry as r13: the core's first word, not the ELF's e_entry.
+        self.assertEqual(lh[2][2], self.r13["exec"][0])
         self.assertEqual(lh[2][3:6], (0, 1, TRAMP_ARGS + 32))   # gp 0, argc 1, argv
         # What launcHER does not do: r13 closes and opens the file and SIF
         # services again between FlushCache(2) and ExecPS2, and clears its own
@@ -712,12 +732,14 @@ class Differential(unittest.TestCase):
         self.assertTrue(all(e[7] == 0x0008FFF0 for e in self.lh_calls if e[0] == "syscall"))
 
     @unittest.skipUnless(os.environ.get("POPS_TEST_ELF"), "POPS_TEST_ELF not set")
-    def test_the_entry_eight_bytes_on_is_the_same_code(self):
-        # r13 enters at 0x200000, launcHER at 0x200008 (the ELF's e_entry);
-        # the two words in between are nops in POPS.ELF.
+    def test_entering_at_the_core_start_runs_the_elf_entry_code(self):
+        # Both enter at 0x200000; POPS.ELF's e_entry is 0x200008 and the two
+        # words before it are nops, so the first real instruction is the ELF's.
         from trace_original_pops_warmboot import core_image
         core = core_image(os.environ["POPS_TEST_ELF"])
         self.assertEqual(bytes(core[0:8]), bytes(8))
+        data = Path(os.environ["POPS_TEST_ELF"]).read_bytes()
+        self.assertEqual(struct.unpack_from("<I", data, 24)[0], 0x00200008)
 
 
 class Source(unittest.TestCase):

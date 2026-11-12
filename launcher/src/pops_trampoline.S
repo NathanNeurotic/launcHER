@@ -112,7 +112,7 @@ pops_trampoline_code:
     nop
 
     /* 6. Enter POPS via ExecPS2(entry, NULL, argc, argv) via syscall 7 */
-    lw      $a0, 0($s0)         /* entry (0x00200008) */
+    lw      $a0, 0($s0)         /* entry (0x00200000, as POPStarter r13) */
     move    $a1, $zero          /* gp = NULL */
     lw      $a2, 28($s0)        /* argc = 1 */
     addiu   $a3, $s0, 32        /* argv (pointer to array of char*) */

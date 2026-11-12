@@ -1,7 +1,21 @@
 #include "pops_handoff.h"
+#include "pops_bootstrap.h"
 
 #include <errno.h>
 #include <string.h>
+
+/* What lives below 1 MiB until ExecPS2, in this order and apart: the
+ * trampoline (at most 0x180 bytes, checked in launchPOPS and by
+ * tools/check_pops_handoff_layout.py), its arguments, the report words, then
+ * the trampoline's stack, which starts at 0x0008fff0 and grows down. A
+ * change to any of these addresses or to PopsTrampolineArgs that makes two
+ * of them overlap fails the build here (and the host build of this file). */
+_Static_assert(POPS_TRAMPOLINE_ADDR + 0x180 <= POPS_TRAMPOLINE_ARGS,
+               "the trampoline would run into its arguments");
+_Static_assert(POPS_TRAMPOLINE_ARGS + sizeof(PopsTrampolineArgs) <= POPS_HANDOFF_REPORT_ADDR,
+               "the trampoline's arguments would run into the handoff report words");
+_Static_assert(POPS_HANDOFF_REPORT_ADDR + 8 * sizeof(int32_t) <= UINT32_C(0x0008fff0),
+               "the handoff report words would run into the trampoline's stack");
 
 static int thread_in_use(const PopsHandoffKernel *kernel, void *ctx, int tid, PopsHandoffThread *out) {
   PopsHandoffThread local;

@@ -37,7 +37,7 @@
 #define POPS_PROXY_ARGS_MAX      252
 
 typedef struct {
-  uint32_t entry;           /* Offset 0: Entrypoint (0x00200008) */
+  uint32_t entry;           /* Offset 0: ExecPS2 entry, the core start (0x00200000) as in r13; the ELF's is 0x00200008 */
   uint32_t bss_address;     /* Offset 4: BSS start (0x00502e60) */
   uint32_t bss_size;        /* Offset 8: BSS size (0x00362ae0) */
   uint32_t scratchpad_size; /* Offset 12: POPS's scratchpad size (0x00003c30); the trampoline clears all of it (POPS_SPAD_CLEAR_SIZE) */

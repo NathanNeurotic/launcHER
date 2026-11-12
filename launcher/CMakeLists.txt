@@ -504,7 +504,9 @@ if(POPS_HANDOFF_PYTHON)
       COMMENT "Checking the POPS handoff layout of launcher_unc.elf"
       VERBATIM)
 else()
-  message(STATUS "python3 not found: POPS handoff layout check skipped")
+  # The ps2homebrew CI image has python3, so the check runs there; a local
+  # build without it says so loudly instead of passing quietly.
+  message(WARNING "python3 not found: the POPS handoff layout check (tools/check_pops_handoff_layout.py) will NOT run on launcher_unc.elf")
 endif()
 
 # Pack ELF

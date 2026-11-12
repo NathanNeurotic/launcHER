@@ -21,9 +21,13 @@
  * The kernel keeps free thread slots in a first-in first-out queue
  * (0x80005b00 takes from one end, 0x80005bb0 adds to the other), so a slot
  * freed here would be handed out last and POPS's threads would get ids one
- * higher than after POPStarter. The slots are therefore put back in front,
- * in their old order: every free slot is taken once (DORMANT threads that
- * never run), then released with the retired ones first.
+ * higher (measured in PCSX2: from 3 instead of 2). The slots are therefore
+ * put back in front, in their old order: every free slot is taken once
+ * (DORMANT threads that never run), then released with the retired ones
+ * first. That POPS's ids are then the ones it gets after POPStarter is
+ * INFERRED for ATA from this queue model: the only POPStarter control with a
+ * kernel dump was a USB run (ids from 2, one thread fewer), and nothing has
+ * run on a console (docs/POPSTARTER_HANDOFF.md).
  *
  * Pure logic: the kernel is reached through the table below, so host tests
  * run it against a model of the thread table. */

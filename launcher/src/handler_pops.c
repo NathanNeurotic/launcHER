@@ -2096,7 +2096,13 @@ int launchPOPS(int argc, char *argv[]) {
    * other threads now, while their stacks are still launcHER's: ExecPS2
    * rewrites the initial frame of every thread it terminates, and by then
    * that memory is POPS code. From here on nothing may wait on another
-   * thread, an alarm or an RPC (no trace line either). */
+   * thread, an alarm or an RPC (no trace line either).
+   * A failure returns to the menu as every other launch failure does.
+   * -EFAULT is returned before any thread is touched. -EBUSY and -EIO can
+   * come after ps2sdk's helper thread is already gone, with the trampoline
+   * and the staging area installed; what the menu does then is untested
+   * (no POPStarter equivalent; never seen, the kernel calls would have to
+   * fail). */
   res = popsHandoffRetireThreads();
   if (res) {
     msg("POPS: Handoff thread cleanup failed: %d\n", res);
