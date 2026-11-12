@@ -40,6 +40,8 @@ and `BIOS.BIN` from MISSING to PARTIAL, `$UNDO_` from PRESENT to PARTIAL
 files and on the review findings for the config-text merge is in progress
 on side branches; the rows concerned say only that.
 
+**Later the same day:** those three pieces were merged (`adcca00` handoff fix, `bc67659` TROJAN files, `31300cd` config-text review answers; [PR23_HANDOFF_2026-11-11.md](PR23_HANDOFF_2026-11-11.md) section 2). The rows marked "in progress on a side branch" were not rewritten after those merges; read them together with that section.
+
 ## Why some commands are BLOCKED, and launcHER's resident code
 
 At launch the original copies two blocks of its own code into the POPS image

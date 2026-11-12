@@ -41,3 +41,9 @@ Two folders of scripts:
 Some reports quote text proposed for the PR description or for shared
 documents ("doc updates"). That text was written for the state at the time
 and was not applied.
+
+The second round of work later the same day (the handoff fix, TROJAN, the
+CHEATS.TXT answers, the status-document answers, the missing reviews and
+what they led to) left its reports in [round-2/](round-2/README.md). Where a
+row above says "not reviewed" or "not answered", that folder has the later
+word.

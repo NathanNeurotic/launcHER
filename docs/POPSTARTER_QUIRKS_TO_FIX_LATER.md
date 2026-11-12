@@ -157,3 +157,65 @@ checks of their own, run on both.
 | 58 | Every `li $t2, 0xb0` that `_2` meets, except the patched `jr $t2` / `li $t1, 0x38`, `0x52` or `0x5a` and `li $t1, 0x38` / `jr $t2` forms, leaves `$v1` holding the third word after it, sign-extended. After the hook POPS stores `$v1` as the last instruction of the block it has just finished, in place of `addiu $k1, $k1, -n` (the block's cycle count). So on the pass where `_2` scans newly loaded code that holds such a call (any other B0 call, such as `jr $t2` / `li $t1, 0x3d`), that block ends with the last one's third word instead: usually `li $t1, n`, or `jr $t2` after a `li $t1`-first B0:52 or B0:5A. What that does in a game was not worked out. Copied. | Keep `$v1`. |
 | 59 | The `0x206318` code loads `$gp` from the slot where the `0x205d1c` code keeps the `$gp` it found (the original saves its own `$gp` elsewhere and never reads it back). So after `0x206318` POPS's `$gp` is what `0x205d1c` last saw, or 0 if `0x205d1c` has not run yet. Whether `0x206318` ever runs first in a game was not worked out. Copied. | Give `0x206318` back its own `$gp`. |
 | 60 | The emit code borrows `$k0`, `$k1` and `$at`, saving and restoring them, in code that runs with interrupts enabled; the EE kernel's exception handlers may change `$k0` and `$k1` at any time (as in quirk 44). It leaves `$ra` = `0x01440000` and the converted word in `$v0` (`0x206318`) or `$a0` (`0x205d1c`); POPS sets both again before reading them. Copied. | Use registers POPS has free there. |
+
+## CHEATS.TXT video commands (docs/POPSTARTER_CONFIG_TEXT.md)
+
+Found by running the original's command pass under emulation
+(`tools/trace_original_pops_config_text.py`) and compared by
+`tools/test_pops_config_text.py`.
+
+| # | POPStarter behaviour (copied) | Possible fix later |
+|---|---|---|
+| 62 | `$FORCEPAL` does nothing after a `$480P`, in the same file or in the earlier of the two `CHEATS.TXT` files: its handler (`0x8987f0`) stores only while `gp+0x3864` is 0, and `$480P` sets that word. The only store of 0 there is the start-up clear (`0x870c90`). Copied. | Let the later command win. |
+| 63 | `$NOPAL` does not undo an earlier `$FORCEPAL`: it clears only `gp+0x4fa0`, and the region pass tests the forced-PAL word (`gp+0x38a0`) first. Copied (`PopsConfig.forced_pal`). | Make `$NOPAL` clear the forced-PAL word too. |
+| 64 | For a `CHEATS.TXT` of 8 bytes or less, the code test reads past its buffer (twice the file size), so whether such a `$` counts as a code depends on the heap. launcHER reads zeros there. No command differed in 1,428 runs; by reading the code, none can. | Bound the read by the file size. |
+
+## TROJAN_n.BIN (docs/POPSTARTER_TROJAN.md)
+
+Found by running the original's loader per file under emulation and the
+resident slot chain under `tools/r5900_mini.py`; compared on the 509
+distinct TROJAN files and 10 distinct PATCH files of a reference collection
+by `tools/test_pops_trojan_corpus.py` and `tools/test_pops_trojan.py`.
+
+| # | POPStarter behaviour (copied, or the difference) | Possible fix later |
+|---|---|---|
+| 65 | Any nonzero header byte `0x0e` is accepted; only zero makes the file Invalid. Copied. | Accept only the values the format defines. |
+| 66 | No address is checked: no alignment and no range for the load address, the entry or the hook. A hook of 0 makes the original write its `jal`/`j` at address 0. launcHER refuses what it cannot place safely, and a hook of 0. Not copied. | Keep launcHER's checks. |
+| 67 | Each file gets a `malloc` of twice its size that is never freed. launcHER allocates nothing for it. Not copied (no visible effect inside POPS). | Free it. |
+| 68 | "Skipped (outdated)" (format 3, revision below 6) happens only when the disc matched a built-in entry by fingerprint; without a match the same file is applied. Copied. | Judge the file on its own. |
+| 69 | The path around the slot chain runs `di` twice (read from the disassembly). launcHER's chain keeps the original's instructions there. Copied. | Run it once. |
+| 70 | On the frame of an in-game disc swap, the original's chain leaves the disc init call's `v0`, `a0` and `ra` in the registers: a payload at the second run of slots sees them (slots 4, 5, 6, 8 and 9 as `check_pops_resident_image.py` numbers them), and POPS sees `v0` and `a0` at the return. launcHER's chain keeps POPS's values; the stores are equal. Not copied. Measured under `r5900_mini`, pinned by `test_the_disc_swap_frame_is_the_known_difference`. | Keep launcHER's. |
+| 71 | Inside the chain launcHER keeps `ra` across its first block of work, where the original has whatever the slots left, and does not keep `k0`/`k1` across the second block. The differential comparison shows no register difference at any slot or at the return apart from 70; it does not cover a payload that reads these registers later through another hook. | Measure such a payload. |
+| 72 | launcHER-only: a file the original would apply is skipped with "valid for POPStarter but NOT loaded by launcHER: <reason>" when it calls POPStarter code launcHER does not have, falls outside the POPS core or launcHER's arena, overlaps launcHER, or exceeds 20 payloads or 0x6f0000 bytes. 142 of the 509 distinct corpus files are skipped this way. | Host more of them. |
+| 73 | The original does not check the payload read and applies the file with whatever its buffer held; launcHER stops the launch on a payload read error. Owner decision. | Decide. |
+| 74 | The original has no size limit; launcHER skips a TROJAN file over 1 MiB (its fix-file read buffer) with a line. Owner decision. | Decide. |
+| 75 | launcHER-only: a slot file accepted when the slots are offered can still stop the launch, if a later fix file (for example a root PATCH writing into `0x2327d0..0x2327ff` or `0x232d08..0x232d37`) changes a slot run or the GP1 hook before install ("TROJAN slots cannot be installed"). The original would run. Found by reading the code; not measured, and no corpus file does this. | Measure the original, then follow it. |
+
+## Handoff to POPS (docs/POPSTARTER_HANDOFF.md)
+
+| # | POPStarter behaviour, or the difference | Possible fix later |
+|---|---|---|
+| 76 | launcHER does not repeat the original's `fioExit`, `SifExitRpc`, `SifInitRpc(0)`, `SifLoadFileInit`, `SifInitCmd`, `fioInit` between `FlushCache(2)` and `ExecPS2` (r13 MAIN `0x87c0d4..0x87c1d0`). The IOP's last known EE address of the SIF command packet buffer is therefore inside the memory POPS takes; the original's re-init points it at its own memory, which survives. Copying the calls would not change that, because launcHER's buffer is in its own BSS. Not measured to cause a fault; POPS reboots the IOP soon after. Owner decision. | Move the buffer out of POPS's range. |
+| 77 | launcHER-only: eight report words are written at `0x00084300..0x00084320` before the trampoline, in release builds too (magic `0x464f4850`, result, self, retired, first retired, drained, queue mode, failed id). The original leaves that memory as it found it. `0x80000..0x90000` holds launcHER's trampoline, its arguments and its stack in any case. Owner decision. | Write them in trace builds only. |
+| 78 | launcHER-only: POPS's threads get the ids they get after POPStarter only while launcHER's extra threads were taken from the front of the kernel's free queue in id order (true for the one helper thread in current builds). Otherwise the queue is released as found (report word queue mode = 2) and the ids may differ. Measured in PCSX2 on ATA: ids 2, 3, 4, 5, 8, 9; the r13 control was on USB only (2, 3, 4, 7, 8, one thread fewer, the same threads by entry address), so ATA parity is inferred. | Rebuild the queue in any order. |
+
+## Not copied: the POPS folder exit of the BIOS.BIN and IGR skin loaders
+
+POPStarter's BIOS handler (`0x880338..0x880380`) and IGR skin function
+(`0x87e48c..0x87e4c4`) call the POPS folder check (`0x8d8958`) when
+`gp+0x3868` is not 1. On a missing folder the check sets `gp+0x38dc` (every
+later current-game loader is skipped), `gp+0x3460` and `gp+0x3868`, and on
+`mass:` calls `0x91be68` on `mass0:/POPS`. The IGR function and an all-games
+`BIOS.BIN` call then return -666 with nothing opened; a game `BIOS.BIN` call
+ignores the failure and loads anyway. `main` normally makes the check first
+(`0x873f9c`, skipped when `gp+0x3888` is not 0, as on `SB.` launches) and
+appears to set `gp+0x3868` before any loader in every launch (static read,
+not traced), so these exits may never be reached. launcHER's loaders make
+neither the check nor the writes. Gap audit sections 4 and 6, spot checks
+S30 to S32; host emulation only. Owner decision whether to copy it.
+
+## SMB network files for `SB.` launches (docs/POPSTARTER_SMB_CONFIG.md)
+
+| # | POPStarter behaviour (copied) | Possible fix later |
+|---|---|---|
+| 79 | `IPCONFIG.DAT`: the argument length is the file size minus the number of space, CR and LF bytes, so the block handed to the network module stops that many bytes before the end of the text, and its last part (normally the gateway) loses its last characters and its NUL. Copied for `SB.` launches; what launcHER's `ps2ip_nm` does with such a block, or with no arguments when the file is missing, is not measured. | Pass the whole text with each separator turned into a NUL, ending in a NUL. |

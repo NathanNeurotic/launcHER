@@ -47,7 +47,7 @@ int pops_user_rom_keeps_shell(const PopsUserRomState *rom);
  * (gp+0x3878, 0x344c set). */
 int pops_user_bios_skipped(int per_game, const PopsUserRomState *state);
 
-/* The size test (0x8803d0): the size as a signed 32-bit value must be more
+/* The size test (0x88089c): the size as a signed 32-bit value must be more
  * than 0x7ff8e. A failed or negative lseek result is "too small". */
 int pops_user_bios_size_ok(int64_t file_size);
 

@@ -274,9 +274,14 @@ only in `case Device_SMB:`. An `SB.` VCD on another device (`mass:`, the
 `mass0:/POPS/` fallback) that reaches `pops_load_smb_stack` without the
 share's modules loaded is connected under the rules of the last target
 dispatched from the share (0 on a fresh boot). Before this fix it was the
-last target's PS1 flag combined with the current `SB.` state. Either way
-the `smb:` driver is not loaded for that device, so at most the failure
-message differs. Not changed further here.
+last target's PS1 flag combined with the current `SB.` state. The share's
+modules may still be resident from that earlier load (a `mass:` dispatch
+goes through the live-stack path in `loadModules`, which does not reset the
+IOP), so the first-stage connect can really log on under that stale rule
+set; read from the code, not run. They are not loaded after the IOP reboot
+(`initPopsServices` loads no SMB modules for a `mass:` VCD), so the
+second-stage `pops_load_smb_stack` fails and such a launch fails either way.
+Not changed further here.
 
 ## Copied as it is
 

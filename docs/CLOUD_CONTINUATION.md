@@ -22,7 +22,10 @@ kept for the record and is not a description of today's state.
   at `ef663b2` (the handoff defect, TROJAN files, the review answers for the
   config-text merge) is described in
   [PR23_HANDOFF_2026-11-11.md](PR23_HANDOFF_2026-11-11.md); this document
-  does not anticipate its outcome.
+  does not anticipate its outcome. Later the same day all three were merged,
+  with the SMB review answers and the review corrections; that file's
+  section 2 lists the merges. The rest of this document was not rewritten
+  after them.
 - REPOP: the live line is `main` at `bc258e48`. To reproduce the REPOP
   numbers quoted in the gap audit, use a clean checkout or a `git archive`
   export of that commit. The worktree `REPOP.worktrees/pr23` is not a

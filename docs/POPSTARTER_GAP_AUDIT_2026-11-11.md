@@ -18,6 +18,8 @@ written and are marked "in progress on a side branch": the handoff defect
 and the answers to the first review of the `CHEATS.TXT` pass (`pr23/cfg`).
 What those branches will end with is not described here.
 
+**Later the same day:** those three pieces were merged (`adcca00` handoff fix, `bc67659` TROJAN files, `31300cd` config-text review answers; [PR23_HANDOFF_2026-11-11.md](PR23_HANDOFF_2026-11-11.md) section 2). The rows marked "in progress on a side branch" were not rewritten after those merges; read them together with that section.
+
 **Nothing in this document was run on a console or in an emulator of the
 whole machine.** "Measured" means: the named block of the original was run on
 a host under Unicorn (or the in-repo R5900 interpreter) with its library
