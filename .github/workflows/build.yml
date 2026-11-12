@@ -72,13 +72,19 @@ jobs:
             release/version.txt
             release/launcHER.zip
 
-      - uses: "marvinpinto/action-automatic-releases@latest"
+      # The automatic-releases action rejects tags that are not full semver
+      # (v1.0 failed; v1.0.0 would pass), so tag pushes use the gh CLI. If a
+      # release for the tag already exists it is left unchanged.
+      - name: Draft release for version tag
         if: startsWith(github.ref, 'refs/tags/v')
-        with:
-          repo_token: "${{ secrets.GITHUB_TOKEN }}"
-          draft: true
-          files: |
-            release/launcHER.elf
-            release/launcHER.CNF
-            release/version.txt
-            release/launcHER.zip
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            echo "A release for $TAG already exists; leaving it unchanged."
+          else
+            gh release create "$TAG" --draft --verify-tag --generate-notes \
+              release/launcHER.elf release/launcHER.CNF release/version.txt release/launcHER.zip
+          fi
