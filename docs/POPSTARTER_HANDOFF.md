@@ -47,7 +47,7 @@ thread, and nothing it clears holds its own interrupt handlers.
 
 ### The fix
 
-Two parts, both inside the POPS launch path. ExecPS2 is still called once,
+Three parts, all inside the POPS launch path. ExecPS2 is still called once,
 as in r13.
 
 1. Before the jump to the trampoline, `popsHandoffRetireThreads()`
@@ -72,17 +72,42 @@ as in r13.
    - Last check: no thread other than the caller is left.
    - Eight report words are left at 0x00084300 (magic 0x464f4850, result,
      self, retired, first retired, drained, queue mode, failed id) for RAM
-     dumps; no trace line can follow.
+     dumps; no trace line can follow. Release builds write them too.
+   - On failure launchPOPS returns to the menu, as for every other launch
+     failure. -EFAULT comes before any thread is touched (host test).
+     -EBUSY and -EIO can come after ps2sdk's helper thread is gone, with the
+     trampoline and the staging area installed; the menu after that is
+     untested. Neither has been seen: a kernel call would have to fail.
 2. At the top of the trampoline, before the first store: interrupts off. The
    loop is ps2sdk's DI() (di, sync.p, read Status, retry while EIE is set).
    ExecPS2 empties the INTC and DMAC handler lists itself and returns with
    EIE = 0 (the di at 0x80002fa8), so POPS starts with interrupts as it does
    after r13. The handlers are no longer live while their code is zeroed.
+3. ExecPS2's entry is 0x00200000, the core's first word, as in r13 (its tail
+   passes that constant). Before, launcHER passed POPS.ELF's e_entry
+   0x00200008. The two words between are nops, so the same code runs; the
+   kernel's record of POPS's main thread (thread 1) now has r13's entry.
+   This difference is older than the handoff fix; it was found by the
+   review of it.
 
-`tools/check_pops_handoff_layout.py` runs after every build (POST_BUILD in
-`launcher/CMakeLists.txt`). It reads the linked ELF and fails the build if
-the trampoline, its arguments, the report words or the placeholder stack
-frame would collide with memory that must survive.
+Build-time checks:
+
+- `tools/check_pops_handoff_layout.py` runs after every link of
+  launcher_unc.elf (POST_BUILD in `launcher/CMakeLists.txt`). It fails the
+  build if the image leaves 0x100000..0x1000000; if the trampoline as
+  assembled from its source is not in the image exactly once, or is over
+  0x180 bytes; if a store or syscall comes before the di; if one of the five
+  thread syscall stubs the retire code uses is missing or never called; or
+  if the report magic is not built in code exactly once. In builds with
+  symbols (DEBUG) it also prints where the helper thread's and the
+  placeholders' reset frames and the SIF packet buffer are (reported, not
+  failed). It does not look at the trampoline's arguments or the report
+  words; the static asserts below do. Without python3 on the build host CMake
+  warns and the check does not run; the ps2homebrew image has python3.
+- Static asserts in `common/src/pops_handoff.c` (EE build and the host
+  tests' gcc build) keep the trampoline (0x84000, at most 0x180 bytes), its
+  arguments (0x84200..0x842b0), the report words (0x84300..0x84320) and the
+  trampoline's stack top (0x8fff0) in that order without overlap.
 
 ### Not the same as r13 (recorded, not changed)
 
@@ -92,9 +117,24 @@ frame would collide with memory that must survive.
   launcHER's SIF command packet buffer stays where the IOP was last told it
   is, inside POPS's memory (0x209580..0x209600 in the fixed trace build).
   r13's SifInitCmd moves the IOP's view to r13's own memory, which survives.
+  Copying the six calls into launcHER (they would have to run from C, before
+  the trampoline zeroes launcHER) would not give that effect: launcHER's own
+  buffer is in its BSS, inside POPS's memory (the layout check's report),
+  and fioInit's RPC bind would depend on the IOP image running then (not
+  measured). Owner
+  question; not changed.
 - Thread ids match r13 only when launcHER's extra threads were taken in id
   order from the front of the queue. That holds for the one helper thread
   in current builds.
+- launcHER leaves the eight report words at 0x00084300, in release builds
+  too; r13 leaves that memory as it found it. The area 0x80000..0x90000 is
+  launcHER's trampoline, arguments and stack in any case, which r13 does not
+  have either, so writing the words only in trace builds would not make that
+  memory match r13. It would lose the one check of the release build after
+  the handoff. Owner question.
+- The interrupt state on the way: r13 calls ExecPS2 with EIE on, launcHER
+  with EIE off. The kernel's ExecPS2 returns through its own di, so POPS
+  starts with EIE off after both (kernel read, Differential test).
 
 ### What was measured, and where
 
@@ -110,9 +150,15 @@ Host (no inputs needed; in CI):
   the clears and the core copy; FlushCache(0), FlushCache(2) and ExecPS2 on
   the trampoline's own stack with EIE off. The sources: the call sits right
   before the jump. On the original image (needs POPSTARTER_TEST_ELF): r13
-  has no thread stubs and calls ExecPS2 once.
-- `tools/test_pops_launch_hooks.py`: trace lines use no `ll` conversion (the
-  EE printf printed a bare "lx").
+  has no thread stubs and calls ExecPS2 once. The static asserts are present
+  (moving the report words to 0x84280, or growing the arguments' strings to
+  256 bytes, was checked by hand to stop the compile).
+- `tools/test_pops_external.py`: pops_trampoline_args_init gives ExecPS2
+  0x00200000 for an ELF entry of 0x00200008 or 0x00200000 and refuses
+  others.
+- `tools/test_pops_launch_hooks.py`: trace lines in the POPS launch path's
+  sources (handler_pops.c and the pops_*.c files) use no `ll` conversion
+  (the EE printf printed a bare "lx").
 
 Differential, under Unicorn, against the original binary (needs
 POPSTARTER_TEST_ELF and POPS_TEST_ELF; `tools/trace_original_pops_handoff.py`
@@ -127,27 +173,46 @@ runs r13's MAIN 0x87c0d4..0x87c1d0 as shipped):
 - interrupts: r13 calls ExecPS2 with EIE on and never turns it off; launcHER
   turns it off first and makes every call with it off. The kernel's ExecPS2
   returns through its di either way;
-- r13 enters POPS at 0x200000, launcHER at 0x200008 (the ELF entry); the two
-  words in between are nops in POPS.ELF.
+- both enter POPS at 0x200000 (the test asserts launcHER's ExecPS2 entry is
+  r13's); POPS.ELF's e_entry is 0x200008 and the two words before it are
+  nops (needs POPS_TEST_ELF).
 
-PCSX2 (emulator only; ATA image, `ata:/POPS/TEST.VCD`):
+PCSX2 (emulator only; ATA image, `ata:/POPS/TEST.VCD`). "Fixed" is
+890a6a3 (handoff fix, entry still 0x200008); "fixed + entry" is da77546
+(the same plus the 0x200000 entry and the review follow-ups):
 
 | Build | CPU | End point | Runs | Result |
 | --- | --- | --- | --- | --- |
 | ef663b2 trace (unfixed) | interpreter | POPS video setup | 1 | Trap exception at 0x00208660 |
-| fixed trace | recompiler | "Transferring control to trampoline" | 3 | 3 PASS |
+| fixed trace | recompiler | "Transferring control to trampoline" (printed before the retire call and the trampoline, so these runs end before the fixed code) | 3 | 3 PASS |
 | fixed trace | interpreter | POPS's "Interlaced (FIELD)" after the handoff | 3 | 3 PASS, no trap |
 | fixed release | interpreter | POPS's "Interlaced (FIELD)" after "SDR driver version" | 1 | PASS, no trap |
 | fixed trace | recompiler | kernel's "Restart Without Memory Clear Done." after the handoff | 1 | PASS |
 | ef663b2 trace (unfixed) | recompiler | same | 1 | FAIL: "TLB Miss, pc=0x0" right after the handoff line, no restart, thread 1 still launcHER's |
 | fixed trace, POPS parked at entry | interpreter | live core = staged core | 1 | 0 words differ |
 | ef663b2 trace, POPS parked at entry | interpreter | live core = staged core | 1 | 4 words differ, 0x208660..0x208690 |
+| fixed + entry, trace | interpreter | POPS's "Interlaced (FIELD)" after the handoff | 3 | 3 PASS, no trap |
+| fixed + entry, release | interpreter | POPS's "Interlaced (FIELD)" after "SDR driver version" | 1 | PASS, no trap |
+| fixed + entry, trace | recompiler | kernel's "Restart Without Memory Clear Done." after the handoff | 1 | PASS |
 
-In all five fixed interpreter runs the report words read result 0, one
-thread retired (id 2), 254 slots drained, queue restored, and POPS's threads
-have ids 2, 3, 4, 5, 8, 9. A POPStarter control run from USB (different
-device, one thread fewer) shows POPS's threads from id 2 in the same pattern.
-No ATA control run with a kernel dump was made.
+Read from the kernel dumps of the runs that have them:
+
+- Report words: result 0, one thread retired (id 2), 254 slots drained,
+  queue restored, in all eleven fixed runs past the handoff with a dump (the
+  five 890a6a3 interpreter runs including the park run, the 890a6a3
+  recompiler run, and the five da77546 runs).
+- POPS's threads have ids 2, 3, 4, 5, 8, 9 in the ten of those runs in
+  which POPS got past its entry (in the park run POPS spins on its first
+  instruction and only threads 0 and 1 exist). The unfixed build gives
+  3, 4, 5, 6, 9, 10.
+- Thread 1's recorded entry is 0x00200008 in the 890a6a3 runs and
+  0x00200000 in the da77546 runs, the same as in the POPStarter control.
+- The POPStarter control run from USB (different device, one thread fewer)
+  shows POPS's threads at 2, 3, 4, 7, 8: by entry address the same threads
+  as launcHER's, except the one launcHER has as thread 3, which the USB run
+  does not create. That is what the queue model predicts for one thread
+  fewer, so ids "as after POPStarter" on ATA are INFERRED. No ATA control
+  run with a kernel dump was made.
 
 The unfixed recompiler run fails before ExecPS2 runs at all: the kernel
 never prints its restart lines and the dump still shows launcHER's main
