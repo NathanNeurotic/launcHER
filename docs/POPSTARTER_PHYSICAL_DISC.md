@@ -63,9 +63,11 @@ found" local (`0x10b8($fp)`) is 0; any other pair skips the whole block
    The fatal exit `0x8709f8` does more than leave. Read from the code, not
    run: when `gp+0x3450` is 1 it calls `0x9174f8("mass0:", 0xc0de0006, ...)`
    and `0x9174f8("mass0:", 0xc0de0003, ...)` and clears that word; unless
-   `gp+0x3828` is 3 it calls `FUN_008dc9ac`; then `FUN_00870700(1)`, three
-   calls of `0x9188b8(address, 0, length)`, `0x87098c` five times unless
-   `gp+0x38b0` is 1, `0x91aaf0` when `gp-0x7fe8` is 1, and `FUN_00870500`.
+   `gp+0x3828` is 3 it calls `FUN_008dc9ac`; then `FUN_00870700(1)`, two
+   calls of `0x9188b8(address, 0, length)` whose lengths are the words
+   `gp+0x33ac` and `gp+0x33b0`, then clears both words (`0x870aac`,
+   `0x870ab0`) and calls `0x9188b8(0x1ff000, 0, 0x303e60)`; then `0x87098c`
+   five times unless `gp+0x38b0` is 1, `0x91aaf0` when `gp-0x7fe8` is 1, and `FUN_00870500`.
    The tests record that the exit is called and stop there: none of its
    own steps is measured, and the planner does not cover them.
 5. `sceCdGetDiskType()`. Anything but `0x10`, `0x11`, `0x12`, `0x13` (the

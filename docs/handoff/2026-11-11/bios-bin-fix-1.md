@@ -145,7 +145,8 @@ re-measured on the host at `4e90fda`) narrows two statements:
   refused after `$UNDO_COMPATIBILITY_CODES`: the 291 that set compatibility
   modes (each sets at least one of modes 1 to 5) and three that set none but
   write mode 4's byte at `0x21af70` directly (entries 109, 571, 572). The
-  other 330 launch. Same counts with an all-games `BIOS.BIN` loaded.
+  other 330 are not refused (`pops_stage_user_files` returns 0 on the host;
+  no launch was run). Same counts with an all-games `BIOS.BIN` loaded.
 - Fix option (a), "after the entry's modes are replayed", must also cover
   the entry's direct core writes, or entries 109, 571 and 572 stay refused.
   Which fix to take is still the owner's decision.

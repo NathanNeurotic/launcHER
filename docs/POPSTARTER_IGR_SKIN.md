@@ -110,7 +110,12 @@ What POPS does with a slot that does not hold a valid TIM2 file was not run.
   | `pops_stage_user_files`: commands, recompiler add-ons, then per folder (all games, then the game) the user `BIOS.BIN` and the fix files | the `BIOS.BIN` range is `0x24bc20..0x2cbbaf`, below the slots |
   | progressive check, video, PS1 BIOS shell edits and region (both through the `_rom` functions with the loader state), `$RESET_WARMBOOT`, TROJAN slot chain, `MODULE_n.IRX` names, `$LOAD_PADMAN`, SLBB bypass, resident pad/widescreen/progressive/display hooks, opcode pass | |
 
-  This is the original's order for a fingerprint-matched entry. For a
+  The skin's place (after the built-in entry, before the user's files) is
+  the original's for a fingerprint-matched entry. Inside and after
+  `pops_stage_user_files` the rows give launcHER's order, not the
+  original's: the original loads both `BIOS.BIN` files before it runs the
+  commands, launcHER runs the commands first
+  ([POPSTARTER_USER_BIOS.md](POPSTARTER_USER_BIOS.md), difference 1). For a
   `$VCDID_n` entry the original applies the entry after the skin and
   launcHER before it; the two orders leave the same core because no
   built-in operation writes inside the three slots (all 624 entries applied
