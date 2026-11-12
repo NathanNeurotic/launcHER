@@ -1051,7 +1051,9 @@ here.
 
 ## 19. What this audit did not do
 
-- No console run, no whole-machine emulator run, no full PS2 target build.
+- No console run, no whole-machine emulator run. No full PS2 target build
+  by the first version or the first correction pass (the second pass's
+  container build is in 19a).
 - No change to any source file. The host test list was run before and
   after the documentation change only to show nothing else moved.
 - The original's parser, SMB parsers and `VMCDIR.TXT` reader were not
@@ -1081,3 +1083,87 @@ The review did not re-derive the OSD handler, the physical-disc block, the
 `XX.`/`SB.` scan, the SMB parsers, the launch-type parser, the wrapper on
 the IOP side, or most `read` statements of section 10. All of it is host
 work. NOT TESTED on a console.
+
+### 19a. The second correction pass (`ef663b2`)
+
+What it changed: the header and section 2b (S30..S34); the BIOS handler's
+POPS folder exit and the condition on the once-flag sentence (section 4);
+the IGR skin row's reachable results and extra writes (section 6); the
+seven callers of `FUN_008d8958` (section 3a); the launcHER paragraphs for
+the five merges; `tools/test_pops_doc_claims.py` (the step parser, whole
+phrases instead of tokens, `MAIN_FUNCTION` ending at `0x87c218`, a set but
+unusable `POPSTARTER_TEST_ELF` failing, the corpus class). No C source
+changed, so the host test list was run only to show nothing else moved.
+
+Emulated (host, Unicorn, library calls modelled): S30 and S31 only. Static:
+S32, S33, S34. Not re-run: S22, S23, S27, the OSD handler, TROJAN and PATCH
+scope handling after the folder check, the region pass, the physical-disc
+block, the device scan, `main` end to end. The launcHER paragraphs of
+sections 4 to 14 were written from the merged code and its tests and are
+not checked by any test.
+
+Host test list, `pr23/docs-2` at `b77a4e8` (documents and the doc-claims
+test changed after it, nothing else), every `tools/test_*.py` one after
+another, temp folders set to a scratch folder:
+
+- Without the reference inputs: 32 files, each exit 0. Skips as the
+  files print them: `test_pops_breakpoint.py` 4, `test_pops_builtin_db.py`
+  14, `test_pops_config_text.py` 10, `test_pops_display.py` 6,
+  `test_pops_doc_claims.py` 11, `test_pops_external.py` 14,
+  `test_pops_features.py` 2, `test_pops_fix_files.py` 3,
+  `test_pops_igr_skin.py` 21, `test_pops_launch_hooks.py` 14,
+  `test_pops_module_irx.py` 4, `test_pops_opcodes.py` 3,
+  `test_pops_padman.py` 3, `test_pops_physical_disc.py` 18,
+  `test_pops_progressive.py` 5, `test_pops_resident.py` 12,
+  `test_pops_smb_config.py` 13, `test_pops_user_bios.py` 13,
+  `test_pops_warmboot.py` 3; the others print no unittest summary or
+  none skipped.
+- With `POPS_TEST_ELF` and `POPSTARTER_TEST_ELF`: 32 files, each exit 0.
+  Still skipping: `test_pops_external.py`, `test_pops_launch_hooks.py`
+  and `test_pops_progressive.py` 3 each (inputs this pass did not give),
+  and `test_pops_doc_claims.py` 1 (its corpus class; run with the corpus
+  separately, below).
+- `test_pops_user_bios.py` reports one expected failure in both passes, the
+  test it marks as a known gap (`$UNDO_` after a built-in entry).
+
+`tools/test_pops_doc_claims.py` at the final commit of this pass: 17 tests,
+11 skipped, exit 0 without inputs; 17 tests, none skipped, exit 0 with
+`POPS_TEST_ELF`, `POPSTARTER_TEST_ELF` and `POPS_TROJAN_CORPUS`. With
+`POPSTARTER_TEST_ELF` naming a missing file or `POPS.ELF`, and with
+`POPS_TROJAN_CORPUS` naming a missing folder, it exits 1.
+
+Container build (Docker, `ghcr.io/ps2homebrew/ps2homebrew:main`, CMake, C
+code as at `ef663b2`, in a git worktree): failed at 28% without the
+`launcher/iop/mmceman` submodule; after `git submodule update --init
+launcher/iop/mmceman` it built `release/launcHER.elf`, 326,772 bytes, with
+version `unknown` (the worktree's `.git` names a Windows path). Not run on
+anything.
+
+Deliberate one-line changes ("mutants") to a `git archive` copy of the
+documents, workflows and tools, each run without inputs and with all three
+inputs. The reviewer's M01..M23 (M21 was not defined) and 18 more of this
+pass:
+
+Run on `3ac02d8`. 40 mutants. With the three inputs 38 are caught; without
+inputs 12 are (the ones in the workflows, the `ci-coverage` list and the
+withdrawn sentences, plus M01, whose wrong address differs from the other
+citations). Survivors with the inputs:
+
+- M07, a changed delay in README.md: README.md is read only for withdrawn
+  sentences.
+- M09, the S27 result count changed: the test reads the corpus file counts
+  and hook slots, not the loaders' results; repeating S27 needs the
+  emulated loaders and is not part of the test.
+
+Caught with the inputs, by group: the `$USBDELAY_` handler and S28 delay
+values (M01, M02, M03, M20); the BIOS handler's exits, gates and once-flag
+sentence (M04, M15, N06, N07, N13, N14); the IGR rows of section 6 and the
+inventory (M05, M06, N15, N17); the slot list and pair count (M08, M19);
+the S21 census and the `gp+0x38b0` row (M12, M13, M14); the section 9
+delay sentence (M16); S24 (M17); S32 and the `gp+0x3868` row (N08, N09,
+N10, N18); the S15 corpus count (N11); `main`'s range (N12); the workflow
+steps: a commented-out `run:` line, `if: false`, `if: ${{ false }}`, a
+push-only `if:`, `continue-on-error: true`, `|| true`, the file named only
+inside `echo`, the doc-claims step itself replaced, a test file in no
+workflow, and a file missing from the `ci-coverage` list (M10, M11, M18,
+M22, M23, N01..N05); the withdrawn run sentence put back (N16).
