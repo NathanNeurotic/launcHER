@@ -1,0 +1,8 @@
+12:16:25 v1-t2-interp-1 tier=t2 mode=interp rc=0 run=20261111T121536-impl-v1-t2-interp-1 ---- verdict: PASS after 28.9s; our PID 49488 still alive: False ----
+12:19:38 v1-t2-interp-2 tier=t2 mode=interp rc=0 run=20261111T121824-impl-v1-t2-interp-2 ---- verdict: PASS after 59.1s; our PID 32276 still alive: False ----
+13:23:32 v2-t1-rec-1 tier=t1 mode=rec rc=0 run=20261111T132257-impl-v2-t1-rec-1 ---- verdict: PASS after 27.4s; our PID 55480 still alive: False ----
+13:24:24 v2-t1-rec-2 tier=t1 mode=rec rc=0 run=20261111T132347-impl-v2-t1-rec-2 ---- verdict: PASS after 23.8s; our PID 50420 still alive: False ----
+13:25:15 v2-t1-rec-3 tier=t1 mode=rec rc=0 run=20261111T132437-impl-v2-t1-rec-3 ---- verdict: PASS after 27.1s; our PID 44208 still alive: False ----
+13:26:49 v2-t2-interp-1 tier=t2 mode=interp rc=0 run=20261111T132533-impl-v2-t2-interp-1 ---- verdict: PASS after 65.2s; our PID 36440 still alive: False ----
+13:28:16 v2-t2-interp-2 tier=t2 mode=interp rc=0 run=20261111T132703-impl-v2-t2-interp-2 ---- verdict: PASS after 60.4s; our PID 62264 still alive: False ----
+13:29:40 v2-t2-interp-3 tier=t2 mode=interp rc=0 run=20261111T132832-impl-v2-t2-interp-3 ---- verdict: PASS after 57.3s; our PID 35460 still alive: False ----

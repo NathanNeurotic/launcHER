@@ -1,0 +1,622 @@
+<!doctype html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>POPS &amp; PS1 Setup · launcHER Docs</title>
+<meta name="description" content="Setup guide for running PlayStation 1 games through Sony POPS with launcHER: dependency files, VCD format, CNF syntax, per-game directives, and memory cards.">
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+<link rel="icon" type="image/png" href="assets/favicon.png">
+<meta property="og:site_name" content="launcHER Docs">
+<meta property="og:type" content="website">
+<link rel="stylesheet" href="assets/style.css">
+</head><body data-base="">
+<header class="topbar">
+  <button class="menu-btn" aria-label="Menu">☰</button>
+  <a class="brand" href="index.html">
+    <span class="psbtns"><i class="tri">&#9651;</i><i class="cir">&#9711;</i><i class="cro">&#10005;</i><i class="squ">&#9633;</i></span>
+    launcHER <small>DOCS</small></a>
+  <div class="topbar-actions">
+    <a class="topbar-btn primary" href="releases.html" title="Downloads &amp; Releases"><span class="icon icon-releases"></span>Downloads</a>
+    <a class="topbar-btn" href="https://github.com/NathanNeurotic/launcHER" target="_blank" rel="noopener" title="GitHub Repository"><span class="icon icon-github"></span>GitHub</a>
+  </div>
+  <div class="search">
+    <span class="ico"></span>
+    <input id="q" type="search" placeholder="Search devices, CNF syntax, HDD modes, OPL…  ( / )" autocomplete="off">
+    <kbd>/</kbd>
+    <div id="results"></div>
+  </div>
+</header>
+<canvas id="ps2-orbs" class="ps2-orbs-canvas" aria-hidden="true"></canvas>
+<div class="layout">
+  <nav class="sidebar">
+    <div class="sidebar-brand-sub">PLAYSTATION 2 // LAUNCHER</div>
+    <a href="index.html"><span class="icon icon-home"></span>Home</a>
+
+    <h4>Start</h4>
+    <a href="getting-started.html"><span class="icon icon-start"></span>Getting Started</a>
+    <a href="pops-setup.html" class="active"><span class="icon icon-ps1"></span>POPS &amp; PS1 Setup</a>
+    <a href="releases.html"><span class="icon icon-releases"></span>Downloads &amp; Releases</a>
+
+    <h4>Storage &amp; Devices</h4>
+    <a href="hdd-modes.html"><span class="icon icon-hdd"></span>"Which HDD Do I Have?"</a>
+    <a href="storage-profiles.html"><span class="icon icon-usb"></span>Storage Profiles</a>
+    <a href="apa-pfs.html"><span class="icon icon-server"></span>APA / PFS Deep Dive</a>
+
+    <h4>Configuration &amp; Launching</h4>
+    <a href="configuration.html"><span class="icon icon-settings"></span>launcHER.CNF Reference</a>
+    <a href="opl-apps.html"><span class="icon icon-apps"></span>OPL APPS Integration</a>
+
+    <h4>Reference</h4>
+    <a href="troubleshooting.html"><span class="icon icon-troubleshoot"></span>Troubleshooting &amp; Errors</a>
+    <a href="building.html"><span class="icon icon-terminal"></span>Building from Source</a>
+    <a href="credits.html"><span class="icon icon-credits"></span>Credits &amp; Lineage</a>
+
+    <h4 style="margin-top:24px;">Family Ecosystem</h4>
+    <a href="https://nathanneurotic.github.io/Open-PS2-Loader/"><span class="icon icon-play"></span>RiptOPL Docs ↗</a>
+    <a href="https://nathanneurotic.github.io/PS2-Servers/"><span class="icon icon-netboot"></span>PS2 Servers Docs ↗</a>
+    <a href="https://nathanneurotic.github.io/POPSLoader/"><span class="icon icon-book"></span>POPStarter Docs ↗</a>
+  </nav>
+  <main class="content">
+
+<h1>Sony POPS &amp; <span class="g">PS1 Setup</span></h1>
+<p class="lead">
+  Draft PR #23 implements substantial independent POPStarter-r13 command, configuration, storage and resident-runtime functionality around user-supplied Sony POPS. It is not a completed drop-in replacement or a claim of compatibility across all storage devices. Current host and component evidence does not establish console behavior.
+</p>
+
+<div class="callout info">
+  <div class="h">External Dependencies Notice</div>
+  launcHER is a loader and environment orchestrator. It does not contain or distribute Sony's proprietary emulator binaries (<code>POPS.PAK</code>, <code>POPS_IOX.PAK</code>, <code>POPS.ELF</code>, <code>IOPRP252.IMG</code>) or PlayStation 1 BIOS images. You must provide clean copies from your own PlayStation 2 installations.
+</div>
+
+<h2 id="step-1-dependencies">Step 1: External POPS Dependencies</h2>
+<p>
+  Sony distributed POPS in different package formats across various official releases. launcHER accepts three distinct installation forms:
+</p>
+
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>Package Form</th>
+        <th>Required Files</th>
+        <th>Description</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><b>Packed IOX (Recommended)</b></td>
+        <td><code>POPS_IOX.PAK</code></td>
+        <td>Compressed POPS memory image containing the emulator core and an updated <code>ioprp2305a</code> reboot module. Offers the best compatibility on modern storage devices.</td>
+      </tr>
+      <tr>
+        <td><b>Packed Legacy</b></td>
+        <td><code>POPS.PAK</code></td>
+        <td>Compressed POPS memory image containing the emulator core and an <code>ioprp252</code> reboot module. Standard package from earlier POPStarter releases.</td>
+      </tr>
+      <tr>
+        <td><b>Loose Files</b></td>
+        <td><code>POPS.ELF</code> and <code>IOPRP252.IMG</code></td>
+        <td>Uncompressed EE executable paired with a standalone IOP reboot image. Both files must reside in the same directory.</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<h3>Discovery Search Order</h3>
+<p>
+  When you launch a <code>.VCD</code> game, launcHER searches for your POPS dependency files in this priority order:
+</p>
+
+<ol class="checklist">
+  <li><b>Target Game Directory:</b> The folder holding the active <code>.VCD</code> disc (for example, <code>mass0:/POPS/</code>).</li>
+  <li><b>Device Root POPS Folder:</b> <code>&lt;device&gt;:/POPS/</code> on the storage volume containing the game (for example, <code>ata:/POPS/</code> or <code>mass0:/POPS/</code>).</li>
+  <li><b>Memory Card Slot 1:</b> <code>mc0:/POPS/</code>.</li>
+  <li><b>Memory Card Slot 2:</b> <code>mc1:/POPS/</code>.</li>
+  <li><b>Internal APA Partition:</b> <code>hdd0:__.POPS:pfs:/</code> (for internal HDD setups).</li>
+</ol>
+
+<p>
+  Place your chosen dependency package (such as <code>POPS_IOX.PAK</code>) in any of these locations. Keeping it in your main <code>POPS/</code> directory or on <code>mc0:/POPS/</code> allows all games to share one file.
+</p>
+
+<h2 id="step-2-vcd-images">Step 2: Preparing .VCD Disc Images</h2>
+<p>
+  POPS requires disc images in Sony's Virtual CD (<code>.VCD</code>) format. These images use raw Mode 2 Form 1 CD-ROM sectors (2,352 bytes per sector).
+</p>
+
+<p>
+  Convert your original PlayStation 1 CD-ROM dumps (BIN/CUE pairs) to <code>.VCD</code> using tools such as <b>CUE2POPS</b>. Place the resulting <code>.VCD</code> files in your games directory:
+</p>
+
+<pre><code>POPS/
+├── POPS_IOX.PAK               <span class="c"># Shared emulator package</span>
+├── Crash Bandicoot.VCD        <span class="c"># Single-disc game</span>
+├── Spyro the Dragon.VCD       <span class="c"># Single-disc game</span>
+└── Metal Gear Solid/          <span class="c"># Multi-disc game subfolder</span>
+    ├── Metal Gear Solid (Disc 1).VCD
+    ├── Metal Gear Solid (Disc 2).VCD
+    └── DISCS.TXT</code></pre>
+
+<h2 id="step-3-launch-methods">Step 3: Launch Methods and CNF Configuration</h2>
+<p>
+  You can launch POPS games using <code>launcHER.CNF</code>, using direct binary names (OPL APPS style), or through command-line invocation.
+</p>
+
+<h3>Method A: Quickboot via launcHER.CNF</h3>
+<p>
+  Point the <code>path=</code> directive directly to your <code>.VCD</code> file. launcHER detects the <code>.VCD</code> file extension, mounts the parent storage device, and boots POPS automatically:
+</p>
+
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>Storage Transport</th>
+        <th>launcHER.CNF Example</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><b>USB Mass Storage</b></td>
+        <td>
+          <pre style="margin:0"><code>path=mass?:/POPS/Crash Bandicoot.VCD</code></pre>
+        </td>
+      </tr>
+      <tr>
+        <td><b>Internal exFAT HDD (ATA BDM)</b></td>
+        <td>
+          <pre style="margin:0"><code>path=ata:/POPS/Crash Bandicoot.VCD
+arg=-dev9=NICHDD</code></pre>
+        </td>
+      </tr>
+      <tr>
+        <td><b>APA / PFS Partition (hdd0:__.POPS)</b></td>
+        <td>
+          <pre style="margin:0"><code>path=hdd0:__.POPS:pfs:/Crash Bandicoot.VCD
+arg=-dev9=NICHDD</code></pre>
+        </td>
+      </tr>
+      <tr>
+        <td><b>MMCE (Memory Card SD adapter)</b></td>
+        <td>
+          <pre style="margin:0"><code>path=mmce?:/POPS/Crash Bandicoot.VCD</code></pre>
+        </td>
+      </tr>
+      <tr>
+        <td><b>MX4SIO / MC2SIO</b></td>
+        <td>
+          <pre style="margin:0"><code>path=mx4sio:/POPS/Crash Bandicoot.VCD</code></pre>
+        </td>
+      </tr>
+      <tr>
+        <td><b>i.Link (FireWire IEEE 1394)</b></td>
+        <td>
+          <pre style="margin:0"><code>path=ilink:/POPS/Crash Bandicoot.VCD</code></pre>
+        </td>
+      </tr>
+      <tr>
+        <td><b>UDPBD (Network Block Device)</b></td>
+        <td>
+          <pre style="margin:0"><code>path=udpbd:/POPS/Crash Bandicoot.VCD
+arg=-dev9=NIC</code></pre>
+        </td>
+      </tr>
+      <tr>
+        <td><b>UDPFS (Network Filesystem)</b></td>
+        <td>
+          <pre style="margin:0"><code>path=udpfs:/POPS/Crash Bandicoot.VCD
+arg=-dev9=NIC</code></pre>
+        </td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<h3>Method B: Direct Binary Quickboot (draft PR #23)</h3>
+<p>
+  When running without a <code>launcHER.CNF</code> file, launcHER discovers game images based on its executable filename:
+</p>
+
+<ol class="checklist">
+  <li><b>No Prefix (Default POPS APA):</b> An executable named <code>Crash Bandicoot.ELF</code> without a prefix defaults to the internal HDD APA partition: <code>hdd0:__.POPS:pfs:/Crash Bandicoot.VCD</code>, followed by adjacent directory checks.</li>
+  <li><b>BDMA and Storage Prefix (<code>XX.</code>):</b> Executables named with an <code>XX.</code> prefix (such as <code>XX.Crash Bandicoot.ELF</code>) check memory card directories (<code>mc0:/POPSTARTER/</code>, <code>mc1:/POPSTARTER/</code>) for external drivers and BDMA markers:
+    <ul>
+      <li>When external drivers (<code>USBD.IRX</code>, <code>USBHDFSD.IRX</code>, <code>bdm_assault.irx</code>, <code>BDM.IRX</code>, <code>MX4SIO.IRX</code>, <code>ATA.IRX</code>, <code>MMCE.IRX</code>) exist in <code>mc?:/POPSTARTER/</code>, launcHER skips internal USB modules and uses the external drivers.</li>
+      <li>When external modules are not present, launcHER loads its built-in modules for USB POPS launches.</li>
+      <li>When BDMA mode markers (<code>bdma_mode.txt</code>) exist, launcHER routes targets to the designated hardware backend: <code>ATA</code> / <code>EXFAT</code> (<code>ata:/POPS/&lt;Game&gt;.VCD</code>), <code>MX4SIO</code> (<code>mx4sio:/POPS/&lt;Game&gt;.VCD</code>), <code>MMCE</code> (<code>mmce0:/POPS/&lt;Game&gt;.VCD</code>), or <code>USB</code> (<code>mass0:/POPS/&lt;Game&gt;.VCD</code>).</li>
+    </ul>
+  </li>
+  <li><b>SMB Network Prefix (<code>SB.</code>):</b> Executables named with an <code>SB.</code> prefix (such as <code>SB.Crash Bandicoot.ELF</code>) load the POPStarter SMB network stack from <code>mc?:/POPSTARTER/</code> (<code>PS2DEV9.IRX</code>, <code>SMAP.IRX</code>, <code>PS2IP.IRX</code>, <code>SMBMAN.IRX</code>, <code>PS2NETFS.IRX</code>). launcHER applies static IP settings from <code>IPCONFIG.DAT</code>, reads share settings from <code>SMBCONFIG.DAT</code>, and launches <code>smb0:/POPS/&lt;Game&gt;.VCD</code>.</li>
+  <li><b>Matching Title Priority:</b> launcHER verifies <code>&lt;Game&gt;.VCD</code> before checking generic <code>IMAGE.VCD</code>.</li>
+</ol>
+
+<p>
+  This maintains POPStarter directory conventions and leverages existing memory card installations while providing built-in drivers for systems without external modules.
+</p>
+
+<h3>Method C: Direct Command-Line Invocation</h3>
+<p>
+  Launchers, scripts, or menu frontends can pass arguments directly to <code>launcHER.elf</code> without requiring a <code>launcHER.CNF</code> file:
+</p>
+
+<ul>
+  <li><b>Bare Game Title:</b> <code>launcHER.elf "Crash Bandicoot"</code> defaults to <code>hdd0:__.POPS:pfs:/Crash Bandicoot.VCD</code>, followed by launcher directory and USB fallbacks.</li>
+  <li><b>Prefixed Title:</b> <code>launcHER.elf "XX.Crash Bandicoot"</code> checks BDMA mode markers and routes to the active backend (ATA, MX4SIO, MMCE, or USB).</li>
+  <li><b>SMB Prefixed Title:</b> <code>launcHER.elf "SB.Crash Bandicoot"</code> checks SMB network shares.</li>
+  <li><b>Relative or Full Path:</b> <code>launcHER.elf mass0:/POPS/Crash Bandicoot.VCD</code> boots the target image directly.</li>
+</ul>
+
+
+<h2 id="step-4-game-directives">Step 4: Per-Game Configuration Directives</h2>
+<p>
+  Place optional text configuration files alongside your <code>.VCD</code> image, or inside the per-game VMC subfolder. launcHER reads these files automatically before entering POPS:
+</p>
+
+<ul>
+  <li><code>PATCHES.TXT</code>: General directives, video modes, and memory patches. (launcHER's own file name; POPStarter takes commands from <code>CHEATS.TXT</code>, which launcHER also reads.)</li>
+  <li><code>MODES.TXT</code>: Compatibility modes 1 through 8. (launcHER's own file name.)</li>
+  <li><code>CHEATS.TXT</code>: GameShark and Action Replay cheat codes.</li>
+  <li><code>DISCS.TXT</code>: The disc file names of a multi-disc game (up to 4), for POPStarter's in-game disc swap.</li>
+  <li><code>VMCDIR.TXT</code>: Custom folder path for Virtual Memory Cards.</li>
+</ul>
+
+<h3>Video Mode Directives</h3>
+<p>
+  POPS runs in NTSC. Like POPStarter, launcHER reads the licence text on the disc and switches European discs to PAL automatically. Nothing on this page has been tested on a console yet.
+</p>
+
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>Directive</th>
+        <th>Description</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>$NOPAL</code> / <code>$PAL2NTSC</code> / <code>$FORCENTSC</code></td>
+        <td>Keeps a European disc at 60 Hz NTSC instead of switching to PAL.</td>
+      </tr>
+      <tr>
+        <td><code>$FORCEPAL</code> / <code>$NTSC2PAL</code></td>
+        <td>Runs any disc in PAL 50 Hz and reports Europe to POPS.</td>
+      </tr>
+      <tr>
+        <td><code>$HDTVFIX</code> / <code>$NOHDTVFIX</code></td>
+        <td>POPStarter's HDTV fix on or off.</td>
+      </tr>
+      <tr>
+        <td><code>$480p</code></td>
+        <td>Selects launcHER's independent guarded progressive bridge. Host and component checks pass; progressive picture output on a physical console remains unverified.</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<h3>Other POPStarter commands</h3>
+<p>
+  Multiple directives may appear on the same line separated by spaces (e.g. <code>$NOPAL $MUTE_CDDA</code>). The full list, including the commands launcHER cannot do yet, is in <a href="https://github.com/NathanNeurotic/launcHER/blob/codex/popstarter-replacement/docs/POPSTARTER_R13_INVENTORY.md">POPSTARTER_R13_INVENTORY.md</a>.
+</p>
+<ul>
+  <li><code>$SCANLINES</code>, <code>$SUBCDSTATUS</code>, <code>$CACHE1</code>, <code>$ROLLBACK</code>, <code>$CODECACHE_ADDON_0</code> to <code>$CODECACHE_ADDON_2</code>: the same core changes POPStarter makes.</li>
+  <li><code>$MUTE_CDDA</code>, <code>$UNDO_MUTE_CDDA</code>, <code>$MUTE_VAB</code>, <code>$MUTE_ALL</code>: mute CD audio, VAB sound or everything.</li>
+  <li><code>$UNDO_COMPATIBILITY_CODES</code>, <code>$UNDO_GAME_FIXES</code>, <code>$UNDO_LIBCRYPT_FIX</code>: make POPStarter's writes. All three keep the PS1 BIOS boot logo; <code>$UNDO_COMPATIBILITY_CODES</code> also cancels <code>$SUBCDSTATUS</code>. They run before <code>$COMPATIBILITY_0x</code>, so a compatibility mode you set still applies. Not yet tested on a console.</li>
+  <li><code>$IGR0</code> to <code>$IGR5</code>: POPStarter's In-Game Reset combos; 3 to 5 exit straight away instead of asking. <code>$NOIGR</code> turns In-Game Reset off. Without any of these, launcHER exits straight to the browser.</li>
+  <li><code>$NOPAD0</code>, <code>$NOPAD1</code>: the game sees no controller in that port. <code>$PAD0ID_0Xhh</code>, <code>$PAD1ID_0Xhh</code>: the port reports controller ID <code>hh</code> (for example <code>0X41</code> digital, <code>0X73</code> analog). <code>$D2LS</code>: swaps the D-pad and the left stick and presents both ports as digital pads. <code>$D2LS_ALT</code>: swaps them and keeps the real controller type. Not yet tested on a console.</li>
+  <li><code>$SAFEMODE</code>: cheats wait while the PS1 BIOS boot is still running, as in POPStarter. <code>$SAFEMODE2</code>: POPStarter's second cheat gate. <code>$NOSAFEMODE</code>: turns both off. Not yet tested on a console.</li>
+  <li><code>$USBDELAY_#</code>: launcHER pauses the given number of seconds once before starting POPS, on any device, and not at all without the command. This is not yet what POPStarter does. POPStarter accepts a single digit, uses 1 second without the command, and on USB and SMB launches passes the number to its own file wrapper, which appears to wait that many seconds once, before the first file it opens. That description comes from POPStarter's code, read and partly run on a PC with the console's services replaced by models; the wait itself has never been observed. Not tested on a console.</li>
+  <li><code>$NOBOOT</code> or <code>$BIOS</code>: keeps the PS1 BIOS boot logo. These are launcHER's own commands; POPStarter r13 has neither.</li>
+  <li><code>$WIDESCREEN</code> (16:9), <code>$ULTRA_WIDESCREEN</code> (about 21:9), <code>$EYEFINITY</code> (three 16:9 screens): squeeze 3D geometry horizontally, as in POPStarter; set the TV to stretch. The last one listed wins. Not yet tested on a console.</li>
+  <li><code>$SET_TIMINGS</code>: while the game runs, controller 1 alone holding L1/L2 or R1/R2 nudges two of POPS's timing values, and controller 2 alone holding L1/L2 (small steps) or R1/R2 (big steps) nudges a third. Like POPStarter, it keeps the values on the slot 0 memory card (a small entry in the card's header area) and loads them next time. Not yet tested on a console.</li>
+  <li><code>$SMOOTH</code>, <code>$XPOS_&lt;n&gt;</code>, <code>$YPOS_&lt;n&gt;</code>, <code>$DWSTRETCH_&lt;n&gt;</code>, <code>$DWCROP_&lt;n&gt;</code>, <code>$LEFTADJ_&lt;n&gt;</code>: POPStarter's picture adjustments. Not yet tested on a console.</li>
+  <li>Not POPStarter commands, ignored: <code>$480i</code>, <code>$576p</code>, <code>$576i</code>, <code>$240p</code>, <code>$VMODE_#</code>, <code>$DITHER_OFF</code>, <code>$FASTMIPS</code>, <code>$SLOWMIPS</code>.</li>
+</ul>
+
+<h2 id="step-5-compatibility-modes">Step 5: Compatibility Modes 1 through 8</h2>
+<p>
+  Certain games require low-level timing or subsystem adjustments within POPS. Specify these modes in <code>MODES.TXT</code> (as bare numbers like <code>1</code>, <code>2</code>) or in <code>PATCHES.TXT</code> (using <code>$COMPATIBILITY_0x01</code> through <code>$COMPATIBILITY_0x08</code>):
+</p>
+
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>Mode</th>
+        <th>Target Memory Site</th>
+        <th>Subsystem Adjustment</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><b>Mode 1</b></td>
+        <td><code>0x002148A0</code></td>
+        <td>Adjusts SPU2 DMA synchronization loops and wait timing. Resolves audio stutter and lockups in music and FMV sequences.</td>
+      </tr>
+      <tr>
+        <td><b>Mode 2</b></td>
+        <td><code>0x00207EC0</code></td>
+        <td>Disables the CD-ROM fast sector cache override. Fixes read errors in games that rely on standard disc seek latency.</td>
+      </tr>
+      <tr>
+        <td><b>Mode 3</b></td>
+        <td><code>0x00210850</code></td>
+        <td>Disables the alternate audio channel mixer, restoring original PS1 sound channel routing.</td>
+      </tr>
+      <tr>
+        <td><b>Mode 4</b></td>
+        <td><code>0x00205B10</code></td>
+        <td>Skips GPU FIFO synchronization locks. Eliminates visual rendering freezes in high-throughput 3D titles.</td>
+      </tr>
+      <tr>
+        <td><b>Mode 5</b></td>
+        <td><code>0x002061A0</code></td>
+        <td>Forces progressive display timing directly inside the emulator display scheduler.</td>
+      </tr>
+      <tr>
+        <td><b>Mode 6</b></td>
+        <td><code>0x0020C1F0</code></td>
+        <td>Enables alternate LibCrypt subchannel emulation for protected titles without pre-calculated keys.</td>
+      </tr>
+      <tr>
+        <td><b>Mode 7</b></td>
+        <td><code>0x002010A0</code></td>
+        <td>Throttles the R3000A CPU cycle counter (<code>addiu $a0, $zero, 2</code>) to resolve speed-dependent bugs.</td>
+      </tr>
+      <tr>
+        <td><b>Mode 8</b></td>
+        <td><code>0x00207EE8</code></td>
+        <td>Adjusts CD-DA streaming buffer parameters, preventing background CD audio loops from dropping out.</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<h2 id="step-6-compatibility-database">Step 6: Title Compatibility Database &amp; LibCrypt</h2>
+<p>
+  launcHER applies POPStarter r13's own built-in per-game list (the disc is identified from 144 bytes of the VCD; <code>$VCDID_n</code> picks an entry by hand when nothing matched; not yet tested on a console) and includes a built-in database of <b>568 verified game profiles</b> and <b>229 validated 16-bit LibCrypt magic keys</b>.
+</p>
+
+<p>
+  When you boot a game, launcHER performs these actions automatically:
+</p>
+
+<ol class="checklist">
+  <li>Inspects the ISO9660 Primary Volume Descriptor inside the <code>.VCD</code> file.</li>
+  <li>Reads <code>SYSTEM.CNF</code> and extracts the official serial (for example, <code>SCES-01422</code> or <code>SLUS-00870</code>).</li>
+  <li>Checks the internal database. If the game has known compatibility requirements, launcHER sets the recommended modes automatically.</li>
+  <li>For a title using European LibCrypt copy protection, the branch applies the measured bypass-patch behavior and programs physical Subchannel Q emulation into the driver using the title's verified 16-bit key. Protected-game compatibility remains unverified on a physical console.</li>
+</ol>
+
+<h2 id="step-7-vmc-saves">Step 7: Virtual Memory Cards (VMC)</h2>
+<p>
+  POPS saves game data into Virtual Memory Card (VMC) images on your storage device rather than physical PS2 memory cards.
+</p>
+
+<h3>Naming Conventions</h3>
+<p>
+  launcHER checks for card images using this filename priority:
+</p>
+
+<ul>
+  <li>Slot 1: <code>&lt;SERIAL&gt;.VMC0</code> &rarr; <code>&lt;GAME_BASE&gt;.VMC0</code> &rarr; <code>SLOT0.VMC</code></li>
+  <li>Slot 2: <code>&lt;SERIAL&gt;.VMC1</code> &rarr; <code>&lt;GAME_BASE&gt;.VMC1</code> &rarr; <code>SLOT1.VMC</code></li>
+</ul>
+
+<p>
+  For example, for <i>Crash Bandicoot</i> (<code>SCUS-94900</code>), launcHER looks for <code>SCUS-94900.VMC0</code> and <code>SCUS-94900.VMC1</code>.
+</p>
+
+<h3>Automatic Formatting</h3>
+<p>
+  If neither card image exists when launching, launcHER creates both 128 KiB files on your storage device, pre-formatting them with valid PlayStation memory card header blocks and XOR checksums. The game recognizes them as formatted memory cards immediately.
+</p>
+
+<h3>Custom Save Folder Redirection</h3>
+<p>
+  Create a <code>VMCDIR.TXT</code> file in your game folder to redirect card saves to a common directory or subfolder:
+</p>
+
+<pre><code>SAVES/Crash/</code></pre>
+
+<h2 id="step-8-multi-disc">Step 8: Multi-Disc Games (DISCS.TXT)</h2>
+<p>
+  For games spanning multiple CD-ROMs (such as <i>Final Fantasy VII</i> or <i>Metal Gear Solid</i>), create a <code>DISCS.TXT</code> file in the game directory. List each disc on its own line:
+</p>
+
+<pre><code>Metal Gear Solid (Disc 1).VCD
+Metal Gear Solid (Disc 2).VCD</code></pre>
+
+<p>
+  launcHER reads <code>DISCS.TXT</code> the way POPStarter r13 does:
+</p>
+
+<ul>
+  <li>Up to 4 lines, one disc each, in order: disc 1 to disc 4. Lines after the fourth are not read.</li>
+  <li>Each line is the name of a file beside the launched game, not a path. A <code>/</code>, <code>\</code> or <code>:</code> anywhere in the file makes launcHER ignore the whole file, as POPStarter does.</li>
+  <li>Nothing is trimmed and there are no comments: a line of spaces or a <code>#</code> line counts as a disc name. Empty lines are skipped.</li>
+  <li>A line of 90 characters or more clears the whole list.</li>
+  <li>A <code>DISCS.TXT</code> beside the games applies to all of them. One in the game's own subfolder (named like the game) is read after it and replaces its lines from the first.</li>
+</ul>
+
+<h3>In-Game Disc Swapping</h3>
+<p>
+  POPStarter's disc swap, on controller 1, holding nothing else (not yet tested on a console):
+</p>
+
+<ol class="checklist">
+  <li>Press <b>SELECT + L2 + R2 + TRIANGLE</b> to open the virtual disc lid.</li>
+  <li>Press <b>SELECT + L2 + R2</b> with <b>UP</b>, <b>RIGHT</b>, <b>DOWN</b> or <b>LEFT</b> to pick disc 1, 2, 3 or 4 of <code>DISCS.TXT</code>.</li>
+  <li>Press <b>SELECT + L2 + R2 + SQUARE</b> to close the lid. POPS loads the disc you picked and the game carries on.</li>
+</ol>
+
+<p>
+  Without a <code>DISCS.TXT</code> line for the disc you picked, closing the lid reloads the disc the game started with.
+  launcHER's older <b>SELECT + L1 + R1</b> swap was removed on November 2, 2026: it could never switch while the game had the disc open, which is all the time in game.
+</p>
+
+<h2 id="step-9-cheats">Step 9: GameShark &amp; Action Replay Cheats</h2>
+<p>
+  Add GameShark or Action Replay cheat codes to <code>CHEATS.TXT</code> in your game folder. Write each code POPStarter style, <code>$</code> then the code. launcHER reads the file the way POPStarter r13 does:
+</p>
+
+<ul>
+  <li>To switch a code off, remove its <code>$</code>. A <code>#</code> or <code>;</code> in front does not switch it off: POPStarter finds a <code>$</code> code anywhere on a line, and so does launcHER.</li>
+  <li>The layout is exact: <code>$</code>, eight characters, one space, four characters. A tab, a second space or a fifth value digit makes POPStarter skip the code, and launcHER skips it too. Upper or lower case both work.</li>
+  <li>A line that is not a code is skipped. It does not stop the game from starting.</li>
+</ul>
+
+<pre><code># Infinite Health (16-bit write)
+$8009A120 0004
+
+# All Items (8-bit write)
+$3009A135 0063
+
+# Switched off: no $
+8009A150 0001
+
+# Master code: every code runs only while 0x0008B000 holds 0x1234
+$C008B000 1234
+
+# If 0x0008B200 == 0x0001, run the next code:
+$D008B200 0001
+$8008B204 00FF
+
+# Repeat: write 0x0010, 0x0011, 0x0012, 0x0013 at 0x0009A200, 0x0009A202, ...
+$50000402 0001
+$8009A200 0010</code></pre>
+
+<p>
+  POPStarter's code types, all read and run as POPStarter compiles them:
+</p>
+
+<ul>
+  <li><code>80xxxxxx yyyy</code>: 16-bit write.</li>
+  <li><code>30xxxxxx 00yy</code>: 8-bit write.</li>
+  <li><code>D0xxxxxx yyyy</code>: run the next code only when the 16-bit value matches. A <code>D0</code> right after another <code>D0</code> is ignored.</li>
+  <li><code>C0xxxxxx yyyy</code>: master code. The first one gates every code in the file, wherever it is; later ones are ignored. As in POPStarter, a value of <code>8000</code> or more never matches, so such a master code turns every code off.</li>
+  <li><code>5000nnss vvvv</code>: repeat the next <code>80</code> or <code>30</code> code <code>nn</code> times (hex), moving the address up <code>ss</code> bytes and the value up <code>vvvv</code> each time. When a <code>D0</code> gates a repeat, POPStarter always skips the code after the repeat, and so does launcHER.</li>
+</ul>
+
+<p>
+  Other GameShark types (<code>10</code>, <code>20</code>, <code>D1</code>..<code>D3</code>, <code>E0</code>, <code>E1</code>) are skipped, as in POPStarter, so the code after one of them runs on its own.
+</p>
+
+<p>
+  POPStarter's PS2-format codes are read and run as POPStarter compiles them too. They have an 8-digit value, so a code is 18 characters long:
+</p>
+
+<ul>
+  <li><code>$0aaaaaaa vvvvvvvv</code>, <code>$1…</code>, <code>$2…</code>: 8, 16 or 32-bit write to PS2 (EE) RAM at the 7-digit address. PlayStation 1 RAM is at <code>01000000</code> there.</li>
+  <li><code>$Szc0oooo vvvvvvvv</code>: the EE scratchpad (<code>70000000</code>), offset <code>0000</code>..<code>3FFF</code>. <code>z</code> is the size (0 byte, 1 halfword, 2 word), <code>c</code> is 0 for a write, 1 to run the next code only if the memory equals the value, 2 only if it differs.</li>
+  <li><code>$Tzc00ooo vvvvvvvv</code>: the same at <code>5F800000</code>, offset <code>000</code>..<code>3FF</code>.</li>
+  <li><code>$=aaaaaaa vvvvvvvv</code> / <code>$!aaaaaaa vvvvvvvv</code>: run the next code only if the 32-bit word at the EE address (below <code>02000000</code>) equals / differs from the value.</li>
+</ul>
+
+<p>
+  Their POPStarter quirks are copied as well. Byte and halfword compares read the memory as signed, so a byte of <code>80</code> matches the value <code>FFFFFF80</code>, not <code>00000080</code>. After the first PS2-format conditional, every later conditional and repeat in the file is ignored, and so are <code>$T</code> writes after a <code>$S</code> conditional and <code>$S</code> writes after a <code>$=</code> or <code>$!</code>. A <code>$0</code>/<code>$1</code>/<code>$2</code> write between a <code>D0</code> and the code it gates runs on its own and usually makes that code skipped; a <code>$S</code>/<code>$T</code> write there is ignored. A code at an address its size does not divide, which crashes POPStarter, is aligned down instead.
+</p>
+
+<p>
+  launcHER copies POPStarter's two repeat bugs too, so a file behaves the same in both. When a repeat crosses a 64 KB boundary, every later write lands another 64 KB further up. When a repeat's value reaches <code>20000</code> (hex), the rest of the writes repeat the last value that still fitted. In that second case POPStarter's generated code also changes another CPU register; launcHER cannot copy that part, and what it does on a console is unknown. The full list of copied POPStarter quirks is in <a href="POPSTARTER_QUIRKS_TO_FIX_LATER.md">POPSTARTER_QUIRKS_TO_FIX_LATER.md</a>.
+</p>
+
+<p>
+  launcHER installs its own small resident program next to POPS and runs these codes against PlayStation 1 RAM (<code>0x00000000</code> to <code>0x001FFFFF</code>), and PS2-format codes against the memory they name, from the same place in POPS as POPStarter: each time the game writes the GPU control port with interrupts enabled; how often that is depends on the game and was not measured. A game that stops writing it gets no codes until it writes it again, in POPStarter too. It is independent code, not POPStarter's. Not yet tested on a console.
+</p>
+
+<h2 id="step-10-igr-hotkeys">Step 10: In-Game Reset &amp; Controller Hotkeys</h2>
+
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>Action</th>
+        <th>Button Combination</th>
+        <th>Behavior</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><b>In-Game Reset (IGR)</b></td>
+        <td><code>L1 + L2 + R1 + R2 + SELECT + START</code></td>
+        <td>Shuts down the emulator safely and returns to your PS2 menu (OSDSYS, OPL, or wLaunchELF).</td>
+      </tr>
+      <tr>
+        <td><b>Disc Swap</b></td>
+        <td><code>SELECT + L2 + R2 + TRIANGLE</code>, then <code>SELECT + L2 + R2</code> + a direction, then <code>SELECT + L2 + R2 + SQUARE</code></td>
+        <td>POPStarter's swap: open the lid, pick disc 1 to 4 of <code>DISCS.TXT</code> (UP, RIGHT, DOWN, LEFT), close the lid to load it. Controller 1.</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<h3>Custom IGR Background Graphics (not tested on a console)</h3>
+<p>
+  On every POPS launch launcHER looks for <code>IGR_BG.TM2</code>, <code>IGR_NO.TM2</code> and <code>IGR_YES.TM2</code> in the folder the <code>.VCD</code> is in and copies each one it finds over the picture Sony's POPS carries for its exit confirmation dialog, as POPStarter does. Nothing in the file is checked. <code>IGR_BG.TM2</code> may be up to 312,064 bytes, <code>IGR_NO.TM2</code> and <code>IGR_YES.TM2</code> up to 7,612 bytes each; a larger file is skipped, and a 0-byte file blanks that picture.
+</p>
+<p>
+  POPStarter reads these files from the device's <code>POPS</code> folder (<code>mass:/POPS/</code>, or <code>pfs1:/POPS/</code> on its HDD back end), so launcHER finds them in the same place only when the <code>.VCD</code> is in <code>mass:/POPS/</code> (for SMB launches, which device the original's <code>mass:</code> names was not traced). The dialog, and with it the pictures, only appears with <code>$IGR0</code>, <code>$IGR1</code> or <code>$IGR2</code> (see the commands above); without an IGR command launcHER exits straight to the browser and the dialog never opens. NOT TESTED on a console: whether POPS shows a replaced picture correctly has not been seen.
+</p>
+
+<h3>Custom Game Fixes (TROJAN_*.BIN, PATCH_*.BIN)</h3>
+<p>
+  launcHER reads <code>TROJAN_0.BIN</code> through <code>TROJAN_9.BIN</code> and <code>PATCH_0.BIN</code> through <code>PATCH_9.BIN</code> from beside the game and from the game's subfolder, checks the container header and applies the files it accepts.
+</p>
+<p>
+  <b>TROJAN files, NOT TESTED on a console.</b> A file POPStarter calls Invalid or outdated is skipped with a line, as POPStarter skips it. A file POPStarter would apply but that uses POPStarter's own code, which launcHER does not have, is skipped with "valid for POPStarter but NOT loaded by launcHER" and the reason, and the game starts without that fix. In a collection of community fix packs, measured on a host on November 11, 2026, launcHER loads 367 of the 509 distinct TROJAN files and skips the other 142; the 10 distinct PATCH files were accepted. Some failures still stop the launch, among them a TROJAN file whose payload cannot be read and a PATCH file that is not accepted ("Fix file rejected"). What a loaded payload does while the game runs was not run anywhere.
+</p>
+
+<h2 id="step-11-custom-irx">Step 11: Custom IRX Modules &amp; Peripherals</h2>
+<p>
+  launcHER supports user-supplied IOP driver modules and peripheral replacement drivers after storage initialization.
+</p>
+
+<h3>Numbered Driver Modules (MODULE_0.IRX .. MODULE_9.IRX)</h3>
+<p>
+  These work as in POPStarter r13. Put <code>MODULE_0.IRX</code> through <code>MODULE_9.IRX</code> in the same folder as your POPS files (<code>POPS_IOX.PAK</code> / <code>POPS.PAK</code>), normally the device's <code>POPS</code> folder; other folders are not searched. A module whose IOP name starts like one of POPS's own (<code>sio2man</code>, <code>padman</code>, libsd, <code>sdr_driver</code>, <code>dev9</code>, <code>atad</code>, <code>hdd</code>, <code>pfs</code>) replaces POPS's copy. They start in numerical order after the IOP reset (<code>hdd</code> and <code>pfs</code> get POPStarter's arguments), and one that fails to start stops the launch. For <code>SB.</code> launches modules 5 to 9 start after the network stack. Not yet tested on a console.
+</p>
+
+<h3>Named Peripheral Drivers</h3>
+<p>
+  Place driver modules into your game directory, VMC directory, or memory card to support specialty hardware:
+</p>
+
+<ul>
+  <li><code>USBMOUSE.IRX</code> / <code>USB_MOUSE.IRX</code>: USB mouse drivers.</li>
+  <li><code>USBKBD.IRX</code>: USB keyboard drivers.</li>
+  <li><code>USBGUN.IRX</code> / <code>GUNCON.IRX</code>: Light gun peripherals (GunCon, USB light guns).</li>
+  <li><code>MULTITAP.IRX</code>: Multi-controller adapter driver.</li>
+  <li><code>DS3.IRX</code> / <code>DS4.IRX</code>: DualShock 3 and DualShock 4 controller drivers.</li>
+  <li><code>PADMAN.IRX</code> / <code>SIO2MAN.IRX</code>: Controller and SIO2 transport replacements.</li>
+</ul>
+
+<h3>Driver Manifests (MODULES.TXT &amp; IRX.TXT)</h3>
+<p>
+  To load arbitrary module files, create <code>MODULES.TXT</code> or <code>IRX.TXT</code> containing file paths or filenames (one module per line). Paths can be absolute (e.g. <code>mc0:/IRX/USBMOUSE.IRX</code>) or relative to the game directory.
+</p>
+
+<h3>Search Locations</h3>
+<p>
+  launcHER searches for custom IRX modules and manifests in this priority order:
+</p>
+
+<ol class="checklist">
+  <li>Per-game Virtual Memory Card folder (<code>vmcDir</code>).</li>
+  <li>The active game <code>.VCD</code> directory (<code>vcdDir</code>).</li>
+  <li>Dedicated IRX subfolder: <code>&lt;vcdDir&gt;IRX/</code>.</li>
+  <li>Memory Card slot 1: <code>mc0:/POPSTARTER/</code> and <code>mc0:/POPS/</code>.</li>
+  <li>Memory Card slot 2: <code>mc1:/POPSTARTER/</code> and <code>mc1:/POPS/</code>.</li>
+</ol>
+
+</main>
+  <aside class="toc"><div class="toc-h">On this page</div><nav id="toc-nav"></nav></aside>
+</div>
+<footer>
+  <p><b>launcHER Documentation</b> &mdash; Standalone PlayStation 2 Ember forwarder.
+  See <a href="credits.html">Credits &amp; Lineage</a>.</p>
+  <p class="prov-inline">PlayStation 2 Homebrew Documentation Family:
+  <a href="https://nathanneurotic.github.io/Open-PS2-Loader/">RiptOPL Docs</a> &middot;
+  <a href="https://nathanneurotic.github.io/PS2-Servers/">PS2 Servers Docs</a> &middot;
+  <a href="https://nathanneurotic.github.io/POPSLoader/">POPStarter Docs</a>.</p>
+</footer>
+<script src="assets/app.js"></script>
+</body></html>

@@ -1,0 +1,23 @@
+{
+  "date": "2026-10-19",
+  "diagnostic_commit": "e9c6485a6285b3f34a58b15927f778c4a6bac467",
+  "production_parent": "5bf2afcc548029f4794497882c96b15c365904e3",
+  "ci_run_id": 39347449955,
+  "elf_sha256": "664d606d95fe290f5baba5e785cc6bf4299c4dacaf3ff789601205caaa863ede",
+  "target": "ata0:/LAUNCHER-TEST-20261013-A/TEST.VCD",
+  "screen_observations": [
+    "Optional configuration opens report errno=2 (ENOENT).",
+    "POPS: Failed reading ata0:/LAUNCHER-TEST-20261013-A/POPS.ELF: -5",
+    "Failed to launch ata0:/LAUNCHER-TEST-20261013-A/TEST.VCD: -5"
+  ],
+  "observation_source": "User-supplied screenshot; only relevant console text is retained.",
+  "screenshot_sha256": "4d702c462babc574cbf6463ad2483d486e6d522ba992246c14d8b2ebe48089c7",
+  "acceptance": "Dependency reader fails with EIO before core staging or Sony IOP reset. No full boot or save acceptance.",
+  "next_step": "Use 32-bit high/low trace fields and a read-only fileXio comparison; always retain the original dependency-read error and discard comparison bytes.",
+  "followup_observation": {
+    "diagnostic_commit": "b60e31f2a505823ede8622acaa4bbef1a5e22312",
+    "reported_line": "POPS_READ size=ld capacity=3166988",
+    "limitation": "The nano printf formatter did not consume the long-long conversion correctly; displayed field positions cannot be used to infer capacity.",
+    "operation_stage": "not captured; original dependency EIO remains unresolved"
+  }
+}

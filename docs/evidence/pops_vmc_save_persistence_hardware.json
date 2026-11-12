@@ -1,0 +1,50 @@
+{
+  "date": "2026-10-28",
+  "audit_status": "previous_completion_claim_withdrawn",
+  "primary_run_id": "20261028T063429-0127",
+  "reset_verification_run_id": "20261028T063634-0128",
+  "claimed_source_commit": "aaf0dea37f00bf755a6d25f7560ccfe69d0d3f2b",
+  "claimed_ci_run_id": 40642811238,
+  "elf_sha256": "e5477ea222797e26989df26b11d5a300d26db44124aed2ee6ab6cba9ce2be016",
+  "target": "ata0:/POPS/Tekken.VCD",
+  "memory_cards": {
+    "slot0": "ata0:/POPS/Tekken/SLOT0.VMC",
+    "slot1": "ata0:/POPS/Tekken/SLOT1.VMC",
+    "reported_size": 131072,
+    "format_and_contents_reverified": false,
+    "persistence_verified": false
+  },
+  "retrieved_run_records": [
+    {
+      "run_id": "20261028T063429-0127",
+      "outcome": "hang",
+      "run_ms": 120000,
+      "stdout_scope": "ELF loading banners and ata0:/POPS/Tekken.VCD only",
+      "artifacts": [
+        "program.elf",
+        "stdout.txt"
+      ]
+    },
+    {
+      "run_id": "20261028T063634-0128",
+      "outcome": "hang",
+      "run_ms": 30000,
+      "stdout_scope": "empty",
+      "artifacts": [
+        "program.elf"
+      ]
+    }
+  ],
+  "unverified": [
+    "in-game save write",
+    "in-game reload of the saved state",
+    "cold power-cycle persistence",
+    "card digest and block integrity",
+    "disc-change execution",
+    "absence of descriptor leaks"
+  ],
+  "interpretation": "These run records do not prove VMC durability or multi-disc parity. No save/reload result, card digest, cold power-cycle observation or swap result is present. A rig hang after Sony IOP reset is not independent game-failure proof either.",
+  "gate_status": "open: dedicated new-card save/reload/cold-power-cycle evidence required",
+  "supersedes": "The previous Gate P0 satisfied claim at commit 7dd60a3 is withdrawn.",
+  "audit": "../POPS_PARITY_AUDIT_2026-10-28.md"
+}

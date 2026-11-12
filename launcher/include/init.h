@@ -20,4 +20,21 @@ int initModules(DeviceType device);
 // next initModules always reboots the IOP, so a launch target still gets exactly its own drivers.
 int initModulesAny(DeviceType devices);
 
+// The next initModules reboots the IOP and loads its drivers even when they are already loaded. Used
+// when the share's network modules were set up under the other network-file rules (handler_smb.h).
+void initModulesReload(void);
+
+/* After external POPS IOP reboot: load selected backends and the proxy without
+ * another reset. Core must have passed boot planning before guarded patching;
+ * its embedded SIO2 module is revalidated here. Volumes still need
+ * mounting before POPS entry. Arguments are packed NUL-terminated IRX strings.
+ * Requires POPS_CORE_STORAGE_BRIDGE at entry to avoid loading SIO2 twice. */
+int initPopsServices(DeviceType devices, const void *core, size_t coreSize,
+                     const char *proxyArguments, uint32_t argumentSize);
+
+/* Built-in stand-in for a POPStarter XX. driver that has no file on the card
+ * (POPS_XX_USBD: usbd_mini, POPS_XX_USBHDFSD: usbmass_bd_mini). Returns the
+ * module ID, or a value <= 0 on failure. */
+int initStartBuiltinXxUsb(int which);
+
 #endif

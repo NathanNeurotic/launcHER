@@ -1,0 +1,9 @@
+{
+  "run_id": "20261013T181122-0001",
+  "outcome": "pass",
+  "exit_code": 0,
+  "elf_sha256": "651a5fcd61136aa6e701fb81692921bfeb3ec625a64de3c193149f529652fe4c",
+  "started": "2026-10-13T18:11:22.9774727Z",
+  "stdout": "loadelf: fname host:program.elf secname all\r\nInput ELF format filename = host:program.elf\r\n1 00100000 00027684 ...\r\nLoaded, host:program.elf\r\nstart address 0x11bd78\r\ngp address 00000000\r\nread/write allocate memory 4000\r\nPOPS_EE_IO_REQUEST lba=0 count=16 byte_offset=1048576\nPOPS_EE_IO_REQUEST lba=16 count=16 byte_offset=1086208\nPOPS_EE_IO_REQUEST lba=1234 count=16 byte_offset=3950944\nPOPS_EE_IO_REQUEST lba=4999 count=2 byte_offset=12806224\nPOPS_EE_IO_REQUEST lba=5000 count=1 byte_offset=12808576\nPOPS_EE_IO_REQUEST lba=1234 count=16 byte_offset=3950944\nPOPS_EE_IO_REQUEST lba=1234 count=16 byte_offset=3950944\nPOPS_EE_IO_REQUEST_PASS cases=7 original_R5900=1 services=modeled\n[ps2rig] exit=0\n",
+  "scope": "Physical PS2 execution of original FUN_00210090; track/RPC/semaphore/log services remain doubles. No full POPS boot, IOP reset or VMC persistence tested."
+}

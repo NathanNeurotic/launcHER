@@ -25,7 +25,7 @@ int _start(int argc, char *argv[])
 
     /* Start udpfs as local IOP file system: "udpfs:" */
 #ifdef FEATURE_UDPFS_IOMAN
-    udpfs_init();
+    if (udpfs_init() != 0) return MODULE_NO_RESIDENT_END;
 #endif
 
     /* Start udpfs as BDM block device */

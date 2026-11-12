@@ -1,0 +1,28 @@
+{
+  "run": {
+    "run_id": "20261014T012340-0018",
+    "outcome": "hang",
+    "elf_sha256": "33311d492e83b058fc4c1e1d6de7feedf1f39cecb39513ec6174e058c2b8d4f1",
+    "stdout": "unmounting\r\nunmounted\r\nloadelf: fname host:program.elf secname all\r\nInput ELF format filename = host:program.elf\r\n1 00100000 00079104 ........\r\nLoaded, host:program.elf\r\nstart address 0x11ca20\r\ngp address 00000000\r\n",
+    "artifacts": [
+      "program.elf",
+      "stdout.txt"
+    ],
+    "timings": {
+      "queue_ms": 0,
+      "upload_ms": 4,
+      "run_ms": 20000
+    },
+    "started": "2026-10-14T01:23:40.3884335Z"
+  },
+  "screen_observations": [
+    "candidate-iomanX id=25 start=0",
+    "production-fileXio id=26 start=0",
+    "controlled-backend id=27 start=0",
+    "production-popfs id=28 start=0",
+    "POPS_IOP_BINDING_FAIL stage=6 result=-16",
+    "[ps2rig] exit=1"
+  ],
+  "interpretation": "Changing only iomanX resolved the POPFS initialization stall on hardware. The controlled bridge did not pass; the next boundary was stage 6 file service access. Source review then found POPFS rejected recycled file slots with stale privdata.",
+  "full_bridge_acceptance": false
+}

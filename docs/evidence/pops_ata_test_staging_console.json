@@ -1,0 +1,24 @@
+{
+  "run_id": "20261014T055930-0026",
+  "outcome": "pass",
+  "exit_code": 0,
+  "elf_sha256": "b9bc40d43a2c4a172d9868250091d82005fa5a9f2b8daba38f2f34745660af50",
+  "args": [
+    "--stage-test",
+    "ata0:/POPS/Tekken.VCD",
+    "usb0:/POPS/",
+    "ata0:/LAUNCHER-TEST-20261013-A/"
+  ],
+  "stdout": "POPS_STAGE new-directory=ata0:/LAUNCHER-TEST-20261013-A result=0\nPOPS_STAGE copy=ata0:/POPS/Tekken.VCD -> ata0:/LAUNCHER-TEST-20261013-A/TEST.VCD size=115654480\nPOPS_STAGE copied=8388608/115654480\nPOPS_STAGE copied=16777216/115654480\nPOPS_STAGE copied=25165824/115654480\nPOPS_STAGE copied=33554432/115654480\nPOPS_STAGE copied=41943040/115654480\nPOPS_STAGE copied=50331648/115654480\nPOPS_STAGE copied=58720256/115654480\nPOPS_STAGE copied=67108864/115654480\nPOPS_STAGE copied=75497472/115654480\nPOPS_STAGE copied=83886080/115654480\nPOPS_STAGE copied=92274688/115654480\nPOPS_STAGE copied=100663296/115654480\nPOPS_STAGE copied=109051904/115654480\nPOPS_STAGE copy-result=0 verified=115654480\nPOPS_STAGE copy=usb0:/POPS/POPS.ELF -> ata0:/LAUNCHER-TEST-20261013-A/POPS.ELF size=3166988\nPOPS_STAGE copy-result=0 verified=3166988\nPOPS_STAGE copy=usb0:/POPS/IOPRP252.IMG -> ata0:/LAUNCHER-TEST-20261013-A/IOPRP252.IMG size=265233\nPOPS_STAGE copy-result=0 verified=265233\nPOPS_STAGE result=0 directory=ata0:/LAUNCHER-TEST-20261013-A/\n[ps2rig] exit=0",
+  "artifacts": [
+    "program.elf",
+    "stdout.txt"
+  ],
+  "timings": {
+    "queue_ms": 0,
+    "upload_ms": 4,
+    "run_ms": 54108
+  },
+  "started": "2026-10-14T05:59:30.4154182Z",
+  "interpretation": "Created a fresh ATA test directory; byte-compared all copied VCD, external POPS and IOP image bytes after closing and reopening. No original game/save/configuration was overwritten. Staged files are user-owned console data, not repository/distribution artifacts."
+}

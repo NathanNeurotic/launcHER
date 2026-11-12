@@ -1,0 +1,1869 @@
+#!/usr/bin/env python3
+import ctypes as c
+import errno
+import os
+import struct
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+
+class CheatEntry(c.Structure):
+    _fields_ = [
+        ("address", c.c_uint32),
+        ("value", c.c_uint32),
+        ("type", c.c_uint8),
+        ("cond", c.c_uint8),
+        ("skip", c.c_uint8),
+        ("reserved", c.c_uint8),
+    ]
+
+class PopsConfig(c.Structure):
+    _fields_ = [
+        ("video_mode", c.c_uint8),
+        ("hdtv_fix", c.c_uint8),
+        ("x_offset", c.c_int16),
+        ("y_offset", c.c_int16),
+        ("smooth", c.c_uint8),
+        ("widescreen", c.c_uint8),
+        ("dither_off", c.c_uint8),
+        ("fast_mips", c.c_uint8),
+        ("slow_mips", c.c_uint8),
+        ("no_boot", c.c_uint8),
+        ("no_igr", c.c_uint8),
+        ("igr_type", c.c_uint8),
+        ("safe_mode", c.c_uint8),
+        ("usb_delay", c.c_uint8),
+        ("no_vmc0", c.c_uint8),
+        ("no_vmc1", c.c_uint8),
+        ("compat_modes", c.c_uint8),
+        ("runtime_corrections", c.c_uint8),
+        ("disc_count", c.c_uint8),
+        ("disc_slot", (c.c_uint8 * 0x60) * 4),
+        ("vmc_dir", c.c_char * 128),
+        ("cheat_count", c.c_uint16),
+        ("cheats", CheatEntry * 256),
+        ("original_tokens", c.c_uint32),
+        ("disc_region", c.c_uint8),
+        ("display_x", c.c_uint16),
+        ("display_y", c.c_uint16),
+        ("display_stretch", c.c_uint16),
+        ("display_crop", c.c_uint16),
+        ("display_mask", c.c_uint8),
+        ("left_adjust", c.c_uint8),
+        ("gs_display", c.c_uint64),
+        ("gs_values", c.c_uint32 * 6),
+        ("gs_mask", c.c_uint8),
+        ("gs_display_valid", c.c_uint8),
+        ("progressive_requested", c.c_uint8),
+        ("pad_override", c.c_uint8),
+        ("pad_id", c.c_uint8 * 2),
+        ("pad_d2ls", c.c_uint8),
+        ("set_timings", c.c_uint8),
+        ("vcdid", c.c_uint16),
+        ("vcdid_set", c.c_uint8),
+        ("subcd_seen", c.c_uint8),
+        ("builtin_id", c.c_uint16),
+        ("builtin_fix_call", c.c_uint8),
+        ("builtin_break_call", c.c_uint8),
+        ("builtin_libcrypt2", c.c_uint8),
+        ("builtin_libcrypt2_code", c.c_uint8 * 84),
+        ("reset_warmboot", c.c_uint8),
+        ("reset_pad", c.c_uint8 * 3),
+        ("reset_vector", c.c_uint32),
+        ("load_padman", c.c_uint8),
+        ("kill_padman", c.c_uint8),
+        ("original_opcodes", c.c_uint8),
+        ("breakpoint", c.c_uint8),
+        ("recompiler_addons", c.c_uint8),
+        ("fakelc", c.c_uint8),
+        ("builtin_no_vmc1", c.c_uint8),
+        ("usb_delay_set", c.c_uint8),
+        ("vmc_dir_set", c.c_uint8),
+        ("forced_pal", c.c_uint8),
+    ]
+
+class PopsCompatEntry(c.Structure):
+    _fields_ = [
+        ("serial", c.c_char_p),
+        ("title", c.c_char_p),
+        ("default_modes", c.c_uint8),
+        ("has_libcrypt", c.c_uint8),
+        ("libcrypt_key", c.c_uint16),
+        ("patch_offset", c.c_uint32),
+        ("patch_val", c.c_uint32),
+    ]
+
+class PopsVcdInfo(c.Structure):
+    _fields_ = [
+        ("sector_size", c.c_uint32),
+        ("data_offset", c.c_uint32),
+        ("image_offset", c.c_uint32),
+        ("pvd_lba", c.c_uint32),
+        ("root_lba", c.c_uint32),
+        ("root_size", c.c_uint32),
+        ("raw_serial", c.c_char * 32),
+        ("normalized_serial", c.c_char * 32),
+    ]
+
+def compile_shared_library():
+    so_name = "pops_features_test.dll" if os.name == "nt" else "pops_features_test.so"
+    so_path = Path(tempfile.gettempdir()) / so_name
+    sources = [
+        str(ROOT / "common/src/pops_config.c"),
+        str(ROOT / "tools/fixtures/pops_config_host_io.c"),
+        str(ROOT / "common/src/pops_compat_db.c"),
+        str(ROOT / "common/src/pops_modes_patches.c"),
+        str(ROOT / "common/src/pops_builtin_db.c"),
+        str(ROOT / "common/src/pops_builtin_db_data.c"),
+        str(ROOT / "common/src/pops_resident_engine.c"),
+        str(ROOT / "common/src/pops_external.c"),
+        str(ROOT / "common/src/pops_vcd.c"),
+    ]
+    cmd = ["gcc", "-shared", "-fPIC", "-O2", "-Dfopen=pops_test_fopen",
+           "-Dfgets=pops_test_fgets", "-Dferror=pops_test_ferror", "-Dfclose=pops_test_fclose",
+           "-I", str(ROOT / "common/include")] + sources + ["-o", str(so_path)]
+    subprocess.check_call(cmd)
+    return c.CDLL(str(so_path))
+
+LIB = None
+
+DISC_SLOT_SIZE = 0x60
+DISC_SLOTS_SIZE = 4 * DISC_SLOT_SIZE
+
+
+def slots(cfg):
+    """The four DISCS.TXT slots, 0x180 bytes."""
+    return c.string_at(c.addressof(cfg) + PopsConfig.disc_slot.offset, DISC_SLOTS_SIZE)
+
+
+def disc_name(cfg, n):
+    slot = slots(cfg)[n * DISC_SLOT_SIZE:(n + 1) * DISC_SLOT_SIZE]
+    if not slot.startswith(b'pfs0:/'):
+        assert slot[0] == 0, slot
+        return b''
+    return slot[6:].split(b'\0')[0]
+
+
+def parse_discs(cfg, data):
+    LIB.pops_config_parse_discs.argtypes = [c.POINTER(PopsConfig), c.c_char_p, c.c_size_t]
+    LIB.pops_config_parse_discs.restype = None
+    text = c.create_string_buffer(data, len(data) + 1)
+    LIB.pops_config_parse_discs(c.byref(cfg), text, len(data))
+
+
+class OriginalDiscsReader:
+    """POPStarter's DISCS.TXT reader as shipped, from where its file has been
+    read (MAIN 0x8d64b0) to its return (0x8d6b5c), on tools/r5900_mini.py:
+    one call of 0x8d5cf8 per file, in order. strlen, memcpy, memset and
+    printf run natively. Needs the external POPSTARTER.ELF; not a console
+    test."""
+    START, END = 0x8D64B0, 0x8D6B5C
+    MAIN, GP = 0x870000, 0x9B68F0
+    FRAME, BUFFER, SLOTS = 0x01F00000, 0x01000000, 0x232950
+
+    def __init__(self, elf):
+        sys.path.insert(0, str(ROOT / "tools"))
+        from r5900_mini import M32, Machine
+        from trace_original_pops_io import decode_main
+
+        self.m = m = Machine()
+        m.record = False
+        m.write(self.MAIN, decode_main(elf))
+
+        def args(mm):
+            return [mm.lo(r) & M32 for r in (4, 5, 6)]
+
+        def strlen(mm):
+            at = mm.lo(4) & M32
+            n = 0
+            while mm.read(at + n, 1) != b'\0':
+                n += 1
+            mm.set_lo(2, n)
+
+        def memcpy(mm):
+            to, src, n = args(mm)
+            mm.write(to, mm.read(src, n))
+            mm.set_lo(2, to)
+
+        def memset(mm):
+            to, value, n = args(mm)
+            mm.write(to, bytes([value & 0xFF]) * n)
+            mm.set_lo(2, to)
+
+        def printf(mm):
+            mm.set_lo(2, 0)
+
+        m.natives.update({0x918E08: strlen, 0x918808: memcpy, 0x9188B8: memset, 0x915708: printf})
+
+    def run(self, files, before):
+        m = self.m
+        m.write(self.SLOTS, before)
+        for data in files:
+            if not data:
+                continue  # "FAILED, its size is zero": it returns before this code
+            size = len(data)
+            # malloc(size * 2), the file read into its start, never cleared.
+            m.write(self.BUFFER, data + b'\xa5' * size)
+            m.write(self.FRAME, bytes(0x110))
+            m.put32(self.FRAME + 0x98, 1)  # the line counter, 1 at entry
+            m.put32(self.FRAME + 0x9C, self.BUFFER)
+            m.put32(self.FRAME + 0xA0, size)
+            for reg, value in ((28, self.GP), (29, self.FRAME), (30, self.FRAME)):
+                m.set_lo(reg, value)
+            m.steps = 0
+            m.run(self.START, self.END, limit=400 * size + 20000)
+        return m.read(self.SLOTS, DISC_SLOTS_SIZE)
+
+
+class FeatureTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        global LIB
+        LIB = compile_shared_library()
+        LIB.pops_config_init.argtypes = [c.POINTER(PopsConfig)]
+        LIB.pops_config_parse_line.argtypes = [c.POINTER(PopsConfig), c.c_char_p]
+        LIB.pops_config_parse_line.restype = c.c_int
+        LIB.pops_config_load_table.argtypes = [c.POINTER(PopsConfig), c.POINTER(c.c_uint8 * 32)]
+        LIB.pops_config_load_table.restype = c.c_int
+        LIB.pops_config_export_table.argtypes = [c.POINTER(PopsConfig), c.POINTER(c.c_uint8 * 32)]
+        LIB.pops_config_export_table.restype = None
+        LIB.pops_compat_db_lookup.argtypes = [c.c_char_p]
+        LIB.pops_compat_db_lookup.restype = c.POINTER(PopsCompatEntry)
+        LIB.pops_compat_db_lookup_title.argtypes = [c.c_char_p]
+        LIB.pops_compat_db_lookup_title.restype = c.POINTER(PopsCompatEntry)
+        LIB.pops_compat_db_count.restype = c.c_size_t
+        LIB.pops_apply_compat_modes.argtypes = [c.c_void_p, c.c_size_t, c.c_uint8]
+        LIB.pops_apply_compat_modes.restype = c.c_int
+        LIB.pops_apply_all_config_patches.argtypes = [c.c_void_p, c.c_size_t, c.POINTER(PopsConfig)]
+        LIB.pops_apply_all_config_patches.restype = c.c_int
+        LIB.pops_apply_video_overrides.argtypes = [c.c_void_p, c.c_size_t, c.c_uint8, c.c_uint8, c.c_int16, c.c_int16]
+        LIB.pops_apply_video_overrides.restype = c.c_int
+        LIB.pops_apply_igr_exit.argtypes = [c.c_void_p, c.c_size_t]
+        LIB.pops_apply_igr_exit.restype = c.c_int
+        LIB.pops_apply_igr_direct_exit.argtypes = [c.c_void_p, c.c_size_t]
+        LIB.pops_apply_igr_direct_exit.restype = c.c_int
+        LIB.pops_apply_igr_pad_control.argtypes = [c.c_void_p, c.c_size_t]
+        LIB.pops_apply_igr_pad_control.restype = c.c_int
+        LIB.pops_apply_iopcd_stack_size.argtypes = [c.c_void_p, c.c_size_t, c.c_uint8]
+        LIB.pops_apply_iopcd_stack_size.restype = c.c_int
+        LIB.pops_apply_hdd_init_exit.argtypes = [c.c_void_p, c.c_size_t]
+        LIB.pops_apply_hdd_init_exit.restype = c.c_int
+        LIB.pops_apply_vmc1_disable.argtypes = [c.c_void_p, c.c_size_t]
+        LIB.pops_apply_vmc1_disable.restype = c.c_int
+        LIB.pops_apply_slbb_vcd_check_bypass.argtypes = [c.c_void_p, c.c_size_t]
+        LIB.pops_apply_slbb_vcd_check_bypass.restype = c.c_int
+        LIB.pops_apply_slbb_vcd_path_redirect.argtypes = [c.c_void_p, c.c_size_t]
+        LIB.pops_apply_slbb_vcd_path_redirect.restype = c.c_int
+        LIB.pops_apply_resource_relink.argtypes = [c.c_void_p, c.c_size_t, c.c_int]
+        LIB.pops_apply_resource_relink.restype = c.c_int
+        LIB.pops_apply_exception_hook.argtypes = [c.c_void_p, c.c_size_t]
+        LIB.pops_apply_exception_hook.restype = c.c_int
+        LIB.pops_apply_bios_osd_disable.argtypes = [c.c_void_p, c.c_size_t]
+        LIB.pops_apply_bios_osd_disable.restype = c.c_int
+        LIB.pops_apply_bios_osd_enable.argtypes = [c.c_void_p, c.c_size_t]
+        LIB.pops_apply_bios_osd_enable.restype = c.c_int
+        LIB.pops_apply_original_tokens.argtypes = [c.c_void_p, c.c_size_t, c.c_uint32]
+        LIB.pops_apply_original_tokens.restype = c.c_int
+        LIB.pops_apply_undo_tokens.argtypes = [c.c_void_p, c.c_size_t, c.c_uint32]
+        LIB.pops_apply_undo_tokens.restype = c.c_int
+        LIB.pops_apply_fakelc.argtypes = [c.c_void_p, c.c_size_t]
+        LIB.pops_apply_fakelc.restype = c.c_int
+        LIB.pops_apply_igr_original.argtypes = [c.c_void_p, c.c_size_t, c.c_uint8, c.c_uint8]
+        LIB.pops_apply_igr_original.restype = c.c_int
+        LIB.pops_region_from_licence.argtypes = [c.c_char_p]
+        LIB.pops_region_from_licence.restype = c.c_int
+        LIB.pops_apply_region.argtypes = [c.c_void_p, c.c_size_t, c.c_int, c.c_uint8, c.c_int]
+        LIB.pops_apply_region.restype = c.c_int
+        LIB.pops_apply_libcrypt_bypass.argtypes = [c.c_void_p, c.c_size_t]
+        LIB.pops_apply_libcrypt_bypass.restype = c.c_int
+        LIB.pops_apply_cheats.argtypes = [c.c_void_p, c.POINTER(CheatEntry), c.c_uint16]
+        LIB.pops_apply_cheats.restype = c.c_int
+        LIB.pops_check_igr_combo.argtypes = [c.c_uint16]
+        LIB.pops_check_igr_combo.restype = c.c_int
+        LIB.pops_check_igr_combo_type.argtypes = [c.c_uint16, c.c_uint8]
+        LIB.pops_check_igr_combo_type.restype = c.c_int
+        LIB.pops_generate_subq.argtypes = [c.c_uint32, c.c_uint16, c.POINTER(c.c_uint8 * 12)]
+        LIB.pops_generate_subq.restype = c.c_int
+        cls.Devctl = c.CFUNCTYPE(c.c_int, c.c_char_p, c.c_int, c.c_void_p, c.c_size_t, c.c_void_p, c.c_size_t)
+        LIB.pops_cdrom_read_subq.argtypes = [cls.Devctl, c.c_uint32, c.POINTER(c.c_uint8 * 12)]
+        LIB.pops_cdrom_read_subq.restype = c.c_int
+        LIB.pops_cheat_engine_tick.argtypes = [c.c_void_p, c.POINTER(CheatEntry), c.c_uint16]
+        LIB.pops_cheat_engine_tick.restype = c.c_int
+        LIB.pops_cheat_engine_tick_ex.argtypes = [c.c_void_p, c.POINTER(CheatEntry), c.c_uint16, c.c_uint32, c.c_uint8]
+        LIB.pops_cheat_engine_tick_ex.restype = c.c_int
+        cls.Devctl = c.CFUNCTYPE(c.c_int, c.c_char_p, c.c_int, c.c_void_p, c.c_size_t, c.c_void_p, c.c_size_t)
+        LIB.pops_vcd_normalize_serial.argtypes = [c.c_char_p, c.c_char_p, c.c_size_t]
+        LIB.pops_vcd_normalize_serial.restype = c.c_int
+        LIB.pops_vcd_inspect_path.argtypes = [c.c_char_p, c.POINTER(PopsVcdInfo)]
+        LIB.pops_vcd_inspect_path.restype = c.c_int
+        cls.Reader = c.CFUNCTYPE(c.c_int, c.c_void_p, c.c_void_p, c.c_size_t)
+        cls.Seeker = c.CFUNCTYPE(c.c_int64, c.c_void_p, c.c_int64, c.c_int)
+        LIB.pops_vcd_inspect_stream.argtypes = [c.c_void_p, cls.Reader, cls.Seeker, c.POINTER(PopsVcdInfo)]
+        LIB.pops_vcd_inspect_stream.restype = c.c_int
+
+    def test_config_patch_preflight_is_atomic(self):
+        # A compatibility-mode write is valid in this small buffer, but a
+        # separately requested visual patch needs the complete POPS core.
+        # Rejection must precede any mode mutation.
+        cfg = PopsConfig()
+        LIB.pops_config_init(c.byref(cfg))
+        cfg.compat_modes = 1
+        cfg.hdtv_fix = 1
+        small = bytearray(0x180000)
+        struct.pack_into("<I", small, 0x00210318 - 0x00200000, 0x8F828228)
+        struct.pack_into("<I", small, 0x0021032C - 0x00200000, 0x1443FFFA)
+        buf = (c.c_uint8 * len(small)).from_buffer(small)
+        before = bytes(small)
+        self.assertLess(LIB.pops_apply_all_config_patches(buf, len(small), c.byref(cfg)), 0)
+        self.assertEqual(small, before)
+
+        # $FORCEPAL writes a late word at 0x00502770. Previous code could
+        # update earlier mode bytes, ignore the late write error and return 0.
+        cfg = PopsConfig()
+        LIB.pops_config_init(c.byref(cfg))
+        cfg.video_mode = 2
+        almost = bytearray(0x302000)
+        ptr = (c.c_uint8 * len(almost)).from_buffer(almost)
+        before = bytes(almost)
+        self.assertLess(LIB.pops_apply_video_overrides(ptr, len(almost),
+                        2, 0, 0, 0), 0)
+        self.assertEqual(almost, before)
+        self.assertLess(LIB.pops_apply_all_config_patches(ptr, len(almost),
+                        c.byref(cfg)), 0)
+        self.assertEqual(almost, before)
+
+        # Reject out-of-range video modes without touching the core.
+        cfg.video_mode = 255
+        self.assertEqual(LIB.pops_apply_all_config_patches(
+            ptr, len(almost), c.byref(cfg)), -errno.ENOTSUP)
+        self.assertEqual(almost, before)
+
+        # Mode 6 is accepted, writing 0x0648 at 0x002525b0
+        cfg = PopsConfig()
+        LIB.pops_config_init(c.byref(cfg))
+        cfg.compat_modes = 1 << 5
+        core_m6 = bytearray(almost)
+        struct.pack_into("<H", core_m6, 0x002525b0 - 0x00200000, 0x1bfc)
+        buf_m6 = (c.c_uint8 * len(core_m6)).from_buffer(core_m6)
+        self.assertEqual(LIB.pops_apply_all_config_patches(buf_m6, len(core_m6), c.byref(cfg)), 0)
+        self.assertEqual(struct.unpack_from("<H", core_m6, 0x002525b0 - 0x00200000)[0], 0x0648)
+
+        # Mode 8 remains unsupported and fails closed
+        cfg.compat_modes = 1 << 7
+        before_m8 = bytes(core_m6)
+        self.assertEqual(LIB.pops_apply_all_config_patches(buf_m6, len(core_m6), c.byref(cfg)), -errno.ENOTSUP)
+        self.assertEqual(core_m6, before_m8)
+
+    def test_vcd_serial_normalization(self):
+        norm = c.create_string_buffer(32)
+        # Standard PS1 format
+        self.assertEqual(LIB.pops_vcd_normalize_serial(b"cdrom0:\\SLUS_008.70;1", norm, 32), 0)
+        self.assertEqual(norm.value.decode("ascii"), "SLUS-00870")
+
+        self.assertEqual(LIB.pops_vcd_normalize_serial(b"SCES_014.22;1", norm, 32), 0)
+        self.assertEqual(norm.value.decode("ascii"), "SCES-01422")
+
+        # Already normalized format
+        self.assertEqual(LIB.pops_vcd_normalize_serial(b"SLES-02529", norm, 32), 0)
+        self.assertEqual(norm.value.decode("ascii"), "SLES-02529")
+
+        # Lowercase / spaces
+        self.assertEqual(LIB.pops_vcd_normalize_serial(b"  slps_013.00;1 \n", norm, 32), 0)
+        self.assertEqual(norm.value.decode("ascii"), "SLPS-01300")
+
+    def test_vcd_image_inspection(self):
+        # Create a synthetic Mode 2 Form 1 raw 2352-byte sector VCD image in a temp file
+        temp_vcd = Path(tempfile.gettempdir()) / "test_game.vcd"
+        sector_size = 2352
+        data_offset = 24
+        total_sectors = 20
+
+        sync_hdr = b"\x00\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\x00"
+        mode2_hdr = b"\x00\x02\x00\x02"  # Mode 2
+        sub_hdr = b"\x00\x00\x08\x00\x00\x00\x08\x00"
+
+        with open(temp_vcd, "wb") as f:
+            for s in range(total_sectors):
+                sector = bytearray(sector_size)
+                # Sync & headers
+                sector[0:12] = sync_hdr
+                sector[12:16] = mode2_hdr
+                sector[16:24] = sub_hdr
+
+                if s == 16:  # PVD
+                    pvd = bytearray(2048)
+                    pvd[0] = 0x01
+                    pvd[1:6] = b"CD001"
+                    pvd[6] = 0x01
+                    # Root directory record at offset 156
+                    root_rec = bytearray(34)
+                    root_rec[0] = 34  # length
+                    root_rec[25] = 0x02  # directory flag
+                    struct.pack_into("<I", root_rec, 2, 17)   # Root LBA = 17
+                    struct.pack_into(">I", root_rec, 6, 17)
+                    struct.pack_into("<I", root_rec, 10, 2048) # Root size = 2048
+                    struct.pack_into(">I", root_rec, 14, 2048)
+                    pvd[156:156+34] = root_rec
+                    sector[data_offset:data_offset+2048] = pvd
+
+                elif s == 17:  # Root Directory
+                    dir_sec = bytearray(2048)
+                    # Directory entry for SYSTEM.CNF;1
+                    name = b"SYSTEM.CNF;1"
+                    rec_len = 33 + len(name)
+                    rec = bytearray(rec_len)
+                    rec[0] = rec_len
+                    struct.pack_into("<I", rec, 2, 18)   # LBA = 18
+                    struct.pack_into(">I", rec, 6, 18)
+                    struct.pack_into("<I", rec, 10, 64)  # File size = 64
+                    struct.pack_into(">I", rec, 14, 64)
+                    rec[25] = 0  # file flags
+                    rec[32] = len(name)
+                    rec[33:33+len(name)] = name
+                    dir_sec[0:rec_len] = rec
+                    sector[data_offset:data_offset+2048] = dir_sec
+
+                elif s == 18:  # SYSTEM.CNF content
+                    cnf = bytearray(2048)
+                    text = b"BOOT = cdrom0:\\SLUS_008.70;1\r\nTCB = 4\r\nEVENT = 16\r\nSTACK = 801FFFF0\r\n"
+                    cnf[0:len(text)] = text
+                    sector[data_offset:data_offset+2048] = cnf
+
+                f.write(sector)
+
+        info = PopsVcdInfo()
+        res = LIB.pops_vcd_inspect_path(str(temp_vcd).encode("utf-8"), c.byref(info))
+        self.assertEqual(res, 0)
+        self.assertEqual(info.sector_size, 2352)
+        self.assertEqual(info.data_offset, 24)
+        self.assertEqual(info.image_offset, 0)
+        self.assertEqual(info.root_lba, 17)
+        self.assertEqual(info.raw_serial.decode("ascii"), "cdrom0:\\SLUS_008.70;1")
+        self.assertEqual(info.normalized_serial.decode("ascii"), "SLUS-00870")
+
+        # Real POPStarter/CUE2POPS VCDs prepend a 0x100000-byte TOC header.
+        # Both observed header families must leave sector/PVD/CNF addressing
+        # relative to the disc payload, not the beginning of the VCD file.
+        bare_disc = temp_vcd.read_bytes()
+        for marker in (b"kHn ", b"SPOP", b"POPS"):
+            toc = bytearray(0x100000)
+            toc[0x400:0x404] = marker
+            struct.pack_into("<II", toc, 0x408, total_sectors, total_sectors)
+            temp_vcd.write_bytes(toc + bare_disc)
+            info = PopsVcdInfo()
+            self.assertEqual(LIB.pops_vcd_inspect_path(
+                str(temp_vcd).encode("utf-8"), c.byref(info)), 0)
+            self.assertEqual(info.image_offset, 0x100000)
+            self.assertEqual(info.sector_size, 2352)
+            self.assertEqual(info.data_offset, 24)
+            self.assertEqual(info.raw_serial.decode("ascii"), "cdrom0:\\SLUS_008.70;1")
+            self.assertEqual(info.normalized_serial.decode("ascii"), "SLUS-00870")
+
+        toc[0x400:0x404] = b"NONE"
+        temp_vcd.write_bytes(toc + bare_disc)
+        info = PopsVcdInfo()
+        self.assertEqual(LIB.pops_vcd_inspect_path(
+            str(temp_vcd).encode("utf-8"), c.byref(info)), 0)
+        self.assertEqual(info.image_offset, 0x100000)
+        self.assertEqual(info.normalized_serial.decode("ascii"), "SLUS-00870")
+
+        # Neither Sony marker byte order may accept a truncated VCD or
+        # misidentify its header as a standalone ISO payload.
+        for marker in (b"SPOP", b"POPS"):
+            toc[0x400:0x404] = marker
+            temp_vcd.write_bytes(toc + bare_disc[:-sector_size])
+            info = PopsVcdInfo()
+            self.assertNotEqual(LIB.pops_vcd_inspect_path(
+                str(temp_vcd).encode('utf-8'), c.byref(info)), 0)
+            temp_vcd.write_bytes(toc)
+            info = PopsVcdInfo()
+            self.assertNotEqual(LIB.pops_vcd_inspect_path(
+                str(temp_vcd).encode("utf-8"), c.byref(info)), 0)
+
+        cursor = [0]
+        @self.Reader
+        def read_in_chunks(user, dst, amount):
+            n = min(int(amount), 13, len(bare_disc) - cursor[0])
+            if n > 0:
+                c.memmove(dst, bare_disc[cursor[0]:cursor[0]+n], n)
+                cursor[0] += n
+            return n
+        @self.Seeker
+        def seek_in_memory(user, offset, whence):
+            dest = offset if whence == 0 else cursor[0] + offset
+            if dest < 0:
+                return -1
+            cursor[0] = dest
+            return dest
+        info = PopsVcdInfo()
+        self.assertEqual(LIB.pops_vcd_inspect_stream(
+            c.c_void_p(1), read_in_chunks, seek_in_memory, c.byref(info)), 0)
+        self.assertEqual(info.normalized_serial.decode('ascii'), 'SLUS-00870')
+
+        # A backend may report a nonnegative but *incorrect* seek position
+        # (for example a truncated 32-bit offset). Never accept metadata
+        # read from a different position, even if its bytes look valid.
+        # The reader deliberately returns the real PVD bytes to show that
+        # the reported seek result, not the content, must be authoritative.
+        for memory_data in (bare_disc, bytes(toc) + bare_disc):
+            cursor = [0]
+
+            @self.Reader
+            def read_lied_seek(user, dst, amount):
+                n = min(int(amount), 13, len(memory_data) - cursor[0])
+                if n > 0:
+                    c.memmove(dst, memory_data[cursor[0]:cursor[0] + n], n)
+                    cursor[0] += n
+                return n
+
+            @self.Seeker
+            def seek_lied_position(user, offset, whence):
+                dest = offset if whence == 0 else cursor[0] + offset
+                if dest < 0:
+                    return -1
+                cursor[0] = dest
+                return dest - 1 if dest > 0 else 0
+
+            info = PopsVcdInfo()
+            self.assertEqual(LIB.pops_vcd_inspect_stream(
+                c.c_void_p(1), read_lied_seek, seek_lied_position, c.byref(info)), -5)
+
+        # Even an *optional* signature probe cannot treat an incorrect
+        # nonnegative SEEK_SET result as "marker absent" and then classify
+        # different bytes as a bare disc image.
+        memory_data = bare_disc
+        cursor = [0]
+
+        @self.Reader
+        def read_marker_lie(user, dst, amount):
+            n = min(int(amount), 13, len(memory_data) - cursor[0])
+            if n > 0:
+                c.memmove(dst, memory_data[cursor[0]:cursor[0] + n], n)
+                cursor[0] += n
+            return n
+
+        @self.Seeker
+        def seek_marker_lie(user, offset, whence):
+            dest = offset if whence == 0 else cursor[0] + offset
+            if dest < 0:
+                return -1
+            cursor[0] = dest
+            return 0x3ff if whence == 0 and dest == 0x400 else dest
+
+        info = PopsVcdInfo()
+        self.assertEqual(LIB.pops_vcd_inspect_stream(
+            c.c_void_p(1), read_marker_lie, seek_marker_lie, c.byref(info)), -5)
+
+        # The recognized container declares 20 sectors, but only 19 exist.
+        # A backend that falsely reports success at 0x408 must not cause the
+        # inspector to *skip* the sector-count integrity check.
+        short_vcd = bytes(toc) + bare_disc[:-sector_size]
+        cursor = [0]
+
+        @self.Reader
+        def read_bad_toc(user, dst, amount):
+            n = min(int(amount), 13, len(short_vcd) - cursor[0])
+            if n > 0:
+                c.memmove(dst, short_vcd[cursor[0]:cursor[0] + n], n)
+                cursor[0] += n
+            return n
+
+        @self.Seeker
+        def seek_bad_toc(user, offset, whence):
+            if whence == 2:
+                dest = len(short_vcd) + offset
+            elif whence == 0:
+                dest = offset
+            else:
+                dest = cursor[0] + offset
+            if dest < 0:
+                return -1
+            cursor[0] = dest
+            return dest - 1 if whence == 0 and dest == 0x408 else dest
+
+        info = PopsVcdInfo()
+        self.assertEqual(LIB.pops_vcd_inspect_stream(
+            c.c_void_p(1), read_bad_toc, seek_bad_toc, c.byref(info)), -5)
+
+        # A BOOT2 line and commented BOOT assignments are not PS1 boot keys.
+        # The BOOT parser must honor line boundaries and exact directive names.
+        modified = bytearray(bare_disc)
+        cnf_offset = 18 * sector_size + data_offset
+        boot_lines = (b"# BOOT = cdrom0:\\\\FAKE_999.99;1\r\n"
+                      b"BOOT2 = cdrom0:\\\\WRONG_999.99;1\r\n"
+                      b"  boot = cdrom0:\\\\SLUS_008.70;1\r\n")
+        modified[cnf_offset:cnf_offset+2048] = boot_lines.ljust(2048, b'\0')
+        # Directory record defines a 64-byte SYSTEM.CNF, so extend its extent
+        # before testing all three lines.
+        struct.pack_into("<I", modified, 17 * sector_size + data_offset + 10, len(boot_lines))
+        temp_vcd.write_bytes(modified)
+        info = PopsVcdInfo()
+        self.assertEqual(LIB.pops_vcd_inspect_path(
+            str(temp_vcd).encode("utf-8"), c.byref(info)), 0)
+        self.assertEqual(info.normalized_serial.decode("ascii"), "SLUS-00870")
+
+        # Reject short/malformed ISO directory records before reading fields
+        # outside their declared bounds, even when the rest of the sector is OK.
+        malformed = bytearray(bare_disc)
+        malformed[17 * sector_size + data_offset] = 20
+        temp_vcd.write_bytes(malformed)
+        self.assertEqual(LIB.pops_vcd_inspect_path(
+            str(temp_vcd).encode("utf-8"), c.byref(info)), -22)
+        malformed[17 * sector_size + data_offset] = 33
+        malformed[17 * sector_size + data_offset + 32] = 200
+        temp_vcd.write_bytes(malformed)
+        self.assertEqual(LIB.pops_vcd_inspect_path(
+            str(temp_vcd).encode("utf-8"), c.byref(info)), -22)
+        temp_vcd.unlink()
+
+    def test_cheat_disable_errors_and_redirected_configuration(self):
+        cfg = PopsConfig()
+        LIB.pops_config_init(c.byref(cfg))
+        for line in (b"80001234 5678", b"50000202 0001", b"C0000000 0000"):
+            self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), line), 0)
+        self.assertEqual(cfg.cheat_count, 0)
+        # POPStarter's repeat and master codes are read; a line it would not
+        # take is skipped, never an error (as in POPStarter).
+        for line, kind in ((b"$50000202 0001", 0x50), (b"$C0000000 0000", 0xC0)):
+            self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), line), 0)
+            self.assertEqual(cfg.cheats[cfg.cheat_count - 1].type, kind)
+        for line in (b"$85001234 5678", b"$80201234 5678", b"$80001234  5678"):
+            self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), line), 0)
+        self.assertEqual(cfg.cheat_count, 2)
+        LIB.pops_config_init(c.byref(cfg))
+        for _ in range(256):
+            self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$80001234 5678"), 0)
+        self.assertLess(LIB.pops_config_parse_line(c.byref(cfg), b"$80001234 5678"), 0)
+
+        LIB.pops_config_discover.argtypes = [c.POINTER(PopsConfig), c.c_char_p, c.c_char_p]
+        LIB.pops_config_load_file.argtypes = [c.POINTER(PopsConfig), c.c_char_p]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            title = root / 'Game'
+            saves = root / 'Shared'
+            title.mkdir()
+            saves.mkdir()
+            (root / 'VMCDIR.TXT').write_text('Shared')
+            (title / 'CHEATS.TXT').write_text('$80001234 5678\n')
+            (saves / 'CHEATS.TXT').write_text('$50000202 0001\n')
+            LIB.pops_config_init(c.byref(cfg))
+            self.assertEqual(LIB.pops_config_discover(c.byref(cfg),
+                             (str(root) + '/').encode(), b'Game'), 0)
+            self.assertEqual(cfg.cheat_count, 1)
+            self.assertEqual(cfg.vmc_dir, b'Shared')
+            (title / 'VMCDIR.TXT').write_text('Other')
+            self.assertEqual(LIB.pops_config_discover(c.byref(cfg),
+                             (str(root) + '/').encode(), b'Game'), 0)
+            self.assertEqual(cfg.vmc_dir, b'Other')
+            (title / 'CHEATS.TXT').write_text('$80001234 5678\n' * 257)
+            LIB.pops_config_init(c.byref(cfg))
+            self.assertLess(LIB.pops_config_discover(c.byref(cfg),
+                            (str(root) + '/').encode(), b'Game'), 0)
+            # The original reads the file as one run of bytes: no line is
+            # too long, and a command after 300 spaces is still a command.
+            oversized = root / 'long.txt'
+            oversized.write_text('$80001234 5678' + ' ' * 300 + '$SMOOTH')
+            LIB.pops_config_init(c.byref(cfg))
+            self.assertEqual(LIB.pops_config_load_file(c.byref(cfg), str(oversized).encode()), 0)
+            self.assertEqual((cfg.cheat_count, cfg.smooth), (1, 1))
+
+    def test_unavailable_optional_global_cards_preserve_title_configuration(self):
+        LIB.pops_test_set_card_error.argtypes = [c.c_int]
+        LIB.pops_test_set_card_read_error.argtypes = [c.c_int]
+        LIB.pops_config_discover.argtypes = [c.POINTER(PopsConfig), c.c_char_p, c.c_char_p]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / 'Game').mkdir()
+            (root / 'Game' / 'MODES.TXT').write_text('MODE 2\n')
+            try:
+                for missing in (errno.ENOENT, errno.ENODEV, errno.ENXIO):
+                    LIB.pops_test_set_card_error(missing)
+                    cfg = PopsConfig()
+                    LIB.pops_config_init(c.byref(cfg))
+                    self.assertEqual(LIB.pops_config_discover(c.byref(cfg),
+                                     (str(root) + '/').encode(), b'Game'), 0)
+                    self.assertEqual(cfg.compat_modes, 2)
+                for failure in (errno.EIO, errno.EACCES):
+                    LIB.pops_test_set_card_error(failure)
+                    cfg = PopsConfig()
+                    LIB.pops_config_init(c.byref(cfg))
+                    self.assertEqual(LIB.pops_config_discover(c.byref(cfg),
+                                     (str(root) + '/').encode(), b'Game'), -failure)
+                LIB.pops_test_set_card_error(errno.ENOENT)
+                cfg = PopsConfig()
+                LIB.pops_config_init(c.byref(cfg))
+                self.assertEqual(LIB.pops_config_discover(c.byref(cfg),
+                                 b'unavailable:/', b'Game'), -errno.ENODEV)
+                for read_failure in (errno.ENODEV, errno.ENXIO, errno.EIO):
+                    LIB.pops_test_set_card_read_error(read_failure)
+                    cfg = PopsConfig()
+                    LIB.pops_config_init(c.byref(cfg))
+                    self.assertEqual(LIB.pops_config_discover(c.byref(cfg),
+                                     (str(root) + '/').encode(), b'Game'), -read_failure)
+            finally:
+                LIB.pops_test_set_card_error(errno.ENOENT)
+                LIB.pops_test_set_card_read_error(0)
+
+    def test_auxiliary_config_bounds(self):
+        cfg = PopsConfig()
+        LIB.pops_config_init(c.byref(cfg))
+        for name in ('pops_config_load_discs', 'pops_config_load_vmcdir'):
+            getattr(LIB, name).argtypes = [c.POINTER(PopsConfig), c.c_char_p]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'config.txt'
+            encoded = str(path).encode()
+            # POPStarter keeps every byte of a line: no trimming, no comments.
+            path.write_bytes(b'\n  \n# comment\nDisc1.VCD\nDisc2.VCD\n')
+            self.assertEqual(LIB.pops_config_load_discs(c.byref(cfg), encoded), 0)
+            self.assertEqual(cfg.disc_count, 4)
+            self.assertEqual([disc_name(cfg, n) for n in range(4)],
+                             [b'  ', b'# comment', b'Disc1.VCD', b'Disc2.VCD'])
+            # Too long a line clears all four, a fifth line is never read, and
+            # neither is an error.
+            for content, count in ((b'X' * 128, 0), (b'Disc.VCD\n' * 5, 4), (b'X' * 300, 0)):
+                path.write_bytes(content)
+                self.assertEqual(LIB.pops_config_load_discs(c.byref(cfg), encoded), 0)
+                self.assertEqual(cfg.disc_count, count, content[:12])
+            path.unlink()
+            self.assertEqual(LIB.pops_config_load_discs(c.byref(cfg), encoded), -errno.ENOENT)
+            # VMCDIR.TXT as POPStarter reads it (tools/test_pops_config_text.py):
+            # a file it does not take is ignored, never an error, and a line
+            # end after the name is one of the things it does not take.
+            cfg.vmc_dir = b'Keep'
+            for value in (b'X' * 128, b'X' * 104, b'Shared\nOther', b'Saves:Other',
+                          b'Shared_Saves\n', b'Shared_Saves\r\n', b'\n'):
+                path.write_bytes(value)
+                self.assertEqual(LIB.pops_config_load_vmcdir(c.byref(cfg), encoded), 0, value[:16])
+                self.assertEqual((cfg.vmc_dir, cfg.vmc_dir_set), (b'Keep', 0), value[:16])
+            path.write_bytes(b'Shared_Saves')
+            self.assertEqual(LIB.pops_config_load_vmcdir(c.byref(cfg), encoded), 0)
+            self.assertEqual((cfg.vmc_dir, cfg.vmc_dir_set), (b'Shared_Saves', 1))
+            # An empty file is taken: the saves go to the POPS folder itself.
+            path.write_bytes(b'')
+            self.assertEqual(LIB.pops_config_load_vmcdir(c.byref(cfg), encoded), 0)
+            self.assertEqual((cfg.vmc_dir, cfg.vmc_dir_set), (b'', 1))
+            path.unlink()
+            self.assertEqual(LIB.pops_config_load_vmcdir(c.byref(cfg), encoded), -errno.ENOENT)
+
+    def test_discs_txt_follows_the_original(self):
+        """POPStarter's DISCS.TXT reader (MAIN 0x8d64b0..0x8d6b5c), rule by rule."""
+        def parsed(data, before=None):
+            cfg = PopsConfig()
+            LIB.pops_config_init(c.byref(cfg))
+            if before is not None:
+                c.memmove(c.addressof(cfg) + PopsConfig.disc_slot.offset, before, DISC_SLOTS_SIZE)
+            parse_discs(cfg, data)
+            return cfg
+
+        cfg = parsed(b'Game (Disc 1).VCD\r\nGame (Disc 2).VCD\r\n')
+        self.assertEqual(cfg.disc_count, 2)
+        self.assertEqual(slots(cfg)[:0x60], b'pfs0:/Game (Disc 1).VCD' + bytes(0x60 - 23))
+        self.assertEqual(disc_name(cfg, 1), b'Game (Disc 2).VCD')
+        self.assertEqual(slots(cfg)[0xC0:], bytes(0xC0))
+        # CR, LF and NUL end a line; nothing else does, and empty lines take
+        # no slot. Bytes above 0x7f are kept.
+        cfg = parsed(b'\r\r\nA\0B\n\n\xe9t\xe9.VCD\t ')
+        self.assertEqual([disc_name(cfg, n) for n in range(4)], [b'A', b'B', b'\xe9t\xe9.VCD\t ', b''])
+        self.assertEqual(cfg.disc_count, 3)
+        # 89 characters fill a slot exactly; 90 clear all four and end the file.
+        line = b'D' * 89
+        self.assertEqual(slots(parsed(line))[:0x60], b'pfs0:/' + line + b'\0')
+        before = bytes(range(256)) + bytes(range(128))
+        for data in (b'D' * 90, b'A\nB\n' + b'D' * 90 + b'\nC', b'D' * 4000):
+            cfg = parsed(data, before)
+            self.assertEqual(slots(cfg), bytes(DISC_SLOTS_SIZE), data[:8])
+            self.assertEqual(cfg.disc_count, 0)
+        # Four lines at most: a fifth, however long, is never read.
+        cfg = parsed(b'1\n2\n3\n4\n' + b'D' * 90)
+        self.assertEqual([disc_name(cfg, n) for n in range(4)], [b'1', b'2', b'3', b'4'])
+        # A backslash, / or : anywhere and the file changes nothing.
+        for bad in (b'\\', b'/', b':'):
+            for data in (bad + b'A.VCD', b'A.VCD\nB.VCD\n' + bad, b'A.VCD\n' + b'D' * 95 + bad):
+                self.assertEqual(slots(parsed(data, before)), before, data)
+        # So does an empty file.
+        self.assertEqual(slots(parsed(b'', before)), before)
+        # Each line writes "pfs0:/", itself and one NUL: the rest of the
+        # slot keeps what an earlier file left there.
+        cfg = parsed(b'LongerName1.VCD\nB.VCD\nC.VCD\n')
+        parse_discs(cfg, b'A.VCD')
+        first = bytearray(b'pfs0:/LongerName1.VCD'.ljust(0x60, b'\0'))
+        first[:12] = b'pfs0:/A.VCD\0'
+        self.assertEqual(slots(cfg)[:0x60], bytes(first))
+        self.assertEqual([disc_name(cfg, n) for n in range(4)], [b'A.VCD', b'B.VCD', b'C.VCD', b''])
+        self.assertEqual(cfg.disc_count, 3)
+
+    def test_discs_txt_per_game_over_global(self):
+        """The original reads POPS/DISCS.TXT, then the game's own over it
+        (0x877414, then 0x8774b4)."""
+        LIB.pops_config_discover.argtypes = [c.POINTER(PopsConfig), c.c_char_p, c.c_char_p]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / 'Game').mkdir()
+            (root / 'DISCS.TXT').write_bytes(b'LongerName1.VCD\nB.VCD\nC.VCD\n')
+
+            def discovered():
+                cfg = PopsConfig()
+                LIB.pops_config_init(c.byref(cfg))
+                self.assertEqual(LIB.pops_config_discover(c.byref(cfg),
+                                 (str(root) + '/').encode(), b'Game'), 0)
+                return cfg
+
+            cfg = discovered()
+            self.assertEqual([disc_name(cfg, n) for n in range(4)],
+                             [b'LongerName1.VCD', b'B.VCD', b'C.VCD', b''])
+            (root / 'Game' / 'DISCS.TXT').write_bytes(b'A.VCD\n')
+            cfg = discovered()
+            self.assertEqual([disc_name(cfg, n) for n in range(4)], [b'A.VCD', b'B.VCD', b'C.VCD', b''])
+            self.assertEqual(slots(cfg)[12:22], b'Name1.VCD\0')
+            (root / 'Game' / 'DISCS.TXT').write_bytes(b'Disc/2.VCD\n')
+            self.assertEqual(disc_name(discovered(), 0), b'LongerName1.VCD')
+            (root / 'Game' / 'DISCS.TXT').write_bytes(b'D' * 90)
+            self.assertEqual(slots(discovered()), bytes(DISC_SLOTS_SIZE))
+            (root / 'DISCS.TXT').unlink()
+            (root / 'Game' / 'DISCS.TXT').write_bytes(b'\nOnly.VCD')
+            cfg = discovered()
+            self.assertEqual((cfg.disc_count, disc_name(cfg, 0)), (1, b'Only.VCD'))
+
+    @unittest.skipUnless(os.environ.get("POPSTARTER_TEST_ELF"), "optional external POPStarter MAIN")
+    def test_discs_txt_matches_the_original(self):
+        """POPStarter's own reader, run on tools/r5900_mini.py, against
+        pops_config_parse_discs: random files, alone and global + per-game."""
+        import random
+        original = OriginalDiscsReader(Path(os.environ["POPSTARTER_TEST_ELF"]).read_bytes())
+        rng = random.Random(0x44495343)
+        pieces = [b'Disc', b' (Disc 2)', b'.VCD', b'.vcd', b' ', b'\t', b'#', b';', b'-', b'_',
+                  b'\xe9', b'\xff', b'\0', b'\r', b'\n', b'\r\n', b'\n\n', b'(', b')', b'[', b']']
+        rare = [b'/', b'\\', b':']
+
+        def line():
+            kind = rng.random()
+            if kind < 0.1:
+                return b'L' * rng.randint(84, 95)
+            text = b''.join(rng.choice(pieces) for _ in range(rng.randint(0, 6)))
+            if rng.random() < 0.04:
+                text += rng.choice(rare)
+            return text
+
+        def file():
+            ending = rng.choice([b'\n', b'\r\n', b'\r', b'\0'])
+            return ending.join(line() for _ in range(rng.randint(0, 7))) + (
+                ending if rng.random() < 0.7 else b'')
+
+        cases = [[b'A.VCD\nB.VCD'], [b'D' * 89], [b'D' * 90], [b'1\n2\n3\n4\n' + b'D' * 90],
+                 [b'LongerName1.VCD\nB.VCD\nC.VCD\n', b'A.VCD'], [b'A:B'], [b'\n\n\r\r'],
+                 [b'1\n2\n3\n4\n', b'D' * 90]]
+        cases += [[file()] for _ in range(150)]
+        cases += [[file(), file()] for _ in range(100)]
+        for files in cases:
+            before = bytes(rng.getrandbits(8) for _ in range(DISC_SLOTS_SIZE)) if rng.random() < 0.3 \
+                else bytes(DISC_SLOTS_SIZE)
+            cfg = PopsConfig()
+            LIB.pops_config_init(c.byref(cfg))
+            c.memmove(c.addressof(cfg) + PopsConfig.disc_slot.offset, before, DISC_SLOTS_SIZE)
+            for data in files:
+                parse_discs(cfg, data)
+            self.assertEqual(slots(cfg), original.run(files, before), files)
+        print("Original DISCS.TXT reader PASS: %d" % len(cases))
+
+    def test_config_parser_directives(self):
+        cfg = PopsConfig()
+        LIB.pops_config_init(c.byref(cfg))
+
+        # Directives
+        self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$480p"), 0)
+        self.assertEqual(cfg.video_mode, 4)
+
+        self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$HDTVFIX"), 0)
+        self.assertEqual(cfg.hdtv_fix, 1)
+
+        self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$SMOOTH"), 0)
+        self.assertEqual(cfg.smooth, 1)
+
+        self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$FASTMIPS"), 0)
+        self.assertEqual(cfg.fast_mips, 1)
+
+        self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$NOIGR"), 0)
+        self.assertEqual(cfg.no_igr, 1)
+
+        self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$NOBOOT"), 0)
+        self.assertEqual(cfg.no_boot, 1)
+
+        # POPStarter has no signed position: a number that is not 1..5
+        # digits writes what its shared temporary holds (0 here) and takes
+        # the one X write (tools/test_pops_config_text.py measures it).
+        self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$XPOS_-15"), 0)
+        self.assertEqual((cfg.x_offset, cfg.display_x, cfg.display_mask & 1), (0, 0, 1))
+
+        self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$YPOS_20"), 0)
+        self.assertEqual((cfg.y_offset, cfg.display_y, cfg.display_mask & 2), (20, 20, 2))
+
+        # Modes
+        self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$COMPATIBILITY_0x02"), 0)
+        self.assertTrue(cfg.compat_modes & (1 << 1))
+
+        self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"MODE 4"), 0)
+        self.assertTrue(cfg.compat_modes & (1 << 3))
+
+        # Only dollar-prefixed codes are enabled; bare codes remain disabled.
+        self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"8009A120 0004"), 0)
+        self.assertEqual(cfg.cheat_count, 0)
+        self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$8009A120 0004"), 0)
+        self.assertEqual(cfg.cheat_count, 1)
+        self.assertEqual(cfg.cheats[0].address, 0x09A120)
+        self.assertEqual(cfg.cheats[0].value, 0x0004)
+        self.assertEqual(cfg.cheats[0].type, 0x80)
+
+        self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$8009A122 0005"), 0)
+        self.assertEqual(cfg.cheat_count, 2)
+        self.assertEqual(cfg.cheats[1].address, 0x09A122)
+        self.assertEqual(cfg.cheats[1].value, 0x0005)
+        self.assertEqual(cfg.cheats[1].type, 0x80)
+
+        self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$3009A124 0012"), 0)
+        self.assertEqual(cfg.cheat_count, 3)
+        self.assertEqual(cfg.cheats[2].type, 0x30)
+        self.assertEqual(cfg.cheats[2].value, 0x12)
+
+        # GameShark types POPStarter does not take are skipped, as there.
+        for line in (b"$1009A126 0034", b"$2009A128 0056", b"$D109A128 0056", b"$E009A128 0056"):
+            self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), line), 0)
+        self.assertEqual(cfg.cheat_count, 3)
+
+        # Multi-directive line
+        self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$SAFEMODE $WIDESCREEN $DITHER_OFF"), 0)
+        self.assertEqual(cfg.safe_mode, 1)
+        self.assertEqual(cfg.widescreen, 1)
+        self.assertEqual(cfg.dither_off, 1)
+
+        # Video directives. $240p/$VMODE are not POPStarter commands and
+        # leave the mode alone; launcHER's own PAL2NTSC/FORCENTSC set
+        # POPS_VMODE_NOPAL (last one wins; owner question in
+        # docs/POPSTARTER_CONFIG_TEXT.md).
+        self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$240p"), 0)
+        self.assertEqual(cfg.video_mode, 4)
+
+        # The $480p above gates $FORCEPAL, as in the original (0x8987f0
+        # tests gp+0x3864): taken, but nothing changes.
+        self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$FORCEPAL"), 0)
+        self.assertEqual((cfg.video_mode, cfg.forced_pal), (4, 0))
+
+        # Without an earlier $480p, $FORCEPAL forces PAL.
+        fresh = PopsConfig()
+        LIB.pops_config_init(c.byref(fresh))
+        self.assertEqual(LIB.pops_config_parse_line(c.byref(fresh), b"$FORCEPAL"), 0)
+        self.assertEqual((fresh.video_mode, fresh.forced_pal), (2, 1))
+
+        self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$FORCENTSC"), 0)
+        self.assertEqual(cfg.video_mode, 3)
+
+        self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$VMODE_4"), 0)
+        self.assertEqual(cfg.video_mode, 3)
+
+        self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$NOPAL"), 0)
+        self.assertEqual(cfg.video_mode, 3)
+
+        # Fixed-value original commands
+        self.assertEqual(LIB.pops_config_parse_line(
+            c.byref(cfg), b"$SCANLINES $MUTE_CDDA $CODECACHE_ADDON_2 $ROLLBACK $CACHE1"), 0)
+        self.assertEqual(cfg.original_tokens, (1 << 0) | (1 << 2) | (1 << 8) | (1 << 9) | (1 << 10))
+        self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$NOHDTVFIX"), 0)
+        self.assertEqual(cfg.hdtv_fix, 0)
+        self.assertTrue(cfg.original_tokens & (1 << 11))
+        self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$HDTVFIX"), 0)
+        self.assertEqual(cfg.hdtv_fix, 1)
+        self.assertFalse(cfg.original_tokens & (1 << 11))
+
+        # Delays and IGR mode
+        self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$USBDELAY_5"), 0)
+        self.assertEqual(cfg.usb_delay, 5)
+
+        self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$IGR2"), 0)
+        self.assertEqual((cfg.igr_type, cfg.no_igr), (3, 0))
+        self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$IGR0"), 0)
+        self.assertEqual((cfg.igr_type, cfg.no_igr), (1, 0))
+        self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$IGR5"), 0)
+        self.assertEqual(cfg.igr_type, 6)
+        self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$IGR6"), 0)
+        self.assertEqual(cfg.igr_type, 6)
+        self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$NOIGR"), 0)
+        self.assertEqual((cfg.igr_type, cfg.no_igr), (0, 1))
+        # Runtime core corrections directives
+        self.assertEqual(cfg.runtime_corrections, 0)
+        self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$FIX_TEXTURE_WINDOW"), 0)
+        self.assertEqual(cfg.runtime_corrections, 1)
+
+        self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$FIX_GPU_DMA"), 0)
+        self.assertEqual(cfg.runtime_corrections, 3)
+
+        self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$FIX_CDDA"), 0)
+        self.assertEqual(cfg.runtime_corrections, 7)
+
+        self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$FIX_SPU_RESET"), 0)
+        self.assertEqual(cfg.runtime_corrections, 15)
+
+        self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$FIX_GTE_RES1"), 0)
+        self.assertEqual(cfg.runtime_corrections, 31)
+
+        cfg.runtime_corrections = 0
+        self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$PSXCORE_FIXES"), 0)
+        self.assertEqual(cfg.runtime_corrections, 31)
+
+        # 32-byte table export and reload
+        cfg.usb_delay = 5
+        cfg.igr_type = 2
+        tbl = (c.c_uint8 * 32)()
+        LIB.pops_config_export_table(c.byref(cfg), c.byref(tbl))
+        self.assertEqual(tbl[2], 1)   # hdtv_fix
+        self.assertEqual(tbl[3], 5)   # usb_delay ($413)
+        self.assertEqual(tbl[9], 1)   # mode 2
+        self.assertEqual(tbl[11], 1)  # mode 4
+        self.assertEqual(tbl[17], 1)  # no_boot ($421)
+        self.assertEqual(tbl[20], 2)  # igr_type ($424)
+
+        cfg2 = PopsConfig()
+        LIB.pops_config_init(c.byref(cfg2))
+        self.assertEqual(LIB.pops_config_load_table(c.byref(cfg2), c.byref(tbl)), 0)
+        self.assertEqual(cfg2.hdtv_fix, 1)
+        self.assertEqual(cfg2.usb_delay, 5)
+        self.assertTrue(cfg2.compat_modes & (1 << 1))
+        self.assertTrue(cfg2.compat_modes & (1 << 3))
+        self.assertEqual(cfg2.no_boot, 1)
+        self.assertEqual(cfg2.igr_type, 2)
+
+    def test_compat_db_lookup(self):
+        count = LIB.pops_compat_db_count()
+        self.assertGreater(count, 500)
+
+        # Lookup by normalized serial
+        entry_ptr = LIB.pops_compat_db_lookup(b"SCES-01492")  # MediEvil
+        self.assertTrue(bool(entry_ptr))
+        entry = entry_ptr.contents
+        self.assertEqual(entry.serial.decode("ascii"), "SCES-01492")
+        self.assertEqual(entry.title.decode("ascii"), "MediEvil")
+        self.assertEqual(entry.has_libcrypt, 1)
+        self.assertEqual(entry.libcrypt_key, 0xD16A)
+        self.assertTrue(entry.default_modes & 0x01)  # Mode 1
+
+        # Resident Evil 3 (SLES-02530)
+        entry_re3 = LIB.pops_compat_db_lookup(b"SLES-02530")
+        self.assertTrue(bool(entry_re3))
+        self.assertEqual(entry_re3.contents.has_libcrypt, 1)
+        self.assertEqual(entry_re3.contents.libcrypt_key, 0x7C23)
+
+        # Lookup by raw PS1 serial
+        entry_ptr2 = LIB.pops_compat_db_lookup(b"SCES_014.92")
+        self.assertTrue(bool(entry_ptr2))
+        self.assertEqual(entry_ptr2.contents.serial.decode("ascii"), "SCES-01492")
+
+        # Tekken 3
+        entry_tk = LIB.pops_compat_db_lookup(b"SLUS-00402")
+        self.assertTrue(bool(entry_tk))
+        self.assertTrue(entry_tk.contents.default_modes & 0x01)  # Mode 1
+        self.assertTrue(entry_tk.contents.default_modes & 0x20)  # Mode 6 (OSD bypass)
+
+        # Title substring lookup
+        entry_tk_title = LIB.pops_compat_db_lookup_title(b"Tekken 3")
+        self.assertTrue(bool(entry_tk_title))
+        self.assertTrue(entry_tk_title.contents.default_modes & 0x01)
+        self.assertTrue(entry_tk_title.contents.default_modes & 0x20)
+
+    def test_modes_and_patches_application(self):
+        core_size = 0x303000
+        buf = bytearray(core_size)
+        core_ptr = (c.c_uint8 * core_size).from_buffer(buf)
+
+        # Original dispatcher modes 1/2/7: seed pristine guard instructions.
+        for offset, value in ((0x10318, 0x8f828228), (0x1032c, 0x1443fffa),
+                              (0x83c, 0x0441000a), (0x85c, 0x1000fffa),
+                              (0xde9c, 0x0c0836ee)):
+            struct.pack_into('<I', buf, offset, value)
+        mask = (1 << 0) | (1 << 1) | (1 << 6)
+        self.assertEqual(LIB.pops_apply_compat_modes(core_ptr, core_size, mask), 0)
+        self.assertEqual(struct.unpack_from('<I', buf, 0x10318)[0], 0x240322e8)
+        self.assertEqual(struct.unpack_from('<I', buf, 0x850)[0], 0xa503c200)
+        self.assertEqual(buf[0x1e45c], 0x40)
+        before = bytes(buf)
+        for unsupported in (1 << 5, 1 << 7, 0xff):
+            self.assertLess(LIB.pops_apply_compat_modes(core_ptr, core_size, unsupported), 0)
+            self.assertEqual(bytes(buf), before)
+        # A site already holding a mode's value (the built-in per-game list
+        # runs first and may have written it) is accepted: applying the same
+        # mask again changes nothing and succeeds.
+        self.assertEqual(LIB.pops_apply_compat_modes(core_ptr, core_size, mask), 0)
+        self.assertEqual(bytes(buf), before)
+        # Any other value at a selected site is a guard mismatch that leaves
+        # every selected site unchanged.
+        struct.pack_into('<I', buf, 0x10318, 0x12345678)
+        corrupted = bytes(buf)
+        self.assertLess(LIB.pops_apply_compat_modes(core_ptr, core_size, mask), 0)
+        self.assertEqual(bytes(buf), corrupted)
+        struct.pack_into('<I', buf, 0x10318, 0x240322e8)
+        self.assertEqual(bytes(buf), before)
+
+        # Guard mismatches leave the core untouched.
+        self.assertEqual(LIB.pops_apply_libcrypt_bypass(core_ptr, core_size), -errno.EILSEQ)
+        self.assertEqual(LIB.pops_apply_video_overrides(core_ptr, core_size, 2, 0, 0, 0), -errno.EILSEQ)
+        self.assertEqual(LIB.pops_apply_video_overrides(core_ptr, core_size, 0, 1, 0, 0), -errno.EILSEQ)
+        self.assertEqual(LIB.pops_apply_igr_original(core_ptr, core_size, 1, 0), -errno.EILSEQ)
+        self.assertEqual(bytes(buf), before)
+
+        # Modes without grounded writes and position offsets are refused.
+        for mode in (4, 5, 6, 7, 8):
+            self.assertEqual(LIB.pops_apply_video_overrides(core_ptr, core_size, mode, 0, 0, 0),
+                             -errno.ENOTSUP)
+        self.assertEqual(LIB.pops_apply_video_overrides(core_ptr, core_size, 0, 0, -10, 0),
+                         -errno.ENOTSUP)
+        # $NOPAL / PAL2NTSC never writes: POPS is NTSC unless patched.
+        self.assertEqual(LIB.pops_apply_video_overrides(core_ptr, core_size, 1, 0, 0, 0), 0)
+        self.assertEqual(LIB.pops_apply_video_overrides(core_ptr, core_size, 3, 0, 0, 0), 0)
+        self.assertEqual(bytes(buf), before)
+
+        # $FORCEPAL writes POPStarter's FUN_008dc218 values; $HDTVFIX li a0,1.
+        buf[0x1AF94] = 0x02
+        struct.pack_into("<I", buf, 0x302770, 0x000c7200)
+        buf[0x3B018] = 0x7f
+        struct.pack_into("<H", buf, 0x3B01C, 0x0357)
+        struct.pack_into("<I", buf, 0x3acb0, 0x32240001)
+        struct.pack_into("<I", buf, 0x3ad0c, 0x32240001)
+        self.assertEqual(LIB.pops_apply_video_overrides(core_ptr, core_size, 2, 1, 0, 0), 0)
+        self.assertEqual(buf[0x1AF94], 3)
+        self.assertEqual(struct.unpack_from("<I", buf, 0x302770)[0], 0x000a6300)
+        self.assertEqual(buf[0x3B018], 0x6b)
+        self.assertEqual(struct.unpack_from("<H", buf, 0x3B01C)[0], 0x02cb)
+        self.assertEqual(struct.unpack_from("<I", buf, 0x3acb0)[0], 0x24040001)
+        self.assertEqual(struct.unpack_from("<I", buf, 0x3ad0c)[0], 0x24040001)
+        # Idempotent on an already patched core.
+        self.assertEqual(LIB.pops_apply_video_overrides(core_ptr, core_size, 2, 1, 0, 0), 0)
+
+        # Fixed-value original commands; later commands win at shared sites.
+        tokens = (1 << 0) | (1 << 2) | (1 << 7) | (1 << 8) | (1 << 11)
+        self.assertEqual(LIB.pops_apply_original_tokens(core_ptr, core_size, tokens), 0)
+        self.assertEqual(struct.unpack_from("<I", buf, 0x1e454)[0], 0x22b50006)
+        self.assertEqual(buf[0xf0b6], 0)
+        self.assertEqual(struct.unpack_from("<I", buf, 0x2734)[0], 0x14600004)
+        self.assertEqual(struct.unpack_from("<I", buf, 0x3acb0)[0], 0x32240001)
+        self.assertEqual(LIB.pops_apply_original_tokens(core_ptr, core_size, 1 << 15), -errno.ENOTSUP)
+        self.assertEqual(LIB.pops_apply_original_tokens(core_ptr, 0x1e456, 1), -errno.ERANGE)
+
+        # Original IGR writes: $IGR4 jumps to 0x20c08c with the 0x900 mask.
+        struct.pack_into("<I", buf, 0x28a64, 0x2622a980)
+        self.assertEqual(LIB.pops_apply_igr_original(core_ptr, core_size, 5, 0), 0)
+        self.assertEqual(struct.unpack_from("<I", buf, 0x28a5c)[0], 0x08083023)
+        self.assertEqual(struct.unpack_from("<I", buf, 0x28a60)[0], 0)
+        self.assertEqual(struct.unpack_from("<H", buf, 0x28a20)[0], 0x0900)
+        self.assertEqual(struct.unpack_from("<H", buf, 0x28a56)[0], 0x1462)
+        self.assertEqual(LIB.pops_apply_igr_original(core_ptr, core_size, 0, 1), 0)
+        self.assertEqual(struct.unpack_from("<I", buf, 0x28a5c)[0], 0x3c110086)
+        self.assertEqual(struct.unpack_from("<H", buf, 0x28a56)[0], 0x1000)
+        self.assertEqual(LIB.pops_apply_igr_original(core_ptr, core_size, 7, 0), -errno.EINVAL)
+
+        # Seed LibCrypt bypass
+        struct.pack_into("<I", buf, 0x0020C1F0 - 0x00200000, 0x3463ffff)
+        struct.pack_into("<I", buf, 0x0020CFB0 - 0x00200000, 0x24020001)
+        res = LIB.pops_apply_libcrypt_bypass(core_ptr, core_size)
+        self.assertEqual(res, 0)
+        val_lc = struct.unpack_from("<I", buf, 0x0020C1F0 - 0x00200000)[0]
+        self.assertEqual(val_lc, 0x00000000)
+        val_lcret = struct.unpack_from("<I", buf, 0x0020CFB0 - 0x00200000)[0]
+        self.assertEqual(val_lcret, 0x24020000)
+
+        # Test Controller IGR combo checkers
+        igr_active_low = (~(0x0400 | 0x0100 | 0x0800 | 0x0200 | 0x0001 | 0x0008)) & 0xFFFF
+        self.assertEqual(LIB.pops_check_igr_combo(0xFFFF), 0)
+        self.assertEqual(LIB.pops_check_igr_combo(igr_active_low), 1)
+
+        # Test IGR types (0: disabled, 1: normal, 2: alternate with CROSS)
+        self.assertEqual(LIB.pops_check_igr_combo_type(igr_active_low, 0), 0)
+        self.assertEqual(LIB.pops_check_igr_combo_type(igr_active_low, 1), 1)
+        igr2_active_low = (~(0x0400 | 0x0100 | 0x0800 | 0x0200 | 0x0001 | 0x4000)) & 0xFFFF
+        self.assertEqual(LIB.pops_check_igr_combo_type(igr2_active_low, 2), 1)
+
+        # Test Subchannel Q generator
+        subq = (c.c_uint8 * 12)()
+        self.assertEqual(LIB.pops_generate_subq(15, 0x7C23, c.byref(subq)), 0)
+        self.assertEqual(subq[0], 0x41)
+        self.assertEqual(subq[1], 0x01)
+        self.assertEqual(subq[2], 0x01)
+        self.assertEqual(subq[10], 0x7C)
+        self.assertEqual(subq[11], 0x23)
+        # Verify LBA boundary validation
+        self.assertEqual(LIB.pops_generate_subq(c.c_uint32(-1).value, 0, c.byref(subq)), -errno.ERANGE)
+        self.assertEqual(LIB.pops_generate_subq(449850, 0, c.byref(subq)), -errno.ERANGE)
+        self.assertEqual(LIB.pops_generate_subq(0, 0, None), -errno.EINVAL)
+        # Unprotected standard track-1 position Q is CRC-protected, and
+        # absolute time starts at 00:02:00 when relative LBA = 0.
+        self.assertEqual(LIB.pops_generate_subq(0, 0, c.byref(subq)), 0)
+        self.assertEqual(bytes(subq), bytes.fromhex("410101000000000002002832"))
+        self.assertEqual(LIB.pops_generate_subq(75, 0, c.byref(subq)), 0)
+        self.assertEqual(tuple(subq[3:6]), (0x00, 0x01, 0x00))
+        self.assertEqual(tuple(subq[7:10]), (0x00, 0x03, 0x00))
+
+        # Test LibCrypt key injection on protected range 12..20
+        for lba in range(12, 21):
+            self.assertEqual(LIB.pops_generate_subq(lba, 0xABCD, c.byref(subq)), 0)
+            self.assertEqual(subq[10], 0xAB)
+            self.assertEqual(subq[11], 0xCD)
+        # Outside range (e.g. LBA 21), CRC is computed normally instead of key
+        self.assertEqual(LIB.pops_generate_subq(21, 0xABCD, c.byref(subq)), 0)
+        self.assertNotEqual((subq[10] << 8) | subq[11], 0xABCD)
+
+        # Test pops_cdrom_read_subq devctl bridge
+        def mock_subq_devctl(dev, cmd, arg, arglen, buf, buflen):
+            dev_str = dev.decode('utf-8') if dev else ""
+            if dev_str == "pops:" and cmd == 0x06:
+                if buf and buflen >= 12:
+                    c.memmove(buf, bytes.fromhex("410101000000000002002832"), 12)
+                return 0
+            return -errno.ENODEV
+
+        cb_devctl = self.Devctl(mock_subq_devctl)
+        self.assertEqual(LIB.pops_cdrom_read_subq(cb_devctl, 0, c.byref(subq)), 0)
+        self.assertEqual(bytes(subq), bytes.fromhex("410101000000000002002832"))
+        null_devctl = c.cast(None, self.Devctl)
+        self.assertEqual(LIB.pops_cdrom_read_subq(null_devctl, 0, c.byref(subq)), -errno.EINVAL)
+        self.assertEqual(LIB.pops_cdrom_read_subq(cb_devctl, 0, None), -errno.EINVAL)
+
+        # Test GameShark cheat RAM injector with 0xD0..0xD3 and 0xE0..0xE1 conditionals
+        ram_size = 0x200000
+        ram_buf = bytearray(ram_size)
+        ram_ptr = (c.c_uint8 * ram_size).from_buffer(ram_buf)
+        cheats_arr = (CheatEntry * 8)(
+            CheatEntry(0x0009A120, 0x1234, 0x10),  # write 0x1234 to 0x9A120 (type 0x10)
+            CheatEntry(0x0009A120, 0x1234, 0xD0),  # if *(u16 *)0x9A120 == 0x1234:
+            CheatEntry(0x0009A124, 0x56, 0x20),    #   write 0x56 to 0x9A124 (type 0x20)
+            CheatEntry(0x0009A120, 0x9999, 0xD0),  # if *(u16 *)0x9A120 == 0x9999 (false):
+            CheatEntry(0x0009A124, 0xAA, 0x30),    #   write 0xAA (should be skipped!)
+            CheatEntry(0x0009A124, 0x56, 0xE0),    # if *(u8 *)0x9A124 == 0x56 (true 8-bit):
+            CheatEntry(0x0009A126, 0x77, 0x30),    #   write 0x77 to 0x9A126
+            CheatEntry(0x0009A124, 0x56, 0xE1),    # if *(u8 *)0x9A124 != 0x56 (false 8-bit):
+        )
+        res = LIB.pops_cheat_engine_tick(ram_ptr, cheats_arr, 8)
+        self.assertEqual(res, 0)
+        self.assertEqual(struct.unpack_from("<H", ram_buf, 0x9A120)[0], 0x1234)
+        self.assertEqual(ram_buf[0x9A124], 0x56)
+        self.assertEqual(ram_buf[0x9A126], 0x77)
+
+        # Test safe mode cheat deferral:
+        safe_ram = bytearray(ram_size)
+        safe_ptr = (c.c_uint8 * ram_size).from_buffer(safe_ram)
+        one_cheat = (CheatEntry * 1)(CheatEntry(0x0009A120, 0xBEEF, 0x10))
+
+        # $SAFEMODE: skipped while PS1 RAM 0x1ffea0 reads "STEM" (the original's gate)
+        struct.pack_into("<I", safe_ram, 0x1FFEA0, 0x4D455453)
+        res = LIB.pops_cheat_engine_tick_ex(safe_ptr, one_cheat, 1, 100, 1)
+        self.assertEqual(res, 0)
+        self.assertEqual(struct.unpack_from("<H", safe_ram, 0x9A120)[0], 0)
+
+        # Gate no longer holds: the write applies
+        struct.pack_into("<I", safe_ram, 0x1FFEA0, 0)
+        res = LIB.pops_cheat_engine_tick_ex(safe_ptr, one_cheat, 1, 100, 1)
+        self.assertEqual(res, 0)
+        self.assertEqual(struct.unpack_from("<H", safe_ram, 0x9A120)[0], 0xBEEF)
+
+        # Safe mode disabled: applies immediately even at frame 0
+        safe_ram[0x9A120:0x9A122] = b"\x00\x00"
+        res = LIB.pops_cheat_engine_tick_ex(safe_ptr, one_cheat, 1, 0, 0)
+        self.assertEqual(res, 0)
+        self.assertEqual(struct.unpack_from("<H", safe_ram, 0x9A120)[0], 0xBEEF)
+
+        # Out-of-bounds rejection
+        self.assertLess(LIB.pops_apply_compat_modes(core_ptr, 0x10000, 1), 0)
+
+    def test_novmc_directives(self):
+        cfg = PopsConfig()
+        LIB.pops_config_init(c.byref(cfg))
+        self.assertEqual(cfg.no_vmc0, 0)
+        self.assertEqual(cfg.no_vmc1, 0)
+
+        line = b"$NOVMC0\n"
+        self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), line), 0)
+        self.assertEqual(cfg.no_vmc0, 1)
+
+        line = b"$NOVMC1\n"
+        self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), line), 0)
+        self.assertEqual(cfg.no_vmc1, 1)
+
+    def test_novmc_in_the_config_pass(self):
+        # $NOVMC0 writes nothing into POPS: its card setup is still called
+        # with a0 = 1 (0x2007b4) and opens card 0; the resident code hides
+        # the card (POPS_RES_F_NOVMC0). $NOVMC1 and a built-in entry's card 1
+        # off write only the card loop's branch at 0x20d0e0.
+        size = 0x303000
+        base = bytearray(size)
+        struct.pack_into("<I", base, 0x002007B4 - 0x00200000, 0x24040001)
+        struct.pack_into("<I", base, 0x0020D0E0 - 0x00200000, 0x1480FFC1)
+
+        def after(**fields):
+            cfg = PopsConfig()
+            LIB.pops_config_init(c.byref(cfg))
+            for name, value in fields.items():
+                setattr(cfg, name, value)
+            b = bytearray(base)
+            bp = (c.c_uint8 * size).from_buffer(b)
+            self.assertEqual(LIB.pops_apply_all_config_patches(bp, size, c.byref(cfg)), 0, fields)
+            del bp
+            return bytes(b)
+
+        plain = after()
+        self.assertEqual(struct.unpack_from("<I", plain, 0x002007B4 - 0x00200000)[0], 0x24040001)
+        self.assertEqual(after(no_vmc0=1), plain)
+        card1_off = bytearray(plain)
+        struct.pack_into("<I", card1_off, 0x0020D0E0 - 0x00200000, 0x24040000)
+        for fields in (dict(no_vmc1=1), dict(builtin_no_vmc1=1), dict(no_vmc0=1, no_vmc1=1),
+                       dict(no_vmc1=1, builtin_no_vmc1=1)):
+            self.assertEqual(after(**fields), bytes(card1_off), fields)
+
+    def test_igr_exit_patch(self):
+        buf_size = 0x100000
+        buf = bytearray(buf_size)
+        ptr = (c.c_uint8 * buf_size).from_buffer(buf)
+
+        # Mismatch guard test
+        self.assertEqual(LIB.pops_apply_igr_exit(ptr, buf_size), -errno.EINVAL)
+
+        # Pristine site: 0x0020c0a4 has 0x0c08b44c
+        off = 0x0020c0a4 - 0x00200000
+        struct.pack_into("<I", buf, off, 0x0c08b44c)
+        self.assertEqual(LIB.pops_apply_igr_exit(ptr, buf_size), 0)
+        self.assertEqual(struct.unpack_from("<I", buf, off)[0], 0x0c08d8ae)
+
+        # Buffer too small
+        self.assertEqual(LIB.pops_apply_igr_exit(ptr, off), -errno.ERANGE)
+
+    def test_igr_direct_exit_patch(self):
+        buf_size = 0x100000
+        buf = bytearray(buf_size)
+        ptr = (c.c_uint8 * buf_size).from_buffer(buf)
+
+        # Mismatch guard test
+        self.assertEqual(LIB.pops_apply_igr_direct_exit(ptr, buf_size), -errno.EINVAL)
+
+        # Pristine site: 0x00228a5c has 0x3c110086, 0x00228a60 has 0x24030080,
+        # 0x00228a64 has 0x2622a980, 0x00228a68 has 0x0000202d
+        off_5c = 0x00228a5c - 0x00200000
+        off_60 = 0x00228a60 - 0x00200000
+        off_64 = 0x00228a64 - 0x00200000
+        off_68 = 0x00228a68 - 0x00200000
+        struct.pack_into("<I", buf, off_5c, 0x3c110086)
+        struct.pack_into("<I", buf, off_60, 0x24030080)
+        struct.pack_into("<I", buf, off_64, 0x2622a980)
+        struct.pack_into("<I", buf, off_68, 0x0000202d)
+        self.assertEqual(LIB.pops_apply_igr_direct_exit(ptr, buf_size), 0)
+        self.assertEqual(struct.unpack_from("<I", buf, off_5c)[0], 0x24020001)
+        self.assertEqual(struct.unpack_from("<I", buf, off_60)[0], 0x10000015)
+        self.assertEqual(struct.unpack_from("<I", buf, off_64)[0], 0x00000000)
+        self.assertEqual(struct.unpack_from("<I", buf, off_68)[0], 0x00000000)
+
+        # Idempotent call
+        self.assertEqual(LIB.pops_apply_igr_direct_exit(ptr, buf_size), 0)
+
+        # Buffer too small
+        self.assertEqual(LIB.pops_apply_igr_direct_exit(ptr, off_68), -errno.ERANGE)
+
+    def test_igr_pad_control_patch(self):
+        buf_size = 0x100000
+        buf = bytearray(buf_size)
+        ptr = (c.c_uint8 * buf_size).from_buffer(buf)
+
+        # Mismatch guard test
+        self.assertEqual(LIB.pops_apply_igr_pad_control(ptr, buf_size), -errno.EINVAL)
+
+        # Pristine site: 0x002264c4 has 0x8c830000, 0x002264f4 has 0x30620020
+        off_4c4 = 0x002264c4 - 0x00200000
+        off_4f4 = 0x002264f4 - 0x00200000
+        struct.pack_into("<I", buf, off_4c4, 0x8c830000)
+        struct.pack_into("<I", buf, off_4f4, 0x30620020)
+        self.assertEqual(LIB.pops_apply_igr_pad_control(ptr, buf_size), 0)
+        self.assertEqual(struct.unpack_from("<I", buf, off_4c4)[0], 0x8c830004)
+        self.assertEqual(struct.unpack_from("<I", buf, off_4f4)[0], 0x30620060)
+
+        # Idempotent call
+        self.assertEqual(LIB.pops_apply_igr_pad_control(ptr, buf_size), 0)
+
+        # Buffer too small
+        self.assertEqual(LIB.pops_apply_igr_pad_control(ptr, off_4f4), -errno.ERANGE)
+
+    def test_iopcd_stack_size_patch(self):
+        buf_size = 0x150000
+        buf = bytearray(buf_size)
+        ptr = (c.c_uint8 * buf_size).from_buffer(buf)
+
+        # Mismatch guard test
+        self.assertEqual(LIB.pops_apply_iopcd_stack_size(ptr, buf_size, 0x40), -errno.EINVAL)
+
+        # Pristine site: 0x002fb599 has 0x08 (2 KiB stack)
+        off = 0x002fb599 - 0x00200000
+        buf[off] = 0x08
+        self.assertEqual(LIB.pops_apply_iopcd_stack_size(ptr, buf_size, 0x40), 0)
+        self.assertEqual(buf[off], 0x40)
+
+        # Custom stack size
+        buf[off] = 0x08
+        self.assertEqual(LIB.pops_apply_iopcd_stack_size(ptr, buf_size, 0x20), 0)
+        self.assertEqual(buf[off], 0x20)
+
+    def test_hdd_init_exit_patch(self):
+        buf_size = 0x10000
+        buf = bytearray(buf_size)
+        ptr = (c.c_uint8 * buf_size).from_buffer(buf)
+
+        # Mismatch guard test
+        self.assertEqual(LIB.pops_apply_hdd_init_exit(ptr, buf_size), -errno.EINVAL)
+
+        # Pristine site: 0x00200766 has 0x1040 (beqz v0)
+        off = 0x00200766 - 0x00200000
+        struct.pack_into("<H", buf, off, 0x1040)
+        self.assertEqual(LIB.pops_apply_hdd_init_exit(ptr, buf_size), 0)
+        self.assertEqual(struct.unpack_from("<H", buf, off)[0], 0x1000)
+
+    def test_vmc_disable_patches(self):
+        buf_size = 0x20000
+        buf = bytearray(buf_size)
+        ptr = (c.c_uint8 * buf_size).from_buffer(buf)
+        # No core write for $NOVMC0 any more (it made POPS's card setup skip
+        # both cards); the original's $NOVMC0 only arms a per-pass store.
+        self.assertFalse(hasattr(LIB, "pops_apply_vmc0_disable"))
+
+        # VMC1 disable: 0x0020d0e0 has 0x1480ffc1
+        off1 = 0x0020d0e0 - 0x00200000
+        self.assertEqual(LIB.pops_apply_vmc1_disable(ptr, buf_size), -errno.EINVAL)
+        struct.pack_into("<I", buf, off1, 0x1480ffc1)
+        self.assertEqual(LIB.pops_apply_vmc1_disable(ptr, buf_size), 0)
+        self.assertEqual(struct.unpack_from("<I", buf, off1)[0], 0x24040000)
+
+    def test_slbb_vcd_check_bypass_patch(self):
+        buf_size = 0x10000
+        buf = bytearray(buf_size)
+        ptr = (c.c_uint8 * buf_size).from_buffer(buf)
+
+        # Mismatch guard test
+        self.assertEqual(LIB.pops_apply_slbb_vcd_check_bypass(ptr, buf_size), -errno.EINVAL)
+
+        # Pristine sites:
+        # 0x00200834 has 0x0c08b520 (JAL 0x0022d480)
+        # 0x0020083c has 0x0441000a (bgez v1, +10)
+        # 0x0020085c has 0x1000fffa (b -6)
+        off_834 = 0x00200834 - 0x00200000
+        off_83c = 0x0020083c - 0x00200000
+        off_85c = 0x0020085c - 0x00200000
+        struct.pack_into("<I", buf, off_834, 0x0c08b520)
+        struct.pack_into("<I", buf, off_83c, 0x0441000a)
+        struct.pack_into("<I", buf, off_85c, 0x1000fffa)
+
+        self.assertEqual(LIB.pops_apply_slbb_vcd_check_bypass(ptr, buf_size), 0)
+        self.assertEqual(struct.unpack_from("<I", buf, off_834)[0], 0x00000000)
+        self.assertEqual(struct.unpack_from("<I", buf, off_83c)[0], 0x1000000a)
+        self.assertEqual(struct.unpack_from("<I", buf, off_85c)[0], 0x00000000)
+
+        # Compatibility with Mode 2 / Mode 5 pre-patched state
+        struct.pack_into("<I", buf, off_834, 0x0c08b520)
+        struct.pack_into("<I", buf, off_83c, 0x1000000a)
+        struct.pack_into("<I", buf, off_85c, 0x00000000)
+        self.assertEqual(LIB.pops_apply_slbb_vcd_check_bypass(ptr, buf_size), 0)
+        self.assertEqual(struct.unpack_from("<I", buf, off_834)[0], 0x00000000)
+
+    def test_unported_runtime_patches(self):
+        buf_size = 0x300000
+        buf = bytearray(buf_size)
+        ptr = (c.c_uint8 * buf_size).from_buffer(buf)
+
+        # 1. SLBB VCD path redirect (FUN_008dbd6c)
+        res = LIB.pops_apply_slbb_vcd_path_redirect(ptr, buf_size)
+        self.assertEqual(res, 0)
+        self.assertEqual(buf[0x004ffe8b - 0x00200000], 0x31)
+        self.assertEqual(buf[0x004ffe8e - 0x00200000], 0x50)
+        self.assertEqual(buf[0x004ffe8f - 0x00200000], 0x4f)
+        self.assertEqual(struct.unpack_from("<H", buf, 0x004ffe90 - 0x00200000)[0], 0x5350)
+
+        # 2. Resource relinking (FUN_008db7e4)
+        res = LIB.pops_apply_resource_relink(ptr, buf_size, 0)
+        self.assertEqual(res, 0)
+        self.assertEqual(struct.unpack_from("<H", buf, 0x00200784 - 0x00200000)[0], 0x8000)
+        self.assertEqual(struct.unpack_from("<H", buf, 0x0020cf58 - 0x00200000)[0], 0x8080)
+        self.assertEqual(struct.unpack_from("<H", buf, 0x0020c920 - 0x00200000)[0], 0x8100)
+        target = buf[0x004f8080 - 0x00200000:0x004f8080 - 0x00200000 + 12]
+        self.assertEqual(target.split(b"\0")[0], b"pfs1:/POPS/")
+
+        # 3. Exception hook (FUN_008d6da4)
+        res = LIB.pops_apply_exception_hook(ptr, buf_size)
+        self.assertEqual(res, 0)
+        self.assertEqual(struct.unpack_from("<I", buf, 0x00232d08 - 0x00200000)[0], 0x0c518000)
+
+    def test_bios_osd_control_patches(self):
+        buf_size = 0x60000
+        buf = bytearray(buf_size)
+        ptr = (c.c_uint8 * buf_size).from_buffer(buf)
+
+        off = 0x002525b0 - 0x00200000
+
+        # Mismatch guard test
+        self.assertEqual(LIB.pops_apply_bios_osd_disable(ptr, buf_size), -errno.EINVAL)
+        self.assertEqual(LIB.pops_apply_bios_osd_enable(ptr, buf_size), -errno.EINVAL)
+
+        # Disable OSD (0x1bfc -> 0x0648)
+        struct.pack_into("<H", buf, off, 0x1bfc)
+        self.assertEqual(LIB.pops_apply_bios_osd_disable(ptr, buf_size), 0)
+        self.assertEqual(struct.unpack_from("<H", buf, off)[0], 0x0648)
+
+        # Enable OSD (0x0648 -> 0x1bfc)
+        self.assertEqual(LIB.pops_apply_bios_osd_enable(ptr, buf_size), 0)
+        self.assertEqual(struct.unpack_from("<H", buf, off)[0], 0x1bfc)
+
+    def test_directive_exact_boundaries_and_guards(self):
+        # 1. Null buffer checks
+        self.assertEqual(LIB.pops_apply_libcrypt_bypass(None, 0x100000), -errno.EINVAL)
+        self.assertEqual(LIB.pops_apply_video_overrides(None, 0x100000, 1, 0, 0, 0), -errno.EINVAL)
+        self.assertEqual(LIB.pops_apply_original_tokens(None, 0x100000, 1), -errno.EINVAL)
+        self.assertEqual(LIB.pops_apply_igr_original(None, 0x100000, 1, 0), -errno.EINVAL)
+        self.assertEqual(LIB.pops_apply_region(None, 0x100000, 1, 0, 0), -errno.EINVAL)
+
+        # 2. Unsupported video mode
+        tiny_buf = bytearray(0x10)
+        tiny_ptr = (c.c_uint8 * len(tiny_buf)).from_buffer(tiny_buf)
+        self.assertEqual(LIB.pops_apply_video_overrides(tiny_ptr, len(tiny_buf), 9, 0, 0, 0), -errno.ENOTSUP)
+
+        # 3. Truncated buffers
+        lc_off = 0x0020CFB0 - 0x00200000
+        buf = bytearray(lc_off + 3)
+        ptr = (c.c_uint8 * len(buf)).from_buffer(buf)
+        self.assertEqual(LIB.pops_apply_libcrypt_bypass(ptr, len(buf)), -errno.ERANGE)
+
+        # $FORCEPAL needs 0x00502770 + 4 (off = 0x302774)
+        buf_pal = bytearray(0x302773)
+        ptr_pal = (c.c_uint8 * len(buf_pal)).from_buffer(buf_pal)
+        self.assertEqual(LIB.pops_apply_video_overrides(ptr_pal, len(buf_pal), 2, 0, 0, 0), -errno.ERANGE)
+
+        # $HDTVFIX needs 0x0023ad0c + 4
+        buf_hdtv = bytearray(0x3ad0f)
+        ptr_hdtv = (c.c_uint8 * len(buf_hdtv)).from_buffer(buf_hdtv)
+        self.assertEqual(LIB.pops_apply_video_overrides(ptr_hdtv, len(buf_hdtv), 0, 1, 0, 0), -errno.ERANGE)
+
+        # Region pass needs the 0x2cbb72 letter
+        buf_rg = bytearray(0xcbb72)
+        ptr_rg = (c.c_uint8 * len(buf_rg)).from_buffer(buf_rg)
+        self.assertEqual(LIB.pops_apply_region(ptr_rg, len(buf_rg), 1, 0, 0), -errno.ERANGE)
+        self.assertEqual(LIB.pops_apply_region(ptr_rg, len(buf_rg), 9, 0, 0), -errno.EINVAL)
+
+    UNDO_COMPAT_WRITES = [
+        (0x2525B0, 0x1BFC, 2), (0x20083C, 0x1000000A, 4), (0x200844, 0, 4),
+        (0x200848, 0, 4), (0x200850, 0, 4), (0x200854, 0, 4), (0x200858, 0, 4),
+        (0x20085C, 0, 4), (0x200860, 0, 4), (0x20BCAC, 0, 4),
+        (0x20DE9C, 0x0C0836EE, 4), (0x210314, 0, 4), (0x210318, 0x8F828228, 4),
+        (0x21031C, 0, 4), (0x210320, 0, 4), (0x210324, 0, 4), (0x210328, 0, 4),
+        (0x21032C, 0x1443FFFA, 4), (0x21AF70, 0x64, 1), (0x21E45C, 0, 1),
+        (0x20E850, 7, 1), (0x20E86C, 0, 4), (0x20E87C, 0x34420020, 4)]
+    UNDO_LIBCRYPT_WRITES = [
+        (0x2525B0, 0x1BFC, 2), (0x210CF8, 0x2442FFFF, 4), (0x210CFC, 0x7C640000, 4),
+        (0x210D00, 0, 4), (0x210D04, 0, 4), (0x210D08, 0, 4), (0x210D0C, 0xFA, 1)]
+    # Writes the original makes inside its own resident blob, not POPS code.
+    UNDO_BLOB_SITES = (0x2397D8, 0x239780, 0x239784)
+
+    def test_undo_commands(self):
+        cfg = PopsConfig()
+        LIB.pops_config_init(c.byref(cfg))
+        for line in (b"$UNDO_COMPATIBILITY_CODES", b"$UNDO_GAME_FIXES", b"$UNDO_LIBCRYPT_FIX"):
+            self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), line), 0)
+        self.assertEqual(cfg.original_tokens, (1 << 12) | (1 << 13) | (1 << 14))
+
+        size = 0x303000
+        read = lambda b, a, w: int.from_bytes(b[a - 0x200000:a - 0x200000 + w], "little")
+
+        def fill(b):
+            for i in range(len(b)):
+                b[i] = 0xA5
+
+        # Each command writes exactly the original's values and nothing else.
+        for flag, writes in ((1 << 12, self.UNDO_COMPAT_WRITES),
+                             (1 << 13, [(0x2525B0, 0x1BFC, 2)]),
+                             (1 << 14, self.UNDO_LIBCRYPT_WRITES)):
+            buf = bytearray(size)
+            fill(buf)
+            ptr = (c.c_uint8 * size).from_buffer(buf)
+            self.assertEqual(LIB.pops_apply_undo_tokens(ptr, size, flag), 0)
+            touched = set()
+            for address, value, width in writes:
+                self.assertEqual(read(buf, address, width), value, hex(address))
+                touched.update(range(address, address + width))
+            changed = {0x200000 + i for i, v in enumerate(buf) if v != 0xA5}
+            self.assertTrue(changed <= touched, sorted(hex(a) for a in changed - touched))
+            for address in self.UNDO_BLOB_SITES:
+                self.assertEqual(read(buf, address, 4), 0xA5A5A5A5)
+            del ptr
+
+        buf = bytearray(size)
+        ptr = (c.c_uint8 * size).from_buffer(buf)
+        self.assertEqual(LIB.pops_apply_undo_tokens(ptr, size, 1 << 15), -errno.ENOTSUP)
+        self.assertEqual(LIB.pops_apply_undo_tokens(ptr, 0x52000, 1 << 13), -errno.ERANGE)
+        self.assertEqual(LIB.pops_apply_undo_tokens(None, size, 1 << 12), -errno.EINVAL)
+        # Tokens without an $UNDO_ bit write nothing here.
+        self.assertEqual(LIB.pops_apply_undo_tokens(ptr, size, 0x0FFF), 0)
+        self.assertEqual(buf, bytearray(size))
+        del ptr
+
+        # $UNDO_COMPATIBILITY_CODES runs after $SUBCDSTATUS and restores its sites.
+        buf = bytearray(size)
+        ptr = (c.c_uint8 * size).from_buffer(buf)
+        self.assertEqual(LIB.pops_apply_original_tokens(ptr, size, (1 << 1) | (1 << 12)), 0)
+        self.assertEqual(buf, bytearray(size))
+        self.assertEqual(LIB.pops_apply_original_tokens(ptr, size, 1 << 1), 0)
+        self.assertEqual(buf[0xE850], 6)
+        del ptr
+
+        # Full pass: $UNDO_COMPATIBILITY_CODES with modes 2 and 5 still applies
+        # them (it runs before $COMPATIBILITY_0x in the original), and the fix
+        # context accepts the branch values it leaves without those modes.
+        def pristine():
+            b = bytearray(size)
+            for address, value, width in self.UNDO_COMPAT_WRITES:
+                b[address - 0x200000:address - 0x200000 + width] = value.to_bytes(width, "little")
+            struct.pack_into("<I", b, 0x83C, 0x0441000A)
+            struct.pack_into("<I", b, 0x85C, 0x1000FFFA)
+            # PATCH PAL sites, which the fix context also tracks.
+            b[0x1AF94] = 0x02
+            struct.pack_into("<I", b, 0x302770, 0x0008A3A2)
+            b[0x3B018] = 0x48
+            struct.pack_into("<H", b, 0x3B01C, 0x0290)
+            buf_ptr = (c.c_uint8 * size).from_buffer(b)
+            return b, buf_ptr
+
+        for modes in (0, 1 << 1, 1 << 4, (1 << 1) | (1 << 4)):
+            b, bp = pristine()
+            cfg = PopsConfig()
+            LIB.pops_config_init(c.byref(cfg))
+            cfg.original_tokens = 1 << 12
+            cfg.compat_modes = modes
+            self.assertEqual(LIB.pops_apply_all_config_patches(bp, size, c.byref(cfg)), 0, modes)
+            self.assertEqual(read(b, 0x20083C, 4), 0x1000000A)
+            self.assertEqual(read(b, 0x20085C, 4), 0)
+            if modes == 1 << 1:
+                self.assertEqual(read(b, 0x200850, 4), 0xA503C200)
+            if modes == 1 << 4:
+                self.assertEqual(read(b, 0x200860, 4), 0x10002D13)
+            ctx = (c.c_uint8 * 4096)()
+            self.assertEqual(LIB.pops_fix_context_init(ctx, bp, size, modes), 0, modes)
+            del bp
+
+    @unittest.skipUnless(os.environ.get("POPSTARTER_TEST_ELF"), "optional external POPStarter MAIN")
+    def test_undo_commands_match_the_original(self):
+        """Run the original's three $UNDO_ handlers in the bounded interpreter
+        and compare every core write with launcHER's, leaving out the writes
+        that land in the original's own resident blob."""
+        import sys
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from trace_original_pops_display import _Window
+        from trace_original_pops_io import decode_main
+        image = decode_main(Path(os.environ["POPSTARTER_TEST_ELF"]).read_bytes())
+
+        class UndoWindow(_Window):
+            def __init__(self, *args):
+                super().__init__(*args)
+                self.memory.update((self.GP + i, 0) for i in range(0x8000)
+                                   if self.GP + i not in self.memory)
+
+            def service(self, target):
+                if target == 0x8D6BD0:  # 16-bit core write
+                    self.writes.append([self.reg[5], self.reg[4] & 0xFFFF, 2])
+                    return
+                super().service(target)
+
+        size = 0x303000
+        for lo, hi, command, flag in ((0x89453C, 0x894AB8, "$UNDO_COMPATIBILITY_CODES", 1 << 12),
+                                      (0x894AB8, 0x894DB4, "$UNDO_GAME_FIXES", 1 << 13),
+                                      (0x894DB4, 0x895164, "$UNDO_LIBCRYPT_FIX", 1 << 14)):
+            w = UndoWindow(image, lo, hi, command)
+            w.run()
+            expected = bytearray(b"\xA5" * size)
+            for address, value, width in w.writes:
+                if address in self.UNDO_BLOB_SITES:
+                    continue
+                expected[address - 0x200000:address - 0x200000 + width] = value.to_bytes(width, "little")
+            blob = [a for a, _, _ in w.writes if a in self.UNDO_BLOB_SITES]
+            self.assertEqual(len(blob), {1 << 12: 0, 1 << 13: 1, 1 << 14: 2}[flag], command)
+            buf = bytearray(b"\xA5" * size)
+            ptr = (c.c_uint8 * size).from_buffer(buf)
+            self.assertEqual(LIB.pops_apply_undo_tokens(ptr, size, flag), 0)
+            self.assertEqual(buf, expected, command)
+            del ptr
+
+    # $FAKELC's 21 bytes at 0x210cf8 (handler 0x89caf0), as the original
+    # leaves them (measured with its whole parser): the built-in entries'
+    # LibCrypt template with the per-game value cleared. POPS_LC_BYTES are
+    # POPS's own, which $UNDO_LIBCRYPT_FIX puts back.
+    FAKELC_AT = 0x210CF8
+    FAKELC_BYTES = bytes.fromhex("001f133c" "00007326" "fcf173ac" "ffff4224" "0000647c" "fd")
+    POPS_LC_BYTES = bytes.fromhex("ffff4224" "0000647c" "00000000" "00000000" "00000000" "fa")
+    FAKELC_LAST, FAKELC_BEFORE_VCDID = 1, 2
+
+    def fakelc_config(self, *lines):
+        cfg = PopsConfig()
+        LIB.pops_config_init(c.byref(cfg))
+        for line in lines:
+            self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), line.encode()), 0)
+        return cfg
+
+    def test_fakelc_command(self):
+        LAST, BEFORE = self.FAKELC_LAST, self.FAKELC_BEFORE_VCDID
+        # (lines) -> (PopsConfig.fakelc, the $VCDID_n id that applies)
+        cases = {
+            ("$FAKELC",): (LAST | BEFORE, None),
+            ("$fakelc",): (LAST | BEFORE, None),
+            ("$FAKELCX",): (0, None),
+            ("$FAKE_LC",): (0, None),
+            ("$VCDID_5", "$FAKELC"): (LAST, 5),
+            ("$FAKELC", "$VCDID_5"): (LAST | BEFORE, 5),
+            # $VCDID_0 leaves the id free, so the $FAKELC is still before it.
+            ("$VCDID_0", "$FAKELC", "$VCDID_7"): (LAST | BEFORE, 7),
+            ("$FAKELC", "$UNDO_LIBCRYPT_FIX"): (BEFORE, None),
+            ("$UNDO_LIBCRYPT_FIX", "$FAKELC"): (LAST | BEFORE, None),
+            ("$FAKELC $UNDO_LIBCRYPT_FIX $FAKELC",): (LAST | BEFORE, None),
+            ("$FAKELC $UNDO_LIBCRYPT_FIX",): (BEFORE, None),
+        }
+        for lines, (flags, vcdid) in cases.items():
+            cfg = self.fakelc_config(*lines)
+            self.assertEqual((cfg.fakelc, cfg.vcdid if cfg.vcdid_set else None), (flags, vcdid), lines)
+
+        size = 0x303000
+        at = self.FAKELC_AT - 0x200000
+        buf = bytearray(b"\xA5" * size)
+        ptr = (c.c_uint8 * size).from_buffer(buf)
+        self.assertEqual(LIB.pops_apply_fakelc(ptr, size), 0)
+        self.assertEqual(bytes(buf[at:at + 21]), self.FAKELC_BYTES)
+        self.assertEqual(buf[:at] + buf[at + 21:], bytearray(b"\xA5" * (size - 21)))
+        del ptr
+        short = bytearray(at + 20)
+        sptr = (c.c_uint8 * len(short)).from_buffer(short)
+        self.assertEqual(LIB.pops_apply_fakelc(sptr, len(short)), -errno.ERANGE)
+        self.assertEqual(short, bytearray(at + 20))
+        del sptr
+        self.assertEqual(LIB.pops_apply_fakelc(None, size), -errno.EINVAL)
+
+        # In the config pass: the later of $FAKELC and $UNDO_LIBCRYPT_FIX wins.
+        def lc_after(*lines):
+            cfg = self.fakelc_config(*lines)
+            b = bytearray(size)
+            b[at:at + 21] = self.POPS_LC_BYTES
+            bp = (c.c_uint8 * size).from_buffer(b)
+            self.assertEqual(LIB.pops_apply_all_config_patches(bp, size, c.byref(cfg)), 0, lines)
+            del bp
+            return bytes(b[at:at + 21])
+        self.assertEqual(lc_after("$FAKELC"), self.FAKELC_BYTES)
+        self.assertEqual(lc_after("$FAKELC", "$UNDO_LIBCRYPT_FIX"), self.POPS_LC_BYTES)
+        self.assertEqual(lc_after("$UNDO_LIBCRYPT_FIX", "$FAKELC"), self.FAKELC_BYTES)
+        self.assertEqual(lc_after("$UNDO_LIBCRYPT_FIX $FAKELC $UNDO_LIBCRYPT_FIX"), self.POPS_LC_BYTES)
+        self.assertEqual(lc_after("$NOPAD0"), self.POPS_LC_BYTES)
+
+    def test_builtin_entries_after_fakelc(self):
+        class Plan(c.Structure):
+            _fields_ = [("id", c.c_uint16), ("compat_modes", c.c_uint8), ("subcd", c.c_uint8),
+                        ("no_vmc1", c.c_uint8), ("no_auto_pal", c.c_uint8), ("fix_call", c.c_uint8),
+                        ("break_call", c.c_uint8), ("libcrypt2", c.c_uint8),
+                        ("libcrypt2_code", c.c_uint8 * 84),
+                        ("fix_size", c.c_uint32), ("break_size", c.c_uint32)]
+        LIB.pops_builtin_apply.argtypes = [c.c_uint16, c.c_void_p, c.c_size_t, c.c_void_p,
+                                           c.c_uint32, c.c_size_t, c.POINTER(Plan)]
+        LIB.pops_builtin_apply.restype = c.c_int
+        LIB.pops_builtin_op_runs.argtypes = [c.c_uint16, c.c_uint]
+        LIB.pops_builtin_op_runs.restype = c.c_int
+        AFTER = 0x8000
+        size, at = 0x400000, self.FAKELC_AT - 0x200000
+
+        def apply(n):
+            core = (c.c_uint8 * size)()
+            plan = Plan()
+            self.assertEqual(LIB.pops_builtin_apply(n, core, size, None, 0, 0, c.byref(plan)), 0, hex(n))
+            return bytes(core), plan
+
+        # Entry 6 is only its LibCrypt write; after a $FAKELC it writes nothing.
+        core, _ = apply(6)
+        self.assertEqual(core[at:at + 21], bytes.fromhex("011f133c70ad7326fcf173acffff42240000647cfd"))
+        core, plan = apply(6 | AFTER)
+        self.assertEqual(core, bytes(size))
+        self.assertEqual(plan.id, 6)
+        # 207 keeps only its compatibility mode 4; 232 only mode 1 (no sub-CD
+        # flag, so nothing gates it); 230 keeps nothing.
+        for n, modes in ((207, 1 << 3), (232, 1 << 0), (230, 0)):
+            _, full = apply(n)
+            self.assertTrue(full.fix_call, n)
+            _, plan = apply(n | AFTER)
+            self.assertEqual((plan.compat_modes, plan.fix_call, plan.break_call, plan.subcd,
+                              plan.fix_size, plan.break_size), (modes, 0, 0, 0, 0, 0), n)
+        # Entries without the test are the same either way.
+        for n in (0, 1, 3, 504):
+            self.assertEqual(apply(n)[0], apply(n | AFTER)[0], n)
+        self.assertEqual([LIB.pops_builtin_op_runs(207, i) for i in range(6)], [1] * 6)
+        self.assertEqual([LIB.pops_builtin_op_runs(207 | AFTER, i) for i in range(6)], [0] * 5 + [1])
+        self.assertEqual(LIB.pops_builtin_op_runs(625, 0), 0)
+        plan = Plan()
+        self.assertEqual(LIB.pops_builtin_apply(625 | AFTER, None, 0, None, 0, 0, c.byref(plan)), -errno.ENOENT)
+
+    def test_region_pass_matches_original(self):
+        self.assertEqual(LIB.pops_region_from_licence(b"Euro"), 1)
+        self.assertEqual(LIB.pops_region_from_licence(b"Amer"), 2)
+        self.assertEqual(LIB.pops_region_from_licence(b"of A"), 2)
+        self.assertEqual(LIB.pops_region_from_licence(b"Inc."), 3)
+        self.assertEqual(LIB.pops_region_from_licence(b"euro"), 0)
+
+        def core():
+            buf = bytearray(0x303000)
+            buf[0x1AF94] = 0x02
+            struct.pack_into("<I", buf, 0x302770, 0x000c7200)
+            buf[0x3B018] = 0x7f
+            struct.pack_into("<H", buf, 0x3B01C, 0x0357)
+            return buf, (c.c_uint8 * len(buf)).from_buffer(buf)
+
+        def pal(buf):
+            return buf[0x1AF94] == 3 and struct.unpack_from("<I", buf, 0x302770)[0] == 0xa6300
+
+        # A European disc gets the PAL patch and E/E/'li a0,E'.
+        buf, ptr = core()
+        self.assertEqual(LIB.pops_apply_region(ptr, len(buf), 1, 0, 0), 0)
+        self.assertTrue(pal(buf))
+        self.assertEqual((buf[0xcbb72], buf[0xf6cc]), (ord('E'), ord('E')))
+        self.assertEqual(struct.unpack_from("<I", buf, 0x649a0)[0], 0x34040045)
+
+        # $NOPAL, $480p and a PATCH file's disable-auto keep it NTSC.
+        for mode, auto_off in ((3, 0), (4, 0), (0, 1)):
+            buf, ptr = core()
+            self.assertEqual(LIB.pops_apply_region(ptr, len(buf), 1, mode, auto_off), 0)
+            self.assertFalse(pal(buf))
+            self.assertEqual(buf[0xcbb72], ord('E'))
+
+        # American and Japanese discs stay NTSC with their letters.
+        buf, ptr = core()
+        self.assertEqual(LIB.pops_apply_region(ptr, len(buf), 2, 0, 0), 0)
+        self.assertFalse(pal(buf))
+        self.assertEqual((buf[0xcbb72], buf[0xf6cc]), (ord('A'), ord('A')))
+        self.assertEqual(struct.unpack_from("<I", buf, 0x649a0)[0], 0x34040041)
+        buf, ptr = core()
+        self.assertEqual(LIB.pops_apply_region(ptr, len(buf), 3, 0, 0), 0)
+        self.assertEqual((buf[0xcbb72], buf[0xf6cc]), (ord('J'), ord('I')))
+        self.assertEqual(struct.unpack_from("<I", buf, 0x649a0)[0], 0x34040049)
+
+        # $FORCEPAL reports Europe to POPS; the BIOS keeps the disc region.
+        buf, ptr = core()
+        buf[0xf6cc] = 0x55
+        self.assertEqual(LIB.pops_apply_region(ptr, len(buf), 2, 2, 0), 0)
+        self.assertTrue(pal(buf))
+        self.assertEqual(buf[0xcbb72], ord('E'))
+        self.assertEqual(buf[0xf6cc], 0x55)
+        self.assertEqual(struct.unpack_from("<I", buf, 0x649a0)[0], 0x34040041)
+
+        # PATCH disable-auto suppresses the original FORCEPAL branch too.
+        buf, ptr = core()
+        self.assertEqual(LIB.pops_apply_region(ptr, len(buf), 2, 2, 1), 0)
+        self.assertFalse(pal(buf))
+        self.assertEqual((buf[0xcbb72], buf[0xf6cc]), (ord('A'), ord('A')))
+
+        # Unknown licence: 'T' and the four region checks zeroed.
+        buf, ptr = core()
+        self.assertEqual(LIB.pops_apply_region(ptr, len(buf), 0, 0, 0), 0)
+        self.assertEqual(buf[0xcbb72], ord('T'))
+        self.assertEqual(struct.unpack_from("<4I", buf, 0x64994),
+                         (0x34050000, 0x34020000, 0x34030000, 0x34040000))
+
+if __name__ == "__main__":
+    unittest.main()

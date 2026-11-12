@@ -1,0 +1,43 @@
+{
+  "date": "2026-10-19",
+  "kind": "physical_ps2_synthetic_fix_staging",
+  "base_commit": "7eee136c9095c6567c08d786ce98631ef017b567",
+  "tested_sources_sha256": {
+    "tools/fixtures/pops_fix_files_ee.c": "bc12cbdc34ef2afaff6d3b5b67738f5ec73ccd59c65e457d4e053b5adc951044",
+    "common/src/pops_modes_patches.c": "067861c000bb6e6e1e88585b6c01e214375eae75e25fb30b8574804814fe60e9",
+    "common/src/pops_external.c": "a441a764b20d51159ffec0cdb3129db7253296cd4a38a2ce1767bc95a95189c7",
+    "common/include/pops_modes_patches.h": "dbc9ed96b5446fb5694a87a4e9a150e7d6e545c3ec04fb352c87399a177aefee",
+    "common/include/pops_config.h": "9839f422a19b8ad806bbcf1930203242b589708a0423f7e68c83eb0d60306528",
+    "common/include/pops_external.h": "795e1334f1f523ede750b98f3b64def812956fb1de10ffe184cdb659355dfe38"
+  },
+  "elf_sha256": "01e9f462a70c9dd10e636595a6659f4133f3a7d621ecec374250646336c3238e",
+  "elf_size": 1023220,
+  "toolchain": "ps2build v2026.10.15, GCC toolchain v2026.09.27",
+  "connection": "ps2link at 192.168.1.10; host files served read-only",
+  "stdout": [
+    "POPS_FIX_FILES_PASS cases=37 result=0 Sony_entry_executed=0",
+    "[ps2rig] exit=0"
+  ],
+  "cases": {
+    "ordered_mode_pairs": 36,
+    "unsupported_mode_with_payload_atomic_rejection": 1
+  },
+  "limits": [
+    "Synthetic core and owned PATCH records only; full-buffer comparison checksums.",
+    "No Sony entry, IOP reset, game file access or save file access.",
+    "Does not establish production file discovery on console, game boot, runtime hooks or save persistence."
+  ],
+  "prior_attempts": [
+    {
+      "variant": "v1",
+      "elf_sha256": "9f10a3a960b5114abb1cc953216f9f58e7160c45fe5826b48da553e8d6dd7378",
+      "observation": "start marker only; no final acceptance before client timeout"
+    },
+    {
+      "variant": "v2",
+      "elf_sha256": "55da952446cd8617ffa6638d6b2e005ce4bb4cab0d931022eaaac044c1acbcb7",
+      "observation": "start marker only; no final acceptance before client timeout"
+    }
+  ],
+  "accepted_variant": "v3: initializes SIF RPC, screen progress, buffered final stdout; no production staging changes between probe variants"
+}

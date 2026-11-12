@@ -9,6 +9,6 @@ IRX_ID(MODNAME, 0x1, 0x0);
 int _start(int argc, char *argv[])
 {
     (void)argc; (void)argv;
-    udpbd_init();
+    if (udpbd_init() != 0) return MODULE_NO_RESIDENT_END;
     return MODULE_RESIDENT_END;
 }
