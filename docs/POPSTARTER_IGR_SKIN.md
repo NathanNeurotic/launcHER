@@ -108,7 +108,7 @@ What POPS does with a slot that does not hold a valid TIM2 file was not run.
   | built-in entry | fingerprint match or `$VCDID_n` |
   | **IGR skin** | |
   | `pops_stage_user_files`: commands, recompiler add-ons, then per folder (all games, then the game) the user `BIOS.BIN` and the fix files | the `BIOS.BIN` range is `0x24bc20..0x2cbbaf`, below the slots |
-  | progressive check, video, PS1 BIOS shell edits, region (the `_rom` variants with the loader state), `$RESET_WARMBOOT`, TROJAN slot chain, `MODULE_n.IRX` names, `$LOAD_PADMAN`, SLBB bypass, resident pad/widescreen/progressive/display hooks, opcode pass | |
+  | progressive check, video, PS1 BIOS shell edits and region (both through the `_rom` functions with the loader state), `$RESET_WARMBOOT`, TROJAN slot chain, `MODULE_n.IRX` names, `$LOAD_PADMAN`, SLBB bypass, resident pad/widescreen/progressive/display hooks, opcode pass | |
 
   This is the original's order for a fingerprint-matched entry. For a
   `$VCDID_n` entry the original applies the entry after the skin and
@@ -142,7 +142,7 @@ in `__common/POPS/`, where POPStarter users have it, is not found.
 For `SB.` (SMB) and `XX.` launches the original uses `mass:/POPS/` too.
 Its launch function sets the back-end word `gp+0x3448` to 1 for a name
 that starts `SB.` or `sb.` (`0x871568..0x871604`, the store at `0x871618`)
-and for `XX.` (the store at `0x8719a4`); the only other store to that word
+and for `XX.` or `xx.` (the store at `0x8719a4`); the only other store to that word
 in MAIN is the 0 at `0x870c64`. The loader then opens the literal
 `mass:/POPS/IGR_*.TM2` (`0x87e508` tests the word, `0x87e538` opens
 through `0x8d6c94`). launcHER reads from the folder of the VCD path it
