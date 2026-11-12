@@ -14,9 +14,9 @@ launcHER paragraphs of sections 3, 4, 5a, 6, 8, 9, 11, 13, 14 and 16 say
 what those merges changed, only as far as the merged code and its tests
 show it. Three areas are being changed on side branches while this is
 written and are marked "in progress on a side branch": the handoff defect
-(`pr23/handoff`), TROJAN files (`pr23/trojan`) and the answers to the first
-review of the `CHEATS.TXT` pass (`pr23/cfg`). What those branches will end
-with is not described here.
+(`pr23/handoff`; the last row of section 3), TROJAN files (`pr23/trojan`)
+and the answers to the first review of the `CHEATS.TXT` pass (`pr23/cfg`).
+What those branches will end with is not described here.
 
 **Nothing in this document was run on a console or in an emulator of the
 whole machine.** "Measured" means: the named block of the original was run on
@@ -50,7 +50,7 @@ Confidence labels, used on every statement:
 | `read` | read from disassembly or source, not executed |
 | `inferred` | a conclusion drawn from the above, not observed |
 
-`S1`..`S33` after a label refers to the spot checks in sections 2, 2a and
+`S1`..`S34` after a label refers to the spot checks in sections 2, 2a and
 2b.
 "Host" in a table says whether the statement, or the launcHER code that
 would implement it, can be checked on a host without a console: `yes`,
@@ -139,36 +139,60 @@ NOT TESTED on a console.
 | S31 | IGR skin function `0x87e464` with `gp+0x3868 = 0`: backend x POPS folder present or missing x `gp+0x38b0` 1 and 0 (8 runs) | Folder missing: return -666, nothing opened, core unchanged, `gp+0x38dc`, `gp+0x3460`, `gp+0x3868` each 0 to 1 (4 of 4); on `mass:` also the call of `0x91be68` on `mass0:/POPS`. Folder present: return 1, three opens, of those words only `gp+0x3868` changes (4 of 4) |
 | S32 | static: every `jal 0x8d8958` in `0x870000..0x915000`, and every `li v0,-666` inside the five file loaders | Callers: `0x873f9c` (`main`), `0x87e49c` (IGR skin), `0x87ec38` (OSD), `0x880348` (BIOS), `0x880aac` (TROJAN), `0x881e70` (PATCH), `0x8d4fac` (the `VMCDIR.TXT` reader). `-666` stores: IGR `0x87e4bc`; OSD `0x87ec68`, `0x87ee84`, `0x87eed0`; BIOS `0x880378`, `0x880558`, `0x8805a4`; TROJAN `0x880adc`, `0x880d18`, `0x880d64`; PATCH `0x881ea0`, `0x8820d8`, `0x882124`. Disassembly of `0x8d8958..0x8d8b10`: it returns 0 only when `gp+0x38dc` or `gp+0x3868` is 1 on entry; otherwise it sets `gp+0x3868 = 1` first and returns 1, or -666 with `gp+0x38dc = 1` and `gp+0x3460 = 1` (a `gp+0x3448` other than 0 or 1, which no store writes, S11, also returns 1) |
 | S33 | `.github/workflows/*.yml` against `tools/test_*.py` at `ef663b2`, read by the step parser of `tools/test_pops_doc_claims.py` | 32 test files. `build.yml` job `host-tests` runs 29, each as an unconditional step of its own. `launch-args.yml` runs `test_launch_args.py`. `test_pops_builtin_db.py` and `test_pops_progressive.py` are run by no workflow |
-| S34 | static: the BIOS handler `0x88019c` from its first gate to the POPS folder exit (`0x8801b4..0x880338`), and every read of `gp+0x38e0` in the handler | Seven gate loads, in this order: `gp+0x38dc` (any scope), `gp+0x343c` and `gp+0x344c` (all games), `gp+0x3878` (game), `gp+0x3430` (all games), `gp+0x344c` and `gp+0x3460` (game); the scope is the frame word `0(fp)`, 1 for the game. A gate that is set branches to the shared return `0x880a0c` (`lw v0,0xc0(fp)`) with `sw zero,0xc0(fp)` in the delay slot: six such branches, the `gp+0x343c`/`gp+0x344c` pair sharing one, each after an optional SKIPPED print gated by `gp+0x38b0`. The handler reads `gp+0x38e0` once, at `0x8804ec`, after all of them |
+| S34 | static: the BIOS handler `0x88019c` from its first gate to the POPS folder exit (`0x8801b4..0x880338`), and every read of `gp+0x38e0` in the handler | Seven gate loads, in this order: `gp+0x38dc` (any scope), `gp+0x343c` and `gp+0x344c` (all games), `gp+0x3878` (game), `gp+0x3430` (all games), `gp+0x344c` and `gp+0x3460` (game); the scope is the frame word `0(fp)`, 1 for the game. A gate that is set branches to the shared return `0x880a0c` (`lw v0,0xc0(fp)`) with `sw zero,0xc0(fp)` in the delay slot: six such branches, the `gp+0x343c`/`gp+0x344c` pair sharing one; the first (`gp+0x38dc`) at once, the other five after an optional `SKIPPED` print gated by `gp+0x38b0`. The handler reads `gp+0x38e0` once, at `0x8804ec`, after all of them |
 
 ### What `tools/test_pops_doc_claims.py` checks
 
 The test was added by the first correction pass. The second review showed
 that it pinned less than this paragraph then said (12 of the reviewer's 23
-one-line changes to the documents survived it). The second pass rewrote it;
-it now checks exactly the following, and nothing else in this document is
-read by a test. The results of the deliberate changes tried against it are
-in section 19.
+one-line changes to the documents survived it). The second pass rewrote it.
+The review of that pass found that this paragraph still named sentences
+the test pinned only in part (9 of the reviewer's 30 changes survived), and
+the third pass extended the pins and this list. The test now checks exactly
+the following, and nothing else in this document is read by a test. A
+sentence named here is compared whole unless the item says which part; a
+part that is compared as text only (its words, not a value computed from
+the original) is said so. The results of the deliberate changes tried
+against it are in section 19.
 
 Without the reference inputs (as in CI):
 
 - The `ci-coverage` list in `CLOUD_CONTINUATION.md` against the workflows.
   A test file counts as run only when an uncommented line of a step's
   `run:` begins a command `python tools/<file>` (or `python3`, `py`, also
-  after `&&` or `;`), not followed by `||` on that line; the step and its
-  job have no `if:` other than `always()`, `success()` or `true` and no
-  `continue-on-error`; and the workflow is triggered by push or pull
-  request. The parser is a small hand-written one for the YAML the
-  workflows use (PyYAML is not a CI dependency). "Every other file" must be
-  a step of the job the block names (`host-tests` in `build.yml`). The
-  parser is itself tested on synthetic texts: a commented-out step and run
-  line, `if: false`, `if: ${{ false }}`, another condition, `if: always()`,
-  `continue-on-error: true`, `|| true`, a mention inside `echo`, a job-level
-  `if:`, a manual-only trigger, a flow-list trigger and a block-scalar
-  `run:`.
+  after `&&` or `;`); that line has no `||`, no pipe and no background `&`
+  (a redirection such as `2>&1` is allowed); no earlier line of the same
+  `run:` is `exit`, `return`, `exec` or `set +e`; the step and its job have
+  no `if:` other than `always()`, `success()` or `true`, no
+  `continue-on-error` and no shell other than the default, `bash` or `sh`
+  (also through `defaults`); and the workflow is triggered by push or pull
+  request without a branch, path, tag or type filter. The parser is a
+  small hand-written one for the YAML the workflows use (PyYAML is not a CI
+  dependency). "Every other file" must be a step of the job the block names
+  (`host-tests` in `build.yml`). The parser is itself tested on synthetic
+  texts: a commented-out step and run line, `if: false`, `if: ${{ false }}`,
+  another condition, `if: always()`, `continue-on-error: true`, `|| true`,
+  a pipe to `tee`, a background `&`, a `2>&1` redirection (counted), `exit
+  0` or `set +e` before the test, `exit 0` after it (counted), `shell:
+  pwsh`, `shell: bash` (counted), a job-level `defaults` shell, a mention
+  inside `echo`, a job-level `if:`, a manual-only trigger, a flow-list
+  trigger, branch and path filters on both triggers, a tag filter on one of
+  them, and a block-scalar `run:`. Limits: the rule reads the step's text
+  and does not run a shell, so a failure hidden some other way (a test
+  inside an `if` or a function, `false && python tools/<file>` on a line
+  that is not the last, a script the step calls) is not seen.
 - One address for the `$USBDELAY_` handler in every document; every `S`
-  number cited here is defined, once; eight withdrawn sentences are gone
+  number cited here is defined, once, and the range `S1`..`S34` stated in
+  section 1 ends at the last one defined; eight withdrawn sentences are gone
   from README.md, `docs/pops-setup.html` and every `docs/*.md`.
+
+With the commits `cfebe01` and `ef663b2` in the clone (skipped otherwise,
+as in CI's shallow checkout): the number of `tools/test_*.py` files at
+each commit and the number the workflows ran, from that commit's own tree
+read by the same step parser, against `CLOUD_CONTINUATION.md`'s two
+sentences on them and the S33 result whole ("each as an unconditional step of
+its own" as one test file per step, and the files run by no workflow); and
+that no workflow at either commit sets one of the three reference inputs.
 
 With `POPSTARTER_TEST_ELF` (a value that is set but cannot be used, or no
 capstone, is a failure, not a skip), from the original's bytes, each
@@ -179,27 +203,61 @@ compared with whole phrases of this document or the inventory:
   of each for the BIOS handler), `main` ending at `0x87c214` (`jr ra` and
   its delay slot, then the next function's frame) with section 3's
   sentence on `main`'s range and frame size, and the counts and two
-  sites in the `gp+0x38b0` row;
+  sites in the `gp+0x38b0` row with its sentence "Most print calls are
+  skipped while it is 1, not all";
 - S25: the handler address `tools/popstarter_r13_commands.py` prints, the
   compare one word on, and every `$USBDELAY_` handler citation;
-- `FUN_008d8958` (S32): its entry tests, its stores of `gp+0x3868`,
-  `gp+0x38dc` and `gp+0x3460`, its two `-666` sites, its three callees and
-  the sentence that states its return values; its seven callers in S32 and
-  in the `gp+0x3868` row; `main`'s own call with the `gp+0x3888` gate and
-  its one store of `gp+0x3868` (`0x87425c`);
+- `FUN_008d8958` (S32): its entry tests; its stores of `gp+0x3868`,
+  `gp+0x38dc` and `gp+0x3460`, each writing 1; its two `-666` sites; its
+  three callees with the path each is given (`pfs1:/POPS/`, `mass:/POPS`,
+  `mass0:/POPS`) and the `bgez` after the second that leads to the third;
+  the `gp+0x3448` branches (0 to the `pfs1:` test, 1 to the `mass:` test,
+  any other value to the return of 1) and the three stores of `gp+0x3448`
+  in the code area with their values 0, 1, 1. Compared: the S32 sentence on
+  the return values whole, with its parenthetical (the values in "other than
+  0 or 1" are computed; "S11" is text); the `gp+0x3448` row's list of
+  writers (addresses and the 0 computed, the `SB.`/`XX.` labels text);
+  its seven callers in S32 and in the `gp+0x3868` row; the `gp+0x3460` row
+  of section 3a whole (text, beside the computed stores); `main`'s own call
+  with the `gp+0x3888` gate and its one store of `gp+0x3868` (`0x87425c`).
+  Also that the OSD, BIOS, TROJAN and PATCH loaders each read `gp+0x3460`
+  once and the IGR skin function never; what each loader does with it is
+  pinned for the BIOS handler only (S34), so "skips every later
+  current-game loader" is otherwise text;
 - the `-666` stores of the five loaders, as one phrase, each after the
   loader's single call of the folder check;
-- the BIOS handler's gates (S34: the seven flag loads of
-  `0x8801b4..0x880334` in order, with the scope each is tested in, six returns of 0, and the
-  section 4 gates sentence), its POPS folder exit (the instructions at
-  `0x880338`, `0x880348`, `0x880360`, `0x880368`, `0x880374`, `0x880378`
-  and the section 4 sentence) and its game-folder exit (the once-flag read
-  at `0x8804ec`, the only one in the handler, the store at `0x880500`, the
-  two calls, stores and `-666` sites, and their sentences, including the
-  condition on "always leaves `gp+0x38e0 = 1`");
-- the IGR skin function's return values 1, 0 and -666, the instructions
-  that decide them, the section 6 sentences on the folder check and its
-  extra writes, and the inventory's IGR sentence;
+- the BIOS handler's gates. S34: the seven flag loads of
+  `0x8801b4..0x880334` in order, with the scope each is tested in; the six
+  branches to the shared return `0x880a0c` (and its `lw v0,0xc0(fp)`);
+  which gate pair shares one; that the first returns with no print and the
+  other five after a `SKIPPED` print behind `gp+0x38b0`. Compared: the S34
+  row whole, with its counts in words computed from those, and the section
+  4 gates sentence;
+- the BIOS handler's POPS folder exit: the instructions at `0x880338`,
+  `0x880348`, `0x880360`, `0x880368` (its branch to `0x880384`),
+  `0x880374`, `0x880378`; the section 4 sentence on the exit; the next
+  sentence, "The check itself sets ... every later current-game loader is
+  skipped.", whole (its stores computed; its consequence, that a game-scope
+  load still runs, rests on the scope branch and on S30, which is not
+  re-run); `main`'s `SB.` gate: the writes of `gp+0x3888` in the code area
+  (0, 3, 0), the 3 in the block that also sets `gp+0x3448`, the phrase
+  "`main` skips it on `SB.` launches (`gp+0x3888 = 3`)" and the 3a
+  `gp+0x3888` row (the `SB.` attribution is text); and the inventory's
+  `BIOS.BIN` sentence on the exit. Not compared: "only when the `SB.` PAK
+  loop succeeds" and the sentence on which launches reach the exit;
+- the BIOS handler's game-folder exit: the once-flag read at `0x8804ec`,
+  the only one in the handler, the store at `0x880500`, the two calls,
+  stores and `-666` sites, and their sentences, including the condition on
+  "always leaves `gp+0x38e0 = 1`";
+- the IGR skin function's return values 1, 0 and -666 and the instructions
+  that decide them. Compared in section 6: "the function returns 0 at once
+  and opens nothing (`0x87e474..0x87e488`)", the sentence from "it first
+  runs the POPS folder check" to "returns -666 (`0x87e4bc`)", "At that call
+  the check returns only 1 or -666", and the sentence "The check also
+  writes: ... on `mass0:/POPS`." whole (offsets, callee and paths computed
+  from the check). In the inventory's IGR row: from "it returns 0 without
+  opening anything" to "which also sets `gp+0x3460`", and from "-666 with
+  that flag set" to "and `gp+0x3868` (gap audit section 6, S23, S31)";
 - S24: the frame word's writers and reader, the two `gp+0x38dc` reads
   around the call with a `nop` in the delay slot, and the S24 sentence
   whole;
@@ -214,10 +272,10 @@ not a folder is a failure): the file counts of S15 and section 12, and that
 every `TROJAN_n.BIN` header's hook word (offset 24) is the slot `SLOTS`
 gives for its file number.
 
-It does not repeat the emulated runs S22, S23, S27, S30 and S31, it does
-not check the launcHER paragraphs of sections 4 to 14 against launcHER's
-code, and it does not read README.md or `docs/pops-setup.html` beyond the
-withdrawn sentences.
+It does not repeat the emulated runs S22, S23, S27, S30 and S31 (so their
+run counts are not pinned), it does not check the launcHER paragraphs of
+sections 4 to 14 against launcHER's code, and it does not read README.md or
+`docs/pops-setup.html` beyond the withdrawn sentences.
 
 ## 3. Order of the original's launch function, and launcHER's
 
@@ -254,8 +312,8 @@ executed end to end by anyone.
 | `0x878f64` | PS1 BIOS shell edits, gated on four flags | `pops_apply_bios_shell_edits_rom` (`:1714`), gated on the loader state since `0945127` |
 | `0x879034` | region pass | `pops_apply_region_rom` (`:1722`) |
 | `0x8795f0` | `$RESET_WARMBOOT` pass | `pops_apply_reset_warmboot` (`:1740`) |
-| `0x879d04..0x879e58` | `$USBDELAY` byte patched into the PFS wrapper | none (`sleep(cfg.usb_delay)` at `:1985` on the EE instead; in progress on a side branch, section 9) |
-| `0x879e5c..0x87c1e0` | IOP resets, module starts, final clears, `j 0x22e440` | `:1665` onwards |
+| `0x879d04..0x879e58` | `$USBDELAY` byte patched into the PFS wrapper | none (`sleep(cfg.usb_delay)` at `:1985` on the EE instead; section 9) |
+| `0x879e5c..0x87c1e0` | IOP resets, module starts, final clears, `j 0x22e440` | `:1665` onwards. The handoff into POPS has a known defect ([PR23_HANDOFF_2026-11-11.md](PR23_HANDOFF_2026-11-11.md) sections 3.2 and 5.1); its fix is in progress on a side branch (`pr23/handoff`) |
 
 **Order difference that already exists.** The original runs TROJAN and PATCH
 files (all games, then the game) before the `CHEATS.TXT` parser. launcHER

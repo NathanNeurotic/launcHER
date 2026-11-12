@@ -8,10 +8,16 @@ the audit said. Section 2b of the audit lists exactly what is checked here;
 change that list and this file together.
 
 Native: needs nothing. The CI coverage list in docs/CLOUD_CONTINUATION.md
-against the steps the workflow files really run (a small parser for the
-subset of YAML they use, itself tested on synthetic texts); one address for
-the $USBDELAY_ handler in every document; every spot-check number cited in
-the audit is defined there; withdrawn sentences are gone.
+against the workflow steps that start each test file in a way whose failure
+fails the step, as far as the step text shows it (a small parser for the
+subset of YAML they use, itself tested on synthetic texts; it runs no
+shell); one address for the $USBDELAY_ handler in every document; every
+spot-check number cited in the audit is defined there and the stated range
+ends at the last one; withdrawn sentences are gone.
+
+History: needs the commits cfebe01 and ef663b2 in the clone (CI's shallow
+checkout has neither, so it skips). The test-file and CI counts the
+documents give for those commits, recounted from their own trees.
 
 Original: needs POPSTARTER_TEST_ELF and capstone (and unicorn for the wrapper
 run). Static reads of the original, and one bounded run of its embedded file
@@ -30,6 +36,7 @@ import hashlib
 import os
 import re
 import struct
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -221,48 +228,88 @@ def _not_continue_on_error(entry):
 
 
 def _triggers(tree):
+    """The unfiltered triggers: a push or pull_request with branches, paths,
+    tags or types filters runs only sometimes and does not count."""
     on = tree.get("on", tree.get("true"))
     if isinstance(on, str):
         return {on}
     if isinstance(on, list):
         return set(on)
     if isinstance(on, dict):
-        return set(on)
+        return {name for name, value in on.items() if not value}
     return set()
 
 
-def steps_that_run(text):
-    """{(job, test file name)} for steps that start a test on push or pull request.
+def _shell_ok(*scopes):
+    """GitHub's default shell (bash -e) or an explicit bash/sh, at every scope."""
+    for scope in scopes:
+        shell = scope.get("shell") if isinstance(scope, dict) else None
+        if shell is None:
+            defaults = scope.get("defaults") if isinstance(scope, dict) else None
+            run = defaults.get("run") if isinstance(defaults, dict) else None
+            shell = run.get("shell") if isinstance(run, dict) else None
+        if shell is not None and str(shell).strip() not in ("bash", "sh"):
+            return False
+    return True
+
+
+# A line after which later lines of a block either never run or no longer
+# fail the step.
+_STOPS = re.compile(r"^(?:exit|return|exec)(?:\s|$)|^set\s+(?:\+e|\+o\s+errexit)\b")
+
+
+def _masks_status(line):
+    """True when the line's exit status cannot fail the step: `||`, a pipe
+    (no pipefail under the default bash -e) or a background `&`."""
+    bare = re.sub(r"\d?>&\d|&>|>&", "", line)
+    return "||" in bare or "|" in bare or re.search(r"(?<!&)&(?!&)", bare) is not None
+
+
+def run_steps(text):
+    """[(job, step index, test file name)] for steps that start a test on push or pull request.
 
     A test file counts when an uncommented line of a step's `run:` begins a
-    command `python tools/<file>` (or `python3`, `py`), the step and its job
-    have no `if:` other than always(), success() or true and no
-    continue-on-error, the command is not followed by `||` on its line, and
-    the workflow runs on push or pull_request.
+    command `python tools/<file>` (or `python3`, `py`, also after `&&` or
+    `;`); the line has no `||`, pipe or background `&`; no earlier line of
+    the block is an `exit`, `return`, `exec` or `set +e`; the step and its
+    job have no `if:` other than always(), success() or true, no
+    continue-on-error and no shell other than bash or sh; and the workflow
+    runs on push or pull_request without branch, path, tag or type filters.
     """
     tree = parse_yaml(text)
     if not isinstance(tree, dict) or not ({"push", "pull_request"} & _triggers(tree)):
-        return set()
-    found = set()
+        return []
+    found = []
     jobs = tree.get("jobs") or {}
     for job_name, job in jobs.items():
         if not isinstance(job, dict) or not _condition_runs(job.get("if")) or not _not_continue_on_error(job):
             continue
-        for step in job.get("steps") or []:
+        for index, step in enumerate(job.get("steps") or []):
             if not isinstance(step, dict) or not _condition_runs(step.get("if")) or not _not_continue_on_error(step):
+                continue
+            if not _shell_ok(tree, job, step):
                 continue
             run = step.get("run")
             if not isinstance(run, str):
                 continue
             for line in run.splitlines():
                 line = line.strip()
-                if not line or line.startswith("#") or "||" in line:
+                if not line or line.startswith("#"):
+                    continue
+                if _STOPS.match(line):
+                    break
+                if _masks_status(line):
                     continue
                 for segment in re.split(r"&&|;", line):
                     match = _RUNS.match(segment.strip())
                     if match:
-                        found.add((job_name, match.group(1)))
+                        found.append((job_name, index, match.group(1)))
     return found
+
+
+def steps_that_run(text):
+    """{(job, test file name)}: run_steps without the step index."""
+    return {(job, name) for job, _index, name in run_steps(text)}
 
 
 def workflow_coverage():
@@ -367,6 +414,19 @@ class Native(unittest.TestCase):
         self.assertEqual(ran("\n        if: always()\n        run: python tools/test_b.py"), {"test_a.py", "test_b.py"})
         self.assertEqual(ran("\n        continue-on-error: true\n        run: python tools/test_b.py"), {"test_a.py"})
         self.assertEqual(ran("\n        run: python tools/test_b.py || true"), {"test_a.py"})
+        # A status that cannot fail the step, or a test that never starts.
+        self.assertEqual(ran("\n        run: python tools/test_b.py | tee b.log"), {"test_a.py"})
+        self.assertEqual(ran("\n        run: python tools/test_b.py &"), {"test_a.py"})
+        self.assertEqual(ran("\n        run: python tools/test_b.py > b.log 2>&1"), {"test_a.py", "test_b.py"})
+        self.assertEqual(ran("\n        run: |\n          exit 0\n          python tools/test_b.py\n"), {"test_a.py"})
+        self.assertEqual(ran("\n        run: |\n          set +e\n          python tools/test_b.py\n"), {"test_a.py"})
+        self.assertEqual(ran("\n        run: |\n          python tools/test_b.py\n          exit 0\n"),
+                         {"test_a.py", "test_b.py"})
+        self.assertEqual(ran("\n        shell: pwsh\n        run: python tools/test_b.py"), {"test_a.py"})
+        self.assertEqual(ran("\n        shell: bash\n        run: python tools/test_b.py"), {"test_a.py", "test_b.py"})
+        job_shell = SYNTHETIC.replace("    runs-on: ubuntu-latest",
+                                      "    defaults:\n      run:\n        shell: python\n    runs-on: ubuntu-latest")
+        self.assertEqual(ran("", job_shell), set())
         # A mention that does not run the file.
         self.assertEqual(ran("\n        run: echo \"python tools/test_b.py\""), {"test_a.py"})
         self.assertEqual(ran("\n        run: ls tools/test_b.py"), {"test_a.py"})
@@ -378,6 +438,11 @@ class Native(unittest.TestCase):
         flow = SYNTHETIC.replace("on:\n  push:\n  pull_request:\n", "on: [push, pull_request]\n")
         self.assertEqual(ran("", flow), {"test_a.py"})
         self.assertEqual(ran("", SYNTHETIC.replace("on:\n  push:\n  pull_request:\n", "on: push\n")), {"test_a.py"})
+        filtered = SYNTHETIC.replace("on:\n  push:\n  pull_request:\n",
+                                     "on:\n  push:\n    branches: [main]\n  pull_request:\n    paths: ['docs/**']\n")
+        self.assertEqual(ran("", filtered), set())
+        half = SYNTHETIC.replace("on:\n  push:\n  pull_request:\n", "on:\n  push:\n    tags: ['v*']\n  pull_request:\n")
+        self.assertEqual(ran("", half), {"test_a.py"})
 
     def test_usbdelay_handler_address_is_cited_one_way(self):
         cited = usbdelay_handler_citations()
@@ -391,6 +456,9 @@ class Native(unittest.TestCase):
         self.assertEqual(len(defined), len(set(defined)), "a spot-check number is defined twice")
         cited = {int(n) for n in re.findall(r"\bS(\d+)\b", text)}
         self.assertFalse(cited - set(defined), "cited but never defined: %s" % sorted(cited - set(defined)))
+        stated = re.search(r"`S1`\.\.`S(\d+)` after a label refers to the spot checks", flat(AUDIT))
+        self.assertIsNotNone(stated, "the audit lost its sentence on the spot-check range")
+        self.assertEqual(int(stated.group(1)), max(defined), "the stated spot-check range is not S1..S%d" % max(defined))
 
     def test_no_document_keeps_a_withdrawn_statement(self):
         withdrawn = ("Every banner `printf` is skipped",
@@ -405,6 +473,75 @@ class Native(unittest.TestCase):
             text = flat(path)
             for phrase in withdrawn:
                 self.assertFalse(phrase in text, "%s keeps the withdrawn phrase %r" % (path.name, phrase))
+
+
+def _git(*args):
+    return subprocess.run(["git", "-C", str(ROOT)] + list(args), capture_output=True, check=True).stdout
+
+
+def _have_commits(*commits):
+    try:
+        for commit in commits:
+            _git("cat-file", "-e", commit + "^{commit}")
+        return True
+    except Exception:
+        return False
+
+
+def coverage_at(commit):
+    """(test files, {(workflow, job): [(step index, file)]}, workflow texts) at a commit."""
+    files = sorted(m.group(1) for m in (re.fullmatch(r"tools/(test_\w+\.py)", p) for p in
+                                        _git("ls-tree", "--name-only", commit, "tools/").decode().split()) if m)
+    steps, texts = {}, {}
+    for path in _git("ls-tree", "--name-only", commit, ".github/workflows/").decode().split():
+        if not path.endswith(".yml"):
+            continue
+        text = _git("show", "%s:%s" % (commit, path)).decode("utf-8")
+        name = path.rsplit("/", 1)[-1]
+        texts[name] = text
+        for job, index, test in run_steps(text):
+            if test in files:
+                steps.setdefault((name, job), []).append((index, test))
+    return files, steps, texts
+
+
+def _names(names):
+    quoted = ["`%s`" % n for n in sorted(names)]
+    return quoted[0] if len(quoted) == 1 else ", ".join(quoted[:-1]) + " and " + quoted[-1]
+
+
+@unittest.skipUnless(_have_commits("cfebe01", "ef663b2"), "cfebe01 and ef663b2 are not in this clone (shallow checkout)")
+class History(unittest.TestCase):
+    """The counts the documents give for cfebe01 and ef663b2, from those commits' own trees."""
+
+    def counts(self, commit):
+        files, steps, texts = coverage_at(commit)
+        host = steps.get(("build.yml", "host-tests"), [])
+        self.assertEqual(len({i for i, _n in host}), len(host), "a host-tests step runs more than one test file")
+        self.assertEqual(len({n for _i, n in host}), len(host), "a test file is two host-tests steps")
+        other = {n for (workflow, job), entries in steps.items() if (workflow, job) != ("build.yml", "host-tests")
+                 for _i, n in entries}
+        ran = {n for _i, n in host} | other
+        for name, text in texts.items():
+            for variable in ("POPS_TEST_ELF", "POPSTARTER_TEST_ELF", "POPS_TROJAN_CORPUS"):
+                self.assertNotIn(variable, text, "%s at %s sets %s" % (name, commit, variable))
+        return files, host, other, ran
+
+    def test_cfebe01(self):
+        files, host, other, ran = self.counts("cfebe01")
+        self.assertEqual(other - {n for _i, n in host}, {"test_launch_args.py"})
+        self.assertIn("At `cfebe01` there were %d `tools/test_*.py` files and CI ran %d of them, all without the "
+                      "reference inputs: %d as steps of the `host-tests` job in `build.yml` and `test_launch_args.py` "
+                      "in its own workflow." % (len(files), len(ran), len(host)), flat(CONTINUATION))
+
+    def test_ef663b2(self):
+        files, host, other, ran = self.counts("ef663b2")
+        self.assertEqual(other - {n for _i, n in host}, {"test_launch_args.py"})
+        self.assertIn("At `ef663b2` there are %d and CI runs %d: %d as `host-tests` steps and `test_launch_args.py` "
+                      "(gap audit S33)." % (len(files), len(ran), len(host)), flat(CONTINUATION))
+        self.assertIn("| %d test files. `build.yml` job `host-tests` runs %d, each as an unconditional step of its own. "
+                      "`launch-args.yml` runs `test_launch_args.py`. %s are run by no workflow |"
+                      % (len(files), len(host), _names(set(files) - ran)), flat(AUDIT))
 
 
 ELF_SET = bool(os.environ.get("POPSTARTER_TEST_ELF"))
@@ -450,13 +587,45 @@ def c_string(address):
 
 
 def print_format(site):
-    """The format string of a print call: `addiu a0,gp,imm` just before it or in its delay slot."""
+    """The string in a0 at a call: `addiu a0,gp,imm` just before it or in its delay slot."""
     for address in (site - 4, site + 4):
         value = word(address)
         if value >> 16 == 0x2784:
             imm = value & 0xffff
             return c_string(GP + (imm - 0x10000 if imm & 0x8000 else imm))
     return None
+
+
+def branch_target(address):
+    offset = word(address) & 0xffff
+    return address + 4 + 4 * (offset - 0x10000 if offset & 0x8000 else offset)
+
+
+def gp_stores(offset, low=CODE_AREA[0], high=CODE_AREA[1]):
+    """{address: value} for every `sw` to offset(gp) in [low, high): `sw zero`, or
+    a register set by `addiu reg,zero,imm` in the instruction before."""
+    found = {}
+    for address in range(low, high, 4):
+        value = word(address)
+        if value >> 21 != (0x2b << 5) | 28 or value & 0xffff != offset:
+            continue
+        reg = (value >> 16) & 31
+        before = word(address - 4)
+        if reg == 0:
+            found[address] = 0
+        elif before >> 16 == 0x2400 | reg:
+            imm = before & 0xffff
+            found[address] = imm - 0x10000 if imm & 0x8000 else imm
+        else:
+            found[address] = None
+    return found
+
+
+NUMBER_WORDS = {1: "one", 2: "two", 3: "three", 4: "four", 5: "five", 6: "six", 7: "seven", 8: "eight", 9: "nine"}
+
+
+def joined(items):
+    return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " and " + items[-1]
 
 
 def print_call_census(low, high):
@@ -571,11 +740,56 @@ class Original(unittest.TestCase):
                 stores.setdefault(value & 0xffff, []).append(address)
         self.assertEqual(stores, {0x3868: [0x8d899c], 0x38dc: [0x8d8a20, 0x8d8ac0], 0x3460: [0x8d8a28, 0x8d8ac8]})
         self.assertEqual([a for a in range(low, high, 4) if word(a) == LI_V0_666], [0x8d8a2c, 0x8d8acc])
-        callees = [word(a) for a in range(low, high, 4) if word(a) >> 26 == 3 and word(a) != jal(PRINT)]
-        self.assertEqual(callees, [jal(0x8d7e78), jal(0x91bf80), jal(0x91be68)])
+        # Every store of the check writes 1.
+        for offset, sites in stores.items():
+            self.assertEqual(gp_stores(offset, low, high), {a: 1 for a in sites}, hex(offset))
+        calls = [a for a in range(low, high, 4) if word(a) >> 26 == 3 and word(a) != jal(PRINT)]
+        self.assertEqual([word(a) for a in calls], [jal(0x8d7e78), jal(0x91bf80), jal(0x91be68)])
+        paths = [print_format(a) for a in calls]
+        self.assertEqual(paths, ["pfs1:/POPS/", "mass:/POPS", "mass0:/POPS"])
+        # mass: a negative stat result (bgez v0 not taken) leads to 0x91be68.
+        self.assertEqual(word(calls[1] + 8) >> 16, 0x0441)                 # bgez v0
+        self.assertEqual(calls[2], calls[1] + 0x14)
+        # gp+0x3448: 0 leads to the pfs1: test, 1 to the mass: test and any
+        # other value to the shared return of 1.
+        self.assertEqual(word(0x8d89a0), gp_word(0x23, 2, 0x3448))
+        self.assertEqual(word(0x8d89a4) >> 16, 0x1440)                     # bnez v0
+        self.assertEqual(branch_target(0x8d89a4), 0x8d8a38)
+        self.assertEqual([word(a) for a in (0x8d8a38, 0x8d8a3c)], [gp_word(0x23, 3, 0x3448), LI_V0_1])
+        self.assertEqual(word(0x8d8a40) >> 16, 0x1462)                     # bne v1,v0
+        one = branch_target(0x8d8a40)
+        self.assertEqual(branch_target(calls[1] + 8), one)
+        self.assertEqual([word(a) for a in (one + 0x1c, one + 0x20, one + 0x24)],
+                         [LI_V0_1, 0xafc20030, 0x8fc20030])                 # li v0,1; sw/lw v0,0x30(fp)
+        writes_3448 = gp_stores(0x3448)
+        self.assertEqual(writes_3448, {0x870c64: 0, 0x871618: 1, 0x8719a4: 1})
         self.assertIn("it returns 0 only when `gp+0x38dc` or `gp+0x3868` is 1 on entry; otherwise it sets "
-                      "`gp+0x3868 = 1` first and returns 1, or -666 with `gp+0x38dc = 1` and `gp+0x3460 = 1`",
-                      self.audit)
+                      "`gp+0x3868 = 1` first and returns 1, or -666 with `gp+0x38dc = 1` and `gp+0x3460 = 1` "
+                      "(a `gp+0x3448` other than %s, which no store writes, S11, also returns 1) |"
+                      % " or ".join(str(v) for v in sorted(set(writes_3448.values()))), self.audit)
+        self.assertIn("written only at %s |" % ", ".join(
+            "`%#x` (%s)" % (a, label) for a, label in zip(sorted(writes_3448), ("0", "`SB.`", "`XX.`"))), self.audit)
+        self.assertEqual([writes_3448[a] for a in sorted(writes_3448)][1:], [1, 1])
+        # Section 6: the extra writes of the check, from the stores and paths above.
+        self.assertIn("The check also writes: `gp+%#x = 1` on every call that gets that far, and on a missing folder "
+                      "`gp+%#x = 1` (which skips every later current-game loader) as well as `gp+%#x = 1`. On `mass:` "
+                      "a failed stat of `%s` is followed by a call of `%#x` on `%s`."
+                      % (0x3868, 0x3460, 0x38dc, paths[1], word(calls[2]) << 2 & 0x0fffffff, paths[2]), self.audit)
+        self.assertIn("| `0x3460` | the game's folder is missing; skips every later current-game loader. Also set to "
+                      "1, with `gp+0x38dc`, by `FUN_008d8958` when the POPS folder is missing |", self.audit)
+        # The loaders that can be skipped by gp+0x3460 read it, once each; the
+        # IGR skin function does not. What each does with it is pinned for
+        # the BIOS handler only (S34).
+        readers = {}
+        for name, (lo, hi) in (("IGR", IGR_SKIN), ("OSD", OSD_HANDLER), ("BIOS", BIOS_HANDLER),
+                               ("TROJAN", TROJAN_LOADER), ("PATCH", PATCH_LOADER)):
+            readers[name] = [a for a in range(lo, hi, 4)
+                             if word(a) >> 26 == 0x23 and (word(a) >> 21) & 31 == 28 and word(a) & 0xffff == 0x3460]
+        self.assertEqual({n: len(s) for n, s in readers.items()}, {"IGR": 0, "OSD": 1, "BIOS": 1, "TROJAN": 1, "PATCH": 1})
+        # The inventory's IGR row, through the extra writes.
+        self.assertIn("-666 with that flag set after a failed POPS folder check, which also sets `gp+%#x` (every later "
+                      "current-game loader is skipped) and `gp+%#x` (gap audit section 6, S23, S31)"
+                      % (0x3460, 0x3868), self.inventory)
         # Its seven callers, in address order, as S32 and section 3a list them.
         callers = [a for a in range(*CODE_AREA, 4) if word(a) == jal(low)]
         self.assertEqual(callers, [0x873f9c, 0x87e49c, 0x87ec38, 0x880348, 0x880aac, 0x881e70, 0x8d4fac])
@@ -610,6 +824,21 @@ class Original(unittest.TestCase):
                          [gp_word(0x23, 3, 0x3868), jal(FOLDER_CHECK[0]), 0x8fc30000, 0x10620006,
                           gp_word(0x2b, 2, 0x38dc), LI_V0_666])
         self.assertEqual(0x880368 + 4 + 4 * 6, 0x880384)                   # the scope test skips the exit
+        self.assertEqual(branch_target(0x880368), 0x880384)
+        check = {o: sorted(gp_stores(o, *FOLDER_CHECK).values()) for o in (0x3868, 0x38dc, 0x3460)}
+        self.assertEqual(check, {0x3868: [1], 0x38dc: [1, 1], 0x3460: [1, 1]})
+        self.assertIn("The check itself sets `gp+0x3868 = 1`, and on a missing folder `gp+0x38dc = 1` and "
+                      "`gp+0x3460 = 1` (S32), so after a missing POPS folder a game-scope load still runs while every "
+                      "later current-game loader is skipped.", self.audit)
+        # main's check is skipped on gp+0x3888 != 0; only the SB. path writes it nonzero, with 3.
+        writes_3888 = gp_stores(0x3888)
+        self.assertEqual(writes_3888, {0x870c7c: 0, 0x871620: 3, 0x8719a8: 0})
+        self.assertEqual(gp_stores(0x3448, 0x87160c, 0x871624), {0x871618: 1})   # the same block sets gp+0x3448
+        self.assertIn("`main` skips it on `SB.` launches (`gp+0x3888 = %d`)" % writes_3888[0x871620], self.audit)
+        self.assertIn("| `0x3888` | %d on `SB.` launches, else 0 |" % writes_3888[0x871620], self.audit)
+        # The inventory's BIOS.BIN row.
+        self.assertIn("the handler's POPS folder exit (`0x880338..0x880380`; all games returns -666, the game scope "
+                      "goes on; gap audit section 4, S30) is not copied", self.inventory)
         self.assertIn("the POPS folder exit (`0x880338..0x880380`). The handler reads `gp+0x3868` and, if it is "
                       "not 1, calls the POPS folder check `FUN_008d8958` (`jal` at `0x880348`). A result of 1 goes "
                       "on. Otherwise all games returns -666 (`sw` of 1 to `gp+0x38dc` at `0x880374`, `li v0,-666` "
@@ -628,7 +857,7 @@ class Original(unittest.TestCase):
         # The gates come first: each returns 0 before either exit and before
         # the once-flag is read, so only a call that passes them sets it.
         low, high = 0x8801b4, 0x880338
-        gates, scope, returns = [], "any scope", 0
+        gates, scope, returns, events = [], "any scope", 0, []
         for address in range(low, high, 4):
             value = word(address)
             if value == 0x8fc30000:                                     # lw v1,0(fp): the scope
@@ -636,13 +865,50 @@ class Original(unittest.TestCase):
                 scope = {0x1062: "all games", 0x1462: "game"}[word(address + 8) >> 16]
             elif value >> 16 == 0x8f83 and value & 0xffff != 0x38b0:    # lw v1,off(gp); 0x38b0 is the print switch
                 gates.append((scope, value & 0xffff))
+                events.append(("gate", value & 0xffff))
+            elif value == jal(PRINT):
+                events.append(("print", print_format(address)))
             elif value >> 16 == 0x1000:                                 # b: the shared return, v0 = 0xc0(fp)
-                target = address + 4 + ((value & 0xffff) ^ 0x8000) * 4 - 0x8000 * 4
-                if target == 0x880a0c:
+                if branch_target(address) == 0x880a0c:
                     self.assertEqual(word(address + 4), 0xafc000c0)    # sw zero,0xc0(fp) in the delay slot
                     returns += 1
+                    events.append(("return", None))
+        self.assertEqual(word(0x880a0c), 0x8fc200c0)                   # lw v0,0xc0(fp)
         self.assertEqual([g for _s, g in gates], [0x38dc, 0x343c, 0x344c, 0x3878, 0x3430, 0x344c, 0x3460])
         self.assertEqual(returns, 6)        # one per gate test; the two 0x343c/0x344c loads share one
+        self.assertEqual(print_call_census(low, high)[1], [])           # every print there is behind gp+0x38b0
+        # Group the events: the gates each return closes, and whether a print came first.
+        groups, current, printed = [], [], []
+        for kind, what in events:
+            if kind == "gate":
+                current.append(what)
+            elif kind == "print":
+                printed.append(what)
+            else:
+                groups.append((current, printed))
+                current, printed = [], []
+        self.assertEqual(current, [])
+        shared = [g for g, _p in groups if len(g) > 1]
+        quiet = [g for g, p in groups if not p]
+        loud = [p for _g, p in groups if p]
+        self.assertTrue(all(p == ["    > SKIPPED !!!\n"] for p in loud), loud)
+        self.assertEqual(len(shared), 1)
+        self.assertEqual(len(quiet), 1)
+        s34_groups, last = [], None
+        for scope, offset in gates:
+            if scope != last:
+                s34_groups.append((scope, []))
+            s34_groups[-1][1].append("`gp+%#x`" % offset)
+            last = scope
+        self.assertIn("| %s gate loads, in this order: %s; the scope is the frame word `0(fp)`, 1 for the game. A gate "
+                      "that is set branches to the shared return `0x880a0c` (`lw v0,0xc0(fp)`) with `sw zero,0xc0(fp)` "
+                      "in the delay slot: %s such branches, the %s pair sharing one; the first (%s) at once, the "
+                      "other %s after an optional `SKIPPED` print gated by `gp+0x38b0`. The handler reads `gp+0x38e0` "
+                      "once, at `0x8804ec`, after all of them |"
+                      % (NUMBER_WORDS[len(gates)].capitalize(),
+                         ", ".join("%s (%s)" % (joined(items), s) for s, items in s34_groups),
+                         NUMBER_WORDS[returns], "/".join("`gp+%#x`" % o for o in shared[0]),
+                         joined(["`gp+%#x`" % o for o in quiet[0]]), NUMBER_WORDS[len(loud)]), self.audit)
         loads = [a for a in range(*BIOS_HANDLER, 4) if word(a) & 0xffe0ffff == gp_word(0x23, 0, 0x38e0)]
         self.assertEqual(loads, [0x8804ec])
         phrase, last = [], None

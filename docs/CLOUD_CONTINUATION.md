@@ -77,11 +77,17 @@ inputs: 23 as steps of the `host-tests` job in `build.yml` and
 `test_launch_args.py` in its own workflow. At `ef663b2` there are 32 and CI
 runs 30: 29 as `host-tests` steps and `test_launch_args.py` (gap audit
 S33). The list below is the current one; `tools/test_pops_doc_claims.py`
-compares it with the steps the workflows really run (an uncommented `run:`
-line that starts `python tools/<file>`, in a step and job with no `if:`
-other than `always()`/`success()`, no `continue-on-error`, in a workflow
-triggered by push or pull request) and fails when they disagree, so change
-both together. Optional third input for that test: `POPS_TROJAN_CORPUS`, a
+compares it with the workflow steps that start each file in a way whose
+failure fails the step, as far as a text parser can tell (an uncommented
+`run:` line that starts `python tools/<file>`, with no `||`, pipe or
+background `&` on it and no `exit` or `set +e` before it; in a step and job
+with no `if:` other than `always()`/`success()`/`true`, no
+`continue-on-error` and the default shell, `bash` or `sh`; in a workflow
+triggered by push or pull request without filters; the rule and what it
+cannot see are in gap audit section 2b) and fails when they disagree, so
+change both together. Where `cfebe01` and `ef663b2` are in the clone (not
+in CI's shallow checkout) it also recounts the two sentences above from
+those commits. Optional third input for that test: `POPS_TROJAN_CORPUS`, a
 folder of community `TROJAN_n.BIN`/`PATCH_n.BIN` files (REPOP's
 `popstarter/` folder was used); it checks the audit's corpus counts and
 hook slots.
