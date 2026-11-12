@@ -7,16 +7,19 @@ present to reset the PS2.
 
 ## Build and evidence
 
-Source commit: `412c11b5dc9e7f96c651f55498ef8a1ccf304cc6` (PR 23).
+Source commit: `37784661ae7a0104dcea2c2bff29a0b519a9c7c7` (PR 23).
+The earlier baseline was `412c11b5dc9e7f96c651f55498ef8a1ccf304cc6`.
 
 | Build | File | SHA-256 |
 | --- | --- | --- |
-| Release | `build-pr23-release/release/launcHER.elf` | `3279611f5039abe19ea26af07476177b8cd731b9104001225082212d369ac9a3` |
-| Trace (`LAUNCHER_BOOT_TRACE=ON`, `DEBUG=ON`) | `build-pr23-trace/release/launcHER.elf` | `70c655abe0f5e5ac0bb1d4b645cd7f068d0a9664d37522755eb2c6af0018028b` |
+| Release | `build-pr23-release/release/launcHER.elf` | `eabd72a33026640c6106c5fc562392bbc976362ad2f98eeac8ab998c347fadb7` |
+| Trace (`LAUNCHER_BOOT_TRACE=ON`, `DEBUG=ON`) | `build-pr23-trace/release/launcHER.elf` | `417a69be955087955afa7c20be68cc66328b52c9d8a78edea884ea998987a4f8` |
 
 Both container builds printed `handoff layout: OK`. CMake printed
 `version=unknown` for these worktree builds; use the source commit above, not
-the generated version string. The files are 332,260 and 336,692 bytes.
+the generated version string. The files are 332,196 and 336,468 bytes.
+The baseline `ata_bd: -200` reproduction and the fixed PCSX2 evidence are in
+[handoff/2026-11-12/usb-pops-services.md](handoff/2026-11-12/usb-pops-services.md).
 
 Use the trace ELF for diagnosis and the release ELF for the final repeat of a
 passing case. For every case, preserve the serial/GS output up to the Sony IOP
@@ -46,20 +49,21 @@ none of them.
    without the command, a launch error, trap, hang, or dead controls. Save the
    config and both logs for comparison.
 
-3. **Tekken from USB, no commands — known blocker at this commit.**
+3. **Tekken from USB, no commands — service fix acceptance.**
    Launch `mass:/POPS/PR23USB.VCD` with no per-game `CHEATS.TXT`.
-   At `412c11b`, the open PCSX2 issue is `ata_bd: -200` followed by failed
-   POPS services; a console result is not yet known. Record that exact error
-   if it occurs and stop the case. Reaching gameplay is the desired result
-   only after the USB service fix lands. Any earlier trap, a different module
-   error, or the same `-200` on a fixed build is a failure. Save the trace.
+   The baseline `412c11b` failed with `ata_bd: -200` and failed POPS services;
+   `3778466` removes that module from the USB-only Sony service load.
+   Expected: Tekken reaches gameplay and controller input works. Failure:
+   `ata_bd: -200`, another module/service error, trap, black screen, hang, or
+   dead controls. Save the trace and final screen. PCSX2 acceptance used
+   EE+IOP interpreters; the separate IOP-recompiler `psxUNK` observation is
+   not a console result.
 
 4. **Tekken from USB with `$ORIGINAL_OPCODES`.**
    Put `$ORIGINAL_OPCODES` in `PR23USB/CHEATS.TXT` and repeat step 3.
-   The current-head blocker is still `ata_bd: -200`; do not count the command
-   as tested if that stops the launch. After the USB fix, expected: the same
-   playable result as step 3. Failure: a difference caused solely by adding
-   the command. Save both configs and logs.
+   Expected: the same playable result as step 3. Failure: `ata_bd: -200`, a
+   regression that was absent without the command, another service error,
+   trap, hang, or dead controls. Save both configs and logs.
 
 5. **Reset combo without `$RESET_WARMBOOT`.**
    Start Tekken from ATA with no commands. In gameplay hold exactly
