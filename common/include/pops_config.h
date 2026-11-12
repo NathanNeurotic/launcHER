@@ -274,9 +274,9 @@ typedef struct {
    * $NOVMC1, no per-pass store, and no SLOT1.VMC is made. */
   uint8_t builtin_no_vmc1;
   /* A $USBDELAY_n was taken (handler 0x89dbd4..0x89e13c): usb_delay is the
-   * digit the original stores in the byte at 0x100017. Without one the
-   * original keeps the byte its ELF ships with (1), which launcHER does not
-   * model: usb_delay stays 0. */
+   * digit the original stores in the byte at 0x100017. Without one the parser
+   * leaves usb_delay at 0; the launch applies the original's default of 1
+   * on USB/SB when this flag is false. */
   uint8_t usb_delay_set;
   /* A VMCDIR.TXT was used (pops_config_parse_vmcdir): vmc_dir is its
    * folder name, empty for the POPS folder itself. */

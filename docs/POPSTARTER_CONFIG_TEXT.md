@@ -175,14 +175,14 @@ code (which file operation) was not traced.
 ### launcHER
 
 - The parsed value is the original's: `usb_delay` is the digit and
-  `usb_delay_set` says one was taken. Without the command `usb_delay` stays
-  0; the original's shipped 1 is not modelled.
+  `usb_delay_set` says one was taken. With no command the launch applies the
+  original's shipped 1 on USB/SB; other devices keep 0 by default.
 - What launcHER does with it is NOT the original's and was not changed
   here: `handler_pops.c` calls `sleep(cfg.usb_delay)` on the EE before the
   launch when the value is above 0, for every device. There is no patched
-  wrapper word and no delay in an IOP module. Matching the original's
-  timing (a one-time IOP delay on USB and SMB launches only, 1 second when
-  no command is given) needs a console to judge and is a follow-up.
+  wrapper word and no one-time delay in an IOP module. Matching the original's
+  timing (a one-time IOP delay on USB and SMB launches only) needs a console
+  to judge and is a follow-up.
 - `pops_config_load_table` / `pops_config_export_table` (used by tests
   only) put `usb_delay` in table byte 3 (`0x100013`). `$USBDELAY_n` writes
   `0x100017`, which is table byte 7. Reported, not changed.
