@@ -1226,3 +1226,60 @@ push-only `if:`, `continue-on-error: true`, `|| true`, the file named only
 inside `echo`, the doc-claims step itself replaced, a test file in no
 workflow, and a file missing from the `ci-coverage` list (M10, M11, M18,
 M22, M23, N01..N05); the withdrawn run sentence put back (N16).
+
+### 19b. The third correction pass (answer to the review of 19a)
+
+The review of the second pass reproduced S30 and S31 with its own folder
+model and found every statement about the original that it checked true.
+It found that section 2b again named sentences the test pinned only in
+part, that the step parser counted a test whose failure cannot fail its
+step, one "in progress on a side branch" marker no branch backed, the
+stale range `S1`..`S33` in section 1, and unpinned counts.
+
+What it changed: section 2b (rewritten to name each compared phrase, and
+left out of the text the test compares, because it quotes some of them);
+the S34 row (the first gate, `gp+0x38dc`, returns with no print; the row
+said every gate printed first: static read of `0x8801b4..0x8801c8`); the
+`S1`..`S34` range; the last row of section 3 (a pointer to the handoff
+defect, which the header said was marked and no row was); the
+`$USBDELAY` row of section 3 (the marker dropped: no side branch changes
+the EE sleep or the wrapper patch); `CLOUD_CONTINUATION.md`'s sentence on
+the step rule; and `tools/test_pops_doc_claims.py`. No C source changed.
+
+The test, in short (section 2b has the full list): the S32, S34, section 4,
+section 6 and inventory sentences the review named are compared whole,
+with their addresses, offsets, paths and counts computed from the
+original; the step parser also refuses a pipe, a background `&`, a step
+after `exit`, `return`, `exec` or `set +e`, a shell other than bash or sh
+and a filtered trigger; the stated spot-check range must end at the last
+row; and a new History class recounts the `cfebe01` and `ef663b2` figures
+from those commits when they are in the clone (CI's shallow checkout skips
+it; checked with a `--depth 1` clone: 2 more skips, exit 0).
+
+Deliberate one-line changes, run on `51c9693` like those of 19a (each to a
+`git archive` copy, or, for the three that need the History class, to a
+temporary `git worktree` of the same commit; each run without inputs and
+with `POPS_TEST_ELF`, `POPSTARTER_TEST_ELF` and `POPS_TROJAN_CORPUS`): the
+reviewer's R01..R30 and 18 more (F01..F18). With the inputs 47 of 48 are
+caught; without inputs 10 are (the workflow changes R11, R12, F10..F13, the
+range F03, and the History ones R09, R10, F09). The one survivor is R14,
+an S30 run count: the emulated runs are not repeated by the test.
+
+Host test list, `pr23/docs-2` at `51c9693` (only this section changed after
+it), every `tools/test_*.py` one after another, temp folders set to a fresh
+scratch folder: without the reference inputs, 32 files, each exit 0, with
+the skip counts of 19a (`test_pops_doc_claims.py` 11, its History class
+running); with `POPS_TEST_ELF`, `POPSTARTER_TEST_ELF` and
+`POPS_TROJAN_CORPUS`, 32 files, each exit 0, still skipping
+`test_pops_external.py`, `test_pops_launch_hooks.py` and
+`test_pops_progressive.py` 3 each (inputs not given). `test_pops_user_bios.py`
+keeps its one expected failure in both passes.
+
+Container build (Docker, `ghcr.io/ps2homebrew/ps2homebrew:main`, CMake, C
+code as at `ef663b2`): `release/launcHER.elf`, 326,772 bytes, version
+`unknown`. Not run on anything.
+
+Not done by this pass: no console, PS2 rig or whole-machine emulator; S22,
+S23, S27, S30 and S31 not re-run; which real launches reach the BIOS and
+IGR POPS folder exits is still not traced (the review's lead that `main`
+may always set `gp+0x3868` first is a static read, not checked here).
