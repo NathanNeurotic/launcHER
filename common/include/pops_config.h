@@ -120,7 +120,12 @@ typedef struct {
 #define POPS_CHEAT_W32        0x40u
 
 typedef struct {
-  /* Video settings */
+  /* Video settings. video_mode holds the original's three words the way
+   * its region pass reads them (0x879034): POPS_VMODE_NTSC2PAL is the
+   * forced-PAL flag (gp+0x38a0, $FORCEPAL), which a later $NOPAL does not
+   * clear; POPS_VMODE_NOPAL is the automatic-PAL selector off (gp+0x4fa0,
+   * $NOPAL) with no forced PAL; POPS_VMODE_480P is $480P, which clears
+   * both and sets progressive_requested. */
   uint8_t video_mode;
   uint8_t hdtv_fix;
   int16_t x_offset;
@@ -186,7 +191,19 @@ typedef struct {
   uint32_t gs_values[6]; /* DX, DY, MAGH, MAGV, DW, DH */
   uint8_t gs_mask;
   uint8_t gs_display_valid;
-  uint8_t progressive_requested; /* $480p remains active across region commands */
+  /* $480p remains active across region commands. It is also what the text
+   * can know of the original's gp+0x3864, which $480P sets (0x8902a4) and
+   * $FORCEPAL tests (0x8987f0): once set, $FORCEPAL does nothing (measured
+   * under emulation, tools/test_pops_config_text.py). Read from the code,
+   * not run: the only store of zero there is the start-up clear
+   * (0x870c90), and the original also stores 1 there at start-up when the byte
+   * at 0x10002a is 2 (0x871218; pops_config_load_table, which the launch
+   * does not call, sets this field for table byte 26 == 2), at 0x871718
+   * (after a word compare with 0x41524258) and at 0x88301c, 0x8830a4 and
+   * 0x883174, in the function before the reader; when that one runs
+   * relative to the text was not traced. None of those is modelled for
+   * the $FORCEPAL test (docs/POPSTARTER_CONFIG_TEXT.md). */
+  uint8_t progressive_requested;
 
   /* Pad commands, applied by the resident code (pops_resident.h). Bit n of
    * pad_override forces the controller ID that port n reports to the game
@@ -264,6 +281,19 @@ typedef struct {
   /* A VMCDIR.TXT was used (pops_config_parse_vmcdir): vmc_dir is its
    * folder name, empty for the POPS folder itself. */
   uint8_t vmc_dir_set;
+  /* The original's forced-PAL word (gp+0x38a0) as the text leaves it:
+   * $FORCEPAL sets it while no $480P was taken (0x898800), $480P clears it
+   * (0x89028c). Only $NOPAL reads it here: $NOPAL clears the automatic-PAL
+   * word (gp+0x4fa0) and nothing else, and the region pass takes forced
+   * PAL before it looks at that word (0x879034..0x87930c), so after a
+   * $FORCEPAL a $NOPAL leaves video_mode at POPS_VMODE_NTSC2PAL.
+   * launcHER's own $NTSC2PAL / $PAL2NTSC do not touch it. Read from the
+   * code, not run: the original also clears the word outside the text, at
+   * start-up (0x870c80, and 0x871208, which pops_config_load_table copies
+   * for table byte 26 == 2) and at 0x883120 in the function before the
+   * reader while gp+0x3898 is 0; the last is not modelled
+   * (docs/POPSTARTER_CONFIG_TEXT.md). */
+  uint8_t forced_pal;
 } PopsConfig;
 
 /* PopsConfig.fakelc */

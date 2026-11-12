@@ -25,8 +25,10 @@ pass (0x89e884), and reports what the pass recognised:
            holds before; POPStarter ships 1 there).
 
 The pass, as its code reads (0x883aa8..0x89e75c):
-  * the text is upper-cased in place (a..z only) and the buffer holds as
-    many zero bytes after the text as the text is long;
+  * the text is upper-cased in place (a..z only) and the second half of
+    its malloc(2 * size) buffer is zeroed (0x883aa8); scan_commands puts
+    0xA5 bytes there first, so a result that depended on them would show;
+    `beyond` is what follows the buffer;
   * at each index: a cheat code's columns are stepped over (0x885a20,
     0x885ccc, 0x885e28, 0x8860b4, 0x886360); otherwise each command's
     compare chain is tried in turn and the first that holds runs, zeroes
@@ -270,7 +272,8 @@ class _EE:
         return True
 
 
-def scan_commands(text: bytes | str, usb_delay: int = 1, gp_words=None, number: int = 0) -> CommandScan:
+def scan_commands(text: bytes | str, usb_delay: int = 1, gp_words=None, number: int = 0,
+                  beyond: bytes = b"") -> CommandScan:
     """Run the original's command pass over one CHEATS.TXT text.
 
     usb_delay is what 0x100017 holds beforehand; gp_words {offset: value}
@@ -278,7 +281,13 @@ def scan_commands(text: bytes | str, usb_delay: int = 1, gp_words=None, number: 
     with no built-in entry active). number is what the shared number
     temporary fp+0x90 holds when the pass starts: the function stores 0 there
     (0x883288) and, for the game's own file only, the length of the game's
-    name (0x883430); nothing else writes it before the pass."""
+    name (0x883430); nothing else writes it before the pass.
+
+    beyond is what the heap holds right after the function's buffer. The
+    buffer is malloc(2 * size) (0x8839f0) and the code zeroes its second
+    half (0x883aa8), but a code test reads columns 9 and 14 from a '$', so
+    in a file of a few bytes it reads past the 2 * size bytes. Zeros are
+    written here after `beyond`."""
     from unicorn import UC_HOOK_CODE
 
     data = text.encode("latin-1") if isinstance(text, str) else bytes(text)
@@ -287,7 +296,9 @@ def scan_commands(text: bytes | str, usb_delay: int = 1, gp_words=None, number: 
     uc, R = _machine()
     image = _image()
     names = handlers()
-    uc.mem_write(TEXT, data + b"\0" * (len(data) + 64))
+    # The first half is the text; the second half is zeroed by the code
+    # itself, so what is put there does not matter (0xA5 shows that it is).
+    uc.mem_write(TEXT, data + b"\xa5" * len(data) + bytes(beyond) + b"\0" * 64)
     uc.mem_write(USB_DELAY, bytes([usb_delay & 0xFF]))
 
     def put(address, value):

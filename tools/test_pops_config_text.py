@@ -18,6 +18,13 @@ strings.
 
 This is bounded emulation of two routines. It is not a POPS boot and not a
 console test.
+
+The host library is linked to a fixed file name in Python's temp folder
+(test_pops_features.compile_shared_library), and tempfile reads TMPDIR
+before TMP and TEMP. To keep two runs apart, set all three:
+
+    export TMP=<empty dir> TEMP=<same> TMPDIR=<same>
+    python tools/test_pops_config_text.py
 """
 import ctypes as c
 import os
@@ -77,7 +84,21 @@ CODES = ["$80012345 1234", "$30112345 0012", "$D0012345 1234", "$50000102 0001",
          "$C0012345 0000", "$20012345 12345678", "$10012345 12345678", "$00012345 12345678",
          "$S0100234 12345678", "$T0100023 12345678", "$=0012345 12345678",
          "$!1012345 12345678", "$80212345 1234", "$E0012345 1234"]
-MODE_TOKEN = re.compile(r"(?:^|[\s\0])(?:\$?MODE\s*[0-9]|[1-8](?:$|[\s\0]))")
+# Where launcHER's own MODE n / bare digit can stand (its white space is the
+# six ASCII bytes, whatever the locale; a run over 63 bytes is no token).
+MODE_TOKEN = re.compile(r"(?:^|[ \t\n\v\f\r\0])(?:\$?MODE[ \t\n\v\f\r]*[0-9]|[1-8](?:$|[ \t\n\v\f\r\0]))")
+# launcHER's own video tokens: the video state is not compared where one
+# stands (they are not POPStarter's; owner decision, docs/PR23_HANDOFF).
+LAUNCHER_VIDEO = re.compile(r"PAL2NTSC|NTSC2PAL|FORCENTSC")
+# The original's three video words (gp-relative), as its region pass
+# reads them at 0x879034..0x87930c (read from the code): forced PAL is
+# 0x38a0 == 1 with 0x3864 == 0; otherwise a European disc goes PAL only
+# while 0x4fa0 == 1. 0x3864 is the 480p flag $480P sets.
+FORCED_PAL, PROGRESSIVE, AUTO_PAL = 0x38A0, 0x3864, 0x4FA0
+# What the pass finds in them: off, off, and the automatic PAL selector on
+# (the start-up value when the byte at 0x10002a is 1, 0x8711ec). No
+# handler of the pass reads 0x4fa0 (its one load is at 0x87930c).
+GP_START = {FORCED_PAL: 0, PROGRESSIVE: 0, AUTO_PAL: 1}
 ENDS = ["\r\n", "\n", " ", "$", "\0", ""]
 NOT_ENDS = ["\t", "X", "_", "2", "#", ";", ",", "\x80"]
 
@@ -168,10 +189,35 @@ def launcher(text, number=0, cfg=None):
     return result, cfg, commands, codes
 
 
-def original(text, number=0):
+def original(text, number=0, gp_words=None, beyond=b""):
     import trace_original_pops_config_text as T
-    scan = T.scan_commands(text, usb_delay=USB_BEFORE, number=number)
+    words = dict(GP_START if gp_words is None else gp_words)
+    scan = T.scan_commands(text, usb_delay=USB_BEFORE, number=number, gp_words=words, beyond=beyond)
+    scan.gp_after = {**words, **scan.flags}
     return scan, [(offset, name, effects > 0) for offset, name, _, effects in scan.events], scan.skips
+
+
+def original_video(words):
+    """What the original's region pass does with its three words: 'forced'
+    (PAL whatever the disc), 'auto' (PAL for a European disc), 'off' (no
+    PAL), and whether the 480p flag is set."""
+    progressive = words.get(PROGRESSIVE, 0) != 0
+    if words.get(FORCED_PAL, 0) == 1 and not progressive:
+        return "forced", progressive
+    return ("auto" if words.get(AUTO_PAL, 0) == 1 else "off"), progressive
+
+
+def launcher_video(cfg):
+    """The same for launcHER's config, as the launch reads it: handler_pops.c
+    passes POPS_VMODE_480P when progressive_requested is set, else
+    video_mode; pops_modes_patches.c forces PAL for POPS_VMODE_NTSC2PAL and
+    leaves a European disc at PAL unless it is POPS_VMODE_NOPAL or
+    POPS_VMODE_480P."""
+    progressive = bool(cfg.progressive_requested)
+    mode = 4 if progressive else cfg.video_mode  # POPS_VMODE_480P
+    if mode == 2:  # POPS_VMODE_NTSC2PAL
+        return "forced", progressive
+    return ("off" if mode in (3, 4) else "auto"), progressive  # NOPAL, 480P
 
 
 def random_text(rng):
@@ -252,6 +298,29 @@ FIXED = [
     "$USBDELAY_5$SMOOTH", "$usbdelay_9\r\n", "$USBDELAY5 ", "$USBDELAY_0 ", "$USBDELAY_3 $USBDELAY_8 ",
     "$LEFTADJ_12 $USBDELAY_7 $XPOS_Q ", "$USBDELAY_7 $XPOS_Q ", "$USBDELAY_ 5 ", "$USBDELAY_05 ",
     "x$USBDELAY_4\n", "#$USBDELAY_6\n", "$USBDELAY_-1 ", "$USBDELAY_9\0", "$USBDELAY_2 $USBDELAY_44 ",
+    # $FORCEPAL is taken but does nothing once a $480P was taken; $NOPAL
+    # does not undo a $FORCEPAL (Native.test_video_commands has the state).
+    "$480P $FORCEPAL ", "$480P $NOPAL $FORCEPAL ", "$FORCEPAL $480P $FORCEPAL ", "$FORCEPAL $NOPAL ",
+    "$NOPAL $FORCEPAL ", "$480p\r\n$forcepal\r\n", "$FORCEPAL\t$480P $FORCEPAL$FORCEPAL",
+    # Each condition of the five code tests, from both sides. A command in
+    # the columns of a code is not seen; where the columns are no code, it is.
+    "$500$480P 1234 ", "$50002345 1234 $NOPAL ", "$50012345 1234 $NOPAL ", "$50102345 1234 $NOPAL ",
+    "$50010000 0000$NOPAL ", "$51002345 1234 $NOPAL ", "$3A012345 1234 $NOPAL ",
+    "$80112345 1234 $NOPAL ", "$D0212345 1234 $NOPAL ", "$80012345$1234 $NOPAL ",
+    "$S0003000 $SMOOTH $NOPAL ", "$S0004000 $SMOOTH $NOPAL ", "$S2203000 $SMOOTH $NOPAL ",
+    "$S3000000 $SMOOTH $NOPAL ", "$S0300000 $SMOOTH $NOPAL ", "$S0010000 $SMOOTH $NOPAL ",
+    "$S0003000 12345678$NOPAL ", "$S0004000 12345678$NOPAL ", "$S0000400 12345678$NOPAL ",
+    "$T0000300 $SMOOTH $NOPAL ", "$T0000400 $SMOOTH $NOPAL ", "$T2200300 $SMOOTH $NOPAL ",
+    "$T0001000 $SMOOTH $NOPAL ", "$T3000000 $SMOOTH $NOPAL ", "$T0300000 $SMOOTH $NOPAL ",
+    "$T0010000 $SMOOTH $NOPAL ", "$T0000300 12345678$NOPAL ", "$T0000400 12345678$NOPAL ",
+    "$=1012345 $SMOOTH $NOPAL ", "$=2012345 $SMOOTH $NOPAL ", "$!0012345 $SMOOTH $NOPAL ",
+    "$!2012345 $SMOOTH $NOPAL ", "$20012345 $SMOOTH $NOPAL ", "$30012345 $SMOOTH $NOPAL ",
+    "$00012345 $SMOOTH $NOPAL ", "$20012345\t$SMOOTH $NOPAL ",
+    # launcHER's own tokens next to a 63-byte cut or a byte above 0x7f: still
+    # nothing to the original, and no stray mode in launcHER.
+    "x" * 63 + "1 ", "x" * 62 + " 1 ", "\xa04 ", "$MODE3" + "x" * 60 + " ",
+    # The 14-column test's '3' kind from both sides (column 3 is 0 or 1).
+    "$30012345 1234 $NOPAL ", "$30212345 1234 $NOPAL ",
 ]
 
 # What the byte at 0x100017 holds before the original's pass in these tests:
@@ -267,6 +336,30 @@ USB_EXPECTED = {
     "$USBDELAY_05 ": None, "x$USBDELAY_4\n": 4, "#$USBDELAY_6\n": 6, "$USBDELAY_-1 ": None,
     "$USBDELAY_9\0": 9, "$USBDELAY_2 $USBDELAY_44 ": 2,
 }
+
+# $480P, $NOPAL, $FORCEPAL: what the original's region pass makes of its
+# three words after the text (original_video), from its run under
+# emulation (Original.test_video_table). $FORCEPAL stores nothing once
+# $480P set 0x3864 (0x8987f0); $NOPAL clears 0x4fa0 only, so it does not
+# undo an earlier $FORCEPAL.
+VIDEO_EXPECTED = {
+    "": ("auto", False), "$SMOOTH ": ("auto", False), "$FORCEPAL ": ("forced", False),
+    "$NOPAL ": ("off", False), "$480P ": ("off", True), "$480P $FORCEPAL ": ("off", True),
+    "$480P $NOPAL $FORCEPAL ": ("off", True), "$FORCEPAL $480P $FORCEPAL ": ("off", True),
+    "$FORCEPAL $NOPAL ": ("forced", False), "$NOPAL $FORCEPAL ": ("forced", False),
+    "$480p\r\n$forcepal\r\n": ("off", True), "$FORCEPAL\t$480P $FORCEPAL$FORCEPAL": ("off", True),
+    "$FORCEPAL $480P ": ("off", True), "$480PX $FORCEPAL ": ("forced", False),
+    "$FORCEPAL\t": ("auto", False), "$FORCEPAL\t$NOPAL ": ("off", False),
+    "$480P $NOPAL ": ("off", True), "$NOPAL $480P ": ("off", True),
+    "$FORCEPAL $480P $NOPAL ": ("off", True), "$FORCEPAL $480P $NOPAL $FORCEPAL ": ("off", True),
+}
+# Two files, the one for all games and then the game's own, as
+# (first, second, result): the words carry over from one to the next.
+VIDEO_TWO_FILES = [
+    ("$480P ", "$FORCEPAL ", ("off", True)), ("$FORCEPAL ", "$480P ", ("off", True)),
+    ("$FORCEPAL ", "$NOPAL ", ("forced", False)), ("$NOPAL ", "$FORCEPAL ", ("forced", False)),
+    ("$480P $NOPAL ", "$FORCEPAL ", ("off", True)), ("$NOPAL ", "", ("off", False)),
+]
 
 # What the original's pass did with each FIXED text, in the same order:
 # (commands [(offset, name, it changed something)], cheat codes [(offset, columns)]).
@@ -423,6 +516,55 @@ EXPECTED = [
     ([], []),
     ([(0, '$USBDELAY_', True)], []),
     ([(0, '$USBDELAY_', True)], []),
+    ([(0, '$480', True), (6, '$FORCEPAL', False)], []),
+    ([(0, '$480', True), (6, '$NOPAL', True), (13, '$FORCEPAL', False)], []),
+    ([(0, '$FORCEPAL', True), (10, '$480', True), (16, '$FORCEPAL', False)], []),
+    ([(0, '$FORCEPAL', True), (10, '$NOPAL', True)], []),
+    ([(0, '$NOPAL', True), (7, '$FORCEPAL', True)], []),
+    ([(0, '$480', True), (7, '$FORCEPAL', False)], []),
+    ([(10, '$480', True), (16, '$FORCEPAL', False), (25, '$FORCEPAL', False)], []),
+    ([(4, '$480', True)], []),
+    ([(15, '$NOPAL', True)], [(0, 14)]),
+    ([(15, '$NOPAL', True)], []),
+    ([(15, '$NOPAL', True)], []),
+    ([(14, '$NOPAL', True)], []),
+    ([(15, '$NOPAL', True)], []),
+    ([(15, '$NOPAL', True)], []),
+    ([(15, '$NOPAL', True)], [(0, 14)]),
+    ([(15, '$NOPAL', True)], []),
+    ([(15, '$NOPAL', True)], []),
+    ([(18, '$NOPAL', True)], [(0, 18)]),
+    ([(10, '$SMOOTH', True), (18, '$NOPAL', True)], []),
+    ([(18, '$NOPAL', True)], [(0, 18)]),
+    ([(10, '$SMOOTH', True), (18, '$NOPAL', True)], []),
+    ([(10, '$SMOOTH', True), (18, '$NOPAL', True)], []),
+    ([(10, '$SMOOTH', True), (18, '$NOPAL', True)], []),
+    ([(18, '$NOPAL', True)], [(0, 18)]),
+    ([(18, '$NOPAL', True)], []),
+    ([(18, '$NOPAL', True)], [(0, 18)]),
+    ([(18, '$NOPAL', True)], [(0, 18)]),
+    ([(10, '$SMOOTH', True), (18, '$NOPAL', True)], []),
+    ([(18, '$NOPAL', True)], [(0, 18)]),
+    ([(10, '$SMOOTH', True), (18, '$NOPAL', True)], []),
+    ([(10, '$SMOOTH', True), (18, '$NOPAL', True)], []),
+    ([(10, '$SMOOTH', True), (18, '$NOPAL', True)], []),
+    ([(10, '$SMOOTH', True), (18, '$NOPAL', True)], []),
+    ([(18, '$NOPAL', True)], [(0, 18)]),
+    ([(18, '$NOPAL', True)], []),
+    ([(18, '$NOPAL', True)], [(0, 18)]),
+    ([(10, '$SMOOTH', True), (18, '$NOPAL', True)], []),
+    ([(18, '$NOPAL', True)], [(0, 18)]),
+    ([(10, '$SMOOTH', True), (18, '$NOPAL', True)], []),
+    ([(18, '$NOPAL', True)], [(0, 18)]),
+    ([(10, '$SMOOTH', True), (18, '$NOPAL', True)], []),
+    ([(18, '$NOPAL', True)], [(0, 18)]),
+    ([(10, '$SMOOTH', True), (18, '$NOPAL', True)], []),
+    ([], []),
+    ([], []),
+    ([], []),
+    ([], []),
+    ([(15, '$NOPAL', True)], [(0, 14)]),
+    ([(15, '$NOPAL', True)], []),
 ]
 
 
@@ -514,6 +656,58 @@ class Native(unittest.TestCase):
                            ("$FORCEPAL $PAL2NTSC", "$NOPAL")):
             expected = launcher(want)[1].video_mode
             self.assertEqual(launcher(text)[1].video_mode, expected, text)
+
+    def test_video_commands(self):
+        """$480P / $NOPAL / $FORCEPAL as the original's words end up."""
+        for text, want in VIDEO_EXPECTED.items():
+            _, cfg, _, _ = launcher(text)
+            self.assertEqual(launcher_video(cfg), want, repr(text))
+            # forced_pal is the original's gp+0x38a0. In every text of the
+            # table the original left it 1 exactly where the region pass
+            # forces PAL (Original.compare checks the word itself).
+            self.assertEqual(cfg.forced_pal, int(want[0] == "forced"), repr(text))
+        # The review's case: after $480P, $FORCEPAL changes nothing at all.
+        for text in ("$480P ", "$480P $FORCEPAL ", "$480P $FORCEPAL $FORCEPAL "):
+            _, cfg, commands, _ = launcher(text)
+            self.assertEqual((cfg.video_mode, cfg.progressive_requested), (4, 1), repr(text))
+            self.assertTrue(all(not effect for _, name, effect in commands if name == "$FORCEPAL"))
+
+    def test_video_two_files(self):
+        """The 480p flag of the file for all games also stops the game's
+        own $FORCEPAL (pops_config_discover reads both)."""
+        import tempfile
+        for first, second, want in VIDEO_TWO_FILES:
+            with tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                (root / "Game").mkdir()
+                (root / "CHEATS.TXT").write_bytes(first.encode("latin-1"))
+                (root / "Game" / "CHEATS.TXT").write_bytes(second.encode("latin-1"))
+                cfg = F.PopsConfig()
+                LIB.pops_config_init(c.byref(cfg))
+                self.assertEqual(LIB.pops_config_discover(c.byref(cfg), (str(root) + "/").encode(), b"Game"), 0)
+                self.assertEqual(launcher_video(cfg), want, (first, second))
+                self.assertEqual(cfg.forced_pal, int(want[0] == "forced"), (first, second))
+
+    def test_launcher_token_bytes(self):
+        """launcHER's own tokens: white space is the six ASCII bytes
+        (space, TAB, LF, VT, FF, CR) whatever the host's locale, and a run of
+        more than 63 non-blank bytes is no token, its tail included. Whether
+        these tokens are read from CHEATS.TXT at all is the owner's call
+        (docs/PR23_HANDOFF_2026-11-11.md section 8); this pins how."""
+        for text, want in (
+                ("x" * 63 + "1 ", 0), ("x" * 64 + "1 ", 0), ("x" * 200 + "7", 0),
+                ("x" * 62 + " 1 ", 1), ("x" * 63 + " 1 ", 1),
+                ("$MODE3" + "x" * 57 + " ", 4), ("$MODE3" + "x" * 58 + " ", 0),
+                ("MODE 3" + "x" * 57 + " ", 4), ("MODE 3" + "x" * 58 + " ", 0),
+                ("\xa04 ", 0), ("\xa0 4 ", 8), ("4\xa0 ", 0), ("\x854 ", 0), ("\x1c4 ", 0),
+                ("\x1f4 ", 0), ("\xff4\xff ", 0), ("\v4 ", 8), ("\f4\f", 8), ("\r4\r", 8),
+                ("MODE\v3 ", 4), ("MODE\xa03 ", 0), ("$MODE\xa03 ", 0),
+                # The MODE digit search stops at a line end: "3x" on the
+                # next line is a token of its own, and no bare digit.
+                ("MODE\n3x ", 0), ("$MODE\n3x ", 0), ("MODE 3x ", 4)):
+            _, cfg, commands, _ = launcher(text)
+            self.assertEqual(cfg.compat_modes, want, repr(text))
+            self.assertEqual(commands, [], repr(text))
 
     def test_usb_delay(self):
         """$USBDELAY_n: one digit and a terminator, nothing else."""
@@ -623,6 +817,14 @@ class Source(unittest.TestCase):
         self.assertIn("pops_config_parse_text(cfg, text, size, value, NULL, NULL)", loader)
         self.assertIn('fopen(filepath, "rb")', loader)
 
+    def test_token_bytes_are_spelt_out(self):
+        """No locale-dependent byte class in the reader: the host test
+        process and the EE build read the same bytes the same way."""
+        self.assertIsNone(re.search(r"\bis(space|digit|alpha|alnum|xdigit)\s*\(", SOURCE))
+        self.assertIn("static int token_space(unsigned char c) {\n"
+                      "  return c == ' ' || (c >= '\\t' && c <= '\\r'); /* TAB LF VT FF CR */\n",
+                      SOURCE.replace("\r\n", "\n"))
+
     def test_game_file_starts_with_the_name_length(self):
         discover = SOURCE[SOURCE.index("int pops_config_discover("):]
         self.assertIn("result = load_config_file(cfg, path, 0, (uint32_t)strlen(subfolder) + 1);",
@@ -668,6 +870,7 @@ class Original(unittest.TestCase):
 
     launcher_modes = 0
     usb_delays = 0
+    launcher_video_texts = 0
 
     def compare(self, text, number=0):
         scan, commands, codes = original(text, number)
@@ -691,6 +894,14 @@ class Original(unittest.TestCase):
         if not cfg.usb_delay_set:
             self.assertEqual(cfg.usb_delay, 0, repr(text))
         self.usb_delays += cfg.usb_delay_set
+        # The forced-PAL word itself (launcHER's own video tokens do not
+        # touch forced_pal, so this holds for every text).
+        self.assertEqual(cfg.forced_pal, scan.gp_after.get(FORCED_PAL, 0), repr(text))
+        # $480P / $NOPAL / $FORCEPAL: the three words the region pass reads.
+        if LAUNCHER_VIDEO.search(text.upper()):
+            self.launcher_video_texts += 1
+        else:
+            self.assertEqual(launcher_video(cfg), original_video(scan.gp_after), repr(text))
         return len(commands), len(codes)
 
     def test_fixed_texts(self):
@@ -748,11 +959,14 @@ class Original(unittest.TestCase):
               % self.usb_delays)
 
     def test_shared_number_start(self):
-        for text in ("$XPOS_ ", "$YPOS_Q $XPOS_ ", "$XPOS_123456 $YPOS_5 ", "$LEFTADJ_7 $XPOS_ ",
-                     "$ZPOS_ $YPOS_ "):
-            for number in (0, 1, 15, 255, 65535, 65536):
+        texts = ("$XPOS_ ", "$YPOS_Q $XPOS_ ", "$XPOS_123456 $YPOS_5 ", "$LEFTADJ_7 $XPOS_ ",
+                 "$ZPOS_ $YPOS_ ")
+        numbers = (0, 1, 15, 255, 65535, 65536)
+        for text in texts:
+            for number in numbers:
                 self.compare(text, number)
-        print("original command pass: 30 texts x starting numbers match")
+        print("original command pass: %d texts x %d starting values (%d runs) match"
+              % (len(texts), len(numbers), len(texts) * len(numbers)))
 
     def test_random_texts(self):
         rng = random.Random(0x13C0)
@@ -763,8 +977,124 @@ class Original(unittest.TestCase):
             count, commands, codes = count + 1, commands + found[0], codes + found[1]
         print("original command pass: %d random texts match (%d commands, %d cheat codes; "
               "%d texts also had a launcHER-only MODE token; the byte at 0x100017 was "
-              "written in %d)"
-              % (count, commands, codes, self.launcher_modes, self.usb_delays))
+              "written in %d; video words not compared in %d with a launcHER-only video token)"
+              % (count, commands, codes, self.launcher_modes, self.usb_delays,
+                 self.launcher_video_texts))
+
+    def test_video_table(self):
+        """$480P / $NOPAL / $FORCEPAL: the original's three words after the
+        pass, against VIDEO_EXPECTED and launcHER."""
+        for text, want in VIDEO_EXPECTED.items():
+            scan, _, _ = original(text)
+            self.assertEqual(original_video(scan.gp_after), want, repr(text))
+            self.compare(text)
+        print("original video words: %d texts match the table" % len(VIDEO_EXPECTED))
+
+    def test_video_random(self):
+        rng = random.Random(0x8987F0)
+        forms = ("$480P", "$480p", "$480PX", "$480", "$FORCEPAL", "$forcepal", "$FORCEPALX",
+                 "$NOPAL", "$nopal", "$NOPALX", "$SMOOTH", "$20012345 00", "x", "#")
+        for _ in range(600):
+            text = "".join(rng.choice(forms) + rng.choice(ENDS + ["\t", "X"])
+                           for _ in range(rng.randrange(1, 6)))
+            self.compare(text)
+        print("original video words: 600 random texts match")
+
+    def _two_files(self, first, second):
+        """The original run twice, its gp words carried from the file for
+        all games to the game's own; launcHER through pops_config_discover
+        and, for each command's effect, one config through both texts."""
+        import tempfile
+        scan1, commands1, codes1 = original(first)
+        scan2, commands2, codes2 = original(second, number=5, gp_words=scan1.gp_after)
+        cfg = F.PopsConfig()
+        LIB.pops_config_init(c.byref(cfg))
+        _, _, got1, got_codes1 = launcher(first, cfg=cfg)
+        cfg.gs_mask = 0  # load_config_file: the six GS flags are per file
+        _, _, got2, got_codes2 = launcher(second, number=5, cfg=cfg)
+        self.assertEqual((got1, got_codes1, got2, got_codes2),
+                         (commands1, codes1, commands2, codes2), (first, second))
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "Game").mkdir()
+            (root / "CHEATS.TXT").write_bytes(first.encode("latin-1"))
+            (root / "Game" / "CHEATS.TXT").write_bytes(second.encode("latin-1"))
+            whole = F.PopsConfig()
+            LIB.pops_config_init(c.byref(whole))
+            self.assertEqual(LIB.pops_config_discover(c.byref(whole), (str(root) + "/").encode(), b"Game"), 0)
+        want = original_video(scan2.gp_after)
+        self.assertEqual(launcher_video(cfg), want, (first, second))
+        self.assertEqual(launcher_video(whole), want, (first, second))
+        word = scan2.gp_after.get(FORCED_PAL, 0)
+        self.assertEqual((cfg.forced_pal, whole.forced_pal), (word, word), (first, second))
+        return want
+
+    def test_video_two_files(self):
+        for first, second, want in VIDEO_TWO_FILES:
+            self.assertEqual(self._two_files(first, second), want, (first, second))
+        forms = ("$480P ", "$FORCEPAL ", "$NOPAL ", "$SMOOTH ")
+        files = [""] + list(forms) + [a + b for a in forms for b in forms]
+        for first in files:
+            for second in files:
+                self._two_files(first, second)
+        print("original video words, two files: %d fixed and %d pairs match"
+              % (len(VIDEO_TWO_FILES), len(files) ** 2))
+
+    def test_short_files(self):
+        """A file of a few bytes. The original's buffer is malloc(2 * size)
+        (0x8839f0) with its second half zeroed (0x883aa8), but a code test
+        at a '$' reads columns up to 14 from it, so for a '$' at i with
+        i + 9 >= 2 * size it reads past the buffer: what the heap holds
+        there decides whether the '$' starts a code. launcHER reads zeros
+        there. Measured: with zeros the original equals launcHER; with
+        other bytes only that kind of '$' can be stepped over as a code,
+        and no command changes."""
+        seeds = [code[:k] for code in CODES for k in range(1, 9)]
+        seeds += [name[:k] for name in PLAIN + NUMBERED for k in range(1, 9)]
+        seeds += ["$800", "$8000", "$30", "$D01", "$5000", "$S00", "$T000", "$=0", "$!1", "$0",
+                  "$$", "$", " $", "x$8", "$480P", "$IGR0", "$D2LS", "$DX_1", "$IGR0$", "$80$80"]
+        texts = sorted({s for s in seeds if 1 <= len(s) <= 8})
+        heaps = (b" " * 32, b"0" * 32, b"  0 $ 1 2 X" * 3, b"\xff" * 32)
+        differ = 0
+        for text in texts:
+            self.compare(text)
+            _, base_commands, base_codes = original(text)
+            n = len(text)
+            for heap in heaps:
+                _, commands, codes = original(text, beyond=heap)
+                self.assertEqual(commands, base_commands, (text, heap))
+                extra = [code for code in codes if code not in base_codes]
+                for offset, _ in extra:
+                    self.assertGreaterEqual(offset + 9, 2 * n, (text, heap))
+                self.assertEqual([code for code in codes if code in base_codes], base_codes, (text, heap))
+                differ += bool(extra)
+        _, _, codes = original("$800", beyond=b" " * 32)
+        self.assertEqual(codes, [(0, 14)])
+        self.assertEqual(launcher("$800")[3], [])
+        print("original command pass, short files: %d texts of 1..8 bytes equal launcHER with a "
+              "zero heap; %d of %d runs with other heap bytes step over a code there, no command "
+              "changes" % (len(texts), differ, len(texts) * len(heaps)))
+
+    def test_random_token_bytes(self):
+        """launcHER's own tokens beside long runs, bytes above 0x7f and the
+        control bytes: the original takes none of them, and launcHER adds a
+        mode only for a whole token of at most 63 bytes."""
+        rng = random.Random(0x63A0)
+        pieces = LAUNCHER_ONLY + ["1", "4", "8", "MODE", "$MODE", "$SMOOTH", "$NOPAL"]
+        blanks = [" ", "\t", "\r\n", "\n", "\v", "\f", "\xa0", "\x85", "\x1c", "\xff", "\0"]
+        for _ in range(500):
+            parts = []
+            for _ in range(rng.randrange(1, 6)):
+                kind = rng.randrange(4)
+                if kind == 0:
+                    piece = "x" * rng.choice((57, 58, 61, 62, 63, 64, 65, 70))
+                elif kind == 1:
+                    piece = "".join(rng.choice("\xa0\x85\xe9\xff\x80") for _ in range(rng.randrange(1, 3)))
+                else:
+                    piece = rng.choice(pieces)
+                parts.append(piece + rng.choice(blanks + [""]))
+            self.compare("".join(parts))
+        print("original command pass: 500 random texts with long runs and high bytes match")
 
     def test_compat_function(self):
         """FUN_008dc2c4, as the pass calls it: which modes poke anything."""

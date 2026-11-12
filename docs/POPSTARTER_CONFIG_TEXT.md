@@ -3,8 +3,9 @@
 Measured on the original (POPSTARTER.ELF MAIN, external input, decoded image
 at `0x870000`) on 2026-11-11, by reading its code and by running that code
 under emulation on synthetic text (`tools/trace_original_pops_config_text.py`,
-`tools/test_pops_config_text.py`). launcHER copies it. Nothing here was
-tested on a console.
+`tools/test_pops_config_text.py`). launcHER copies it, with the differences
+listed under "Known differences that remain". What is only read from the
+code, not run, says so. Nothing here was tested on a console.
 
 ## The reader (`FUN_00883270`)
 
@@ -12,8 +13,9 @@ Called twice: at `0x8771ac` with `a0 = 0` (the CHEATS.TXT "for all games")
 and at `0x87724c` with `a0 = 1` and `a1 = gp+0x38f0` (the game's own). The
 second call is skipped when `gp+0x38dc` or `gp+0x3460` is set.
 
-- The file is read whole: size from a seek to the end, `malloc(2 * size)`,
-  one read. An empty file returns early. There is no size or line limit.
+- The file is read whole: size from a seek to the end, `malloc(2 * size)`
+  (`0x8839f0`), one read of `size + 16` bytes (`0x883a50..0x883a60`). An
+  empty file returns early. There is no size or line limit.
 - `0x883aa8`: the second half of the buffer is zeroed and the text is
   upper-cased in place (`a`..`z` only).
 - A first pass (`0x883b80..0x8859fc`) looks for the `$C0` master code and
@@ -30,6 +32,17 @@ second call is skipped when `gp+0x38dc` or `gp+0x3460` is set.
   3. otherwise the byte is zeroed and the scan moves one byte on.
 - After the pass (`0x89e75c..0x89e884`) a complete manual GS DISPLAY set is
   written.
+- **A file of a few bytes is read past its buffer.** A code test at a `$`
+  reads up to column 14 from it (column 9 after columns 1..3), and only
+  `2 * size` bytes are the buffer. For a `$` at offset `i` with
+  `i + 9 >= 2 * size` (so only in files of 8 bytes or less) the bytes it
+  reads are whatever the heap holds after the buffer, and they decide
+  whether that `$` starts a code. Measured with other bytes put there: 357
+  texts of 1..8 bytes, 4 heap patterns: in 17 of the 1428 runs such a `$`
+  is stepped over as a code (`$800` with spaces after the buffer is a
+  14-column code); no command is taken or lost in any of them (a command
+  needs at least 5 bytes, which leaves no room for such a `$` before it).
+  Whether the later code passes then compile such a code was not run.
 
 So there are no lines, no tokens and no comments:
 
@@ -50,7 +63,7 @@ So there are no lines, no tokens and no comments:
 | --- | --- |
 | `0x8866a0` | `$SMOOTH` |
 | `0x888048`..`0x890110` | `$DX_` `$DY_` `$MAGH_` `$MAGV_` `$DW_` `$DH_` + 1..5 digits. Each handler is not tried again in the same file once it took a value (`fp+0xfc..0x110`) |
-| `0x89030c` | `$480` + `P` + terminator (not tried when `gp+0x3880` is set; the only store to it found in the image is the start-up clear at `0x870ca4`) |
+| `0x89030c` | `$480` + `P` + terminator (not tried when `gp+0x3880` is set; the only store to it found in the image is the start-up clear at `0x870ca4`). Stores `gp+0x38a0` = 0 (forced PAL off), `gp+0x4fa0` = 0 (automatic PAL off), `gp+0x3864` = 1 (480p), `gp+0x38d0` = `gp+0x3898` = 1, and makes four pokes |
 | `0x890a34` | `$LEFTADJ_` + 1..3 digits; applied for 1..255 only |
 | `0x890c48` | `$SCANLINES` |
 | `0x891e98` | `$VCDID_` + 1..4 digits; not tried once `gp+0x38d8` is nonzero, so `$VCDID_0` does not stop the next one |
@@ -58,7 +71,9 @@ So there are no lines, no tokens and no comments:
 | `0x894528` | `$ORIGINAL_OPCODES`: the terminator is tested at column 19, not 17 (see quirks) |
 | `0x894aa4`..`0x897ca8` | `$UNDO_COMPATIBILITY_CODES` `$UNDO_GAME_FIXES` `$UNDO_LIBCRYPT_FIX` `$UNDO_MUTE_CDDA` `$WIDESCREEN` `$ULTRA_WIDESCREEN` `$EYEFINITY` `$ROLLBACK` `$SET_TIMINGS` `$BREAKPOINT0` `$BREAKPOINT1` `$NOVMC0` `$NOVMC1` `$NOPAD0` `$NOPAD1` `$D2LS` `$D2LS_ALT` `$IGR0`..`$IGR5` `$NOIGR` |
 | `0x8982b4` | `$PAD` + `0` or `1` + `ID_0X` + two bytes + terminator at column 12; applied only when both bytes are hex digits |
-| `0x8984a4`..`0x89882c` | `$MUTE_ALL` `$NOPAL` `$FORCEPAL` |
+| `0x8984a4` | `$MUTE_ALL` |
+| `0x898628` | `$NOPAL`: one store, `gp+0x4fa0` = 0 (`0x89860c`) |
+| `0x89882c` | `$FORCEPAL`: always taken; its three stores (`gp+0x38a0`, `gp+0x38d0`, `gp+0x3898` = 1) are made only while `gp+0x3864` is 0 (`0x8987f0`), see quirks |
 | `0x89a2d0` | `$` + any byte + `POS_` + 1..5 digits; the second byte (`X` or `Y`) is looked at afterwards (see quirks) |
 | `0x89b604`, `0x89c918` | `$DWSTRETCH_`, `$DWCROP_` + 1..4 digits |
 | `0x89cae8`, `0x89ccc0` | `$CACHE1` `$FAKELC` |
@@ -97,6 +112,20 @@ terminator does nothing (the scan still moves one byte on). The exception is
 - **Nothing is a comment.** `#` and `;` hide nothing.
 - **`$USBDELAY_` takes one digit only.** `$USBDELAY_12`, `$USBDELAY_05`,
   `$USBDELAY5` and `$USBDELAY_` are not commands.
+- **`$FORCEPAL` does nothing after a `$480P`.** `$480P` sets `gp+0x3864`
+  and nothing in the pass clears it, so a later `$FORCEPAL`, in the same
+  file or in the game's own file after a `$480P` in the one for all games,
+  is taken and stores nothing: `$480P $FORCEPAL` is 480p without forced PAL.
+  `$FORCEPAL $480P` ends the same way, since `$480P` clears the forced-PAL
+  word.
+- **`$NOPAL` does not undo `$FORCEPAL`.** It clears only the automatic-PAL
+  word. The region pass (read from the code, not run) tests the forced-PAL
+  word first: `gp+0x38a0` == 1 with `gp+0x3864` == 0
+  (`0x879034..0x879048`) takes the forced-PAL path, which ends at
+  `0x8795f0` without reading `gp+0x4fa0`; otherwise a European disc goes
+  PAL only while `gp+0x4fa0` is 1 (`0x87930c`). So `$FORCEPAL $NOPAL` and
+  `$NOPAL $FORCEPAL` are both forced PAL. These are the only loads of
+  `gp+0x38a0` and `gp+0x4fa0` in the image.
 
 ## `$USBDELAY_n`
 
@@ -163,7 +192,19 @@ code (which file operation) was not traced.
 - `pops_config_parse_text()` (`common/src/pops_config.c`): the same pass on
   an upper-cased copy of the file: the five code tests, then the handler
   table in the original's order (`pops_commands[]`), one byte on after each.
-  `load_config_file()` reads the file in binary and has no line limit.
+  `load_config_file()` reads the file in binary and has no line limit. The
+  copy has 32 zero bytes after the text, so a short file reads zeros where
+  the original reads its heap.
+- The three video words are `video_mode` and `progressive_requested` as
+  the launch reads them (`handler_pops.c` passes `POPS_VMODE_480P` when
+  `progressive_requested` is set; `pops_modes_patches.c` forces PAL for
+  `POPS_VMODE_NTSC2PAL` and keeps a European disc at PAL unless the mode is
+  `POPS_VMODE_NOPAL` or `POPS_VMODE_480P`), plus `forced_pal` for the
+  original's forced-PAL word, which only `$NOPAL` reads. `$FORCEPAL` does
+  nothing while `progressive_requested` is set; `$NOPAL` keeps
+  `POPS_VMODE_NTSC2PAL` while `forced_pal` is set. Whether every other
+  reader of `video_mode` in launcHER agrees with that mapping was not
+  analysed.
 - The shared number temporary is the function's `value` argument: 0, or
   `strlen(game folder) + 1` for `<game>/CHEATS.TXT` (`pops_config_discover`).
   So a game folder `Game` with `$XPOS_` and nothing after it writes X = 5.
@@ -173,7 +214,19 @@ code (which file operation) was not traced.
   `$PSXCORE_FIXES`) are not POPStarter's: the original takes none of them.
   They keep launcHER's earlier rules (split at white space, `#` or `;`
   starts a comment) and are applied in file order with the original's
-  commands.
+  commands. White space there is space, TAB, LF, VT, FF and CR, tested as
+  bytes (not with the C library's `isspace`, which follows the locale for
+  bytes above `0x7f`), and a run of more than 63 non-blank bytes is no
+  token at all (it used to be cut at 63 bytes and its tail read as a new
+  token, so 63 bytes and a `1` set mode 1). Their video tokens set
+  `video_mode` only: `$NTSC2PAL $NOPAL` gives `POPS_VMODE_NOPAL`, as before.
+  So they are not the original's `$NOPAL` / `$FORCEPAL`: `$FORCEPAL
+  $PAL2NTSC` gives no PAL, while `$FORCEPAL $NOPAL` stays forced PAL.
+  Whether they should follow the original's commands is an open owner
+  question.
+  Whether these tokens are read from CHEATS.TXT at all is an open owner
+  decision (`docs/PR23_HANDOFF_2026-11-11.md`, section 8); that was not
+  changed.
 
 ### Known differences that remain
 
@@ -185,6 +238,28 @@ code (which file operation) was not traced.
   or with a code inside a `$C0` code's columns can differ.
 - Files over 1 MiB are refused (`-EFBIG`); the original has no limit.
 - `gp+0x3880` (the `$480p` gate) is not modelled.
+- The `$FORCEPAL` test knows only the `$480P` commands of the text. The
+  original also sets `gp+0x3864` outside the text (read from the code, not
+  run): at start-up when the byte at `0x10002a` is 2 (`0x871218`), at
+  `0x871718` after a word compare, and at `0x88301c`, `0x8830a4` and
+  `0x883174` in the function before the reader. launcHER does not model
+  these for `$FORCEPAL`; it applies a fix file's progressive setting after
+  the text (`handler_pops.c`). Whether a launch then differs was not
+  measured.
+- The forced-PAL and automatic-PAL words also have writers outside the
+  text (read from the code, not run). The function before the reader
+  clears `gp+0x38a0` and `gp+0x4fa0` at `0x883120`/`0x883124` while
+  `gp+0x3898` is 0 (`0x883114`; `$FORCEPAL` and `$480P` set that word), and
+  sets `gp+0x3864` at `0x88301c`/`0x8830a4`/`0x883174`. Start-up writes are
+  at `0x870c80`/`0x870c90` and `0x8711ec`..`0x871230`; further stores of 0
+  to `gp+0x4fa0` are at `0x871710`, `0x883014`, `0x88309c`, `0x88316c` and
+  `0x8f8abc`. When the function at `0x883000` runs relative to the reader
+  was not traced, so whether it changes the video result of a text was not
+  measured. The comparison of the video words above holds for the words as
+  the text pass leaves them.
+- Files of 8 bytes or less: where the original reads its heap after the
+  buffer (see above), launcHER reads zeros. Only whether such a `$` is
+  stepped over as a code can differ; no command does.
 
 ## VMCDIR.TXT (`FUN_008d4f84`)
 
@@ -244,17 +319,42 @@ What one file does:
 
 - the 66 handler names and their order, read from the image, equal
   `pops_commands[]`;
-- 120 fixed texts: the original's pass and launcHER's reader report the
-  same commands at the same offsets, the same codes stepped over, and the
-  same X, Y, compatibility-mode, game-id and `0x100017` values;
+- 169 fixed texts: the original's pass and launcHER's reader report the
+  same commands at the same offsets (and whether each changed something),
+  the same codes stepped over, the same X, Y, compatibility-mode, game-id
+  and `0x100017` values, the same forced-PAL word (`gp+0x38a0`, launcHER's
+  `forced_pal`), and the same three video words as the region pass
+  reads them. Among them: each condition of the five code tests from both
+  sides, and the orders of `$480P`, `$NOPAL` and `$FORCEPAL`;
 - 1500 seeded random texts: the same (2876 commands, 399 codes stepped
   over; 96 texts also had a launcHER-only `MODE` token, 20 wrote
-  `0x100017`);
+  `0x100017`; the video words are not compared in texts that hold a
+  launcHER-only video token);
+- the video words: 20 texts against a table, 600 seeded random texts, and
+  two files (the second run with the first's gp words; launcHER through
+  `pops_config_discover`): 6 fixed and 441 pairs;
+- 357 files of 1..8 bytes: equal with zeros after the original's buffer;
+  with 4 other heap patterns see "A file of a few bytes is read past its
+  buffer";
+- 500 seeded random texts with runs of 57..70 bytes, bytes above `0x7f` and
+  control bytes next to launcHER's own tokens;
 - 300 seeded random `$USBDELAY` texts: the same (84 wrote `0x100017`);
 - VMCDIR.TXT: 39 fixed files (30 of them also as the game's own file) and
   400 seeded random files (212 used, 188 ignored): used or ignored, and
   the name, are the same;
-- 30 text/start-value pairs for the shared number temporary;
+- 30 text/start-value pairs (5 texts, 6 start values) for the shared
+  number temporary;
 - `FUN_008dc2c4`: 21 modes, with and without `$SUBCDSTATUS`.
+
+Without `POPSTARTER_TEST_ELF` (as in CI) only the table checks run: the
+fixed texts against the recorded results, and launcHER's own tokens.
+
+Set all three temp variables, or two runs share one host library file
+(Python's `tempfile` reads `TMPDIR` before `TMP` and `TEMP`):
+
+```sh
+export TMP=<empty dir> TEMP=<same> TMPDIR=<same>
+python tools/test_pops_config_text.py
+```
 
 NOT TESTED on a console.

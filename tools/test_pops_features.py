@@ -83,6 +83,7 @@ class PopsConfig(c.Structure):
         ("builtin_no_vmc1", c.c_uint8),
         ("usb_delay_set", c.c_uint8),
         ("vmc_dir_set", c.c_uint8),
+        ("forced_pal", c.c_uint8),
     ]
 
 class PopsCompatEntry(c.Structure):
@@ -939,12 +940,22 @@ class FeatureTests(unittest.TestCase):
         self.assertEqual(cfg.dither_off, 1)
 
         # Video directives. $240p/$VMODE are not POPStarter commands and
-        # leave the mode alone; PAL2NTSC/FORCENTSC are the original $NOPAL.
+        # leave the mode alone; launcHER's own PAL2NTSC/FORCENTSC set
+        # POPS_VMODE_NOPAL (last one wins; owner question in
+        # docs/POPSTARTER_CONFIG_TEXT.md).
         self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$240p"), 0)
         self.assertEqual(cfg.video_mode, 4)
 
+        # The $480p above gates $FORCEPAL, as in the original (0x8987f0
+        # tests gp+0x3864): taken, but nothing changes.
         self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$FORCEPAL"), 0)
-        self.assertEqual(cfg.video_mode, 2)
+        self.assertEqual((cfg.video_mode, cfg.forced_pal), (4, 0))
+
+        # Without an earlier $480p, $FORCEPAL forces PAL.
+        fresh = PopsConfig()
+        LIB.pops_config_init(c.byref(fresh))
+        self.assertEqual(LIB.pops_config_parse_line(c.byref(fresh), b"$FORCEPAL"), 0)
+        self.assertEqual((fresh.video_mode, fresh.forced_pal), (2, 1))
 
         self.assertEqual(LIB.pops_config_parse_line(c.byref(cfg), b"$FORCENTSC"), 0)
         self.assertEqual(cfg.video_mode, 3)
