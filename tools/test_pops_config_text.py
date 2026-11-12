@@ -319,6 +319,8 @@ FIXED = [
     # launcHER's own tokens next to a 63-byte cut or a byte above 0x7f: still
     # nothing to the original, and no stray mode in launcHER.
     "x" * 63 + "1 ", "x" * 62 + " 1 ", "\xa04 ", "$MODE3" + "x" * 60 + " ",
+    # The 14-column test's '3' kind from both sides (column 3 is 0 or 1).
+    "$30012345 1234 $NOPAL ", "$30212345 1234 $NOPAL ",
 ]
 
 # What the byte at 0x100017 holds before the original's pass in these tests:
@@ -349,6 +351,7 @@ VIDEO_EXPECTED = {
     "$FORCEPAL $480P ": ("off", True), "$480PX $FORCEPAL ": ("forced", False),
     "$FORCEPAL\t": ("auto", False), "$FORCEPAL\t$NOPAL ": ("off", False),
     "$480P $NOPAL ": ("off", True), "$NOPAL $480P ": ("off", True),
+    "$FORCEPAL $480P $NOPAL ": ("off", True), "$FORCEPAL $480P $NOPAL $FORCEPAL ": ("off", True),
 }
 # Two files, the one for all games and then the game's own, as
 # (first, second, result): the words carry over from one to the next.
@@ -560,6 +563,8 @@ EXPECTED = [
     ([], []),
     ([], []),
     ([], []),
+    ([(15, '$NOPAL', True)], [(0, 14)]),
+    ([(15, '$NOPAL', True)], []),
 ]
 
 
@@ -657,6 +662,10 @@ class Native(unittest.TestCase):
         for text, want in VIDEO_EXPECTED.items():
             _, cfg, _, _ = launcher(text)
             self.assertEqual(launcher_video(cfg), want, repr(text))
+            # forced_pal is the original's gp+0x38a0. In every text of the
+            # table the original left it 1 exactly where the region pass
+            # forces PAL (Original.compare checks the word itself).
+            self.assertEqual(cfg.forced_pal, int(want[0] == "forced"), repr(text))
         # The review's case: after $480P, $FORCEPAL changes nothing at all.
         for text in ("$480P ", "$480P $FORCEPAL ", "$480P $FORCEPAL $FORCEPAL "):
             _, cfg, commands, _ = launcher(text)
@@ -677,6 +686,7 @@ class Native(unittest.TestCase):
                 LIB.pops_config_init(c.byref(cfg))
                 self.assertEqual(LIB.pops_config_discover(c.byref(cfg), (str(root) + "/").encode(), b"Game"), 0)
                 self.assertEqual(launcher_video(cfg), want, (first, second))
+                self.assertEqual(cfg.forced_pal, int(want[0] == "forced"), (first, second))
 
     def test_launcher_token_bytes(self):
         """launcHER's own tokens: white space is the six ASCII bytes
@@ -691,7 +701,10 @@ class Native(unittest.TestCase):
                 ("MODE 3" + "x" * 57 + " ", 4), ("MODE 3" + "x" * 58 + " ", 0),
                 ("\xa04 ", 0), ("\xa0 4 ", 8), ("4\xa0 ", 0), ("\x854 ", 0), ("\x1c4 ", 0),
                 ("\x1f4 ", 0), ("\xff4\xff ", 0), ("\v4 ", 8), ("\f4\f", 8), ("\r4\r", 8),
-                ("MODE\v3 ", 4), ("MODE\xa03 ", 0), ("$MODE\xa03 ", 0)):
+                ("MODE\v3 ", 4), ("MODE\xa03 ", 0), ("$MODE\xa03 ", 0),
+                # The MODE digit search stops at a line end: "3x" on the
+                # next line is a token of its own, and no bare digit.
+                ("MODE\n3x ", 0), ("$MODE\n3x ", 0), ("MODE 3x ", 4)):
             _, cfg, commands, _ = launcher(text)
             self.assertEqual(cfg.compat_modes, want, repr(text))
             self.assertEqual(commands, [], repr(text))
@@ -881,6 +894,9 @@ class Original(unittest.TestCase):
         if not cfg.usb_delay_set:
             self.assertEqual(cfg.usb_delay, 0, repr(text))
         self.usb_delays += cfg.usb_delay_set
+        # The forced-PAL word itself (launcHER's own video tokens do not
+        # touch forced_pal, so this holds for every text).
+        self.assertEqual(cfg.forced_pal, scan.gp_after.get(FORCED_PAL, 0), repr(text))
         # $480P / $NOPAL / $FORCEPAL: the three words the region pass reads.
         if LAUNCHER_VIDEO.search(text.upper()):
             self.launcher_video_texts += 1
@@ -1009,6 +1025,8 @@ class Original(unittest.TestCase):
         want = original_video(scan2.gp_after)
         self.assertEqual(launcher_video(cfg), want, (first, second))
         self.assertEqual(launcher_video(whole), want, (first, second))
+        word = scan2.gp_after.get(FORCED_PAL, 0)
+        self.assertEqual((cfg.forced_pal, whole.forced_pal), (word, word), (first, second))
         return want
 
     def test_video_two_files(self):

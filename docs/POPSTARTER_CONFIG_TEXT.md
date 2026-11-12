@@ -220,6 +220,10 @@ code (which file operation) was not traced.
   token at all (it used to be cut at 63 bytes and its tail read as a new
   token, so 63 bytes and a `1` set mode 1). Their video tokens set
   `video_mode` only: `$NTSC2PAL $NOPAL` gives `POPS_VMODE_NOPAL`, as before.
+  So they are not the original's `$NOPAL` / `$FORCEPAL`: `$FORCEPAL
+  $PAL2NTSC` gives no PAL, while `$FORCEPAL $NOPAL` stays forced PAL.
+  Whether they should follow the original's commands is an open owner
+  question.
   Whether these tokens are read from CHEATS.TXT at all is an open owner
   decision (`docs/PR23_HANDOFF_2026-11-11.md`, section 8); that was not
   changed.
@@ -242,6 +246,17 @@ code (which file operation) was not traced.
   these for `$FORCEPAL`; it applies a fix file's progressive setting after
   the text (`handler_pops.c`). Whether a launch then differs was not
   measured.
+- The forced-PAL and automatic-PAL words also have writers outside the
+  text (read from the code, not run). The function before the reader
+  clears `gp+0x38a0` and `gp+0x4fa0` at `0x883120`/`0x883124` while
+  `gp+0x3898` is 0 (`0x883114`; `$FORCEPAL` and `$480P` set that word), and
+  sets `gp+0x3864` at `0x88301c`/`0x8830a4`/`0x883174`. Start-up writes are
+  at `0x870c80`/`0x870c90` and `0x8711ec`..`0x871230`; further stores of 0
+  to `gp+0x4fa0` are at `0x871710`, `0x883014`, `0x88309c`, `0x88316c` and
+  `0x8f8abc`. When the function at `0x883000` runs relative to the reader
+  was not traced, so whether it changes the video result of a text was not
+  measured. The comparison of the video words above holds for the words as
+  the text pass leaves them.
 - Files of 8 bytes or less: where the original reads its heap after the
   buffer (see above), launcHER reads zeros. Only whether such a `$` is
   stepped over as a code can differ; no command does.
@@ -304,17 +319,18 @@ What one file does:
 
 - the 66 handler names and their order, read from the image, equal
   `pops_commands[]`;
-- 167 fixed texts: the original's pass and launcHER's reader report the
+- 169 fixed texts: the original's pass and launcHER's reader report the
   same commands at the same offsets (and whether each changed something),
   the same codes stepped over, the same X, Y, compatibility-mode, game-id
-  and `0x100017` values, and the same three video words as the region pass
+  and `0x100017` values, the same forced-PAL word (`gp+0x38a0`, launcHER's
+  `forced_pal`), and the same three video words as the region pass
   reads them. Among them: each condition of the five code tests from both
   sides, and the orders of `$480P`, `$NOPAL` and `$FORCEPAL`;
 - 1500 seeded random texts: the same (2876 commands, 399 codes stepped
   over; 96 texts also had a launcHER-only `MODE` token, 20 wrote
   `0x100017`; the video words are not compared in texts that hold a
   launcHER-only video token);
-- the video words: 18 texts against a table, 600 seeded random texts, and
+- the video words: 20 texts against a table, 600 seeded random texts, and
   two files (the second run with the first's gp words; launcHER through
   `pops_config_discover`): 6 fixed and 441 pairs;
 - 357 files of 1..8 bytes: equal with zeros after the original's buffer;

@@ -195,7 +195,8 @@ typedef struct {
    * can know of the original's gp+0x3864, which $480P sets (0x8902a4) and
    * $FORCEPAL tests (0x8987f0): once set, $FORCEPAL does nothing (measured
    * under emulation, tools/test_pops_config_text.py). Read from the code,
-   * not run: the original also stores 1 there at start-up when the byte
+   * not run: the only store of zero there is the start-up clear
+   * (0x870c90), and the original also stores 1 there at start-up when the byte
    * at 0x10002a is 2 (0x871218; pops_config_load_table, which the launch
    * does not call, sets this field for table byte 26 == 2), at 0x871718
    * (after a word compare with 0x41524258) and at 0x88301c, 0x8830a4 and
@@ -286,7 +287,12 @@ typedef struct {
    * word (gp+0x4fa0) and nothing else, and the region pass takes forced
    * PAL before it looks at that word (0x879034..0x87930c), so after a
    * $FORCEPAL a $NOPAL leaves video_mode at POPS_VMODE_NTSC2PAL.
-   * launcHER's own $NTSC2PAL / $PAL2NTSC do not touch it. */
+   * launcHER's own $NTSC2PAL / $PAL2NTSC do not touch it. Read from the
+   * code, not run: the original also clears the word outside the text, at
+   * start-up (0x870c80, and 0x871208, which pops_config_load_table copies
+   * for table byte 26 == 2) and at 0x883120 in the function before the
+   * reader while gp+0x3898 is 0; the last is not modelled
+   * (docs/POPSTARTER_CONFIG_TEXT.md). */
   uint8_t forced_pal;
 } PopsConfig;
 

@@ -533,9 +533,10 @@ static int run_command(PopsConfig *cfg, const PopsCommand *command, const unsign
   case CMD_FORCEPAL:
     /* 0x8987f0: the handler's three stores (gp+0x38a0, the forced-PAL flag
      * the region pass reads at 0x879034, and gp+0x38d0, gp+0x3898) are
-     * skipped when gp+0x3864 is set. $480P sets it (0x8902a4) and nothing
-     * clears it, so after a $480P, in this file or an earlier one, the
-     * command is taken and does nothing. progressive_requested is that
+     * skipped when gp+0x3864 is set. $480P sets it (0x8902a4); the only
+     * store of zero there is the start-up clear (0x870c90), so after a
+     * $480P, in this file or an earlier one, the command is taken and
+     * does nothing. progressive_requested is that
      * word as far as the text goes; pops_config.h says what else sets it
      * in the original. */
     if (!command_end(*rest))
@@ -715,8 +716,12 @@ static void apply_launcher_token(PopsConfig *cfg, const char *token) {
     DPRINTF("POPS config: %s is not a POPStarter command; ignored\n", token);
     return;
   }
-  /* POPS runs NTSC unless the PAL patch is applied, so "PAL to NTSC" is
-   * the original's $NOPAL: keep a European disc at 60 Hz. */
+  /* POPS runs NTSC unless the PAL patch is applied, so "PAL to NTSC" sets
+   * POPS_VMODE_NOPAL: keep a European disc at 60 Hz. It is not quite the
+   * original's $NOPAL: it does not test forced_pal, so it undoes an
+   * earlier $FORCEPAL ("$FORCEPAL $PAL2NTSC" is no PAL), where $NOPAL
+   * does not ("$FORCEPAL $NOPAL" is forced PAL). Whether these tokens
+   * stay is an owner decision (docs/POPSTARTER_CONFIG_TEXT.md). */
   if (!strcasecmp(token, "$PAL2NTSC") || !strcasecmp(token, "$FORCENTSC")) {
     cfg->video_mode = POPS_VMODE_NOPAL;
     return;
