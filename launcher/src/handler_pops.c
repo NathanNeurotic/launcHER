@@ -15,6 +15,7 @@
 #include "pops_igr_skin.h"
 #include "pops_resident.h"
 #include "pops_read_trace.h"
+#include "pops_handoff_ee.h"
 #include <ctype.h>
 #include <fcntl.h>
 #include <kernel.h>
@@ -1249,8 +1250,11 @@ int launchPOPS(int argc, char *argv[]) {
       }
       close(vcdFd);
     }
-    DPRINTF("POPS: Disc region %u (licence at 0x%llx)\n", (unsigned)cfg.disc_region,
-            (unsigned long long)licence);
+    /* No ll length modifier here: the EE libc's printf does not know it and
+     * printed the bare "lx". The offset is a header (0 or 1 MiB) plus four
+     * sectors, far below 4 GiB. */
+    DPRINTF("POPS: Disc region %u (licence at 0x%lx)\n", (unsigned)cfg.disc_region,
+            (unsigned long)licence);
   }
 
   /* All card candidates below fit within vcdDir + one optional folder +
@@ -2088,7 +2092,25 @@ int launchPOPS(int argc, char *argv[]) {
   return 0;
 #endif
 
-  /* Execute trampoline below 1 MiB, which stages core, clears RAM, and enters POPS */
+  /* POPStarter enters POPS as the kernel's only thread. Retire launcHER's
+   * other threads now, while their stacks are still launcHER's: ExecPS2
+   * rewrites the initial frame of every thread it terminates, and by then
+   * that memory is POPS code. From here on nothing may wait on another
+   * thread, an alarm or an RPC (no trace line either).
+   * A failure returns to the menu as every other launch failure does.
+   * -EFAULT is returned before any thread is touched. -EBUSY and -EIO can
+   * come after ps2sdk's helper thread is already gone, with the trampoline
+   * and the staging area installed; what the menu does then is untested
+   * (no POPStarter equivalent; never seen, the kernel calls would have to
+   * fail). */
+  res = popsHandoffRetireThreads();
+  if (res) {
+    msg("POPS: Handoff thread cleanup failed: %d\n", res);
+    return res;
+  }
+
+  /* Execute trampoline below 1 MiB, which turns interrupts off, stages core,
+   * clears RAM, and enters POPS */
   ((void (*)(void *))POPS_TRAMPOLINE_ADDR)((void *)POPS_TRAMPOLINE_ARGS);
 
   return 0;

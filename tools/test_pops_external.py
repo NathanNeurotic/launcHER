@@ -1142,8 +1142,18 @@ class InspectorTests(unittest.TestCase):
 
         # Successful init with default arg
         self.assertEqual(LIB.pops_trampoline_args_init(c.byref(args), c.byref(plan), 0x01000000, None), 0)
-        self.assertEqual(args.entry, 0x00200008)
+        # ExecPS2 goes to the core's first word, as POPStarter r13's constant
+        # 0x00200000 (tools/test_pops_handoff.py, Differential), not to the
+        # ELF's e_entry 0x00200008; the two words between are nops in POPS.ELF.
+        self.assertEqual(args.entry, 0x00200000)
         self.assertEqual(args.core_address, 0x00200000)
+        plan.entry = 0x00200000
+        self.assertEqual(LIB.pops_trampoline_args_init(c.byref(args), c.byref(plan), 0x01000000, None), 0)
+        self.assertEqual(args.entry, 0x00200000)
+        plan.entry = 0x00200004
+        self.assertEqual(LIB.pops_trampoline_args_init(c.byref(args), c.byref(plan), 0x01000000, None), RANGE)
+        plan.entry = 0x00200008
+        self.assertEqual(LIB.pops_trampoline_args_init(c.byref(args), c.byref(plan), 0x01000000, None), 0)
         self.assertEqual(args.core_size, 0x00302E60)
         self.assertEqual(args.staging_core, 0x01000000)
         self.assertEqual(args.argc, 1)

@@ -778,7 +778,7 @@ def trampoline_words():
     return words, symbols
 
 
-def run_trampoline(bss_address, bss_size, core, entry=0x00200008):
+def run_trampoline(bss_address, bss_size, core, entry=0x00200000):
     """Run the trampoline with PopsTrampolineArgs at 0x84200 (as
     pops_trampoline_args_init writes them) over memory filled with MARK,
     up to its ExecPS2. Returns the machine and the syscalls it made."""
@@ -829,7 +829,7 @@ class Trampoline(unittest.TestCase):
         self.assertEqual(m.read(CORE, len(core)), core)
         kept(CORE + len(core), 0x00201000)
         # FlushCache(0), FlushCache(2), ExecPS2(entry, NULL, 1, argv)
-        self.assertEqual([call[:2] for call in calls], [(0x64, 0), (0x64, 2), (7, 0x00200008)])
+        self.assertEqual([call[:2] for call in calls], [(0x64, 0), (0x64, 2), (7, 0x00200000)])
         self.assertEqual(calls[2][2:], (0, 1, TRAMP_ARGS + 32))
         self.assertEqual(m.lo(29), 0x0008FFF0)
         return m
@@ -934,6 +934,22 @@ class Source(unittest.TestCase):
             "POPS_CORE_ADDR, (void *)stagedCore, plan.core_size, POPS_CORE_ALL);", "", 1))
         self.assertNotIn("pops_resident_hook", between)
         self.assertNotIn("pops_stage_igr_skin(", between)
+
+    def test_trace_lines_use_no_long_long_conversion(self):
+        # The EE libc's printf does not know %ll: a traced launch printed
+        # "POPS: Disc region 3 (licence at 0xlx)" (emulator, trace build).
+        # Only the POPS launch path's sources are held to it here; code the
+        # rest of launcHER (and Ember) shares is not this test's business.
+        import re
+        pops = ([ROOT / "launcher/src/handler_pops.c"] + sorted((ROOT / "launcher/src").glob("pops_*.c"))
+                + sorted((ROOT / "common/src").glob("pops_*.c")))
+        self.assertGreater(len(pops), 10)
+        for path in pops:
+            text = path.read_text(encoding="utf-8", errors="replace")
+            self.assertIsNone(re.search(r'"[^"\n]*%[-+ #0-9.]*ll[diouxX]', text), path.name)
+        src = (ROOT / "launcher/src/handler_pops.c").read_text()
+        self.assertIn('DPRINTF("POPS: Disc region %u (licence at 0x%lx)\\n", (unsigned)cfg.disc_region,\n'
+                      '            (unsigned long)licence);', src)
 
     def test_ember_never_reaches_the_pops_launch(self):
         common = (ROOT / "launcher/src/common.c").read_text()

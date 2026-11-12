@@ -70,6 +70,8 @@ jobs:
         run: python tools/test_pops_config_text.py
       - name: Test POPStarter's user BIOS.BIN and the gates its loader flags drive
         run: python tools/test_pops_user_bios.py
+      - name: Test the POPS handoff (one thread left, interrupts off before the clears)
+        run: python tools/test_pops_handoff.py
 
   build:
     runs-on: ubuntu-latest

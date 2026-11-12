@@ -160,7 +160,12 @@ int pops_trampoline_args_init(PopsTrampolineArgs *out, const PopsBootPlan *plan,
     return POPS_FILE_RANGE;
 
   memset(out, 0, sizeof(*out));
-  out->entry = plan->entry;
+  /* ExecPS2 at the core's first word, as POPStarter r13 does: its tail
+   * passes the constant 0x00200000 whatever the ELF's e_entry (MAIN
+   * 0x87c0d4..0x87c1d0, run by tools/trace_original_pops_handoff.py). POPS.ELF's
+   * e_entry is 0x00200008 and the two words before it are nops, so the same
+   * code runs; the kernel's record of thread 1 then has r13's entry. */
+  out->entry = POPS_CORE_ADDR;
   out->bss_address = plan->bss_address;
   out->bss_size = plan->bss_size;
   out->scratchpad_size = plan->scratchpad_size;

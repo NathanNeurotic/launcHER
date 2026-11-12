@@ -9,7 +9,11 @@ and keeps bits 64..127 (as the R5900 does); branch delay slots; branch-likely;
 an address error on a misaligned halfword, word or doubleword access (LQ/SQ
 ignore the low four bits, as on the console; SWR stores the bytes from the
 address to the end of its word); SYSCALL stops the run with a Syscall
-exception (pc left on it, $v1 holds the number). With `kseg` set,
+exception (pc left on it, $v1 holds the number); of COP0 only DI, EI and
+MFC0 from Status, with the R5900's rule for user mode (DI/EI act when
+Status.EDI is set, in kernel mode or at exception level; `di_misses` makes
+that many DIs lose their race with an interrupt, which is what the loop
+around DI is for). With `kseg` set,
 0x80000000..0xbfffffff reach the same memory as their low 29 bits (kseg0
 and kseg1, as main RAM is mapped in kernel mode); off, every address is its
 own. Any other instruction raises, so a test never runs something this
@@ -53,6 +57,11 @@ class Machine:
         self.kseg = False       # True: kseg0/kseg1 reach the low 512 MiB
         self.pc = 0
         self.steps = 0
+        # COP0 Status as a user program has it (0x70030c11 measured in
+        # launcHER at the POPS handoff): EDI (bit 17) lets user mode run
+        # DI/EI, EIE (bit 16) is the master interrupt enable they change.
+        self.status = 0x70030C11
+        self.di_misses = 0      # this many DIs leave EIE set (a lost race with an interrupt)
 
     def _phys(self, addr):
         a = addr & M32
@@ -183,6 +192,21 @@ class Machine:
                 self.set_lo(rd, (v - ((v & (1 << 63)) << 1)) >> (sa + 32))
             else:
                 raise NotImplementedError("SPECIAL funct 0x%02x at 0x%08x" % (fn, pc))
+            return None
+        if op == 0x10:       # COP0: mfc0 Status, di, ei
+            if word in (0x42000039, 0x42000038):
+                # Allowed in kernel mode, at exception level, or with EDI set.
+                allowed = (self.status & 0x20006) or not (self.status & 0x18)
+                if word == 0x42000039 and self.di_misses:
+                    self.di_misses -= 1
+                elif allowed and word == 0x42000039:
+                    self.status &= ~0x10000
+                elif allowed:
+                    self.status |= 0x10000
+            elif rs == 0 and rd == 12 and not (word & 0x7FF):
+                self.set_lo(rt, sext32(self.status))
+            else:
+                raise NotImplementedError("COP0 0x%08x at 0x%08x" % (word, pc))
             return None
         if op in (2, 3):     # j / jal
             target = ((pc + 4) & 0xF0000000) | ((word & 0x03FFFFFF) << 2)
@@ -424,6 +448,12 @@ def assemble(source, base, externs=None, defines=None):
                 (((target - pc - 4) >> 2) & 0xFFFF)
         elif mnem == "syscall":
             w = 0x0C
+        elif mnem in ("di", "ei"):
+            w = 0x42000039 if mnem == "di" else 0x42000038
+        elif mnem in ("sync", "sync.l", "sync.p"):
+            w = 0x0000040F if mnem == "sync.p" else 0x0000000F
+        elif mnem == "mfc0":
+            w = (0x10 << 26) | (REG[a[0]] << 16) | (REG[a[1]] << 11)
         elif mnem == "pcpyld":
             w = (0x1C << 26) | (REG[a[1]] << 21) | (REG[a[2]] << 16) | (REG[a[0]] << 11) | \
                 (0x0E << 6) | 0x09
