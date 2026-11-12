@@ -48,6 +48,14 @@ static PopsResidentConfig residentCfg;
 #define POPS_IOP_MAX_SIZE   0x00080000
 #define POPS_STAGE_BUF      ((void *)POPS_STAGING_BASE)
 #define POPS_LOAD_MAX_SIZE  (8 * 1024 * 1024)
+/* TROJAN payloads that load above the POPS image wait here until handoff,
+ * in what was the raw POPS.ELF input: nothing reads that once the image is
+ * staged, and fix files are read later, at 0x01f00000. The last 64 KB are
+ * the work memory of the payload scan (POPS_TROJAN_SCAN_WORK of 1 MiB). */
+#define POPS_TROJAN_HOLD_BUF  ((uint8_t *)0x01800000)
+#define POPS_TROJAN_HOLD_SIZE 0x006f0000u
+#define POPS_TROJAN_WORK_BUF  ((void *)0x01ef0000)
+#define POPS_TROJAN_WORK_SIZE 0x00010000u
 
 int isPopsTarget(const char *path) {
   if (!path)
@@ -277,10 +285,55 @@ static int readPopsDependency(const char *path, void *buffer, size_t max_size,
   return result;
 }
 
+/* One TROJAN_n.BIN, opened, read as POPStarter reads it (0x881134..0x881230,
+ * 0x881a1c; tools/test_pops_trojan.py, class Original, runs the original
+ * with these failures): the size is what the lseek to the end returns, a
+ * failure included, and a size below 0x44 is Invalid; neither the rewind
+ * nor the header read is checked, so what did not arrive stays zero (the
+ * original clears its header after every file and reads it in one call;
+ * here it is read until it has arrived or a read returns nothing). The
+ * payload is read only for a file the original would apply and that fits
+ * `capacity`. Returns 0 with the whole file in buffer and *size set, a
+ * POPS_FIX_SKIP_* result (pops_fix_trojan_header), or a negative error for
+ * a failed payload read, which the original does not check: it copies
+ * whatever its buffer holds, so that stays fatal here. */
+static int pops_read_trojan(int fd, void *memory, size_t capacity, unsigned slot,
+                            PopsTrojanSet *set, size_t *size) {
+  uint8_t *buffer = memory;
+  off_t end = lseek(fd, 0, SEEK_END);
+  /* The original keeps the size as a signed 32-bit word. */
+  size_t fileSize = end > 0 && end <= 0x7fffffff ? (size_t)end : 0;
+  size_t total = 0;
+  lseek(fd, 0, SEEK_SET);
+  memset(buffer, 0, POPS_CONTAINER_HEADER_SIZE);
+  while (total < POPS_CONTAINER_HEADER_SIZE) {
+    ssize_t n = read(fd, buffer + total, POPS_CONTAINER_HEADER_SIZE - total);
+    if (n <= 0 || (size_t)n > POPS_CONTAINER_HEADER_SIZE - total)
+      break;
+    total += (size_t)n;
+  }
+  int result = pops_fix_trojan_header(set, buffer, fileSize, slot, capacity);
+  if (result)
+    return result;
+  if (lseek(fd, POPS_CONTAINER_HEADER_SIZE, SEEK_SET) != POPS_CONTAINER_HEADER_SIZE)
+    return -EIO;
+  total = POPS_CONTAINER_HEADER_SIZE;
+  while (total < fileSize) {
+    size_t chunk = fileSize - total;
+    if (chunk > 65536)
+      chunk = 65536;
+    ssize_t n = read(fd, buffer + total, chunk);
+    if (n <= 0 || (size_t)n > chunk)
+      return n < 0 && errno ? -errno : -EIO;
+    total += (size_t)n;
+  }
+  *size = fileSize;
+  return 0;
+}
+
 /* The archived MAIN calls root TROJAN, root PATCH, title TROJAN, title PATCH
  * (0x876d6c/0x876e00/0x877078/0x877118). Slot order is 0..9 in both loaders.
  * These are explicit external fix files, never files from VMCDIR redirection.
- * The staged executable is discarded by the caller on any failure.
  * Before each folder's TROJAN files it calls its BIOS.BIN loader for that
  * folder (0x876cd8/0x876fd8); pops_user_bios_load is that loader. */
 
@@ -335,12 +388,24 @@ static int pops_user_bios_load(void *stagedCore, size_t coreSize, const char *di
   return result;
 }
 
+/* Each folder's BIOS.BIN, then its TROJAN files, then its PATCH files.
+ * A TROJAN the original calls "Invalid" or "Skipped (outdated)" is skipped
+ * with its words and the next slot is read, as there (its loader returns 1
+ * whatever happened and its callers ignore that). A TROJAN it would apply
+ * and launcHER cannot host is skipped too, with a line that says so: the
+ * game then runs without that fix; so is one larger than the 1 MiB read
+ * buffer, which the original has no limit for. A TROJAN that cannot be
+ * opened, for whatever reason, is "NOT FOUND" there and here, and one whose
+ * size or header cannot be read is "Invalid" (pops_read_trojan). Any other
+ * failure, a PATCH file's read error or a TROJAN payload's included, still
+ * stops the launch, and the staged executable is discarded by the caller. */
 static int pops_stage_fix_files(void *stagedCore, size_t coreSize,
                                  const char *vcdDir, const char *titleDir,
                                  uint16_t builtinId, uint8_t initialModes,
                                  uint8_t initialVideo,
                                  uint32_t progressiveEntry, uint32_t initialInterlace,
-                                 PopsUserRomState *rom, PopsFixContext *finalContext) {
+                                 PopsUserRomState *rom, PopsFixContext *finalContext,
+                                 PopsTrojanSet *trojanSet) {
   PopsFixContext context;
   PopsUserRomState noState;
   if (!rom) {
@@ -378,13 +443,40 @@ static int pops_stage_fix_files(void *stagedCore, size_t coreSize,
                                 kind ? "PATCH" : "TROJAN", slot);
         if (length < 0 || (size_t)length >= sizeof(path))
           return -ENAMETOOLONG;
-        result = readFullFile(path, buffer, 0x100000, &size);
-        if (result == -ENOENT)
-          continue;
+        if (kind) {
+          result = readFullFile(path, buffer, 0x100000, &size);
+          if (result == -ENOENT)
+            continue;
+        } else {
+          int fd = open(path, O_RDONLY);
+          if (fd < 0) {
+            DPRINTF("POPS: %s NOT FOUND\n", path);
+            continue;
+          }
+          result = pops_read_trojan(fd, buffer, 0x100000, slot, trojanSet, &size);
+          close(fd); /* not checked there either */
+        }
         if (!result)
-          result = pops_fix_stage_rom(&context, stagedCore, coreSize, buffer, size,
-                                       slot, !kind, rom);
-        if (result < 0) {
+          result = kind ? pops_fix_stage_rom(&context, stagedCore, coreSize, buffer, size,
+                                             slot, 0, rom)
+                        : pops_fix_stage_trojan(&context, trojanSet, stagedCore, coreSize,
+                                                buffer, size, slot);
+        /* POPS_MODE6_SKIPPED has the value of POPS_FIX_SKIP_INVALID: the
+         * three skip results are TROJAN results only. */
+        if (!kind && result == POPS_FIX_SKIP_INVALID) {
+          msg("POPS: %s: Invalid\n", path);
+          continue;
+        }
+        if (!kind && result == POPS_FIX_SKIP_OUTDATED) {
+          msg("POPS: %s: Skipped (outdated)\n", path);
+          continue;
+        }
+        if (!kind && result == POPS_FIX_SKIP_UNHOSTED) {
+          msg("POPS: %s is valid for POPStarter but NOT loaded by launcHER: %s\n", path,
+              pops_trojan_reason_text(trojanSet ? trojanSet->reason : POPS_TROJAN_NO_SPACE));
+          continue;
+        }
+        if (result < 0 || (!kind && result)) {
           msg("POPS: Fix file rejected %s (%d)\n", path, result);
           return result;
         }
@@ -908,7 +1000,8 @@ static int pops_probe_live_storage(int virtualPfs, uint32_t pvdSampleOffset) {
  *     $RECOMPILER_ADDON_3/4 jumps: the original's handlers write those into
  *     POPS's two emit points while the user's files are read.
  *  4. Each folder's BIOS.BIN and fix files (pops_stage_fix_files), with the
- *     osd_off the commands left.
+ *     osd_off the commands left. TROJAN files go into *trojanSet (made by
+ *     the caller; NULL hosts none), whose slots are offered first.
  *  5. If a load in 4 did not do what 2 said, the commands ran with the wrong
  *     flags: -EIO, and the caller discards the staged core.
  * Returns 0 or a negative error. */
@@ -917,7 +1010,8 @@ static int pops_stage_user_files(void *stagedCore, size_t coreSize,
                                  uint16_t builtinId, uint8_t builtinModes,
                                  const PopsConfig *cfg,
                                  const PopsResidentHeader *residentHdr,
-                                 PopsUserRomState *rom, PopsFixContext *finalContext) {
+                                 PopsUserRomState *rom, PopsFixContext *finalContext,
+                                 PopsTrojanSet *trojanSet) {
   PopsUserRomState atCommands;
   int res;
   memset(rom, 0, sizeof(*rom));
@@ -953,13 +1047,20 @@ static int pops_stage_user_files(void *stagedCore, size_t coreSize,
     return res;
   }
 
+  /* POPStarter's ten TROJAN slots are offered when the two runs still hold
+   * POPS's own bytes and the GP1 hook is the expected jal, after the
+   * commands and the emit jumps, as in the launch before the BIOS.BIN work. */
+  if (trojanSet)
+    trojanSet->chain_offered =
+        (uint8_t)pops_resident_slot_chain_possible(stagedCore, coreSize, residentHdr);
+
   /* Preserve original root/title and TROJAN/PATCH ordering. */
   res = pops_stage_fix_files(stagedCore, coreSize, vcdDir, titleDir, builtinId,
                              cfg->compat_modes,
                              cfg->progressive_requested ? POPS_VMODE_480P : cfg->video_mode,
                              residentHdr->progressive_entry,
                              cfg->hdtv_fix ? 0x24040001 : 0x32240001,
-                             rom, finalContext);
+                             rom, finalContext, trojanSet);
   if (res)
     return res;
   if (rom->bios_all != atCommands.bios_all ||
@@ -1139,6 +1240,8 @@ int launchPOPS(int argc, char *argv[]) {
     DPRINTF("POPS: Built-in list fingerprint %s, entry %u\n", sigOk ? "read" : "unreadable",
             (unsigned)builtinId);
   }
+  /* What the fingerprint alone picked: the TROJAN "outdated" rule reads it. */
+  const uint16_t fingerprintId = builtinId;
   if (builtinId) {
     res = pops_builtin_apply(builtinId, NULL, 0, NULL, 0, 0, &builtinPlan);
     if (res) {
@@ -1681,12 +1784,24 @@ int launchPOPS(int argc, char *argv[]) {
 
   /* The user's commands, the $RECOMPILER_ADDON_3/4 jumps, then each folder's
    * BIOS.BIN and fix files, with POPStarter's loader state
-   * (pops_modes_patches.h) that the stages below test. */
+   * (pops_modes_patches.h) that the stages below test. The original's
+   * "outdated" rule for TROJAN files reads the entry its fingerprint
+   * matcher picked: a $VCDID_n is parsed after the fix files there. */
   PopsUserRomState romState;
   PopsFixContext fixContext;
+  PopsTrojanSet trojanSet;
+  /* A fingerprint entry's breakpoint call is in POPStarter's slot at
+   * 0x232d08 before it reads the first TROJAN file. Whether the slots are
+   * offered is decided in the helper, just before the first fix file. */
+  pops_trojan_set_init(&trojanSet, POPS_BUILTIN_ID(fingerprintId),
+                       fingerprintId && builtinPlan.break_call);
+  trojanSet.hold = POPS_TROJAN_HOLD_BUF;
+  trojanSet.hold_size = POPS_TROJAN_HOLD_SIZE;
+  trojanSet.work = POPS_TROJAN_WORK_BUF;
+  trojanSet.work_size = POPS_TROJAN_WORK_SIZE;
   res = pops_stage_user_files((void *)stagedCore, plan.core_size, vcdDir, gameConfigDir,
                               builtinId, builtinPlan.compat_modes, &cfg, &residentHdr,
-                              &romState, &fixContext);
+                              &romState, &fixContext, &trojanSet);
   if (res)
     return res;
   res = pops_fix_require_progressive(&fixContext, (void *)stagedCore, plan.core_size);
@@ -1739,6 +1854,7 @@ int launchPOPS(int argc, char *argv[]) {
    * when it finds the SystemErrorExit stub, makes the in-game reset jump
    * there; that store takes over the slot its breakpoint handler would use,
    * so the handler is dropped, as there (quirk 25). */
+  int resetStore = 0;
   if (cfg.reset_warmboot) {
     uint32_t exitVector = 0;
     res = pops_apply_reset_warmboot((void *)stagedCore, plan.core_size, &exitVector);
@@ -1751,6 +1867,40 @@ int launchPOPS(int argc, char *argv[]) {
     if (exitVector) {
       cfg.reset_vector = exitVector;
       cfg.builtin_break_call = 0;
+      resetStore = 1;
+    }
+  }
+
+  /* POPStarter's ten TROJAN slots, only when a hosted TROJAN file hooks or
+   * names one: the two runs of five go into the core at its addresses and
+   * the GP1 hook is pointed at the entry that runs them where its chain
+   * does. What ends up in the slot at 0x232d08 follows its write order:
+   * the fingerprint entry's breakpoint call, then a TROJAN file's hook,
+   * then the call again from $BREAKPOINT0/1 or a $VCDID_n entry (both are
+   * parsed after the fix files there), then $RESET_WARMBOOT's store. From
+   * here the call is that slot's word, not a flag of the resident code. */
+  {
+    unsigned slot4 = POPS_SLOT4_AS_FILES;
+    const uint32_t filesWord = trojanSet.slot_word[1][0];
+    if (resetStore)
+      slot4 = POPS_SLOT4_RESET_STORE;
+    else if ((cfg.breakpoint & (POPS_BREAKPOINT_0 | POPS_BREAKPOINT_1)) ||
+             (!fingerprintId && builtinId && builtinPlan.break_call))
+      slot4 = POPS_SLOT4_BREAK_CALL;
+    res = pops_resident_hook_slot_chain((void *)stagedCore, plan.core_size, &residentHdr,
+                                        &trojanSet, slot4);
+    if (res < 0) {
+      msg("POPS: TROJAN slots cannot be installed: %d\n", res);
+      return res;
+    }
+    if (res) {
+      if (filesWord != trojanSet.slot_word[1][0] && filesWord != POPS_TROJAN_SLOT_EMPTY &&
+          filesWord != POPS_TROJAN_BREAK_CALL)
+        msg("POPS: the TROJAN hook at 0x232d08 is replaced by %s, as in POPStarter\n",
+            resetStore ? "$RESET_WARMBOOT" : "the breakpoint handler call");
+      cfg.builtin_break_call = trojanSet.slot_word[1][0] == POPS_TROJAN_BREAK_CALL;
+      DPRINTF("POPS: TROJAN slots installed, 0x232d08 = 0x%08x\n",
+              (unsigned)trojanSet.slot_word[1][0]);
     }
   }
 
@@ -2062,6 +2212,29 @@ int launchPOPS(int argc, char *argv[]) {
       msg("POPS: $BREAKPOINT handler install failed: %d\n", res);
       return res ? res : -EINVAL;
     }
+  }
+
+  /* TROJAN payloads that load above the image, where the original's memcpy
+   * puts them. Checked again against everything this launch still needs,
+   * and nothing is written unless every payload passes. */
+  if (trojanSet.payload_count) {
+    const PopsTrojanKeep keep[] = {
+        {(uint32_t)(uintptr_t)stagedCore, (uint32_t)(uintptr_t)stagedCore + plan.core_size},
+        {POPS_BUILTIN_FIX_ADDR, POPS_BUILTIN_FIX_LIMIT},
+        {POPS_RESIDENT_BASE, POPS_BUILTIN_BREAK_LIMIT},
+        {(uint32_t)(uintptr_t)POPS_TROJAN_HOLD_BUF, 0x02000000u},
+        {0, 0x00200000u}};
+    /* The arena itself is the memory handed over, never address 0: the
+     * function refuses a null pointer, and no payload is placed outside
+     * the arena anyway. */
+    res = pops_trojan_copy_out(&trojanSet, (uint8_t *)(uintptr_t)POPS_TROJAN_ARENA_BASE,
+                               POPS_TROJAN_ARENA_BASE, POPS_TROJAN_ARENA_LIMIT, keep,
+                               sizeof(keep) / sizeof(keep[0]));
+    if (res < 0) {
+      msg("POPS: TROJAN payload install failed: %d\n", res);
+      return -EFAULT;
+    }
+    DPRINTF("POPS: %d TROJAN payload(s) placed above the image\n", res);
   }
 
   /* Last write before handoff: nothing of launcHER's lives at the resident

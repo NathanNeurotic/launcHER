@@ -179,6 +179,9 @@ int pops_resident_check_image(const void *image, size_t image_len, PopsResidentH
   h.recompiler_entry = get_u32(b + 92);
   for (unsigned i = 0; i < POPS_EMIT_COUNT; ++i)
     h.recompiler_emit[i] = get_u32(b + 96 + 4 * i);
+  h.gp1_chain_entry = get_u32(b + 112);
+  h.gp1_resume_a = get_u32(b + 116);
+  h.gp1_resume_b = get_u32(b + 120);
 
   if (h.magic != POPS_RESIDENT_MAGIC || h.version != POPS_RESIDENT_VERSION ||
       h.header_size != sizeof(PopsResidentHeader))
@@ -216,6 +219,12 @@ int pops_resident_check_image(const void *image, size_t image_len, PopsResidentH
   for (unsigned i = 0; i <= POPS_EMIT_COUNT; ++i) {
     uint32_t e = i < POPS_EMIT_COUNT ? h.recompiler_emit[i] : h.recompiler_entry;
     if ((e & 3) || e < POPS_RESIDENT_BASE + h.header_size || e >= POPS_RESIDENT_BASE + h.file_size)
+      return -ERANGE;
+  }
+  const uint32_t chain[] = {h.gp1_chain_entry, h.gp1_resume_a, h.gp1_resume_b};
+  for (unsigned i = 0; i < 3; ++i) {
+    if ((chain[i] & 3) || chain[i] < POPS_RESIDENT_BASE + h.header_size ||
+        chain[i] >= POPS_RESIDENT_BASE + h.file_size)
       return -ERANGE;
   }
   /* The configuration must fit inside the image, in its zeroed part or not,
@@ -368,6 +377,69 @@ int pops_resident_hook_gp1(void *staged_core, size_t core_size, uint32_t entry) 
     return -EILSEQ;
   put_u32(site, jal);
   return 0;
+}
+
+/* POPS's own bytes in the two runs (0x30 bytes each), as an FNV-1a sum:
+ * part of its unreferenced function at 0x232790. */
+#define SLOT_RUN_A_PRISTINE UINT32_C(0xa465b265)
+#define SLOT_RUN_B_PRISTINE UINT32_C(0x0b521ce9)
+
+static uint32_t slot_run_sum(const uint8_t *bytes) {
+  uint32_t sum = UINT32_C(0x811c9dc5);
+  for (unsigned i = 0; i < POPS_TROJAN_SLOTS_SPAN; ++i)
+    sum = (sum ^ bytes[i]) * UINT32_C(0x01000193);
+  return sum;
+}
+
+static int slot_chain_check(const uint8_t *core, size_t core_size, const PopsResidentHeader *h) {
+  const uint32_t entries[] = {h->gp1_entry, h->gp1_chain_entry, h->gp1_resume_a, h->gp1_resume_b};
+  for (unsigned i = 0; i < 4; ++i)
+    if ((entries[i] & 3) || entries[i] < POPS_RESIDENT_BASE || entries[i] >= POPS_RESIDENT_LIMIT)
+      return -EINVAL;
+  if (core_size < POPS_TROJAN_SLOTS_B + POPS_TROJAN_SLOTS_SPAN - POPS_CORE_BASE)
+    return -ERANGE;
+  if (slot_run_sum(core + POPS_TROJAN_SLOTS_A - POPS_CORE_BASE) != SLOT_RUN_A_PRISTINE ||
+      slot_run_sum(core + POPS_TROJAN_SLOTS_B - POPS_CORE_BASE) != SLOT_RUN_B_PRISTINE ||
+      get_u32(core + POPS_GP1_HOOK_ADDR - POPS_CORE_BASE) !=
+          (0x0c000000u | ((h->gp1_entry >> 2) & 0x03ffffffu)))
+    return -EILSEQ;
+  return 0;
+}
+
+int pops_resident_slot_chain_possible(const void *staged_core, size_t core_size,
+                                      const PopsResidentHeader *header) {
+  return staged_core && header && !slot_chain_check(staged_core, core_size, header);
+}
+
+int pops_resident_hook_slot_chain(void *staged_core, size_t core_size,
+                                  const PopsResidentHeader *header, PopsTrojanSet *set,
+                                  unsigned slot4) {
+  uint8_t *core = staged_core;
+  uint32_t first;
+  if (!core || !header || !set || slot4 > POPS_SLOT4_RESET_STORE)
+    return -EINVAL;
+  if (!set->chain)
+    return 0;
+  if (!set->chain_offered)
+    return -EINVAL;
+  int res = slot_chain_check(core, core_size, header);
+  if (res)
+    return res;
+  /* Every check is done. */
+  first = slot4 == POPS_SLOT4_BREAK_CALL ? POPS_TROJAN_BREAK_CALL :
+          slot4 == POPS_SLOT4_RESET_STORE ? POPS_TROJAN_SLOT_EMPTY : set->slot_word[1][0];
+  set->slot_word[1][0] = first;
+  for (unsigned run = 0; run < 2; ++run) {
+    uint8_t *at = core + (run ? POPS_TROJAN_SLOTS_B : POPS_TROJAN_SLOTS_A) - POPS_CORE_BASE;
+    uint32_t resume = run ? header->gp1_resume_b : header->gp1_resume_a;
+    for (unsigned i = 0; i < POPS_TROJAN_SLOTS_HOOKS / 4; ++i)
+      put_u32(at + 4 * i, set->slot_word[run][i]);
+    put_u32(at + POPS_TROJAN_SLOTS_HOOKS, 0x08000000u | ((resume >> 2) & 0x03ffffffu));
+    put_u32(at + POPS_TROJAN_SLOTS_HOOKS + 4, 0);
+  }
+  put_u32(core + POPS_GP1_HOOK_ADDR - POPS_CORE_BASE,
+          0x0c000000u | ((header->gp1_chain_entry >> 2) & 0x03ffffffu));
+  return 1;
 }
 
 /* POPStarter's always-on guards (0x874864..0x874998), in its order: the

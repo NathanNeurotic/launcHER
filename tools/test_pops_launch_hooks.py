@@ -79,6 +79,8 @@ class Header(c.Structure):
         ("gte_ultra_entry", c.c_uint32), ("gp1_entry", c.c_uint32),
         ("guard_entry", c.c_uint32 * 9),
         ("recompiler_entry", c.c_uint32), ("recompiler_emit", c.c_uint32 * 4),
+        ("gp1_chain_entry", c.c_uint32), ("gp1_resume_a", c.c_uint32),
+        ("gp1_resume_b", c.c_uint32),
     ]
 
 

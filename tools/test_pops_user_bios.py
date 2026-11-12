@@ -314,10 +314,20 @@ static int test_close(int fd) { ++closes; return close(fd); }
 #define read test_read
 #define close test_close
 %s
+/* TROJAN files as launchPOPS stages them, without holding memory: a payload
+ * above the image is not hosted here. */
+static unsigned char host_trojan_work[0x10000];
+static void host_set(PopsTrojanSet *set) {
+  pops_trojan_set_init(set, 0, 0);
+  set->work = host_trojan_work;
+  set->work_size = sizeof(host_trojan_work);
+}
 int test_stage(void *core, size_t size, const char *root, const char *title,
                PopsUserRomState *rom) {
   PopsFixContext state;
-  return pops_stage_fix_files(core, size, root, title, 0, 0, 0, 0, 0, rom, &state);
+  PopsTrojanSet set;
+  host_set(&set);
+  return pops_stage_fix_files(core, size, root, title, 0, 0, 0, 0, 0, rom, &state, &set);
 }
 int test_load(void *core, size_t size, const char *dir, int per_game, PopsUserRomState *rom) {
   return pops_user_bios_load(core, size, dir, per_game, rom);
@@ -333,12 +343,14 @@ int test_launch(void *core, size_t size, const char *root, const char *title,
                 PopsFixContext *context) {
   PopsResidentHeader header;
   PopsFixContext local;
+  PopsTrojanSet set;
+  host_set(&set);
   memset(&header, 0, sizeof(header));
   for (unsigned i = 0; emit && i < POPS_EMIT_COUNT; ++i) header.recompiler_emit[i] = emit[i];
   header.progressive_entry = progressive;
   return pops_stage_user_files(core, size, root, title, (uint16_t)builtin_id,
                                (uint8_t)builtin_modes, cfg, &header, rom,
-                               context ? context : &local);
+                               context ? context : &local, &set);
 }
 /* The built-in entry as launchPOPS applies it; returns its
  * PopsBuiltinPlan.compat_modes, what the launch hands to the helper. */
@@ -1933,7 +1945,7 @@ class Source(unittest.TestCase):
         declared = body.index("PopsUserRomState romState;")
         calls = ["res = pops_stage_user_files((void *)stagedCore, plan.core_size, vcdDir, gameConfigDir,\n"
                  "                              builtinId, builtinPlan.compat_modes, &cfg, &residentHdr,\n"
-                 "                              &romState, &fixContext);\n  if (res)\n    return res;",
+                 "                              &romState, &fixContext, &trojanSet);\n  if (res)\n    return res;",
                  "res = pops_apply_bios_shell_edits_rom((void *)stagedCore, plan.core_size, &romState);",
                  "&romState)\n                   : 0;"]
         at = [body.index(text) for text in calls]
@@ -1951,8 +1963,8 @@ class Source(unittest.TestCase):
         self.assertTrue(self.helper().startswith(LAUNCH_HELPER))
         self.assertIn("static int pops_stage_user_files(void *stagedCore, size_t coreSize,", self.helper())
         # The fix files are staged with the same state.
-        self.assertIn("result = pops_fix_stage_rom(&context, stagedCore, coreSize, buffer, size,\n"
-                      "                                       slot, !kind, rom);", self.src)
+        self.assertIn("result = kind ? pops_fix_stage_rom(&context, stagedCore, coreSize, buffer, size,\n"
+                      "                                             slot, 0, rom)", self.src)
         self.assertNotIn("pops_fix_stage(", self.src)
 
     def test_bios_is_read_where_the_original_reads_it(self):
@@ -1970,7 +1982,7 @@ class Source(unittest.TestCase):
                  "result = pops_fix_context_rom_loaded(&context, stagedCore, coreSize);",
                  "for (unsigned kind = 0; kind < 2; ++kind) {",
                  'kind ? "PATCH" : "TROJAN", slot);',
-                 "result = pops_fix_stage_rom(&context, stagedCore, coreSize, buffer, size,"]
+                 "result = kind ? pops_fix_stage_rom(&context, stagedCore, coreSize, buffer, size,"]
         at = [stage.index(text) for text in order]
         self.assertEqual(at, sorted(at))
         self.assertEqual(stage.count("pops_user_bios_load("), 1)

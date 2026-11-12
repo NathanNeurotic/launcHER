@@ -27,7 +27,9 @@ int fileXioClose(int);
         (directory / 'io_common.h').write_text('#define FIO_O_RDONLY 0x0001\n')
         source = (ROOT / 'launcher/src/handler_pops.c').read_text()
         start = source.index('static int readFullFile(')
-        end = source.index('/* The archived MAIN calls root TROJAN', start)
+        # The readers end where the TROJAN reader, which needs the fix file
+        # types, begins.
+        end = source.index('/* One TROJAN_n.BIN, opened, read as POPStarter reads it', start)
         wrapper = directory / 'wrapper.c'
         wrapper.write_text('''
 #include "pops_read_trace.h"

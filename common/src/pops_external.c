@@ -135,6 +135,345 @@ int pops_container_inspect(const void *file, size_t size, PopsContainer *out) {
   return POPS_FILE_OK;
 }
 
+int pops_trojan_verdict(const void *file, size_t size, unsigned slot,
+                        unsigned fingerprint_builtin_id, PopsTrojanInfo *out) {
+  const uint8_t *h = file;
+  PopsTrojanInfo info = {0};
+  uint32_t jump;
+  if (!h || !out || slot > 9)
+    return POPS_FILE_INVALID;
+  if (size < POPS_TROJAN_MIN_FILE)
+    return POPS_TROJAN_INVALID;
+  if (memcmp(h, "TROJAN_", 7) || h[7] != '0' + slot)
+    return POPS_TROJAN_INVALID;
+  if (h[0x0c] < 1 || h[0x0c] > 3)
+    return POPS_TROJAN_INVALID;
+  if (h[0x08] | h[0x09] | h[0x0b] | h[0x0d] | h[0x0f] | h[0x1f])
+    return POPS_TROJAN_INVALID;
+  for (unsigned i = 0x34; i < 0x40; ++i)
+    if (h[i])
+      return POPS_TROJAN_INVALID;
+  info.load = le32(h + 0x10);
+  info.entry = le32(h + 0x14);
+  info.hook = le32(h + 0x18);
+  info.size = le32(h + 0x1c) & UINT32_C(0x00ffffff);
+  if (!info.load || !info.entry)
+    return POPS_TROJAN_INVALID;
+  if ((uint64_t)info.size + HEADER_SIZE != size)
+    return POPS_TROJAN_INVALID;
+  if (!h[0x0e] || !h[0x20])
+    return POPS_TROJAN_INVALID;
+  if (h[0x0c] == 1 && h[0x0a])
+    return POPS_TROJAN_INVALID;
+  info.slot = (uint8_t)slot;
+  info.format = h[0x0c];
+  info.width = h[0x0a];
+  jump = (info.entry >> 2) & UINT32_C(0x03ffffff);
+  info.hook_words = 1;
+  info.hook_word[0] = UINT32_C(0x0c000000) | jump;
+  if (info.format == 2 && info.width >= 1 && info.width <= 3) {
+    info.hook_words = info.width;
+    info.hook_word[0] = UINT32_C(0x08000000) | jump;
+  }
+  *out = info;
+  if (info.format == 3 && info.width < POPS_TROJAN_REVISION && fingerprint_builtin_id)
+    return POPS_TROJAN_OUTDATED;
+  return POPS_TROJAN_APPLY;
+}
+
+const char *pops_trojan_reason_text(unsigned reason) {
+  switch (reason) {
+  case POPS_TROJAN_NO_UNALIGNED:
+    return "an address or the size is not a multiple of 4";
+  case POPS_TROJAN_NO_ENTRY:
+    return "its entry is outside its payload";
+  case POPS_TROJAN_NO_RANGE:
+    return "its payload loads outside the memory launcHER can host";
+  case POPS_TROJAN_NO_HOOK:
+    return "its hook is not a word launcHER can patch";
+  case POPS_TROJAN_NO_SPACE:
+    return "the payloads of this launch do not fit launcHER's holding memory";
+  case POPS_TROJAN_NO_SLOT:
+    return "it needs POPStarter's slots, which launcHER cannot offer on this POPS, or its hook "
+           "words run past them";
+  case POPS_TROJAN_NO_480P:
+    return "it uses POPStarter's 480p handler, which launcHER does not have";
+  case POPS_TROJAN_NO_BLOCK2:
+    return "it uses POPStarter code at 0x238a90..0x2397ef, which launcHER does not have";
+  case POPS_TROJAN_NO_BUILTIN:
+    return "it uses a built-in fix's code at 0x01410000";
+  case POPS_TROJAN_NO_OWNED:
+    return "it uses POPStarter code at 0x0143a000..0x014601ff, where launcHER keeps its own";
+  case POPS_TROJAN_NO_BLOCK1:
+    return "it uses POPStarter code at 0x232790..0x232ec7 outside the slots";
+  case POPS_TROJAN_NO_MAIN:
+    return "it uses POPStarter's own program, which is not in memory";
+  case POPS_TROJAN_NO_LARGE:
+    return "the file is larger than launcHER's 1 MiB fix file buffer";
+  default:
+    return "unknown reason";
+  }
+}
+
+void pops_trojan_set_init(PopsTrojanSet *set, unsigned fingerprint_id, int fingerprint_break) {
+  if (!set)
+    return;
+  memset(set, 0, sizeof(*set));
+  set->fingerprint_id = (uint16_t)fingerprint_id;
+  for (unsigned run = 0; run < 2; ++run)
+    for (unsigned slot = 0; slot < POPS_TROJAN_SLOTS_HOOKS / 8; ++slot)
+      set->slot_word[run][2 * slot] = POPS_TROJAN_SLOT_EMPTY;
+  if (fingerprint_break)
+    set->slot_word[1][0] = POPS_TROJAN_BREAK_CALL;
+}
+
+static int trojan_within(uint32_t address, uint32_t base, uint32_t limit) {
+  return address >= base && address < limit;
+}
+
+static int trojan_overlap(uint32_t address, uint32_t size, uint32_t base, uint32_t limit) {
+  return size && address < limit && (uint64_t)address + size > base;
+}
+
+int pops_trojan_in_arena(uint32_t address, uint32_t size) {
+  return size && address >= POPS_TROJAN_ARENA_BASE && address < POPS_TROJAN_ARENA_LIMIT &&
+         size <= POPS_TROJAN_ARENA_LIMIT - address &&
+         !trojan_overlap(address, size, POPS_TROJAN_OWNED_BASE, POPS_TROJAN_OWNED_LIMIT);
+}
+
+/* How a reference was made. */
+enum { TROJAN_REF_CODE, TROJAN_REF_DATA, TROJAN_REF_VALUE };
+#define TROJAN_POPS_GP UINT32_C(0x0050a670)
+
+typedef struct {
+  const uint8_t *payload;
+  uint32_t load;
+  uint32_t size;
+  uint8_t *done;    /* one bit per payload word: read as code */
+  uint8_t *pending; /* one bit per payload word: code to read */
+  uint32_t lowest;  /* no pending word below this index */
+  uint32_t flags;
+  uint32_t value[32];
+  uint8_t state[32]; /* 0: unknown, 1: lui only, 2: a whole constant */
+} TrojanScan;
+
+static uint32_t trojan_ref_flags(uint32_t address, int kind) {
+  for (unsigned i = 0; i < 2; ++i) {
+    uint32_t base = i ? POPS_TROJAN_SLOTS_B : POPS_TROJAN_SLOTS_A;
+    if (trojan_within(address, base, base + POPS_TROJAN_SLOTS_SPAN))
+      /* Jumping to the words after the slots continues the chain; reading
+       * or changing them is reading or changing POPStarter's code. */
+      return address - base >= POPS_TROJAN_SLOTS_HOOKS && kind == TROJAN_REF_DATA
+                 ? POPS_TROJAN_REF_BLOCK1 : POPS_TROJAN_REF_SLOT;
+  }
+  if (trojan_within(address, POPS_TROJAN_BLOCK1_BASE, POPS_TROJAN_BLOCK1_LIMIT))
+    return POPS_TROJAN_REF_BLOCK1;
+  if (trojan_within(address, POPS_TROJAN_480P_BASE, POPS_TROJAN_480P_LIMIT))
+    return POPS_TROJAN_REF_480P;
+  if (trojan_within(address, POPS_TROJAN_BLOCK2_BASE, POPS_TROJAN_BLOCK2_LIMIT))
+    return POPS_TROJAN_REF_BLOCK2;
+  if (trojan_within(address, POPS_TROJAN_BUILTIN_BASE, POPS_TROJAN_ARENA_BASE))
+    return POPS_TROJAN_REF_BUILTIN;
+  if (trojan_within(address, POPS_TROJAN_OWNED_BASE, POPS_TROJAN_OWNED_LIMIT))
+    return POPS_TROJAN_REF_OWNED;
+  if (kind != TROJAN_REF_VALUE &&
+      trojan_within(address, POPS_TROJAN_MAIN_BASE, POPS_TROJAN_MAIN_LIMIT))
+    return POPS_TROJAN_REF_MAIN;
+  return 0;
+}
+
+static void trojan_note(TrojanScan *s, uint32_t address, int kind) {
+  if (address >= s->load && address - s->load < s->size) {
+    uint32_t index = (address - s->load) / 4;
+    if (kind == TROJAN_REF_CODE && !(address & 3) && !(s->done[index / 8] & (1u << (index & 7)))) {
+      s->pending[index / 8] |= (uint8_t)(1u << (index & 7));
+      if (index < s->lowest)
+        s->lowest = index;
+    }
+    return;
+  }
+  s->flags |= trojan_ref_flags(address, kind);
+}
+
+/* A whole 32-bit constant: the j/jal word it may be, or a plain value. */
+static void trojan_constant(TrojanScan *s, uint32_t value) {
+  if (value >> 26 == 2 || value >> 26 == 3)
+    trojan_note(s, (value & UINT32_C(0x03ffffff)) << 2, TROJAN_REF_CODE);
+  else
+    trojan_note(s, value, TROJAN_REF_VALUE);
+}
+
+static uint32_t trojan_s16(uint32_t word) {
+  return (uint32_t)(int32_t)(int16_t)(word & 0xffff);
+}
+
+#define TROJAN_STEP_BRANCH 1 /* the next word is its delay slot */
+#define TROJAN_STEP_STOP   2 /* nothing is read after the delay slot */
+
+static int trojan_step(TrojanScan *s, uint32_t pc, uint32_t word) {
+  uint32_t op = word >> 26, rs = (word >> 21) & 31, rt = (word >> 16) & 31;
+  uint32_t rd = (word >> 11) & 31, imm = word & 0xffff, fn = word & 0x3f;
+  if (!word)
+    return 0;
+  if (op == 0) {
+    if (fn == 8) { /* jr */
+      if (s->state[rs] == 2)
+        trojan_note(s, s->value[rs], TROJAN_REF_CODE);
+      return TROJAN_STEP_BRANCH | TROJAN_STEP_STOP;
+    }
+    if (fn == 9) { /* jalr */
+      if (s->state[rs] == 2)
+        trojan_note(s, s->value[rs], TROJAN_REF_CODE);
+      memset(s->state, 0, sizeof(s->state));
+      return TROJAN_STEP_BRANCH;
+    }
+    if (fn != 0x0c)
+      s->state[rd] = 0;
+    return 0;
+  }
+  if (op == 2 || op == 3) { /* j, jal */
+    trojan_note(s, (pc & UINT32_C(0xf0000000)) | ((word & UINT32_C(0x03ffffff)) << 2),
+                TROJAN_REF_CODE);
+    return op == 2 ? TROJAN_STEP_BRANCH | TROJAN_STEP_STOP : TROJAN_STEP_BRANCH;
+  }
+  if (op == 1 || (op >= 4 && op <= 7) || (op >= 0x14 && op <= 0x17)) { /* branches */
+    int always = (op == 4 && rs == rt) || (op == 6 && !rs) || (op == 1 && rt == 1 && !rs);
+    trojan_note(s, pc + 4 + (trojan_s16(word) << 2), TROJAN_REF_CODE);
+    return always ? TROJAN_STEP_BRANCH | TROJAN_STEP_STOP : TROJAN_STEP_BRANCH;
+  }
+  if (op == 0x0f) { /* lui */
+    s->value[rt] = imm << 16;
+    s->state[rt] = rt ? 1 : 0;
+    return 0;
+  }
+  if (op == 0x09 || op == 0x0d || op == 0x08 || op == 0x19 || op == 0x18) {
+    /* addiu, ori, addi, daddiu, daddi */
+    if (s->state[rs] && (rs != rt || s->state[rs] == 1)) {
+      uint32_t value = op == 0x0d ? s->value[rs] | imm : s->value[rs] + trojan_s16(word);
+      s->value[rt] = value;
+      s->state[rt] = rt ? 2 : 0;
+      trojan_constant(s, value);
+    } else if (!rs) {
+      s->value[rt] = op == 0x0d ? imm : trojan_s16(word);
+      s->state[rt] = rt ? 2 : 0;
+    } else {
+      s->state[rt] = 0;
+    }
+    return 0;
+  }
+  if (op == 0x0a || op == 0x0b || op == 0x0c || op == 0x0e) { /* slti, sltiu, andi, xori */
+    s->state[rt] = 0;
+    return 0;
+  }
+  {
+    /* lb lh lwl lw lbu lhu lwr lwu ld lq ldl ldr lwc1; sb sh swl sw swr sd sq sdl sdr swc1 */
+    int load = (op >= 0x20 && op <= 0x27) || op == 0x37 || op == 0x1e || op == 0x1a ||
+               op == 0x1b || op == 0x31;
+    int store = (op >= 0x28 && op <= 0x2b) || op == 0x2e || op == 0x3f || op == 0x1f ||
+                op == 0x2c || op == 0x2d || op == 0x39;
+    if (load || store) {
+      if (rs == 28)
+        trojan_note(s, TROJAN_POPS_GP + trojan_s16(word), TROJAN_REF_DATA);
+      else if (s->state[rs])
+        trojan_note(s, s->value[rs] + trojan_s16(word), TROJAN_REF_DATA);
+      if (load && op != 0x31)
+        s->state[rt] = 0;
+      return 0;
+    }
+  }
+  if (op == 0x10) /* COP0: mfc0, mtc0, eret, ei, di */
+    return 0;
+  s->state[rt] = 0;
+  s->state[rd] = 0;
+  return 0;
+}
+
+static int trojan_take(TrojanScan *s, uint32_t address) {
+  /* Marks a word as read; 0 when it is outside the payload or was read. */
+  uint32_t index;
+  if (address < s->load || address - s->load >= s->size)
+    return 0;
+  index = (address - s->load) / 4;
+  if (s->done[index / 8] & (1u << (index & 7)))
+    return 0;
+  s->done[index / 8] |= (uint8_t)(1u << (index & 7));
+  return 1;
+}
+
+int pops_trojan_scan(const void *payload, uint32_t size, uint32_t load, uint32_t entry,
+                     void *work, size_t work_size, uint32_t *flags) {
+  TrojanScan s;
+  uint32_t words = size / 4, map = (words + 7) / 8;
+  if (!payload || !work || !flags || !size || ((size | load | entry) & 3) ||
+      (uint64_t)load + size > UINT32_C(0xffffffff) || entry < load || entry - load >= size ||
+      work_size < (size_t)map * 2)
+    return POPS_FILE_INVALID;
+  memset(&s, 0, sizeof(s));
+  s.payload = payload;
+  s.load = load;
+  s.size = size;
+  s.done = work;
+  s.pending = s.done + map;
+  memset(work, 0, (size_t)map * 2);
+  s.lowest = words;
+  trojan_note(&s, entry, TROJAN_REF_CODE);
+  while (s.lowest < words) {
+    /* The lowest address still to read, with nothing known about registers. */
+    uint32_t index = s.lowest, pc;
+    while (index < words && !(s.pending[index / 8] & (1u << (index & 7))))
+      index = s.pending[index / 8] ? index + 1 : (index | 7) + 1;
+    s.lowest = index;
+    if (index >= words)
+      break;
+    s.pending[index / 8] &= (uint8_t)~(1u << (index & 7));
+    pc = load + index * 4;
+    memset(s.state, 0, sizeof(s.state));
+    while (trojan_take(&s, pc)) {
+      int step = trojan_step(&s, pc, le32(s.payload + (pc - load)));
+      if (!(step & TROJAN_STEP_BRANCH)) {
+        pc += 4;
+        continue;
+      }
+      if (trojan_take(&s, pc + 4))
+        (void)trojan_step(&s, pc + 4, le32(s.payload + (pc + 4 - load)));
+      if (step & TROJAN_STEP_STOP)
+        break;
+      memset(s.state, 0, sizeof(s.state));
+      pc += 8;
+    }
+  }
+  *flags = s.flags;
+  return POPS_FILE_OK;
+}
+
+int pops_trojan_copy_out(const PopsTrojanSet *set, uint8_t *ram, uint32_t ram_base,
+                         uint32_t ram_limit, const PopsTrojanKeep *keep, unsigned keep_count) {
+  if (!set || !ram || ram_limit < ram_base || (keep_count && !keep) ||
+      set->payload_count > POPS_TROJAN_MAX_PAYLOADS || set->hold_used > set->hold_size ||
+      (set->payload_count && !set->hold))
+    return POPS_FILE_INVALID;
+  for (unsigned i = 0; i < set->payload_count; ++i) {
+    const PopsTrojanPayload *p = &set->payload[i];
+    uintptr_t target;
+    if ((p->address | p->size) & 3 || !pops_trojan_in_arena(p->address, p->size) ||
+        p->address < ram_base || p->address > ram_limit || p->size > ram_limit - p->address ||
+        p->hold > set->hold_used || p->size > set->hold_used - p->hold)
+      return POPS_FILE_INVALID;
+    for (unsigned k = 0; k < keep_count; ++k)
+      if (keep[k].end < keep[k].start ||
+          trojan_overlap(p->address, p->size, keep[k].start, keep[k].end))
+        return POPS_FILE_INVALID;
+    target = (uintptr_t)ram + (p->address - ram_base);
+    if (target < (uintptr_t)set->hold + set->hold_size && (uintptr_t)set->hold < target + p->size)
+      return POPS_FILE_INVALID;
+  }
+  for (unsigned i = 0; i < set->payload_count; ++i) {
+    const PopsTrojanPayload *p = &set->payload[i];
+    memcpy(ram + (p->address - ram_base), set->hold + p->hold, p->size);
+  }
+  return (int)set->payload_count;
+}
+
 static int window_offset(uint32_t address, uint32_t length, uint32_t base,
                          size_t span, size_t *offset) {
   if (address < base || address - base > span || length > span - (address - base))
