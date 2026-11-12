@@ -2133,6 +2133,10 @@ int launchPOPS(int argc, char *argv[]) {
     return res;
   }
 
+  /* POPStarter's default is one second on XX./SB.; an explicit command wins. */
+  if ((device == Device_USB || isSbLaunch) && !cfg.usb_delay_set)
+    cfg.usb_delay = 1;
+
   /* Apply USB delay if configured */
   if (cfg.usb_delay > 0) {
     DPRINTF("POPS: USB delay requested: %u seconds\n", cfg.usb_delay);

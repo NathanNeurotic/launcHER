@@ -912,7 +912,7 @@ from launcHER's sources (S17 for the lines).
   not when a `BIOS.BIN` was loaded). After a mode 6 this ends differently
   from the original, which ignores the token.
 - Aliases `$PAL2NTSC`, `$FORCENTSC`, `$NTSC2PAL`.
-- The EE sleep for `$USBDELAY_n` and its default 0. (`$USBDELAY` with
+- The EE sleep for `$USBDELAY_n` on USB/SB launches (other devices keep the old default 0). (`$USBDELAY` with
   several digits or without the underscore was also launcHER-only at
   `cfebe01`; since `95ba812` the parser takes one digit, as the original.)
 - Since `173d5de` and `0945127`: the IGR skin and `BIOS.BIN` are read from

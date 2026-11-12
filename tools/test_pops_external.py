@@ -958,6 +958,34 @@ class InspectorTests(unittest.TestCase):
         self.assertIn("ret = iopret;", init[check:end])
         self.assertLess(check, end)
 
+    def test_usb_only_pops_does_not_load_ata_bd(self):
+        init = (ROOT / "launcher/src/init.c").read_text()
+        start = init.index("static int loadModuleList(")
+        sony_sio2 = init.index('if (sonySio2 && !strcmp(moduleList[i].name, "sio2man"))', start)
+        selection = init[start:sony_sio2]
+        self.assertIn("sonySio2 && (device & Device_USB) &&", selection)
+        self.assertIn("!(device & (Device_ATA | Device_APA))", selection)
+        self.assertIn('!strcmp(moduleList[i].name, "ata_bd")', selection)
+        self.assertIn("continue;", selection)
+        # The pre-reset table still uses ata_bd for USB-family launches, and
+        # USB is not added to the DEV9 module's mask to satisfy that driver.
+        self.assertIn("INT_MODULE(ata_bd, NULL, Device_ATA | Device_APA | Device_USB),", init)
+        dev9 = next(line for line in init.splitlines() if "INT_MODULE(ps2dev9" in line)
+        self.assertNotIn("Device_USB", dev9)
+
+    def test_pops_usb_default_delay_uses_existing_sleep(self):
+        source = (ROOT / "launcher/src/handler_pops.c").read_text()
+        point = source.index("/* POPStarter's default is one second")
+        probe = source.index("res = pops_probe_live_storage(virtualPfs, pvdSample);", point)
+        body = source[point:probe]
+        self.assertIn("(device == Device_USB || isSbLaunch) && !cfg.usb_delay_set", body)
+        self.assertIn("cfg.usb_delay = 1;", body)
+        self.assertIn("sleep(cfg.usb_delay);", body)
+        # The default uses the existing post-driver sleep, so XX./BDMA's
+        # replacement drivers have already started before any storage probe.
+        self.assertLess(source.index('pops_start_xx_usb("post-reset", 1)'), point)
+        self.assertLess(source.index("pops_load_bdma_drivers(vcdDir, vmcDir, bdmaMode);"), point)
+
     def test_custom_iop_reset_invalidates_regular_device_cache(self):
         init = (ROOT / "launcher/src/init.c").read_text()
         check = init.index("int initPopsServices(")

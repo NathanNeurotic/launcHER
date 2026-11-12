@@ -800,13 +800,15 @@ class Source(unittest.TestCase):
         self.assertNotIn("EINVAL;\n  }", reader)
         self.assertNotIn("trim_line", SOURCE)
 
-    def test_usb_delay_use_is_unchanged(self):
-        """The parsed digit matches the original; what launcHER does with it
-        (an EE sleep before the launch, only when it is above 0) is as it was."""
+    def test_usb_delay_default_and_existing_sleep(self):
+        """An explicit digit keeps the existing EE sleep. With no command,
+        USB/SB launches default to one second at that same place."""
         handler = (ROOT / "launcher/src/handler_pops.c").read_text(encoding="utf-8").replace("\r\n", "\n")
+        self.assertIn("  if ((device == Device_USB || isSbLaunch) && !cfg.usb_delay_set)\n", handler)
+        self.assertIn("    cfg.usb_delay = 1;\n", handler)
         self.assertIn("  if (cfg.usb_delay > 0) {\n", handler)
         self.assertIn("    sleep(cfg.usb_delay);\n", handler)
-        self.assertEqual(handler.count("usb_delay"), 3)
+        self.assertEqual(handler.count("usb_delay"), 5)
         self.assertNotIn("strtol(token + 10", SOURCE)
 
     def test_no_line_reader_is_left(self):

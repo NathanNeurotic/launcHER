@@ -199,10 +199,10 @@ static ModuleListEntry moduleList[] = {
     INT_MODULE(udpbd, NULL, Device_UDPBD),
 #endif
 #if defined(ATA) || defined(APA)
-    /* ata_bd also serves USB-family launches: the test console's VCD
-     * library lives on the internal HDD's FAT32 partition (enumerated
-     * by ata_bd, mounted as mass0:), independent of the flaky USB
-     * drives. Hardware without an HDD skips it via tolerance.
+    /* ata_bd also serves pre-reset USB-family launches: the test console's
+     * VCD library lives on the internal HDD's FAT32 partition (enumerated
+     * by ata_bd, mounted as mass0:), independent of the flaky USB drives.
+     * Hardware without an HDD skips it via tolerance.
      * (docs/evidence/pops_hw_runs_2026-10-30.json run 0152) */
     INT_MODULE(ata_bd, NULL, Device_ATA | Device_APA | Device_USB),
 #endif
@@ -374,6 +374,13 @@ static int loadModuleList(DeviceType device, int tolerant, int sonySio2, int def
     iopret = 0;
     if (!(device & moduleList[i].type) && !(moduleList[i].type & Device_Basic))
       continue;
+    /* A USB-only POPS stack has no DEV9 for ata_bd. The pre-reset USB-family
+     * layout above is unchanged, as are ATA/APA and non-Sony module loads. */
+    if (sonySio2 && (device & Device_USB) && !(device & (Device_ATA | Device_APA)) &&
+        !strcmp(moduleList[i].name, "ata_bd")) {
+      DPRINTF("POPS: USB-only launch, skipping ata_bd without DEV9\n");
+      continue;
+    }
     if (sonySio2 && !strcmp(moduleList[i].name, "sio2man"))
       continue;
     /* A loose external IRX on a memory card does not mean that driver was
