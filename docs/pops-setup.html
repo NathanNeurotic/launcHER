@@ -549,9 +549,12 @@ $8009A200 0010</code></pre>
   </table>
 </div>
 
-<h3>Custom IGR Background Graphics: not implemented</h3>
+<h3>Custom IGR Background Graphics (not tested on a console)</h3>
 <p>
-  POPStarter can replace the pictures of the exit confirmation screen with <code>IGR_BG.TM2</code>, <code>IGR_YES.TM2</code> and <code>IGR_NO.TM2</code> from the device's <code>POPS</code> folder. This branch of launcHER has no code that reads these files, so placing them has no effect. (Corrected November 11, 2026: this section used to say they were supported.)
+  On every POPS launch launcHER looks for <code>IGR_BG.TM2</code>, <code>IGR_NO.TM2</code> and <code>IGR_YES.TM2</code> in the folder the <code>.VCD</code> is in and copies each one it finds over the picture Sony's POPS carries for its exit confirmation dialog, as POPStarter does. Nothing in the file is checked. <code>IGR_BG.TM2</code> may be up to 312,064 bytes, <code>IGR_NO.TM2</code> and <code>IGR_YES.TM2</code> up to 7,612 bytes each; a larger file is skipped, and a 0-byte file blanks that picture.
+</p>
+<p>
+  POPStarter reads these files from the device's <code>POPS</code> folder (<code>mass:/POPS/</code>, or <code>pfs1:/POPS/</code> on its HDD back end), so launcHER finds them in the same place only when the <code>.VCD</code> is in <code>mass:/POPS/</code>. The dialog, and with it the pictures, only appears with <code>$IGR0</code>, <code>$IGR1</code> or <code>$IGR2</code> (see the commands above); without an IGR command launcHER exits straight to the browser and the dialog never opens. NOT TESTED on a console: whether POPS shows a replaced picture correctly has not been seen. (From November 11, 2026 until the skin was merged this section said the files had no effect.)
 </p>
 
 <h3>Custom Game Fixes (TROJAN_*.BIN, PATCH_*.BIN)</h3>

@@ -107,7 +107,8 @@ What POPS does with a slot that does not hold a valid TIM2 file was not run.
   | always-on hooks and pokes | |
   | built-in entry | fingerprint match or `$VCDID_n` |
   | **IGR skin** | |
-  | commands, recompiler add-ons, fix files, video, PS1 BIOS shell edits, region, `$RESET_WARMBOOT`, `MODULE_n.IRX` names, `$LOAD_PADMAN`, SLBB bypass, resident pad/widescreen/progressive/display hooks, opcode pass | |
+  | `pops_stage_user_files`: commands, recompiler add-ons, then per folder (all games, then the game) the user `BIOS.BIN` and the fix files | the `BIOS.BIN` range is `0x24bc20..0x2cbbaf`, below the slots |
+  | progressive check, video, PS1 BIOS shell edits, region (the `_rom` variants with the loader state), `$RESET_WARMBOOT`, TROJAN slot chain, `MODULE_n.IRX` names, `$LOAD_PADMAN`, SLBB bypass, resident pad/widescreen/progressive/display hooks, opcode pass | |
 
   This is the original's order for a fingerprint-matched entry. For a
   `$VCDID_n` entry the original applies the entry after the skin and
@@ -137,6 +138,18 @@ the all-games `TROJAN_n.BIN` and `PATCH_n.BIN` from. This is a stand-in
 until launcHER has the HDD `__common` layout. When the VCD itself is in
 `mass:/POPS/` the two are the same folder. On HDD they are not: a skin kept
 in `__common/POPS/`, where POPStarter users have it, is not found.
+
+For `SB.` (SMB) and `XX.` launches the original uses `mass:/POPS/` too.
+Its launch function sets the back-end word `gp+0x3448` to 1 for a name
+that starts `SB.` or `sb.` (`0x871568..0x871604`, the store at `0x871618`)
+and for `XX.` (the store at `0x8719a4`); the only other store to that word
+in MAIN is the 0 at `0x870c64`. The loader then opens the literal
+`mass:/POPS/IGR_*.TM2` (`0x87e508` tests the word, `0x87e538` opens
+through `0x8d6c94`). launcHER reads from the folder of the VCD path it
+launches (`vcdDir`), on whatever device that path names. Whether `mass:`
+in POPStarter's SMB mode names a USB device or the SMB share was not
+traced, so for an `SB.` launch the two may or may not be the same place.
+Read from the code, not run.
 
 launcHER has a second stand-in for the same original folder: `MODULE_n.IRX`
 is read from the folder POPS.ELF came from (`popsDir`), not from the VCD's
@@ -249,10 +262,16 @@ that, a most-per-read, a failing rewind, an over-reported count.
   `MODULE_n.IRX` names, `$LOAD_PADMAN`, the SLBB bypass, the resident pad
   (3), widescreen (3), progressive (3) and display hooks, the opcode pass,
   every one returning success; a fix file aimed elsewhere keeps the skin and
-  one aimed at a slot replaces exactly its bytes; 21 whole launches in
-  `launchPOPS`'s order (7 masks by 3 built-in choices) keep the skin; the
-  same launch with the skin staged before the runtime corrections is refused
-  for all 6 masks.
+  one aimed at a slot replaces exactly its bytes; 84 launches in
+  `launchPOPS`'s order (7 masks by 3 built-in choices by 4 user `BIOS.BIN`
+  choices: none, all-games folder, game's folder, both) keep the skin. That
+  replay calls the common functions `launchPOPS` calls, with
+  `pops_stage_user_files`'s steps written out (commands and fix files
+  through the `_rom` variants with the loader state, `pops_user_bios_stage`
+  and `pops_fix_context_rom_loaded` for each `BIOS.BIN`); it leaves out the
+  TROJAN slot chain (no TROJAN file) and the progressive hook. The same
+  launch with the skin staged before the runtime corrections is refused for
+  all 6 masks.
 - Original's instructions (4, `POPSTARTER_TEST_ELF`): the three paths for
   both backends, fill and read addresses and lengths and the size tests are
   decoded from the loader and equal launcHER's table; one caller; the gate

@@ -414,9 +414,11 @@ from the code, not re-measured by this pass:
   missing POPS folder and a missing folder never stops the later
   current-game loaders. Proposed as a quirk entry in this pass's report;
   the quirks file is not edited here.
-- Known gap that document records: a built-in entry with compatibility
-  modes followed by `$UNDO_COMPATIBILITY_CODES` is refused with `-EINVAL`
-  for 294 of 624 entries; the test marks it as an expected failure.
+- Known gap that document records: a built-in entry followed by
+  `$UNDO_COMPATIBILITY_CODES` is refused with `-EINVAL` for 294 of 624
+  entries (the 291 that set compatibility modes and three that write mode
+  4's byte at `0x21af70` directly); the test marks it as an expected
+  failure.
 
 Host tests and Unicorn runs only. NOT TESTED on a console.
 
