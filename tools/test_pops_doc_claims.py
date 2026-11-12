@@ -531,6 +531,10 @@ class Original(unittest.TestCase):
         self.assertEqual(MAIN_FUNCTION[1], 0x87c218)
         self.assertEqual(word(MAIN_FUNCTION[1] - 8), 0x03e00008)           # jr ra; delay slot 0x87c214
         self.assertEqual(word(MAIN_FUNCTION[1]) >> 16, 0x27bd)             # the next function's frame
+        frame = 0x10000 - (word(MAIN_FUNCTION[0]) & 0xffff)                 # addiu sp,sp,-frame
+        self.assertEqual(word(MAIN_FUNCTION[0]) >> 16, 0x27bd)
+        self.assertIn("The original's `main` is `%#x..%#x` (frame `%#x`;"
+                      % (MAIN_FUNCTION[0], MAIN_FUNCTION[1] - 4, frame), self.audit)
         phrases = [census_phrase("BIOS handler", *BIOS_HANDLER, formats=True),
                    census_phrase("OSD handler", *OSD_HANDLER),
                    census_phrase("IGR skin function", *IGR_SKIN),

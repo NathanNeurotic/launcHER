@@ -33,7 +33,7 @@ audit; documents only). The rows that the merges `95ba812` (config text),
 `173d5de` (IGR skin), `0945127` (`BIOS.BIN` and its loader state),
 `21c3476` (`SB.` network files) and `f22a69f` (physical disc, host part)
 change say so, as far as the merged code and its tests show; nothing here
-was re-measured beyond the audit's S30..S33. Changed status: the IGR skin
+was re-measured beyond the audit's S30..S34. Changed status: the IGR skin
 and `BIOS.BIN` from MISSING to PARTIAL, `$UNDO_` from PRESENT to PARTIAL
 (a launch that fails where the original goes on); the config-text and
 `VMCDIR.TXT` rows stay PARTIAL with smaller differences. Work on TROJAN
