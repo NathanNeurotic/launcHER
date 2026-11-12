@@ -13,11 +13,18 @@
 #include <string.h>
 
 static int connected;
-static int popsTarget;
-void launcher_smb_reset(void) { connected = 0; }
-void launcher_smb_set_pops_target(int pops) { popsTarget = pops; }
-/* POPStarter's rules: a PS1 target and an SB. name, both. */
-static int sb_rules(void) { return popsTarget && pops_get_active_sb_launch(); }
+/* 1 for POPStarter's rules, 0 for launcHER's: the rules the target being
+ * dispatched from the share needs, and the rules the loaded network module's
+ * arguments and session were set up with (-1: nothing set up since the last
+ * module load). */
+static int targetRules;
+static int liveRules = -1;
+void launcher_smb_reset(void) { connected = 0; liveRules = -1; }
+int launcher_smb_set_target(int popstarter) {
+  targetRules = popstarter != 0;
+  return liveRules >= 0 && liveRules != targetRules;
+}
+static int sb_rules(void) { return targetRules; }
 
 /* Network bootstrap files must be reachable before a share is mounted.
  * RiptOPL writes POPStarter network files in these memory-card directories. */
@@ -155,6 +162,7 @@ static int sb_connect(void) {
 }
 
 char *initTCPIPArguments(uint32_t *length) {
+  liveRules = sb_rules();
   if (sb_rules())
     return sb_tcpip_arguments(length);
   char text[128], packed[48];

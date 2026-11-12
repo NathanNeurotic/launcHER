@@ -18,6 +18,10 @@ With POPSTARTER_TEST_ELF and unicorn the original's own code runs as shipped
 (tools/trace_original_pops_smb_config.py, its I/O and C-library calls
 modelled) and every text must give the same class of result, the same
 argument block and the same two structures, byte for byte.
+Dispatch runs consecutive launch attempts of one boot through handler_smb.c
+with init.c's module cache modelled: a setup made under one set of rules is
+never reused for a target that needs the other, and an SB. PS1 launch uses
+POPStarter's rules before and after the IOP reboot.
 Unchanged compares the non-SB. path of handler_smb.c with the revision before
 this work, call for call, when that revision is in the checkout.
 Source pins the wiring. Nothing here is a console run, and nothing here says
@@ -405,11 +409,14 @@ def candidates(name):
 def session(lib, files, sb, steps=("tcpip", "connect"), results=(), chunk=0, read_error=0,
             close_error=0, pops=None):
     """Run handler_smb.c entry points; returns (trace lines, tcpip bytes or None).
-    `sb` is the SB. name flag, `pops` whether the target is a PS1 disc image
-    (the same as `sb` unless given)."""
+    `sb` is the SB. state, `pops` whether the target is a PS1 disc image
+    (the same as `sb` unless given). POPStarter's rules need both."""
     lib.host_reset()
-    if hasattr(lib, "launcher_smb_set_pops_target"):
-        lib.launcher_smb_set_pops_target(sb if pops is None else pops)
+    pops = sb if pops is None else pops
+    if hasattr(lib, "launcher_smb_set_target"):
+        lib.launcher_smb_set_target(int(bool(sb) and bool(pops)))
+    elif hasattr(lib, "launcher_smb_set_pops_target"):     # the revision before the fix
+        lib.launcher_smb_set_pops_target(pops)
     for name, data in files.items():
         assert lib.host_add_file(name.encode(), bytes(data), len(data)) >= 0
     lib.host_set_sb(sb)
@@ -444,6 +451,134 @@ def devctls(trace):
             size = int(part[3])
             out.append((part[1], int(part[2], 16), bytes.fromhex(part[4]) if size else b""))
     return out
+
+
+def _launch_args():
+    """common/src/launch_args.c for the host: the SB. and XX. tests that
+    launchPath and launchPOPS use."""
+    out = _WORK / ("launch_args" + _SUFFIX)
+    subprocess.run(["gcc", "-shared", "-fPIC", "-std=c99", "-Wall", "-Wextra", "-Werror",
+                    "-I", str(ROOT / "common/include"), str(ROOT / "common/src/launch_args.c"),
+                    "-o", str(out)], check=True)
+    lib = c.CDLL(str(out))
+    lib.pops_is_sb_prefix.argtypes = lib.pops_is_xx_prefix.argtypes = [c.c_char_p]
+    return lib
+
+
+ARGS = _launch_args()
+
+
+def is_pops_target(target):
+    """handler_pops.c isPopsTarget (pinned by Source): the last dot starts `.vcd`."""
+    dot = target.rfind(".")
+    return dot >= 0 and target[dot:].lower() == ".vcd"
+
+
+def target_rules(target, sb):
+    """launchPath's Device_SMB case (common.c, pinned by Source): 1 for
+    POPStarter's rules. `sb` is the SB. state before the target is dispatched."""
+    name = target.encode()
+    return int(is_pops_target(target) and
+               (bool(ARGS.pops_is_sb_prefix(name)) or (not ARGS.pops_is_xx_prefix(name) and bool(sb))))
+
+
+def launch_pops_sb(target, sb):
+    """launchPOPS's update of the SB. state (pinned by Source): an SB. or XX.
+    prefix on the target decides, otherwise it stays."""
+    name = target.encode()
+    direct_sb, direct_xx = ARGS.pops_is_sb_prefix(name), ARGS.pops_is_xx_prefix(name)
+    return int(bool(direct_sb)) if (direct_sb or direct_xx) else sb
+
+
+def calls(trace):
+    """The trace with the file numbers of successful opens left out (the
+    stand-in counts them up across a boot)."""
+    out = []
+    for line in trace:
+        part = line.split()
+        if line.startswith("open ") and len(part) == 5 and part[4].isdigit():
+            line = " ".join(part[:4] + ["fd"])
+        out.append(line)
+    return out
+
+
+class Boot:
+    """Consecutive launch attempts of one boot, as handler_smb.c sees them.
+    init.c's loadModules returns at once while the share's modules are loaded
+    unless initModulesReload asked for a reload; a load is loadModuleList
+    (launcher_smb_reset, the module arguments, the connect). A handler with no
+    launcher_smb_set_target (the revision before the fix) only gets the
+    PS1-target flag in the Device_SMB case."""
+
+    def __init__(self, lib, files, sb=0):
+        self.lib, self.sb = lib, sb
+        lib.host_reset()
+        for name, data in files.items():
+            assert lib.host_add_file(name.encode(), bytes(data), len(data)) >= 0
+        self.loaded = self.reload = False
+
+    def _trace(self):
+        trace = calls(self.lib.host_trace().decode("latin-1").splitlines())
+        self.lib.host_clear_trace()
+        return trace
+
+    def _load(self):
+        self.lib.launcher_smb_reset()
+        out = (c.c_uint8 * 256)()
+        self.reload = False
+        self.loaded = self.lib.host_tcpip(out, 256) >= 0 and self.lib.host_connect() == 0
+
+    def dispatch(self, target):
+        """launchPath(target) on smb: up to the end of initModules."""
+        self.lib.host_clear_trace()
+        self.lib.host_set_sb(self.sb)
+        if hasattr(self.lib, "launcher_smb_set_target"):
+            if self.lib.launcher_smb_set_target(target_rules(target, self.sb)):
+                self.reload = True
+        elif hasattr(self.lib, "launcher_smb_set_pops_target"):
+            self.lib.launcher_smb_set_pops_target(int(is_pops_target(target)))
+        if not self.loaded or self.reload:
+            self._load()
+        return self._trace()
+
+    def launch_pops(self, target):
+        """launchPOPS before the IOP reboot: the target's own prefix, then
+        pops_load_smb_stack."""
+        self.lib.host_clear_trace()
+        self.sb = launch_pops_sb(target, self.sb)
+        self.lib.host_set_sb(self.sb)
+        self.lib.host_connect()
+        return self._trace()
+
+    def iop_reboot(self):
+        """initPopsServices: the module list again on POPS's IOP; afterwards
+        any launch reboots the IOP (forceIOPReset)."""
+        self.lib.host_clear_trace()
+        self._load()
+        self.reload = True
+        return self._trace()
+
+
+def summary(trace):
+    """The trace in short: the module argument length, each devctl (LOGON
+    with its user and password type, OPENSHARE with its password type) and
+    the connect result."""
+    lines = []
+    for line in trace:
+        if line.startswith("devctl"):
+            part = line.split()
+            raw = bytes.fromhex(part[4]) if int(part[3]) else b""
+            cmd = int(part[2], 16)
+            if cmd == LOGON:
+                lines.append("LOGON user=%r ptype=%d" % (raw[USER:USER + 256].split(b"\0")[0].decode(),
+                             struct.unpack_from("<i", raw, PASSWORD_TYPE)[0]))
+            elif cmd == OPENSHARE:
+                lines.append("OPENSHARE ptype=%d" % struct.unpack_from("<i", raw, SHARE_PASSWORD_TYPE)[0])
+            else:
+                lines.append("DEVCTL %08x" % cmd)
+        elif line.startswith(("tcpip", "connect", "msg")):
+            lines.append(line)
+    return lines
 
 
 class Native(unittest.TestCase):
@@ -765,6 +900,101 @@ class Handler(unittest.TestCase):
         self.assertIsNone(args)             # without IPCONFIG.DAT the launcher's rule is an error
 
 
+class Dispatch(unittest.TestCase):
+    """Launch attempts in one boot (the quickboot CNF and OSDM path loops try
+    several targets). Every target gets a setup made under its own rules;
+    one made under the other rules is loaded again, never reused."""
+    SMB = b"10.0.0.2 SHARE\nguest\n\n"
+    IP = b"10.0.0.9 255.255.255.0 10.0.0.1"
+    FILES = {"mc0:/POPSTARTER/SMBCONFIG.DAT": SMB, "mc0:/POPSTARTER/IPCONFIG.DAT": IP}
+    ELF = "smb:/EMBER/ember.elf"
+    LAUNCHER_RULES = ["tcpip 32", "LOGON user='guest' ptype=-1", "OPENSHARE ptype=-1", "connect 0"]
+    POPSTARTER_RULES = ["tcpip 29", "LOGON user='guest' ptype=0", "DEVCTL c0de0007", "OPENSHARE ptype=-1",
+                        "connect 0"]
+
+    def test_the_decision(self):
+        for target, sb, want in (("smb:/POPS/SB.Game.VCD", 0, 1), ("smb:/POPS/sb.game.vcd", 0, 1),
+                                 ("smb:/POPS/Game.VCD", 1, 1), ("smb:/POPS/Game.VCD", 0, 0),
+                                 ("smb:/POPS/XX.Game.VCD", 1, 0), ("smb:/SB.POPS/Game.VCD", 0, 0),
+                                 ("smb:/POPS/SB.Game.VCD.elf", 1, 0), ("smb:/APPS/SB.app.elf", 1, 0),
+                                 (self.ELF, 1, 0), (self.ELF, 0, 0)):
+            self.assertEqual(target_rules(target, sb), want, (target, sb))
+            # The rule launchPOPS then applies to the same target agrees.
+            if is_pops_target(target):
+                self.assertEqual(launch_pops_sb(target, sb), want, (target, sb))
+
+    def test_a_setup_under_popstarters_rules_is_not_reused(self):
+        """Review finding 1. The launcher is SB.-named; CNF path 1 is a PS1
+        game that is not there, path 2 an ELF on the share."""
+        fresh = Boot(HANDLER, self.FILES, sb=1).dispatch(self.ELF)
+        self.assertEqual(summary(fresh), self.LAUNCHER_RULES)
+        boot = Boot(HANDLER, self.FILES, sb=1)
+        self.assertEqual(summary(boot.dispatch("smb:/POPS/Game.VCD")), self.POPSTARTER_RULES)
+        self.assertEqual(boot.dispatch(self.ELF), fresh)
+        # launchPOPS stopping before the IOP reboot (no POPS_IOX.PAK, say).
+        boot = Boot(HANDLER, self.FILES)
+        self.assertEqual(summary(boot.dispatch("smb:/POPS/SB.Game.VCD")), self.POPSTARTER_RULES)
+        self.assertEqual(boot.launch_pops("smb:/POPS/SB.Game.VCD"), ["connect 0"])
+        self.assertEqual(boot.dispatch(self.ELF), fresh)
+        # The other way round.
+        boot = Boot(HANDLER, self.FILES)
+        self.assertEqual(boot.dispatch(self.ELF), fresh)
+        self.assertEqual(boot.dispatch("smb:/POPS/SB.Game.VCD"),
+                         Boot(HANDLER, self.FILES).dispatch("smb:/POPS/SB.Game.VCD"))
+
+    def test_the_same_rules_keep_the_setup(self):
+        """As before: a loaded setup made under the target's rules is used
+        as it is."""
+        boot = Boot(HANDLER, self.FILES, sb=1)
+        boot.dispatch(self.ELF)
+        self.assertEqual(boot.dispatch("smb:/APPS/other.elf"), [])
+        self.assertEqual(boot.dispatch("smb:/POPS/XX.Game.VCD"), [])
+        boot = Boot(HANDLER, self.FILES)
+        boot.dispatch("smb:/POPS/SB.A.VCD")
+        self.assertEqual(boot.dispatch("smb:/POPS/SB.B.VCD"), [])
+
+    def test_an_sb_vcd_uses_popstarters_rules_from_the_first_stage(self):
+        """Review finding 2. The SB. is only in the VCD's own name (quickboot
+        CNF or OSDM path, a launcher that is not SB.-named): the setup that
+        finds the VCD and the one after the IOP reboot both use the original's
+        rules, with the same calls."""
+        smb = "mc0:/POPSTARTER/SMBCONFIG.DAT"
+        ip = {"mc0:/POPSTARTER/IPCONFIG.DAT": self.IP}
+        cases = (
+            ({smb: b"10.0.0.2 SHARE", **ip},
+             ["tcpip 29", "LOGON user='POPStarter' ptype=-1", "DEVCTL c0de0007", "OPENSHARE ptype=-1",
+              "connect 0"]),
+            ({smb: b"10.0.0.2 SHARE"},                                    # no IPCONFIG.DAT
+             ["tcpip 0", "LOGON user='POPStarter' ptype=-1", "DEVCTL c0de0007", "OPENSHARE ptype=-1",
+              "connect 0"]),
+            ({smb: b"10.0.0.2 SHARE\nuser\npass\nfourth\n", **ip},       # a fourth line
+             ["tcpip 29", "LOGON user='user' ptype=0", "DEVCTL c0de0007", "OPENSHARE ptype=-1",
+              "connect 0"]),
+            ({smb: b"my-nas.local SHARE\nuser\npass\n", **ip},           # a host name
+             ["tcpip 29", "LOGON user='user' ptype=0", "DEVCTL c0de0007", "OPENSHARE ptype=-1",
+              "connect 0"]),
+        )
+        for files, want in cases:
+            for target in ("smb:/POPS/SB.Game.VCD", "smb:/POPS/sb.Game.vcd"):
+                boot = Boot(HANDLER, files)
+                stage1 = boot.dispatch(target)
+                self.assertEqual(summary(stage1), want, (files, target))
+                self.assertEqual(stage1, calls(session(HANDLER, files, 1)[0]), (files, target))
+                self.assertEqual(boot.launch_pops(target), ["connect 0"])
+                self.assertEqual(boot.iop_reboot(), stage1, (files, target))
+                self.assertEqual(boot.sb, 1)
+
+    def test_an_xx_vcd_keeps_the_launchers_rules_in_both_stages(self):
+        """An SB.-named launcher with an XX. VCD: launchPOPS turns the SB.
+        state off, so both stages use launcHER's rules."""
+        boot = Boot(HANDLER, self.FILES, sb=1)
+        stage1 = boot.dispatch("smb:/POPS/XX.Game.VCD")
+        self.assertEqual(summary(stage1), self.LAUNCHER_RULES)
+        boot.launch_pops("smb:/POPS/XX.Game.VCD")
+        self.assertEqual(boot.sb, 0)
+        self.assertEqual(boot.iop_reboot(), stage1)
+
+
 def _base_handler():
     try:
         text = subprocess.run(["git", "-C", str(ROOT), "show", BASE_REVISION + ":launcher/src/handler_smb.c"],
@@ -826,6 +1056,18 @@ class Unchanged(unittest.TestCase):
         for sb, pops in ((0, 0), (1, 0), (0, 1)):
             self.assertEqual(session(HANDLER, files, sb, pops=pops), before, (sb, pops))
         self.assertNotEqual(session(HANDLER, files, 1, pops=1), before)
+
+    def test_a_launch_after_an_sb_launch(self):
+        """Review finding 1: an ELF on the share after an SB. PS1 attempt in
+        the same boot gets the calls this revision's module load makes for
+        it, not the earlier session."""
+        files = Dispatch.FILES
+        before = Boot(BASE, files, sb=1).dispatch(Dispatch.ELF)
+        self.assertEqual(summary(before), Dispatch.LAUNCHER_RULES)
+        for first, sb in (("smb:/POPS/Game.VCD", 1), ("smb:/POPS/SB.Game.VCD", 0)):
+            boot = Boot(HANDLER, files, sb=sb)
+            boot.dispatch(first)
+            self.assertEqual(boot.dispatch(Dispatch.ELF), before, first)
 
 
 def _image_text(addr):
@@ -1081,22 +1323,51 @@ class Source(unittest.TestCase):
         gate = connect.index("if (sb_rules())\n    return sb_connect();")
         self.assertLess(connect.index("if (connected) return 0;"), gate)
         self.assertLess(gate, connect.index('read_config("SMBCONFIG.DAT"'))
-        # The switch: a PS1 target and an SB. name, both.
-        self.assertIn("static int sb_rules(void) { return popsTarget && pops_get_active_sb_launch(); }",
-                      self.src)
-        self.assertEqual(self.src.count("pops_get_active_sb_launch()"), 1)
-        self.assertEqual(self.src.count("sb_rules()"), 2)
-        self.assertEqual(self.src.count("popsTarget"), 3)
-        # Whether the target is a PS1 disc image is decided in one place,
-        # where a launch from the share is dispatched.
+        # The switch: the rules decided for the dispatched target.
+        self.assertIn("static int sb_rules(void) { return targetRules; }", self.src)
+        self.assertNotIn("pops_get_active_sb_launch", self.src)
+        self.assertEqual(self.src.count("sb_rules()"), 3)
+        self.assertEqual(self.src.count("targetRules"), 4)
+        # The rules the loaded modules were set up with: recorded where the
+        # network module's arguments are made, forgotten on every module load.
+        self.assertTrue(tcpip.startswith("char *initTCPIPArguments(uint32_t *length) {\n"
+                                         "  liveRules = sb_rules();\n"))
+        self.assertIn("void launcher_smb_reset(void) { connected = 0; liveRules = -1; }", self.src)
+        self.assertIn("int launcher_smb_set_target(int popstarter) {\n  targetRules = popstarter != 0;\n"
+                      "  return liveRules >= 0 && liveRules != targetRules;\n}", self.src)
+        self.assertEqual(self.src.count("liveRules"), 5)
+        # The rules are decided in one place, where a launch from the share is
+        # dispatched, before its modules are loaded, as launchPOPS decides
+        # the SB. state (target_rules and launch_pops_sb above).
         common = (ROOT / "launcher/src/common.c").read_text()
-        self.assertEqual(common.count("launcher_smb_set_pops_target("), 1)
+        self.assertEqual(common.count("launcher_smb_set_target("), 1)
+        self.assertEqual(common.count("initModulesReload()"), 1)
         self.assertIn("  case Device_SMB:\n#ifdef SMB\n"
-                      "    /* Only a PS1 launch may read the network files by POPStarter's rules. */\n"
-                      "    launcher_smb_set_pops_target(isPopsTarget(argv[0]));\n#endif\n"
+                      "    /* Only a PS1 launch may read the network files by POPStarter's rules: one\n"
+                      "     * whose SB. state, decided here as launchPOPS will decide it, is on.\n"
+                      "     * Modules set up under the other rules are not reused. */\n"
+                      "    if (launcher_smb_set_target(isPopsTarget(argv[0]) &&\n"
+                      "                                (pops_is_sb_prefix(argv[0]) ||\n"
+                      "                                 (!pops_is_xx_prefix(argv[0]) && pops_get_active_sb_launch()))))\n"
+                      "      initModulesReload();\n#endif\n"
                       "    ret = handleGenericPath(Device_SMB, argc, argv);", common)
+        init = (ROOT / "launcher/src/init.c").read_text()
+        self.assertIn("void initModulesReload(void) { forceIOPReset = 1; }", init)
+        self.assertIn("  if (!forceIOPReset && currentDevice && (currentDevice & device) == device)\n"
+                      "    // Do nothing if the drivers are already loaded\n    return 0;\n  forceIOPReset = 0;",
+                      init)
+        self.assertIn("#ifdef SMB\n  launcher_smb_reset();\n#endif\n  currentDevice = Device_None;", init)
+        pops = (ROOT / "launcher/src/handler_pops.c").read_text()
+        self.assertIn("int isPopsTarget(const char *path) {\n  if (!path)\n    return 0;\n"
+                      "  const char *dot = strrchr(path, '.');\n  if (!dot)\n    return 0;\n"
+                      "  return !strcasecmp(dot, \".vcd\");\n}", pops)
+        self.assertIn("  const int directXx = pops_is_xx_prefix(vcdPath);\n"
+                      "  const int directSb = pops_is_sb_prefix(vcdPath);\n"
+                      "  if (directXx || directSb) {", pops)
+        self.assertIn("    pops_set_active_xx_launch(directXx);\n    pops_set_active_sb_launch(directSb);\n  }",
+                      pops)
         for other in ("main.c", "init.c", "handler_pops.c", "handler_quickboot.c"):
-            self.assertNotIn("launcher_smb_set_pops_target", (ROOT / "launcher/src" / other).read_text())
+            self.assertNotIn("launcher_smb_set_target", (ROOT / "launcher/src" / other).read_text())
         self.assertIn("pops_parse_ipconfig(text, n, &size)", self.body("static char *sb_tcpip_arguments("))
         sb = self.body("static int sb_connect(void) {")
         self.assertIn("pops_parse_smbconfig(text, result, (unsigned char *)&logon, (unsigned char *)&share)", sb)

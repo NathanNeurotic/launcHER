@@ -20,6 +20,10 @@ int initModules(DeviceType device);
 // next initModules always reboots the IOP, so a launch target still gets exactly its own drivers.
 int initModulesAny(DeviceType devices);
 
+// The next initModules reboots the IOP and loads its drivers even when they are already loaded. Used
+// when the share's network modules were set up under the other network-file rules (handler_smb.h).
+void initModulesReload(void);
+
 /* After external POPS IOP reboot: load selected backends and the proxy without
  * another reset. Core must have passed boot planning before guarded patching;
  * its embedded SIO2 module is revalidated here. Volumes still need
