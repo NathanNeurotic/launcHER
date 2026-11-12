@@ -6,6 +6,7 @@
 #include "handler_pops.h"
 #include "handler_smb.h"
 #include "init.h"
+#include "launch_args.h"
 #include "loader.h"
 #include <ctype.h>
 #include <debug.h>
@@ -179,8 +180,13 @@ int launchPath(int argc, char *argv[]) {
 #endif
   case Device_SMB:
 #ifdef SMB
-    /* Only a PS1 launch may read the network files by POPStarter's rules. */
-    launcher_smb_set_pops_target(isPopsTarget(argv[0]));
+    /* Only a PS1 launch may read the network files by POPStarter's rules: one
+     * whose SB. state, decided here as launchPOPS will decide it, is on.
+     * Modules set up under the other rules are not reused. */
+    if (launcher_smb_set_target(isPopsTarget(argv[0]) &&
+                                (pops_is_sb_prefix(argv[0]) ||
+                                 (!pops_is_xx_prefix(argv[0]) && pops_get_active_sb_launch()))))
+      initModulesReload();
 #endif
     ret = handleGenericPath(Device_SMB, argc, argv);
     break;

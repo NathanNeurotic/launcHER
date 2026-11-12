@@ -236,6 +236,8 @@ static int loadModuleListResident(DeviceType device, int tolerant, int sonySio2)
 // Initializes IOP modules for given device type
 int initModules(DeviceType device) { return loadModules(device, 0); }
 
+void initModulesReload(void) { forceIOPReset = 1; }
+
 int initModulesAny(DeviceType devices) {
   int ret = loadModules(devices, 1);
   forceIOPReset = 1;
