@@ -76,6 +76,18 @@ def flat(path):
     return " ".join(path.read_text(encoding="utf-8").split())
 
 
+SECTION_2B = "### What `tools/test_pops_doc_claims.py` checks"
+
+
+def audit_text():
+    """The audit as one line, without section 2b: that section quotes some of
+    the phrases compared here, and a quote must not satisfy the comparison."""
+    text = AUDIT.read_text(encoding="utf-8")
+    start = text.index(SECTION_2B)
+    end = text.index("\n## ", start)
+    return " ".join((text[:start] + text[end:]).split())
+
+
 def documents():
     files = [ROOT / "README.md", ROOT / "docs" / "pops-setup.html"]
     files += sorted((ROOT / "docs").glob("*.md"))
@@ -456,7 +468,7 @@ class Native(unittest.TestCase):
         self.assertEqual(len(defined), len(set(defined)), "a spot-check number is defined twice")
         cited = {int(n) for n in re.findall(r"\bS(\d+)\b", text)}
         self.assertFalse(cited - set(defined), "cited but never defined: %s" % sorted(cited - set(defined)))
-        stated = re.search(r"`S1`\.\.`S(\d+)` after a label refers to the spot checks", flat(AUDIT))
+        stated = re.search(r"`S1`\.\.`S(\d+)` after a label refers to the spot checks", audit_text())
         self.assertIsNotNone(stated, "the audit lost its sentence on the spot-check range")
         self.assertEqual(int(stated.group(1)), max(defined), "the stated spot-check range is not S1..S%d" % max(defined))
 
@@ -541,7 +553,7 @@ class History(unittest.TestCase):
                       "(gap audit S33)." % (len(files), len(ran), len(host)), flat(CONTINUATION))
         self.assertIn("| %d test files. `build.yml` job `host-tests` runs %d, each as an unconditional step of its own. "
                       "`launch-args.yml` runs `test_launch_args.py`. %s are run by no workflow |"
-                      % (len(files), len(host), _names(set(files) - ran)), flat(AUDIT))
+                      % (len(files), len(host), _names(set(files) - ran)), audit_text())
 
 
 ELF_SET = bool(os.environ.get("POPSTARTER_TEST_ELF"))
@@ -681,7 +693,7 @@ class Original(unittest.TestCase):
     def setUpClass(cls):
         if IMAGE is None:
             raise AssertionError("POPSTARTER_TEST_ELF is set but the image could not be used (%s)" % IMAGE_ERROR)
-        cls.audit = flat(AUDIT)
+        cls.audit = audit_text()
         cls.inventory = flat(INVENTORY)
 
     def test_usbdelay_handler_address(self):
@@ -1099,7 +1111,7 @@ class Corpus(unittest.TestCase):
             if kind == "TROJAN":
                 self.assertGreaterEqual(len(data), 28, path.name)
                 hooks.setdefault(number, set()).add(struct.unpack_from("<I", data, 24)[0])
-        audit = flat(AUDIT)
+        audit = audit_text()
         self.assertIn("{:,} TROJAN files, {:,} unique; {:,} PATCH files, {:,} unique".format(
             counts["TROJAN"], len(distinct["TROJAN"]), counts["PATCH"], len(distinct["PATCH"])), audit)
         self.assertIn("{:,} TROJAN files, {:,} unique by content; {:,} PATCH files, {:,} unique".format(

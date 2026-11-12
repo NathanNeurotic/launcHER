@@ -152,8 +152,9 @@ the third pass extended the pins and this list. The test now checks exactly
 the following, and nothing else in this document is read by a test. A
 sentence named here is compared whole unless the item says which part; a
 part that is compared as text only (its words, not a value computed from
-the original) is said so. The results of the deliberate changes tried
-against it are in section 19.
+the original) is said so. This section is left out of the text the test
+compares, so a phrase quoted here does not satisfy it. The results of the
+deliberate changes tried against it are in section 19.
 
 Without the reference inputs (as in CI):
 
