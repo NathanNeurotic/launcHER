@@ -214,3 +214,26 @@ For a console session, once a drive part exists (none of this has been run):
 8. The lid hotkeys with a real tray: SELECT+L2+R2+TRIANGLE then a real disc change then SELECT+L2+R2+SQUARE (the original's text says this refreshes the TOC).
 9. sceCdInit(5) before the IOP work: effect on the drive and on the later POPS start.
 10. Both fatal paths end as the original's do (message, exit), with quiet on and off.
+
+## Correction (added later, after a review of the merged piece)
+
+This report is kept as written. A later read-only review of the merge
+(`f22a69f`, read at `ef663b2`) found three things in it that are wrong or
+stale; `docs/POPSTARTER_PHYSICAL_DISC.md` now has the corrected text.
+
+- The proposed quirk row "CD audio is always muted ... no command keeps it"
+  and decision 7 are wrong about the original. Its command parser
+  (`0x883270`, called at `0x8771ac` and `0x87724c`) runs after the drive
+  block, and its `$UNDO_MUTE_CDDA` arm (`0x8953d8..0x895408`) writes Sony's
+  three values back. Read from the code, not run; whether the parser finds
+  a command file in a physical launch was not run either.
+- "Always run `pops_apply_region`" (deviation 8, not done 9): since the
+  user `BIOS.BIN` merge the region call is `pops_apply_region_rom` with the
+  loader state. A physical launch must run that call, not
+  `pops_apply_region`, which writes the BIOS words the `_rom` variant
+  leaves alone under a user `BIOS.BIN`.
+- The `handler_pops.c` line numbers are those of `1f8c525` and no longer
+  match. The built-in entry is now applied before the IGR skin, so "after
+  `pops_apply_always_on_pokes` and before `pops_stage_igr_skin`" is
+  ambiguous; the original's order is after the always-on pokes and before
+  `pops_builtin_apply`.

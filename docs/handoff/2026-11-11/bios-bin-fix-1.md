@@ -134,3 +134,19 @@ Console checks still owed for this feature (nothing here has been run on a PS2):
 7. A game with a built-in entry + `$UNDO_COMPATIBILITY_CODES`: expected to FAIL to launch today (known gap); record the on-screen result.
 8. `PATCH_n.BIN` with mode byte 6 + `$UNDO_GAME_FIXES`, no `BIOS.BIN`: record whether the BIOS shell is shown on launcHER and on POPStarter (expected to differ).
 9. Both storage back ends (HDD pfs and USB mass) for 2 and 3.
+
+## Correction (added later, after the second review)
+
+This report is kept as written. The second review (read at `ef663b2`,
+re-measured on the host at `4e90fda`) narrows two statements:
+
+- The user-facing note "for a game that has a built-in fix entry currently
+  makes the launch fail" is too wide. 294 of the 624 built-in entries are
+  refused after `$UNDO_COMPATIBILITY_CODES`: the 291 that set compatibility
+  modes (each sets at least one of modes 1 to 5) and three that set none but
+  write mode 4's byte at `0x21af70` directly (entries 109, 571, 572). The
+  other 330 are not refused (`pops_stage_user_files` returns 0 on the host;
+  no launch was run). Same counts with an all-games `BIOS.BIN` loaded.
+- Fix option (a), "after the entry's modes are replayed", must also cover
+  the entry's direct core writes, or entries 109, 571 and 572 stay refused.
+  Which fix to take is still the owner's decision.

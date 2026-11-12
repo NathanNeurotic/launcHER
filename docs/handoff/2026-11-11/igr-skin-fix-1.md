@@ -170,3 +170,13 @@ docs/pops-setup.html:554, replace the paragraph with the same content: the three
 - A launch with no IGR command and the files present: the launch is unaffected and the direct exit still works.
 - A launch with a $FIX_* runtime correction and the skin files present: starts (this order failed with -4 before the reorder, on the host).
 - A game with a built-in entry (by fingerprint and by $VCDID_n) plus the skin files: both take effect.
+
+## Correction (added later)
+
+This report is kept as written. "21 whole launches in launchPOPS's order"
+was true of the test at the time. The user `BIOS.BIN` merge (`0945127`)
+then moved launchPOPS's commands and fix files into `pops_stage_user_files`
+and switched the shell edits and the region pass to the `_rom` functions,
+which the test's replay did not follow. The replay now follows them, adds
+a user `BIOS.BIN` in either folder or both (84 launches), and names the two
+calls it leaves out (the TROJAN slot chain and the progressive hook).

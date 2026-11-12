@@ -16,7 +16,8 @@ list, the always-on hooks and the unguarded scans write nothing inside the
 three slots; where launchPOPS makes the call.
 With POPS_TEST_ELF (RealCore): Sony's own three files fill the slots
 exactly, and launchPOPS's other stages are run on the real core around a
-staged skin, one by one and as one whole launch order.
+staged skin, one by one and in launchPOPS's order (user BIOS.BIN included;
+the TROJAN slot chain and the progressive hook left out).
 With POPSTARTER_TEST_ELF (OriginalCode): the table, the call's gates and
 the order of the original's built-in list against the skin call are decoded
 from its instructions.
@@ -215,6 +216,24 @@ L.pops_resident_hook_progressive.argtypes = [c.c_void_p, c.c_size_t, c.c_uint32,
 L.pops_resident_progressive_interlace.argtypes = [c.c_void_p]
 L.pops_resident_progressive_interlace.restype = c.c_uint32
 L.pops_resident_hook_display.argtypes = [c.c_void_p, c.c_size_t, c.c_uint32]
+
+
+class Rom(c.Structure):
+    """PopsUserRomState (common/include/pops_modes_patches.h)."""
+    _fields_ = [(name, c.c_uint8) for name in ("bios_all", "bios_game", "osd_all_a", "osd_all_b",
+                                                "osd_game_a", "osd_game_b", "osd_off")]
+
+
+L.pops_apply_all_config_patches_rom.argtypes = [c.c_void_p, c.c_size_t, c.c_void_p, c.POINTER(Rom)]
+L.pops_user_bios_stage.argtypes = [c.c_void_p, c.c_size_t, c.c_void_p, c.c_size_t, c.c_int64,
+                                   c.c_int, c.POINTER(Rom)]
+L.pops_fix_context_rom_loaded.argtypes = [c.c_void_p, c.c_void_p, c.c_size_t]
+L.pops_fix_stage_rom.argtypes = [c.c_void_p, c.c_void_p, c.c_size_t, c.c_void_p, c.c_size_t,
+                                 c.c_uint, c.c_int, c.POINTER(Rom)]
+L.pops_apply_bios_shell_edits_rom.argtypes = [c.c_void_p, c.c_size_t, c.POINTER(Rom)]
+L.pops_apply_region_rom.argtypes = [c.c_void_p, c.c_size_t, c.c_int, c.c_uint8, c.c_int,
+                                    c.POINTER(Rom)]
+USER_BIOS_ADDR, USER_BIOS_READ = 0x0024BC20, 0x0007FF90   # pops_modes_patches.h
 
 
 def stage(core, which, data, size=None, core_size=None):
@@ -1140,14 +1159,19 @@ class RealCore(unittest.TestCase):
         changed = [i for i in range(FIRST - CORE, END - CORE) if core[i] != base[i]]
         self.assertTrue(set(changed) <= set(range(inside - CORE, inside - CORE + 8)))
 
-    def launch(self, mask, builtin, skin_first=False):
-        """launchPOPS's staging calls in its order on one core. Returns the
-        core and the skin range staged, or the failing step."""
+    def launch(self, mask, builtin, bios=(), skin_first=False):
+        """launchPOPS's staging calls on one core, in its order, through the
+        common functions it calls; pops_stage_user_files's steps are written
+        out here (its look-ahead at the two BIOS.BIN files becomes the flags
+        `bios` names: "all" for the all-games folder, "game" for the game's).
+        Not replayed: the TROJAN slot chain (no TROJAN file here) and the
+        progressive hook (not asked for). Returns 0 and the core, or the
+        runtime corrections' result when the skin was staged first."""
         core = bytearray(self.pristine)
         header = resident_header()
 
         def ok(name, rc, want=0):
-            self.assertEqual(rc, want, (name, mask, builtin))
+            self.assertEqual(rc, want, (name, mask, builtin, bios))
 
         ok("core patches", L.pops_core_patches_stage(CORE, H.buf(core), len(core), (1 << 7) - 1))
         if skin_first:
@@ -1158,25 +1182,51 @@ class RealCore(unittest.TestCase):
                 return rc, core
             ok("runtime corrections", rc)
         ok("always-on hooks", always_on(core), [0, 0, 0, 0])
+        modes = 0
         if builtin:
             ok("built-in entry", L.pops_builtin_apply(builtin, H.buf(core), len(core), None, 0, 0, PLAN))
+            modes = PLAN[2]   # PopsBuiltinPlan.compat_modes
         core = self.staged_with_skin(bytes(core))
         want = skin_range(core)
         cfg = config("$IGR0")
         L.pops_config_parse_line(c.byref(cfg), b"$COMPATIBILITY_0x04")
         L.pops_config_parse_line(c.byref(cfg), b"$HDTVFIX")
-        ok("commands", L.pops_apply_all_config_patches(H.buf(core), len(core), c.byref(cfg)))
+        # pops_stage_user_files: the state, the commands with the flags the
+        # loads will set, the emit jumps, then pops_stage_fix_files.
+        rom = Rom(osd_off=1 if modes & (1 << 5) else 0)
+        at_commands = Rom(bios_all="all" in bios, bios_game="game" in bios, osd_off=rom.osd_off)
+        ok("commands", L.pops_apply_all_config_patches_rom(H.buf(core), len(core), c.byref(cfg),
+                                                           c.byref(at_commands)))
+        rom.osd_off = at_commands.osd_off
         self.assertEqual(igr_outcome(core), "dialog")
         ok("emit", L.pops_resident_hook_recompiler_emit(H.buf(core), len(core), 24, header))
         context = c.create_string_buffer(4096)
         ok("fix context", L.pops_fix_context_init_builtin(context, H.buf(core), len(core), builtin,
                                                           cfg.compat_modes, cfg.video_mode))
-        blob = fix_file("PATCH", 0, payload=b"\x5a" * 8, address=0x00240000)
-        ok("fix file", L.pops_fix_stage(context, H.buf(core), len(core), blob, len(blob), 0, 0))
+        ok("fix bind", L.pops_fix_bind_progressive(context, H.buf(core), len(core),
+                                                   header.progressive_entry, 0x24040001))
+        # Each folder's BIOS.BIN, then its fix files: all games, then the game.
+        # The file is POPS's own ROM copy with its first 16 bytes changed.
+        user_bios = bytearray(self.pristine[USER_BIOS_ADDR - CORE:USER_BIOS_ADDR - CORE + USER_BIOS_READ])
+        user_bios[:16] = b"\x5a" * 16
+        user_bios = bytes(user_bios)
+        for scope, folder in enumerate(("all", "game")):
+            if folder in bios:
+                ok("BIOS.BIN " + folder,
+                   L.pops_user_bios_stage(H.buf(core), len(core), user_bios, len(user_bios), 0x80000,
+                                          scope, c.byref(rom)), 1)
+                ok("BIOS.BIN context", L.pops_fix_context_rom_loaded(context, H.buf(core), len(core)))
+            if not scope:
+                blob = fix_file("PATCH", 0, payload=b"\x5a" * 8, address=0x00240000)
+                ok("fix file", L.pops_fix_stage_rom(context, H.buf(core), len(core), blob, len(blob),
+                                                    0, 0, c.byref(rom)))
+        self.assertEqual((rom.bios_all, rom.bios_game), (at_commands.bios_all, at_commands.bios_game))
+        if bios:
+            self.assertEqual(H.u32(core, USER_BIOS_ADDR), 0x5A5A5A5A)
         ok("fix progressive", L.pops_fix_require_progressive(context, H.buf(core), len(core)))
         ok("fix video", L.pops_fix_finalize_video(context, H.buf(core), len(core), 1, cfg.video_mode))
-        ok("shell edits", L.pops_apply_bios_shell_edits(H.buf(core), len(core)))
-        ok("region", L.pops_apply_region(H.buf(core), len(core), 1, cfg.video_mode, 0))
+        ok("shell edits", L.pops_apply_bios_shell_edits_rom(H.buf(core), len(core), c.byref(rom)))
+        ok("region", L.pops_apply_region_rom(H.buf(core), len(core), 1, cfg.video_mode, 0, c.byref(rom)))
         vector = c.c_uint32(0)
         ok("warmboot", L.pops_apply_reset_warmboot(H.buf(core), len(core), c.byref(vector)), 1)
         irx = module_irx("sio2man")
@@ -1194,13 +1244,18 @@ class RealCore(unittest.TestCase):
         return 0, core
 
     def test_whole_launches_keep_the_skin(self):
-        """Every staging call launchPOPS makes on the core, in its order,
-        with and without runtime corrections and a built-in entry: each one
-        succeeds and the skin read by the reader is still in place."""
+        """launchPOPS's staging calls on the core in its order (see launch
+        for the two it leaves out), with and without runtime corrections, a
+        built-in entry and a user BIOS.BIN in either folder or both: each
+        call succeeds and the skin read by the reader is still in place."""
+        runs = 0
         for mask in (0,) + RUNTIME_MASKS:
             for builtin in (0, 1, 508):
-                rc, _ = self.launch(mask, builtin)
-                self.assertEqual(rc, 0)
+                for bios in ((), ("all",), ("game",), ("all", "game")):
+                    rc, _ = self.launch(mask, builtin, bios)
+                    self.assertEqual(rc, 0)
+                    runs += 1
+        self.assertEqual(runs, 84)
 
     def test_a_skin_before_the_runtime_corrections_stops_the_launch(self):
         """The order the first version of this stage would have had once the

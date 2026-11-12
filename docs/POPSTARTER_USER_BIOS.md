@@ -20,7 +20,7 @@ folder), `a1` the game's name.
 | Path | `pfs1:/POPS/BIOS.BIN` or `pfs1:/POPS/<game>/BIOS.BIN` on the HDD (`gp+0x3448 == 0`), `mass:/POPS/...` otherwise. Measured with the plain `POPS` folder (`gp+0x381c == 0`) |
 | Open | flags 1 (read only). A failed open prints `NOT FOUND` and returns 0 |
 | Size | `lseek(fd, 0, END)`, then `lseek(fd, 0, SET)`, whose result is not looked at |
-| Size test (`0x8803d0`) | loads when the END result, as a signed 32-bit value, is more than `0x7ff8e`. Otherwise prints `<path> is too small`, closes and returns 0. A failed lseek (`-1`, `-5`) and `0x80000000` or more are "too small"; `0x7fffffff` loads |
+| Size test (`0x88089c`: `slt` against `0x7ff8e`, built at `0x880894..0x880898`, branch at `0x8808a0`; both back ends) | loads when the END result, as a signed 32-bit value, is more than `0x7ff8e`. Otherwise prints `<path> is too small`, closes and returns 0. A failed lseek (`-1`, `-5`) and `0x80000000` or more are "too small"; `0x7fffffff` loads |
 | Read | one `read(fd, 0x24bc20, 0x7ff90)` straight into POPS. Its result is not looked at |
 | After | sets `gp+0x38a4` (all-games) or `gp+0x3b98` (game), writes halfword `0x1000` at `0x20079a` without looking at what was there, prints `User BIOS == <path>`, closes, returns 1 |
 
@@ -195,13 +195,17 @@ Differences from the original:
    keeps each as one byte that only ever holds 0 or 1.
 
 Known gap, found while testing the sequence, older than this work and not
-fixed here: a built-in entry with compatibility modes followed by
-`$UNDO_COMPATIBILITY_CODES`. The original puts POPS's words back and goes
-on. launcHER's fix-file session (`pops_fix_context_init_builtin`) still
-expects the entry's words at those sites and refuses the launch with
-`-EINVAL`. On the real core, on the host, that is 294 of the 624 built-in
-entries that apply to it, and the count was the same before the `BIOS.BIN`
-work. `$UNDO_GAME_FIXES` and `$UNDO_LIBCRYPT_FIX` are not affected (before
+fixed here: a built-in entry followed by `$UNDO_COMPATIBILITY_CODES`. The
+original puts POPS's words back and goes on. launcHER's fix-file session
+(`pops_fix_context_init_builtin`) still expects the entry's words at those
+sites and refuses the launch with `-EINVAL`. On the real core, on the host,
+that is 294 of the 624 built-in entries that apply to it: all 291 entries
+that set compatibility modes (each sets at least one of modes 1 to 5; one
+sets mode 6 as well), and three that set none but write mode 4's byte at
+`0x21af70` directly (entries 109, 571 and 572). The other 330, which set no
+mode and make no such write, are not refused. The same 294 with an
+all-games `BIOS.BIN` loaded, and the count was the same before the
+`BIOS.BIN` work. `$UNDO_GAME_FIXES` and `$UNDO_LIBCRYPT_FIX` are not affected (before
 this work they failed for one entry).
 `Launch.test_undo_compatibility_codes_after_a_built_in_entry` asserts what
 should happen and is marked as an expected failure.

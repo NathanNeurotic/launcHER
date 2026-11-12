@@ -60,11 +60,23 @@ found" local (`0x10b8($fp)`) is 0; any other pair skips the whole block
    `Cannot access (%d)!` with the status and take the fatal exit
    (`0x8709f8`). The disc type is never asked for. Nothing is unmounted on
    this path, and there is no retry or wait.
+   The fatal exit `0x8709f8` does more than leave. Read from the code, not
+   run: when `gp+0x3450` is 1 it calls `0x9174f8("mass0:", 0xc0de0006, ...)`
+   and `0x9174f8("mass0:", 0xc0de0003, ...)` and clears that word; unless
+   `gp+0x3828` is 3 it calls `FUN_008dc9ac`; then `FUN_00870700(1)`, two
+   calls of `0x9188b8(address, 0, length)` whose lengths are the words
+   `gp+0x33ac` and `gp+0x33b0`, then clears both words (`0x870aac`,
+   `0x870ab0`) and calls `0x9188b8(0x1ff000, 0, 0x303e60)`; then `0x87098c`
+   five times unless `gp+0x38b0` is 1, `0x91aaf0` when `gp-0x7fe8` is 1, and `FUN_00870500`.
+   The tests record that the exit is called and stop there: none of its
+   own steps is measured, and the planner does not cover them.
 5. `sceCdGetDiskType()`. Anything but `0x10`, `0x11`, `0x12`, `0x13` (the
    SDK's PS1 CD, PS1 CD with CD-DA, PS2 CD, PS2 CD with CD-DA): print
-   `NO PS1 CDROM!`, call the helper `0x8d7ff8` unless `gp+0x3448` is 1 or
-   the launch type is 3 or 4, then take the fatal exit. (The helper was read,
-   not run: it unmounts `pfs0:` and `pfs1:`.)
+   `NO PS1 CDROM!`, call the helper `0x8d7ff8` unless `gp+0x3448` is
+   nonzero (`0x8769d8`, `bnez`; the tests run 0 and 1) or the launch type
+   is 3 or 4, then take the fatal exit. (The helper was read, not run: it
+   calls `0x9174f8("pfs:", 0x5003, 0, 0, 0, 0)`, a devctl with the PS2SDK's
+   `PDIOC_CLOSEALL`, then unmounts `pfs0:` and `pfs1:` through `0x915f50`.)
    The SDK's "still detecting" values `0x01..0x04` are refused like any
    other; the original does not wait for detection to finish.
 6. Zero the sector buffer (`0x9ba5b0`, `0x1260` bytes), `sceCdSync(0)`,
@@ -143,7 +155,15 @@ planner's letters. One difference from launcHER's VCD path matters when this
 is wired: launcHER skips the region pass when it cannot read the licence,
 while the original, after a failed disc read, runs it with four zero letters
 and so writes the unknown-region values. To match, a physical launch must
-always run `pops_apply_region` with the planner's letters.
+always run the region call `launchPOPS` already makes
+(`pops_apply_region_rom`, with the loader state `romState`) on the
+planner's letters, not skip it. Not `pops_apply_region`: that passes no
+loader state, so under a user `BIOS.BIN` it still writes what the `_rom`
+variant leaves alone there (`0x2649a0` for a known licence;
+`0x264994..0x2649a3` and the bytes at `0x20f6cc`, `0x20f6d8`, `0x20f6dc`,
+`0x20f6e0` for an unknown one; `docs/POPSTARTER_USER_BIOS.md`, section 3).
+The run above used `pops_apply_region` with no user ROM, where the two
+write the same bytes.
 
 ## Built-in list fingerprint
 
@@ -184,9 +204,18 @@ original's file backends.
   site it is about to write holds Sony's value and writes nothing otherwise
   (`-EILSEQ`). The CD-DA writes go through the existing `$MUTE_CDDA` writer.
   Its place in `launchPOPS` is after `pops_apply_always_on_pokes` and before
-  `pops_stage_igr_skin`: the original's order is always-on changes, this
-  block (with the built-in entry at its end), IGR skin, user files. On the
-  real core, launcHER's earlier stages (core patches, each `$FIX_*`
+  `pops_builtin_apply` (which `launchPOPS` now calls before
+  `pops_stage_igr_skin`): the original's order is always-on changes, this
+  block (with the fingerprint and its built-in entry at its end,
+  `0x8769ac`), IGR skin, user files. No built-in entry writes any of this
+  block's sites (all 624 applied over two marked synthetic cores, on the
+  host), so a place between the entry and the skin gives the same bytes;
+  before the entry is the original's order. It must stay before
+  `pops_stage_user_files`, as the header says: in the original the user's
+  commands run after this block, so a `$UNDO_MUTE_CDDA` would put Sony's
+  three CD-DA values back (its handler `0x8953d8..0x895408`; read, not run,
+  and whether the parser finds a command file in a physical launch was not
+  run either). On the real core, launcHER's earlier stages (core patches, each `$FIX_*`
   correction, the hooks, the always-on pokes) leave all four sites as Sony
   shipped them.
 - `pops_physical_disc_clear_name(core, core_size)`: the `memset` at
