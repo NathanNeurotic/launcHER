@@ -617,9 +617,42 @@ class Original(unittest.TestCase):
         self.assertEqual([word(a) for a in (0x880538, 0x880554, 0x880558, 0x880570, 0x8805a0, 0x8805a4)],
                          [jal(0x8d7e78), gp_word(0x2b, 2, 0x3460), LI_V0_666,
                           jal(0x91bf80), gp_word(0x2b, 2, 0x3460), LI_V0_666])
-        self.assertIn("(`pfs1:` call at `0x880538`, store at `0x880554`, `-666` at `0x880558`; `mass:` call at "
-                      "`0x880570`, store at `0x8805a0`, `-666` at `0x8805a4`)", self.audit)
+        self.assertIn("A missing folder sets `gp+0x3460 = 1` and returns -666 with nothing opened (`pfs1:` call at "
+                      "`0x880538`, store at `0x880554`, `-666` at `0x880558`; `mass:` call at `0x880570`, store at "
+                      "`0x8805a0`, `-666` at `0x8805a4`)", self.audit)
         self.assertIn("the handler reads the once-flag `gp+0x38e0` (`0x8804ec`)", self.audit)
+        # The gates come first: each returns 0 before either exit and before
+        # the once-flag is read, so only a call that passes them sets it.
+        low, high = 0x8801b4, 0x880338
+        gates, scope, returns = [], "any scope", 0
+        for address in range(low, high, 4):
+            value = word(address)
+            if value == 0x8fc30000:                                     # lw v1,0(fp): the scope
+                # beq v1,v0 skips the gate for scope 1 (game), bne for the others.
+                scope = {0x1062: "all games", 0x1462: "game"}[word(address + 8) >> 16]
+            elif value >> 16 == 0x8f83 and value & 0xffff != 0x38b0:    # lw v1,off(gp); 0x38b0 is the print switch
+                gates.append((scope, value & 0xffff))
+            elif value >> 16 == 0x1000:                                 # b: the shared return, v0 = 0xc0(fp)
+                target = address + 4 + ((value & 0xffff) ^ 0x8000) * 4 - 0x8000 * 4
+                if target == 0x880a0c:
+                    self.assertEqual(word(address + 4), 0xafc000c0)    # sw zero,0xc0(fp) in the delay slot
+                    returns += 1
+        self.assertEqual([g for _s, g in gates], [0x38dc, 0x343c, 0x344c, 0x3878, 0x3430, 0x344c, 0x3460])
+        self.assertEqual(returns, 6)        # one per gate test; the two 0x343c/0x344c loads share one
+        loads = [a for a in range(*BIOS_HANDLER, 4) if word(a) & 0xffe0ffff == gp_word(0x23, 0, 0x38e0)]
+        self.assertEqual(loads, [0x8804ec])
+        phrase, last = [], None
+        for scope, offset in gates:
+            item = "`gp+%#x`" % offset
+            if scope != last:
+                phrase.append("%s %s" % (scope, item))
+            else:
+                phrase[-1] += ", " + item
+            last = scope
+        self.assertIn("Gates inside the handler, in this order, each returning 0 (`%#x..%#x`, before both exits): %s."
+                      % (low, high - 4, "; ".join(phrase)), self.audit)
+        self.assertIn("So a game-scope call that gets past the gates of the next row always leaves `gp+0x38e0 = 1`",
+                      self.audit)
 
     def test_igr_skin_function_return_values(self):
         low, high = IGR_SKIN

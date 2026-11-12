@@ -187,11 +187,14 @@ compared with whole phrases of this document or the inventory:
   its one store of `gp+0x3868` (`0x87425c`);
 - the `-666` stores of the five loaders, as one phrase, each after the
   loader's single call of the folder check;
-- the BIOS handler's POPS folder exit (the instructions at `0x880338`,
-  `0x880348`, `0x880360`, `0x880368`, `0x880374`, `0x880378` and the
-  section 4 sentence) and its game-folder exit (the once-flag at
-  `0x8804ec`/`0x880500`, the two calls, stores and `-666` sites, and their
-  sentence);
+- the BIOS handler's gates (the seven flag loads of `0x8801b4..0x880334`
+  in order, with the scope each is tested in, six returns of 0, and the
+  section 4 gates sentence), its POPS folder exit (the instructions at
+  `0x880338`, `0x880348`, `0x880360`, `0x880368`, `0x880374`, `0x880378`
+  and the section 4 sentence) and its game-folder exit (the once-flag read
+  at `0x8804ec`, the only one in the handler, the store at `0x880500`, the
+  two calls, stores and `-666` sites, and their sentences, including the
+  condition on "always leaves `gp+0x38e0 = 1`");
 - the IGR skin function's return values 1, 0 and -666, the instructions
   that decide them, the section 6 sentences on the folder check and its
   extra writes, and the inventory's IGR sentence;
@@ -313,8 +316,8 @@ Handler `FUN_0088019c(scope, name)`, `0x88019c..0x880a20`; callers
 | On accept: flag `gp+0x38a4` (all games) or `gp+0x3b98` (game), and halfword `0x20079a = 0x1000`, which turns POPS's `bnez v0` at `0x200798` into an unconditional branch past its "xCdInit failed" exit | `2x S5 S12` | yes |
 | Missing file or too small: return 0, nothing written to POPS and no BIOS flag set | `2x` | yes |
 | Both scopes, before the game-folder check: the POPS folder exit (`0x880338..0x880380`). The handler reads `gp+0x3868` and, if it is not 1, calls the POPS folder check `FUN_008d8958` (`jal` at `0x880348`). A result of 1 goes on. Otherwise all games returns -666 (`sw` of 1 to `gp+0x38dc` at `0x880374`, `li v0,-666` at `0x880378`) and the game scope goes on (the scope test at `0x880360..0x880368`). The check itself sets `gp+0x3868 = 1`, and on a missing folder `gp+0x38dc = 1` and `gp+0x3460 = 1` (S32), so after a missing POPS folder a game-scope load still runs while every later current-game loader is skipped. `main` normally makes the same check much earlier (`jal 0x8d8958` at `0x873f9c`, skipped when `gp+0x3888 != 0`) and sets `gp+0x3868`, so in a whole launch this exit is reached only where that earlier check was skipped and `gp+0x3868` was not set otherwise. `main` skips it on `SB.` launches (`gp+0x3888 = 3`) and sets `gp+0x3868` itself at `0x87425c` only when the `SB.` PAK loop succeeds; which launches end up here has not been traced end to end (`read`). OSD, TROJAN and PATCH also call the check and have a `-666` store right after it (S32); their scope handling was not traced | `2x S30 S32` (S30 run here; the reviewer reported it first) | yes |
-| Game scope only, before the file is opened: the handler reads the once-flag `gp+0x38e0` (`0x8804ec`). If it is not 1 it sets it to 1 and checks that the game folder exists (`FUN_008d7e78` on `pfs1:`, the stat call `0x91bf80` on `mass:`). A missing folder sets `gp+0x3460 = 1` and returns -666 with nothing opened (`pfs1:` call at `0x880538`, store at `0x880554`, `-666` at `0x880558`; `mass:` call at `0x880570`, store at `0x8805a0`, `-666` at `0x8805a4`). If the flag is already 1 the folder is not checked. So a game-scope call always leaves `gp+0x38e0 = 1`, also when the file is missing or too small | `2x S22` (the reviewer's run and S22) | yes |
-| Gates inside the handler: any scope `gp+0x38dc`; all games `gp+0x343c`, `gp+0x344c`, `gp+0x3430`; game `gp+0x3878`, `gp+0x344c`, `gp+0x3460`. A game BIOS is not blocked by an all-games OSD, and loads over an all-games BIOS | `2x` | yes |
+| Game scope only, before the file is opened: the handler reads the once-flag `gp+0x38e0` (`0x8804ec`). If it is not 1 it sets it to 1 and checks that the game folder exists (`FUN_008d7e78` on `pfs1:`, the stat call `0x91bf80` on `mass:`). A missing folder sets `gp+0x3460 = 1` and returns -666 with nothing opened (`pfs1:` call at `0x880538`, store at `0x880554`, `-666` at `0x880558`; `mass:` call at `0x880570`, store at `0x8805a0`, `-666` at `0x8805a4`). If the flag is already 1 the folder is not checked. So a game-scope call that gets past the gates of the next row always leaves `gp+0x38e0 = 1`, also when the file is missing or too small. A call those gates stop returns 0 before the once-flag is read (the gates are `0x8801b4..0x880334`, the read is `0x8804ec`); the first version of this row said "always" without that condition | `2x S22` (the reviewer's run and S22, both without a gate set); the gate order `read` by the second correction pass and checked by the test | yes |
+| Gates inside the handler, in this order, each returning 0 (`0x8801b4..0x880334`, before both exits): any scope `gp+0x38dc`; all games `gp+0x343c`, `gp+0x344c`; game `gp+0x3878`; all games `gp+0x3430`; game `gp+0x344c`, `gp+0x3460`. A game BIOS is not blocked by an all-games OSD, and loads over an all-games BIOS | `2x` | yes |
 | Extra gate in `main` (`0x876bb4..0x876cd8`, `0x876ea8..0x876fd8`): skipped when any of the eight preset compat slots (`0x100018..0x10001f`) equals 6. They are all 0 in the four profiles, so this never fires there | `1x`; preset values `2x S2` | yes |
 | Readers of the two BIOS flags: the shell edits, the eight region groups, the three `$UNDO_` handlers (`0x8948f0`, `0x894d4c`, `0x895088`), `FUN_008db97c` (`0x8db98c`), mode 6 in `FUN_008dc2c4` (`0x8dc75c..0x8dc83c`). The `$RESET_WARMBOOT` pass reads none, so it scans a user BIOS too | `2x S11` | yes |
 | With a BIOS flag set, the three `$UNDO_` commands skip their `0x2525b0 = 0x1bfc` write, and mode 6 writes nothing and prints "please delete BIOS.BIN ..." (only on non-quiet profiles) | `1x` (reader sites `2x S11`) | yes |
