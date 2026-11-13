@@ -457,6 +457,8 @@ static int pops_stage_fix_files(void *stagedCore, size_t coreSize,
                                  uint32_t originalTokens,
                                  const int *osdResults, const PopsOsdPlan *osdPlans,
                                  const PopsUserRomState *osdAfter,
+                                 const PopsUserRomState *commandState,
+                                 PopsUserRomState *osdState,
                                  PopsUserRomState *rom, PopsFixContext *finalContext,
                                  PopsTrojanSet *trojanSet) {
   PopsFixContext context;
@@ -466,6 +468,10 @@ static int pops_stage_fix_files(void *stagedCore, size_t coreSize,
     noState.integrity = 1;
     rom = &noState;
   }
+  if (!commandState)
+    commandState = rom;
+  if (!osdState)
+    osdState = rom;
   int result = pops_fix_context_init_builtin_rom(&context, stagedCore, coreSize, builtinId,
                                                   initialModes, initialVideo, originalTokens, rom);
   if (result)
@@ -477,27 +483,37 @@ static int pops_stage_fix_files(void *stagedCore, size_t coreSize,
       return result;
   }
   const char *dirs[] = {vcdDir, titleDir};
+  rom->osd_off = commandState->osd_off;
   for (unsigned scope = 0; scope < 2; ++scope) {
     PopsOsdPlan actualPlan;
-    result = pops_user_osd_load(stagedCore, coreSize, dirs[scope], scope, rom, &actualPlan);
+    PopsUserRomState before = *osdState;
+    result = pops_user_osd_load(stagedCore, coreSize, dirs[scope], scope, osdState, &actualPlan);
     if (osdResults && result != osdResults[scope])
       result = -EIO;
     if (result == 1 && osdPlans && memcmp(&actualPlan, &osdPlans[scope], sizeof(actualPlan)))
       result = -EIO;
-    if (result == 1 && osdAfter && memcmp(rom, &osdAfter[scope], sizeof(*rom)))
+    if (result == 1 && osdAfter && memcmp(osdState, &osdAfter[scope], sizeof(*osdState)))
       result = -EIO;
     if (result == 1)
-      result = pops_fix_context_osd_loaded(&context, stagedCore, coreSize);
+      result = pops_fix_context_osd_loaded(&context, stagedCore, coreSize, &actualPlan, &before);
     if (result < 0) {
       msg("POPS: User OSD.BIN in %s failed (%d)\n", dirs[scope], result);
       return result;
     }
+    rom->osd_all_a = osdState->osd_all_a;
+    rom->osd_all_b = osdState->osd_all_b;
+    rom->osd_game_a = osdState->osd_game_a;
+    rom->osd_game_b = osdState->osd_game_b;
     /* The folder's BIOS.BIN replaces POPS's PS1 ROM before the folder's
      * TROJAN and PATCH files, so the game's BIOS.BIN also replaces what the
      * all-games files wrote into that range. */
-    result = pops_user_bios_load(stagedCore, coreSize, dirs[scope], scope, rom);
+    result = pops_user_bios_load(stagedCore, coreSize, dirs[scope], scope, osdState);
     if (result > 0)
       result = pops_fix_context_rom_loaded(&context, stagedCore, coreSize);
+    if (result >= 0) {
+      rom->bios_all = osdState->bios_all;
+      rom->bios_game = osdState->bios_game;
+    }
     if (result < 0) {
       msg("POPS: User BIOS.BIN in %s failed (%d)\n", dirs[scope], result);
       return result;
@@ -1068,9 +1084,11 @@ static int pops_probe_live_storage(int virtualPfs, uint32_t pvdSampleOffset) {
  *  3. The user's commands (pops_apply_all_config_patches_rom), then the
  *     $RECOMPILER_ADDON_3/4 jumps: the original's handlers write those into
  *     POPS's two emit points while the user's files are read.
- *  4. Each folder's OSD.BIN, BIOS.BIN and fix files (pops_stage_fix_files),
- *     with the osd_off the commands left. TROJAN files go into *trojanSet (made by
- *     the caller; NULL hosts none), whose slots are offered first.
+ *  4. Each folder's OSD.BIN, BIOS.BIN and fix files (pops_stage_fix_files).
+ *     A separate sequential state supplies the original built-in/root/game
+ *     gates; the command state's osd_off remains in *rom for later patches.
+ *     TROJAN files go into *trojanSet (made by the caller; NULL hosts none),
+ *     whose slots are offered first.
  *  5. If a load in 4 did not do what 2 said, the commands ran with the wrong
  *     flags: -EIO, and the caller discards the staged core.
  * Returns 0 or a negative error. */
@@ -1081,7 +1099,7 @@ static int pops_stage_user_files(void *stagedCore, size_t coreSize,
                                  const PopsResidentHeader *residentHdr,
                                  PopsUserRomState *rom, PopsFixContext *finalContext,
                                  PopsTrojanSet *trojanSet) {
-  PopsUserRomState atCommands;
+  PopsUserRomState atCommands, sequential;
   int osdResults[2];
   PopsOsdPlan osdPlans[2];
   PopsUserRomState osdAfter[2];
@@ -1091,7 +1109,8 @@ static int pops_stage_user_files(void *stagedCore, size_t coreSize,
   rom->no_fix = (builtinModes & 0x80) != 0;
   rom->osd_off = (builtinModes & (1 << 5)) != 0;
 
-  atCommands = *rom;
+  sequential = *rom;
+  atCommands = sequential;
   osdResults[0] = pops_user_osd_load(NULL, 0, vcdDir, 0, &atCommands, &osdPlans[0]);
   if (osdResults[0] < 0)
     return osdResults[0];
@@ -1117,7 +1136,6 @@ static int pops_stage_user_files(void *stagedCore, size_t coreSize,
     msg("POPS: Applying config patches failed: %d\n", res);
     return res;
   }
-  rom->osd_off = atCommands.osd_off;
   if (res == POPS_MODE6_SKIPPED) {
     DPRINTF("POPS: Compatibility mode 6 is not applied over a user BIOS.BIN\n");
   }
@@ -1143,7 +1161,7 @@ static int pops_stage_user_files(void *stagedCore, size_t coreSize,
                              residentHdr->progressive_entry,
                              cfg->hdtv_fix ? 0x24040001 : 0x32240001,
                              cfg->original_tokens, osdResults, osdPlans, osdAfter,
-                             rom, finalContext, trojanSet);
+                             &atCommands, &sequential, rom, finalContext, trojanSet);
   if (res)
     return res;
   if (rom->bios_all != atCommands.bios_all ||

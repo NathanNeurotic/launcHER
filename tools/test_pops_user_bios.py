@@ -332,8 +332,8 @@ int test_stage(void *core, size_t size, const char *root, const char *title,
   PopsFixContext state;
   PopsTrojanSet set;
   host_set(&set);
-  return pops_stage_fix_files(core, size, root, title, 0, 0, 0, 0, 0, 0, NULL, NULL, NULL,
-                              rom, &state, &set);
+  return pops_stage_fix_files(core, size, root, title, 0, 0, 0, 0, 0, 0,
+                              NULL, NULL, NULL, NULL, NULL, rom, &state, &set);
 }
 int test_load(void *core, size_t size, const char *dir, int per_game, PopsUserRomState *rom) {
   return pops_user_bios_load(core, size, dir, per_game, rom);
@@ -2039,8 +2039,8 @@ class Source(unittest.TestCase):
         order = ["pops_fix_context_init_builtin_rom(&context, stagedCore, coreSize, builtinId,",
                  "const char *dirs[] = {vcdDir, titleDir};",
                  "for (unsigned scope = 0; scope < 2; ++scope) {",
-                 "result = pops_user_osd_load(stagedCore, coreSize, dirs[scope], scope, rom, &actualPlan);",
-                 "result = pops_user_bios_load(stagedCore, coreSize, dirs[scope], scope, rom);",
+                 "result = pops_user_osd_load(stagedCore, coreSize, dirs[scope], scope, osdState, &actualPlan);",
+                 "result = pops_user_bios_load(stagedCore, coreSize, dirs[scope], scope, osdState);",
                  "result = pops_fix_context_rom_loaded(&context, stagedCore, coreSize);",
                  "for (unsigned kind = 0; kind < 2; ++kind) {",
                  'kind ? "PATCH" : "TROJAN", slot);',
@@ -2059,13 +2059,13 @@ class Source(unittest.TestCase):
         helper = self.helper()
         order = ["memset(rom, 0, sizeof(*rom));",
                  "rom->osd_off = (builtinModes & (1 << 5)) != 0;",
-                 "atCommands = *rom;",
+                 "sequential = *rom;",
+                 "atCommands = sequential;",
                  "res = pops_user_bios_load(NULL, 0, vcdDir, 0, &atCommands);",
                  "atCommands.bios_all = res > 0;",
                  "res = pops_user_bios_load(NULL, 0, titleDir, 1, &atCommands);",
                  "atCommands.bios_game = res > 0;",
                  "res = pops_apply_all_config_patches_rom(stagedCore, coreSize, cfg, &atCommands);",
-                 "rom->osd_off = atCommands.osd_off;",
                  "res = pops_resident_hook_recompiler_emit(stagedCore, coreSize, cfg->recompiler_addons,",
                  "res = pops_stage_fix_files(stagedCore, coreSize, vcdDir, titleDir, builtinId,",
                  "if (rom->bios_all != atCommands.bios_all ||\n"

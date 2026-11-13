@@ -6,9 +6,11 @@ modelled services; nothing here is a console run or emits reference bytes.
 """
 import ctypes as c
 import errno
+import mmap
 import os
 import random
 import struct
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -63,7 +65,8 @@ def library():
         _LIB.pops_osd_stage.restype = c.c_int
         _LIB.pops_user_osd_skipped.argtypes = [c.c_int, c.POINTER(Rom)]
         _LIB.pops_user_osd_skipped.restype = c.c_int
-        _LIB.pops_fix_context_osd_loaded.argtypes = [c.POINTER(B.Context), c.c_void_p, c.c_size_t]
+        _LIB.pops_fix_context_osd_loaded.argtypes = [c.POINTER(B.Context), c.c_void_p, c.c_size_t,
+                                                     c.POINTER(Plan), c.POINTER(Rom)]
         _LIB.pops_fix_context_osd_loaded.restype = c.c_int
     return _LIB
 
@@ -345,6 +348,17 @@ class OriginalProbe(OsdTest):
         self.assertEqual(result["ret"], 1)
         self.assertEqual((T.get(result["core"], 0x2525B0, 2), result["flags"]["osd_off"]), (0x1BFC, 0))
 
+    def test_bios_state_precedes_header_mode6(self):
+        core = bytearray(self.core)
+        B.put(core, 0x2525B0, 0x8956, 2)
+        for off, expected in ((0, 0x8956), (1, 0x1BFC)):
+            with self.subTest(off=off):
+                result = T.run_osd(core, scope=1, data=T.make_osd(modes=(6,)),
+                                   flags={"bios_all": 1, "osd_off": off})
+                self.assertEqual(result["ret"], 1)
+                self.assertEqual(T.get(result["core"], 0x2525B0, 2), expected)
+                self.assertEqual(result["flags"]["osd_off"], 0)
+
     def test_mixed_v2_then_v1_scopes(self):
         root = self.probe(T.make_osd(version=2, body_size=64, seed=1), scope=0)
         self.assertEqual(root["ret"], 1)
@@ -377,6 +391,11 @@ class OriginalProbe(OsdTest):
 
 
 class Guard(unittest.TestCase):
+    def refresh(self, context, core, plan, state=None):
+        state = Rom(integrity=1) if state is None else state
+        return library().pops_fix_context_osd_loaded(c.byref(context), B.buf(core), len(core),
+                                                     c.byref(plan), c.byref(state))
+
     def test_refresh_accepts_only_the_validated_osd_writes(self):
         lib = library()
         core = B.pristine_sites()
@@ -391,23 +410,71 @@ class Guard(unittest.TestCase):
         blob = B.patch((1,))
         self.assertEqual(lib.pops_fix_stage(c.byref(context), B.buf(core), B.SIZE,
                                             blob, len(blob), 1, 0), -errno.EINVAL)
-        self.assertEqual(lib.pops_fix_context_osd_loaded(c.byref(context), B.buf(core), B.SIZE), 0)
+        self.assertEqual(self.refresh(context, core, staged["plan"]), 0)
         self.assertEqual(list(context.video_expected), pal)
         self.assertEqual((context.resident_entry, list(context.resident_expected), context.progressive_set), resident)
         self.assertEqual(lib.pops_fix_stage(c.byref(context), B.buf(core), B.SIZE,
                                             blob, len(blob), 1, 0), 0)
+        other = B.patch((2,), slot=2)
+        self.assertEqual(lib.pops_fix_stage(c.byref(context), B.buf(core), B.SIZE,
+                                            other, len(other), 2, 0), 0)
         core[0x210318 - U.CORE_BASE] ^= 1
-        self.assertEqual(lib.pops_fix_context_osd_loaded(c.byref(context), B.buf(core), B.SIZE), 0)
         before = bytes(context)
-        other = B.patch((2,))
+        self.assertEqual(self.refresh(context, core, staged["plan"]), -errno.EINVAL)
+        self.assertEqual(bytes(context), before)
         self.assertEqual(lib.pops_fix_stage(c.byref(context), B.buf(core), B.SIZE,
                                             other, len(other), 2, 0), -errno.EINVAL)
         core[0x21AF94 - U.CORE_BASE] ^= 1
-        self.assertEqual(lib.pops_fix_context_osd_loaded(c.byref(context), B.buf(core), B.SIZE), -errno.EINVAL)
+        self.assertEqual(self.refresh(context, core, staged["plan"]), -errno.EINVAL)
         self.assertEqual(bytes(context), before)
-        other = B.patch((2,))
-        self.assertEqual(lib.pops_fix_stage(c.byref(context), B.buf(core), B.SIZE,
-                                            other, len(other), 2, 0), -errno.EINVAL)
+
+
+class GuardShortCore(unittest.TestCase):
+    def test_preflight_happens_before_any_compatibility_read(self):
+        if os.environ.get("POPS_OSD_SHORT_CORE_CHILD") != "1":
+            env = os.environ.copy()
+            env["POPS_OSD_SHORT_CORE_CHILD"] = "1"
+            isolated = Path(tempfile.gettempdir()) / ("pops_osd_short_core_%d" % os.getpid())
+            isolated = isolated.with_suffix(".dll" if os.name == "nt" else ".so")
+            env["POPS_TEST_HOST_LIBRARY"] = str(isolated)
+            try:
+                result = subprocess.run([sys.executable, str(Path(__file__)), "GuardShortCore"],
+                                        cwd=ROOT, env=env, capture_output=True, text=True)
+            finally:
+                isolated.unlink(missing_ok=True)
+            self.assertEqual(result.returncode, 0,
+                             "short-core child failed (the old code reads into the guard page):\n" +
+                             result.stdout[-2000:] + result.stderr[-2000:])
+            return
+        lib = library()
+        full = B.pristine_sites()
+        context = B.Context()
+        self.assertEqual(lib.pops_fix_context_init_builtin(c.byref(context), B.buf(full), B.SIZE,
+                                                          0, 0, 0), 0)
+        before = bytes(context)
+        header = bytearray(80)
+        header[:80] = T.make_osd()[:80]
+        plan = Plan()
+        self.assertEqual(lib.pops_osd_plan(buf(header), len(header), 80, c.byref(plan)), 0)
+        page = mmap.PAGESIZE
+        memory = mmap.mmap(-1, page + 0x52600)
+        self.addCleanup(memory.close)
+        memory[page - 32:page] = b"\xA5" * 32
+        address = c.addressof(c.c_char.from_buffer(memory))
+        core = address + page - 32
+        if os.name == "nt":
+            old = c.c_uint32()
+            protect = c.windll.kernel32.VirtualProtect
+            protect.argtypes = [c.c_void_p, c.c_size_t, c.c_uint32, c.POINTER(c.c_uint32)]
+            protect.restype = c.c_int
+            self.assertNotEqual(protect(address + page, len(memory) - page, 1, c.byref(old)), 0)
+        else:
+            self.assertEqual(c.CDLL(None).mprotect(c.c_void_p(address + page), len(memory) - page, 0), 0)
+        state = Rom(integrity=1)
+        self.assertEqual(lib.pops_fix_context_osd_loaded(c.byref(context), core, 32,
+                                                         c.byref(plan), c.byref(state)), -errno.ERANGE)
+        self.assertEqual(bytes(context), before)
+        self.assertEqual(c.string_at(core, 32), b"\xA5" * 32)
 
 
 class Launch(OsdTest):
@@ -440,8 +507,13 @@ class Launch(OsdTest):
             out.append(event)
         return out
 
-    def launch(self, lines=(), builtin=0, modes=0, state=None, context=None):
+    def launch(self, lines=(), builtin=0, modes=0, state=None, context=None, builtin6=False):
         self.core = U.core_image() if HAVE else B.pristine_sites()
+        if builtin6:
+            builtin = B.mode_6_entry()
+            modes = self.lib.test_builtin(builtin, B.buf(self.core), len(self.core))
+            self.assertEqual(modes & 0x20, 0x20)
+            self.assertEqual(T.get(self.core, 0x2525B0, 2), 0x0648)
         self.lib.test_io(0, 0, 0, 0, 0)
         cfg = B.config(*lines)
         if state is None:
@@ -451,6 +523,9 @@ class Launch(OsdTest):
                                   c.byref(cfg), None, 0, c.byref(state),
                                   None if context is None else c.byref(context))
         return rc, state_dict(state)
+
+    def launch_builtin6(self, lines=()):
+        return self.launch(lines=lines, builtin6=True)
 
     def osd_opens(self):
         return [path_key(event.path) for event in self.events()
@@ -487,6 +562,48 @@ class Launch(OsdTest):
         self.assertEqual(T.get(self.core, 0x20083C, 4), T.get(B.pristine_sites(), 0x20083C, 4))
         self.assertEqual(T.get(self.core, 0x21AF70, 1), 0)
         self.assertEqual(T.get(self.core, 0x21E45C, 1), 0x40)
+
+    def test_builtin_mode6_osd_restores_before_each_scope(self):
+        for scope in (0, 1):
+            with self.subTest(scope=scope):
+                self.put(None, scope=0)
+                self.put(None, scope=1)
+                self.put(T.make_osd(), scope=scope)
+                rc, flags = self.launch_builtin6()
+                self.assertEqual(rc, 0)
+                self.assertEqual(T.get(self.core, 0x2525B0, 2), 0x1BFC)
+                self.assertEqual(flags["osd_off"], 0)
+
+    def test_sequential_mode6_and_post_command_state(self):
+        cases = (
+            ((6,), (), (), 0x1BFC, 0),
+            ((), (6,), (), 0x0648, 1),
+            ((6,), (6,), (), 0x0648, 1),
+            ((), None, (B.MODE_6_LINE,), 0x1BFC, 1),
+            ((6,), (), (B.MODE_6_LINE,), 0x1BFC, 1),
+        )
+        for root_modes, game_modes, lines, word, off in cases:
+            with self.subTest(root=root_modes, game=game_modes, lines=lines):
+                self.put(None if root_modes is None else T.make_osd(modes=root_modes), scope=0)
+                self.put(None if game_modes is None else T.make_osd(modes=game_modes), scope=1)
+                rc, flags = self.launch_builtin6(lines)
+                self.assertEqual(rc, 0)
+                self.assertEqual(T.get(self.core, 0x2525B0, 2), word)
+                self.assertEqual(flags["osd_off"], off)
+
+    def test_game_osd_sees_the_root_bios_state(self):
+        bios = B.bios_file(B.ROM_MIN, 2)
+        user_word = T.get(bios, 0x2525B0 - B.ROM + B.BASE, 2)
+        for builtin6, expected, off in ((0, user_word, 0), (1, 0x1BFC, 0)):
+            with self.subTest(builtin6=builtin6):
+                self.put(None, scope=0)
+                self.put(T.make_osd(modes=(6,)), scope=1)
+                (self.root / "BIOS.BIN").write_bytes(bios)
+                rc, flags = self.launch_builtin6() if builtin6 else self.launch()
+                self.assertEqual(rc, 0)
+                self.assertEqual(T.get(self.core, 0x2525B0, 2), expected)
+                self.assertEqual(flags["osd_off"], off)
+                self.assertEqual(flags["bios_all"], 1)
 
     def test_changed_files_between_probe_and_load(self):
         original = T.make_osd(body_size=31, seed=1)

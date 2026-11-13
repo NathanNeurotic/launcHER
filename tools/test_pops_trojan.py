@@ -1601,7 +1601,7 @@ class Source(Built):
         init = source.index('pops_trojan_set_init(&trojanSet, POPS_BUILTIN_ID(fingerprintId),')
         staged = source.index('res = pops_stage_user_files((void *)stagedCore, plan.core_size, '
                               'vcdDir, gameConfigDir,')
-        self.assertIn('&romState, &fixContext, &trojanSet);', source[staged:staged + 300])
+        self.assertIn('&romState, &fixContext, &trojanSet);', source[staged:staged + 500])
         warmboot = source.index('res = pops_apply_reset_warmboot(')
         install = source.index('res = pops_resident_hook_slot_chain((void *)stagedCore, '
                                'plan.core_size, &residentHdr,')

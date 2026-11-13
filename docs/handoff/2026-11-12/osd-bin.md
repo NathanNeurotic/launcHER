@@ -15,7 +15,7 @@ booted and no drop-in-parity claim is made.**
   synthetic cases, registered in CI.
 - `e80fc9e`: pure validation, v1/v2 staging and loader state.
 - `0ed8411`: exact launcher file reader.
-- Task 4: per-scope look-ahead and actual OSD loading before BIOS, built-in
+- `352aae2`: per-scope look-ahead and actual OSD loading before BIOS, built-in
   no-fix propagation, changed-file `-EIO`, and failure-atomic fix-context
   refresh. Independent whole-branch review is pending.
 
@@ -41,7 +41,7 @@ proprietary reference content, real card, save or share was used.
 
 ## Tests run
 
-- `tools/test_pops_osd.py`: **30 tests with references and 30 without (15
+- `tools/test_pops_osd.py`: **35 tests with references and 35 without (16
   optional skips)**. This includes 256 whole-core seeded differentials,
   every rejection, cap boundaries, both backend I/O models, read faults,
   mixed scopes, launch ordering, changed files and guard checks.
@@ -54,7 +54,7 @@ proprietary reference content, real card, save or share was used.
   the separate 16 original-order and 28 current-launcHER ordering differences
   remain unchanged.
 - Release and trace container builds both print `handoff layout: OK` and
-  `version=0ed84119b8f5`:
+  `version=352aae2588d2`:
   - release: 333,556 bytes, SHA-256
     `e347fdd2d5f141db9a6386efaea294bc87629286ed14452fa0b13fb80c864540`;
   - trace: 338,148 bytes, SHA-256
@@ -73,8 +73,9 @@ proprietary reference content, real card, save or share was used.
 - Quirk 84: original POPS-folder inspection, once flags and some
   abort/folder-error paths remain uncopied. `game_dir_missing` is modeled
   where supplied, but its inspection is not performed.
-- Debug logging is not identical to the original's on-screen text.
+- Debug logging is not identical to the original's on-screen text (quirk 81).
 - No PCSX2 or physical-console run was made for this piece. Runtime behavior
   of an actual replacement PS1 BIOS shell is unverified.
 
-Final host sweeps, independent review and the reversible merge are pending.
+The final no-reference sweep passes **37 of 37 files**. The reference-backed
+sweep, independent review and the reversible merge are pending.

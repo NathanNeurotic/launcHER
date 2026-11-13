@@ -660,15 +660,62 @@ int pops_fix_context_rom_loaded(PopsFixContext *context, const void *staged_core
   return 0;
 }
 
-int pops_fix_context_osd_loaded(PopsFixContext *context, void *staged_core,
-                                size_t core_size) {
+int pops_fix_context_osd_loaded(PopsFixContext *context, const void *staged_core,
+                                size_t core_size, const PopsOsdPlan *plan,
+                                const PopsUserRomState *before) {
   PopsFixContext candidate;
-  if (!context || !staged_core ||
-      fix_alias(context, sizeof(*context), staged_core, core_size))
+  PopsOsdPlan valid;
+  PopsUserRomState sequential;
+  int checked;
+  if (!context || !staged_core || !plan || !before ||
+      fix_alias(context, sizeof(*context), staged_core, core_size) ||
+      fix_alias(plan, sizeof(*plan), staged_core, core_size) ||
+      fix_alias(before, sizeof(*before), staged_core, core_size))
     return -EINVAL;
+  checked = pops_osd_plan(plan->header, POPS_OSD_HEADER_READ, plan->file_size, &valid);
+  if (checked)
+    return checked < 0 ? checked : -EINVAL;
+  if (plan->file_size != valid.file_size || plan->body_size != valid.body_size ||
+      plan->body_request != valid.body_request || plan->body_address != valid.body_address ||
+      plan->body_capacity != valid.body_capacity ||
+      memcmp(plan->header, valid.header, POPS_OSD_HEADER_SIZE))
+    return -EINVAL;
+  for (unsigned i = 0; i < POPS_COMPAT_SITE_COUNT; ++i) {
+    size_t offset = compat_patches[i].address - POPS_CORE_BASE_ADDR;
+    if (offset > core_size || compat_patches[i].width > core_size - offset)
+      return -ERANGE;
+  }
   candidate = *context;
-  for (unsigned i = 0; i < POPS_COMPAT_SITE_COUNT; ++i)
-    candidate.expected[i] = compat_read(staged_core, &compat_patches[i]);
+  sequential = *before;
+  if (sequential.osd_off == 1) {
+    for (unsigned j = 0; j < POPS_COMPAT_SITE_COUNT; ++j)
+      if (compat_patches[j].address == 0x002525b0)
+        candidate.expected[j] = 0x1bfc;
+    sequential.osd_off = 0;
+  }
+  for (unsigned mode = 0; mode < 4; ++mode) {
+    uint8_t number = plan->header[0x38 + mode];
+    if (!number || number > 7 || (sequential.no_fix && (number == 1 || number == 2 ||
+                                                        number == 3 || number == 5)))
+      continue;
+    if (number == 6) {
+      if (mode6_gate(&sequential) == 0) {
+        for (unsigned j = 0; j < POPS_COMPAT_SITE_COUNT; ++j)
+          if (compat_patches[j].address == 0x002525b0)
+            candidate.expected[j] = 0x0648;
+        sequential.osd_off = 1;
+      }
+      continue;
+    }
+    for (unsigned i = 0; i < POPS_COMPAT_SITE_COUNT; ++i) {
+      const CompatPatch *patch = &compat_patches[i];
+      if (patch->mode != number)
+        continue;
+      for (unsigned j = 0; j < POPS_COMPAT_SITE_COUNT; ++j)
+        if (compat_patches[j].address == patch->address)
+          candidate.expected[j] = patch->replacement;
+    }
+  }
   int result = compat_context_check(&candidate, staged_core, core_size);
   if (result)
     return result;

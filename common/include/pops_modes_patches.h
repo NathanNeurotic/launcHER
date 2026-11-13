@@ -196,10 +196,12 @@ int pops_fix_stage(PopsFixContext *context, void *staged_core, size_t core_size,
  * must still match; on a mismatch nothing changes. */
 int pops_fix_context_rom_loaded(PopsFixContext *context, const void *staged_core,
                                 size_t core_size);
-/* After a validated OSD.BIN stage, adopt only its intentional compatibility
- * writes. PAL/resident expectations are unchanged. Failure is atomic. */
-int pops_fix_context_osd_loaded(PopsFixContext *context, void *staged_core,
-                                size_t core_size);
+/* After a validated OSD.BIN stage, replay only the compatibility writes its
+ * header selects from the sequential pre-load state. Other live bytes must
+ * still match. PAL/resident expectations are unchanged. Failure is atomic. */
+int pops_fix_context_osd_loaded(PopsFixContext *context, const void *staged_core,
+                                size_t core_size, const PopsOsdPlan *plan,
+                                const PopsUserRomState *before);
 int pops_fix_stage_rom(PopsFixContext *context, void *staged_core, size_t core_size,
                         const void *file, size_t file_size, unsigned slot,
                         int expected_trojan, PopsUserRomState *rom);
