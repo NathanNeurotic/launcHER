@@ -337,6 +337,56 @@ static int pops_read_trojan(int fd, void *memory, size_t capacity, unsigned slot
  * Before each folder's TROJAN files it calls its BIOS.BIN loader for that
  * folder (0x876cd8/0x876fd8); pops_user_bios_load is that loader. */
 
+/* FUN_0087eb24 for one folder (docs/POPSTARTER_OSD.md): open
+ * <dir>OSD.BIN, read its zero-filled 80-byte header, validate before any
+ * core write, then issue one unchecked body read of the planned size.
+ * A NULL core is the state-only look-ahead and does not read the body. */
+static int pops_user_osd_load(void *stagedCore, size_t coreSize, const char *dir,
+                              int perGame, PopsUserRomState *rom, PopsOsdPlan *plan) {
+  PopsOsdPlan local;
+  uint8_t header[POPS_OSD_HEADER_READ] = {0};
+  void *buffer = (void *)0x01f00000;
+  char path[PATH_MAX];
+  size_t bodyRead = 0;
+  if (!dir || !rom)
+    return -EINVAL;
+  if (!plan)
+    plan = &local;
+  if (perGame == 1 && rom->game_dir_missing == 1)
+    return -666;
+  if (pops_user_osd_skipped(perGame, rom))
+    return 0;
+  int length = snprintf(path, sizeof(path), "%sOSD.BIN", dir);
+  if (length < 0 || (size_t)length >= sizeof(path))
+    return -ENAMETOOLONG;
+  int fd = open(path, O_RDONLY);
+  if (fd < 0) {
+    DPRINTF("POPS: %s NOT FOUND\n", path);
+    return 0;
+  }
+  off_t size = lseek(fd, 0, SEEK_END);
+  lseek(fd, 0, SEEK_SET);
+  ssize_t ignored = read(fd, header, sizeof(header));
+  (void)ignored;
+  lseek(fd, POPS_OSD_HEADER_SIZE, SEEK_SET);
+  int result = pops_osd_plan(header, sizeof(header), size, plan);
+  if (result) {
+    close(fd);
+    DPRINTF("POPS: %s rejected (%d)\n", path, result);
+    return result;
+  }
+  if (stagedCore) {
+    ignored = read(fd, buffer, plan->body_request);
+    if (ignored > 0)
+      bodyRead = (size_t)ignored;
+  }
+  result = pops_osd_stage(stagedCore, coreSize, plan, buffer, bodyRead, perGame, rom);
+  close(fd);
+  if (result == 1)
+    DPRINTF("POPS: User OSD == %s\n", path);
+  return result;
+}
+
 /* FUN_0088019c for one folder (docs/POPSTARTER_USER_BIOS.md): open
  * <dir>BIOS.BIN, take its size with lseek, apply the size test, read the
  * first POPS_USER_BIOS_READ bytes and stage them. As there, a file that is

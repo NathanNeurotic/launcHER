@@ -10,6 +10,7 @@ import os
 import random
 import struct
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -90,6 +91,104 @@ def stage_file(core, data, scope=0, flags=None, body_read=None):
     rc = lib.pops_osd_stage(buf(after), len(after), c.byref(plan), buf(body), body_read,
                             scope, c.byref(state))
     return {"ret": rc, "reason": None, "core": after, "flags": state_dict(state), "plan": plan, "rc": 0}
+
+
+class Event(c.Structure):
+    _fields_ = [("kind", c.c_int), ("fd", c.c_int), ("a", c.c_longlong),
+                ("b", c.c_longlong), ("result", c.c_longlong), ("path", c.c_char * 1024)]
+
+
+_READER = {}
+OSD_IO_C = r'''
+typedef struct {
+  int kind, fd;
+  long long a, b, result;
+  char path[1024];
+} OsdEvent;
+static OsdEvent osd_events[64];
+static unsigned osd_event_count, osd_limit_read, osd_limit;
+static int osd_fail_read;
+static void osd_event(int kind, int fd, long long a, long long b, long long result,
+                      const char *path) {
+  OsdEvent *event;
+  if (osd_event_count >= 64) return;
+  event = &osd_events[osd_event_count++];
+  memset(event, 0, sizeof(*event));
+  event->kind = kind; event->fd = fd; event->a = a; event->b = b; event->result = result;
+  if (path) snprintf(event->path, sizeof(event->path), "%%s", path);
+}
+static int test_open(const char *path, int flags) {
+  int fd = test_open_original(path, flags);
+  osd_event(1, fd, flags, 0, fd, path);
+  return fd;
+}
+static off_t test_lseek(int fd, off_t offset, int whence) {
+  off_t result = test_lseek_original(fd, offset, whence);
+  osd_event(2, fd, offset, whence, result, NULL);
+  return result;
+}
+static ssize_t test_read(int fd, void *buffer, size_t size) {
+  unsigned previous_limit = read_limit;
+  int previous_fails = read_fails;
+  ssize_t result;
+  if (osd_fail_read && osd_fail_read == reads + 1) read_fails = 1;
+  if (osd_limit_read == (unsigned)(reads + 1)) read_limit = osd_limit;
+  if (osd_limit_read == (unsigned)(reads + 1) && !osd_limit && !read_fails) {
+    ++reads;
+    osd_event(3, fd, size, 0, 0, NULL);
+    read_fails = previous_fails;
+    read_limit = previous_limit;
+    return 0;
+  }
+  result = test_read_original(fd, buffer, size);
+  read_fails = previous_fails;
+  read_limit = previous_limit;
+  osd_event(3, fd, size, 0, result, NULL);
+  return result;
+}
+static int test_close(int fd) {
+  int result = test_close_original(fd);
+  osd_event(4, fd, 0, 0, result, NULL);
+  return result;
+}
+void test_osd_read_rule(int fail, unsigned which, unsigned limit) {
+  osd_fail_read = fail < 0 ? (int)which : fail;
+  osd_limit_read = which; osd_limit = limit;
+}
+int test_osd_event(unsigned index, OsdEvent *out) {
+  if (!out) return -1;
+  if (index >= osd_event_count) return 0;
+  *out = osd_events[index];
+  return 1;
+}
+'''
+
+
+def reader_library():
+    if "lib" not in _READER:
+        wrapper = B.READER_WRAPPER
+        for name in ("open", "lseek", "read", "close"):
+            wrapper = wrapper.replace("static int test_%s(" % name if name in ("open", "close") else
+                                      "static off_t test_lseek(" if name == "lseek" else
+                                      "static ssize_t test_read(",
+                                      ("static int test_%s_original(" % name) if name in ("open", "close") else
+                                      "static off_t test_lseek_original(" if name == "lseek" else
+                                      "static ssize_t test_read_original(")
+        wrapper = wrapper.replace("#define open test_open", OSD_IO_C + "\n#define open test_open")
+        wrapper = wrapper.replace("opens = reads = closes = bios_opens = 0; bytes_read = 0;",
+                                  "opens = reads = closes = bios_opens = 0; bytes_read = 0;\n"
+                                  "  osd_event_count = osd_fail_read = osd_limit_read = 0; osd_limit = 0;")
+        B.READER_WRAPPER = wrapper
+        _READER["lib"] = B.reader_library()
+        lib = _READER["lib"]
+        lib.test_osd_load.argtypes = [c.c_void_p, c.c_size_t, c.c_char_p, c.c_int,
+                                      c.POINTER(Rom), c.POINTER(Plan)]
+        lib.test_osd_load.restype = c.c_int
+        lib.test_osd_read_rule.argtypes = [c.c_int, c.c_uint, c.c_uint]
+        lib.test_osd_read_rule.restype = None
+        lib.test_osd_event.argtypes = [c.c_uint, c.POINTER(Event)]
+        lib.test_osd_event.restype = c.c_int
+    return _READER["lib"]
 
 
 def rejection_cases():
@@ -264,6 +363,149 @@ class OriginalProbe(OsdTest):
                 self.assertIn(result["ret"], (0, 1))
                 if result["ret"] == 0:
                     self.assertEqual(result["core"], self.core)
+
+
+class Reader(OsdTest):
+    @classmethod
+    def setUpClass(cls):
+        cls.lib = reader_library()
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        (self.root / "GAME").mkdir()
+        self.core = U.core_image() if HAVE else B.pristine_sites()
+
+    def put(self, data, scope=0):
+        folder = self.root / "GAME" if scope else self.root
+        path = folder / "OSD.BIN"
+        if data is None:
+            if path.exists():
+                path.unlink()
+        else:
+            path.write_bytes(data)
+
+    def load(self, data, scope=0, flags=None, probe=False, read_rule=None):
+        self.put(data, scope)
+        self.lib.test_io(0, 0, 0, 0, 0)
+        if read_rule:
+            self.lib.test_osd_read_rule(*read_rule)
+        core = bytearray(self.core)
+        state = Rom(**{name: (flags or {}).get(name, 0) for name in ROM_FIELDS})
+        if not flags or "integrity" not in flags:
+            state.integrity = 1
+        plan = Plan()
+        folder = self.root / "GAME" if scope else self.root
+        rc = self.lib.test_osd_load(None if probe else buf(core), 0 if probe else len(core),
+                                    os.fsencode(str(folder) + "/"), scope, c.byref(state), c.byref(plan))
+        return {"ret": rc, "core": core, "flags": state_dict(state), "plan": plan}
+
+    def events(self):
+        out = []
+        for index in range(64):
+            event = Event()
+            if self.lib.test_osd_event(index, c.byref(event)) != 1:
+                break
+            out.append(event)
+        return out
+
+    def test_valid_read_sequence_and_state_probe(self):
+        for version, address, cap in ((1, T.V1_ADDR, T.V1_CAP), (2, T.V2_ADDR, T.V2_CAP)):
+            for size in (16, 17):
+                with self.subTest(version=version, size=size):
+                    data = T.make_osd(version=version, body_size=size)
+                    result = self.load(data)
+                    self.assertEqual(result["ret"], 1)
+                    self.assertEqual(result["core"][address - U.CORE_BASE:address - U.CORE_BASE + size], data[64:])
+                    self.assertEqual(result["core"][address - U.CORE_BASE + size:address - U.CORE_BASE + cap],
+                                     bytes(cap - size))
+                    self.assertEqual(result["flags"]["osd_all_a"], 1)
+                    self.assertEqual(result["flags"]["osd_all_b"], 1)
+                    events = self.events()
+                    self.assertEqual([event.kind for event in events], [1, 2, 2, 3, 2, 3, 4])
+                    expected = size + 16 if size & 0xF else size
+                    self.assertEqual([event.a for event in events if event.kind == 3], [80, expected])
+                    self.assertEqual([(event.a, event.b) for event in events if event.kind == 2],
+                                     [(0, 2), (0, 0), (64, 0)])
+                    probe = self.load(data, probe=True)
+                    self.assertEqual(probe["ret"], 1)
+                    self.assertEqual(probe["flags"], result["flags"])
+                    self.assertEqual(probe["core"], self.core)
+                    self.assertEqual([event.a for event in self.events() if event.kind == 3], [80])
+
+    def test_missing_gates_and_rejections(self):
+        result = self.load(None)
+        self.assertEqual((result["ret"], result["core"]), (0, self.core))
+        self.assertEqual([event.kind for event in self.events()], [1])
+        for flags, expected in (({"integrity": 0}, 0), ({"abort": 1}, 0),
+                                ({"game_dir_missing": 1}, -666)):
+            result = self.load(T.make_osd(), scope=1, flags=flags)
+            self.assertEqual((result["ret"], result["core"]), (expected, self.core))
+            self.assertEqual(self.events(), [])
+        for name, data, reason in rejection_cases():
+            with self.subTest(name=name):
+                result = self.load(data)
+                self.assertEqual((result["ret"], result["core"]), (REASON_CODES[reason], self.core))
+                events = self.events()
+                self.assertEqual([event.kind for event in events], [1, 2, 2, 3, 2, 4])
+                self.assertEqual(events[-2].a, 64)
+                self.assertEqual(len([event for event in events if event.kind == 3]), 1)
+
+    def test_short_and_failed_reads(self):
+        data = T.make_osd(body_size=31)
+        result = self.load(data, read_rule=(0, 2, 1))
+        self.assertEqual(result["ret"], 1)
+        self.assertEqual(result["core"][T.V1_ADDR - U.CORE_BASE], data[64])
+        self.assertEqual(result["core"][T.V1_ADDR - U.CORE_BASE + 1:T.V1_ADDR - U.CORE_BASE + T.V1_CAP],
+                         bytes(T.V1_CAP - 1))
+        result = self.load(data, read_rule=(-5, 2, 0))
+        self.assertEqual(result["ret"], 1)
+        self.assertEqual(result["core"][T.V1_ADDR - U.CORE_BASE:T.V1_ADDR - U.CORE_BASE + T.V1_CAP],
+                         bytes(T.V1_CAP))
+        result = self.load(data, read_rule=(0, 1, 64))
+        self.assertEqual(result["ret"], 1)
+        result = self.load(data, read_rule=(-5, 1, 0))
+        self.assertEqual((result["ret"], result["core"]), (REASON_CODES["NOT_FILE"], self.core))
+
+    def test_long_path_is_a_safe_known_difference(self):
+        state = Rom(integrity=1)
+        plan = Plan()
+        core = bytearray(self.core)
+        rc = self.lib.test_osd_load(buf(core), len(core), b"x" * 1016 + b"/", 0,
+                                    c.byref(state), c.byref(plan))
+        self.assertEqual(rc, -errno.ENAMETOOLONG)
+        self.assertEqual(core, self.core)
+
+    @unittest.skipUnless(HAVE, "original inputs and unicorn are needed")
+    def test_original_reader_differential(self):
+        for version in (1, 2):
+            for backend in (0, 1):
+                for fault in (None, 1, 0, -5):
+                    with self.subTest(version=version, backend=backend, fault=fault):
+                        data = T.make_osd(version=version, body_size=31)
+                        original = self.probe(data, backend=backend,
+                                              read_faults={} if fault is None else {"body": fault})
+                        rule = None if fault is None else ((-5 if fault < 0 else 0), 2, max(fault, 0))
+                        actual = self.load(data, read_rule=rule)
+                        self.assertEqual(actual["ret"], original["ret"])
+                        self.assertEqual(actual["core"], original["core"])
+                        for name in ROM_FIELDS:
+                            self.assertEqual(actual["flags"][name], original["flags"][name], name)
+                        original_reads = [event for event in original["io"] if event[0] == "read"]
+                        actual_reads = [event for event in self.events() if event.kind == 3]
+                        self.assertEqual(len(actual_reads), len(original_reads))
+                        for expected, actual_event in zip(original_reads, actual_reads):
+                            self.assertEqual(actual_event.a, expected[2])
+                            if expected[3] < 0:
+                                self.assertLess(actual_event.result, 0)
+                            else:
+                                self.assertEqual(actual_event.result, expected[3])
+                        original_seeks = [(event[2], event[3], event[4]) for event in original["io"]
+                                          if event[0] == "lseek"]
+                        actual_seeks = [(event.a, event.b, event.result) for event in self.events()
+                                        if event.kind == 2]
+                        self.assertEqual(actual_seeks, original_seeks)
 
 
 class Native(unittest.TestCase):

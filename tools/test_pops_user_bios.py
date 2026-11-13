@@ -335,6 +335,12 @@ int test_stage(void *core, size_t size, const char *root, const char *title,
 int test_load(void *core, size_t size, const char *dir, int per_game, PopsUserRomState *rom) {
   return pops_user_bios_load(core, size, dir, per_game, rom);
 }
+static int pops_user_osd_load(void *core, size_t size, const char *dir,
+                              int per_game, PopsUserRomState *state, PopsOsdPlan *plan);
+int test_osd_load(void *core, size_t size, const char *dir, int per_game,
+                  PopsUserRomState *state, PopsOsdPlan *plan) {
+  return pops_user_osd_load(core, size, dir, per_game, state, plan);
+}
 int test_dependency(const char *path, void *buffer, size_t size, size_t *read_size) {
   return readPopsDependency(path, buffer, size, read_size);
 }
