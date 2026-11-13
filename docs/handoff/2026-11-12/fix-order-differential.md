@@ -1,8 +1,9 @@
 # Fix files versus commands: differential report
 
-**Evidence level: host code and original blocks under Unicorn with modelled file
-services. NOT TESTED on a console.** No production launch order or `$UNDO_` fix
-is changed by this piece.
+**Historical measurement at `36475d7`; the follow-up is below.** Evidence
+level: host code and original blocks under Unicorn with modelled file
+services. NOT TESTED on a console. That base piece changed no production
+launch order or `$UNDO_` fix.
 
 ## Method
 
@@ -62,9 +63,30 @@ refused only in current order. Accepted entries in both orders have final-core
 hashes matching the original. This is a measurement of the guard and its order,
 not an implementation of either owner-option fix.
 
-## Final verification
+## Follow-up: token-aware expected state
 
-Full reference-backed run: 7 tests pass in 525 seconds. Independent code
+The owner selected option (a). `pops_stage_fix_files` now supplies the
+`$UNDO_` tokens and loader state, and expected compatibility values are
+replayed through the entry's direct writes, the selected undo writes and
+then the text modes, matching the existing grouped command pass. The guard
+otherwise remains in force. The original 294-refusal
+result above is therefore historical, not the current behavior.
+
+The reference-backed census now reports **0 refused / 624 accepted in both
+orders**, including direct-write entries 109, 571 and 572; every accepted
+final-core hash matches the original. The separate 16/28 ordering results
+are unchanged. Combined undo/text ordering and BIOS-skipped mode 6 have
+focused regressions. Token-specific negatives reject incomplete and
+complete restores with missing/wrong tokens and arbitrary non-OSD
+corruption. Evidence: host tests and Unicorn, **NOT TESTED on a console**.
+See `undo-expected-state.md` for the final verification on the delivered
+tree.
+
+## Final verification of the historical `36475d7` measurement
+
+At that base, the full reference-backed run passed 7 tests in 525 seconds.
+The current follow-up's evidence is in `undo-expected-state.md`; it no longer
+has the expected failure described below. Independent code
 review: `merge` on inspection. Full sequential host sweeps: 36 of 36 files
 pass without reference inputs and 36 of 36 with `POPS_TEST_ELF`,
 `POPSTARTER_TEST_ELF` and `POPS_TROJAN_CORPUS`. `test_pops_user_bios.py`

@@ -194,21 +194,25 @@ Differences from the original:
 8. **Width of the state.** The original's words are 32 bits; launcHER
    keeps each as one byte that only ever holds 0 or 1.
 
-Known gap, found while testing the sequence, older than this work and not
-fixed here: a built-in entry followed by `$UNDO_COMPATIBILITY_CODES`. The
-original puts POPS's words back and goes on. launcHER's fix-file session
-(`pops_fix_context_init_builtin`) still expects the entry's words at those
-sites and refuses the launch with `-EINVAL`. On the real core, on the host,
-that is 294 of the 624 built-in entries that apply to it: all 291 entries
-that set compatibility modes (each sets at least one of modes 1 to 5; one
-sets mode 6 as well), and three that set none but write mode 4's byte at
-`0x21af70` directly (entries 109, 571 and 572). The other 330, which set no
-mode and make no such write, are not refused. The same 294 with an
-all-games `BIOS.BIN` loaded, and the count was the same before the
-`BIOS.BIN` work. `$UNDO_GAME_FIXES` and `$UNDO_LIBCRYPT_FIX` are not affected (before
-this work they failed for one entry).
-`Launch.test_undo_compatibility_codes_after_a_built_in_entry` asserts what
-should happen and is marked as an expected failure.
+The former `$UNDO_COMPATIBILITY_CODES` guard failure was fixed on
+2026-11-12 by the owner-selected token-aware expected-state option.
+`pops_stage_fix_files` now passes the parsed `$UNDO_` tokens and the BIOS
+loader state to `pops_fix_context_init_builtin_rom`. That function replays
+the entry's compatibility modes and direct core writes, then the command's
+own writes, then the text modes—the order of the existing grouped command
+pass. The undo OSD write has the same replaced-BIOS gate as the command
+pass; expected mode-6 state is preserved for the command pass's BIOS
+look-ahead, and the existing original-word fallback is preserved. Other
+unexpected words are still rejected. In particular, the direct writes of
+entries 109, 571 and 572 are covered.
+
+Before this fix 294 of 624 applicable entries were refused with `-EINVAL`.
+The reference-backed census now accepts all 624 in either command order and
+every accepted final-core hash matches the original. The older refusal is
+historical evidence in `docs/handoff/2026-11-11/bios-bin-fix-1.md`; it is no
+longer an expected test failure. `$UNDO_GAME_FIXES` and
+`$UNDO_LIBCRYPT_FIX` retain their OSD behavior. The separate command/file
+ordering difference above remains.
 
 ## 5. Evidence
 
@@ -228,6 +232,7 @@ functions on the same core; not console runs):
 | `$COMPATIBILITY_0x06` and the three `$UNDO_` commands through the original's command reader, flags preset | 72 | bytes and `gp+0x3704` equal |
 | Shell slice, region window (4 licences) and `$RESET_WARMBOOT` pass over a core the loader replaced | 1 load | whole core equal |
 | The launch sequence: `pops_stage_user_files` on files against the original's chain (per folder its loader and, for a `PATCH` file's mode byte 6, its mode dispatcher; then its command reader), built-in mode 6 x each folder's `BIOS.BIN` (none, one byte too small, loaded) x `PATCH` mode 6 in neither or one folder x 5 command sets | 270 | 150 with a `BIOS.BIN` loaded: whole core and loader words equal. 92 without: equal. 28 without: `0x2525b0` alone differs (difference 2) |
+| Built-in entry + `$UNDO_COMPATIBILITY_CODES`, through `pops_stage_user_files` and the original parser, in both command orders (`tools/test_pops_fix_order.py`) | 624 applicable entries in each order | 0 refused / 624 accepted in each; accepted final-core hashes match the original |
 | Launch-function tests, loader entry tests, shell slice, mode 6 and region window with a loader word holding 1, 2, `0x80`, `0xff` | 140 | equal |
 
 The 18 region cases are European licence with auto video disabled and
@@ -239,9 +244,9 @@ a file's mode byte 6 is represented by the dispatcher that byte reaches
 (`FUN_008dc2c4`). launcHER's side reads a real `PATCH_n.BIN` file.
 launcHER's own launch writes (taken from a run with no command and no
 file) are set aside; the test checks that they stay outside the loaded
-range and outside everything the original's chain changed. A built-in
-entry followed by `$UNDO_COMPATIBILITY_CODES` is left out of the scenarios
-(the known gap of section 4).
+range and outside everything the original's chain changed. The separate
+all-entry `$UNDO_COMPATIBILITY_CODES` census is no longer excluded or
+expected to fail: its 624 accepted results in each order are listed above.
 
 Without the two inputs the same file checks the functions against the
 tables above on synthetic cores, runs the reader from `handler_pops.c` on

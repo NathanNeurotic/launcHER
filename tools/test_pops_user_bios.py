@@ -73,6 +73,8 @@ for name, args in (
         ("pops_apply_all_config_patches", [P, Z, c.POINTER(F.PopsConfig)]),
         ("pops_apply_all_config_patches_rom", [P, Z, c.POINTER(F.PopsConfig), ROMP]),
         ("pops_fix_context_init_builtin", [CTXP, P, Z, c.c_uint16, c.c_uint8, c.c_uint8]),
+        ("pops_fix_context_init_builtin_rom", [CTXP, P, Z, c.c_uint16, c.c_uint8, c.c_uint8,
+                                               c.c_uint32, ROMP]),
         ("pops_fix_stage", [CTXP, P, Z, c.c_char_p, Z, c.c_uint, c.c_int]),
         ("pops_fix_stage_rom", [CTXP, P, Z, c.c_char_p, Z, c.c_uint, c.c_int, ROMP]),
         ("pops_builtin_apply", [c.c_uint16, P, Z, P, Z, c.c_uint32, P]),
@@ -327,7 +329,7 @@ int test_stage(void *core, size_t size, const char *root, const char *title,
   PopsFixContext state;
   PopsTrojanSet set;
   host_set(&set);
-  return pops_stage_fix_files(core, size, root, title, 0, 0, 0, 0, 0, rom, &state, &set);
+  return pops_stage_fix_files(core, size, root, title, 0, 0, 0, 0, 0, 0, rom, &state, &set);
 }
 int test_load(void *core, size_t size, const char *dir, int per_game, PopsUserRomState *rom) {
   return pops_user_bios_load(core, size, dir, per_game, rom);
@@ -742,6 +744,42 @@ class Native(unittest.TestCase):
             blob = patch((4,))
             self.assertEqual(LIB.pops_fix_stage(c.byref(context), buf(core), SIZE, blob, len(blob), 1, 0),
                              0, tokens)
+
+    def test_undo_expected_state_needs_matching_tokens_and_bytes(self):
+        entry = self.mode_6_entry()
+        plan = (c.c_uint8 * 4096)()
+        core = pristine_sites()
+        self.assertEqual(LIB.pops_builtin_apply(entry, buf(core), SIZE, None, 0, 0, plan), 0)
+        put(core, 0x21AF70, 0x64, 1)
+        sentinel = b"\xA5" * c.sizeof(Context())
+        for tokens in (0, 1 << 13, 1 << 14):
+            context = Context.from_buffer_copy(sentinel)
+            self.assertEqual(LIB.pops_fix_context_init_builtin_rom(
+                c.byref(context), buf(core), SIZE, entry, 0, 0, tokens, None), -errno.EINVAL, tokens)
+            self.assertEqual(bytes(context), sentinel, tokens)
+        # Restoring only the direct-write byte is not enough: this entry has
+        # compatibility writes too. Apply the complete command for the match.
+        self.assertEqual(LIB.pops_apply_undo_tokens(buf(core), SIZE, 1 << 12), 0)
+        for tokens in (0, 1 << 13, 1 << 14):
+            context = Context.from_buffer_copy(sentinel)
+            self.assertEqual(LIB.pops_fix_context_init_builtin_rom(
+                c.byref(context), buf(core), SIZE, entry, 0, 0, tokens, None), -errno.EINVAL, tokens)
+            self.assertEqual(bytes(context), sentinel, tokens)
+        context = Context()
+        self.assertEqual(LIB.pops_fix_context_init_builtin_rom(
+            c.byref(context), buf(core), SIZE, entry, 0, 0, 1 << 12, None), 0)
+        put(core, 0x210318, get(core, 0x210318, 4) ^ 1, 4)
+        context = Context.from_buffer_copy(sentinel)
+        self.assertEqual(LIB.pops_fix_context_init_builtin_rom(
+            c.byref(context), buf(core), SIZE, entry, 0, 0, 1 << 12, None), -errno.EINVAL)
+        self.assertEqual(bytes(context), sentinel)
+
+    def test_bios_skipped_mode_6_expected_state(self):
+        core = pristine_sites()
+        state = rom(bios_all=1)
+        context = Context()
+        self.assertEqual(LIB.pops_fix_context_init_builtin_rom(
+            c.byref(context), buf(core), SIZE, 0, 1 << 5, 0, 0, c.byref(state)), 0)
 
     # -- BIOS.BIN itself -------------------------------------------------------
 
@@ -1209,19 +1247,30 @@ class Launch(Files):
                     count += 1
         self.assertEqual(count, 432)
 
-    @unittest.expectedFailure
     def test_undo_compatibility_codes_after_a_built_in_entry(self):
-        """KNOWN GAP, older than the BIOS.BIN work and not the original's
-        behaviour: the original runs a built-in entry's compatibility modes
-        and lets $UNDO_COMPATIBILITY_CODES put POPS's words back. launcHER's
-        fix-file session (pops_fix_context_init_builtin) still expects the
-        entry's words at those sites and refuses the launch with -EINVAL.
-        This asserts what should happen; take the decorator away with the fix."""
+        """The built-in entry's compatibility writes are replayed, then the
+        undo command's writes restore POPS's values without tripping the
+        fix-file guard. An earlier mode 6 still keeps its OSD state."""
         core, entry, modes = self.start(1)
         self.assertEqual(get(core, 0x21AF70, 1), 0)  # the entry's mode 4
         rc, state = self.launch(core, (UNDO_LINES[0],), entry, modes)
         self.assertEqual((rc, get(core, 0x21AF70, 1), get(core, OSD_SITE, 2), state.osd_off),
                          (0, 0x64, 0x1BFC, 1))
+
+    def test_direct_write_entries_undo_compatibility(self):
+        for entry in (109, 571, 572):
+            with self.subTest(entry=entry):
+                core = pristine_sites()
+                modes = self.lib.test_builtin(entry, buf(core), SIZE)
+                rc, state = self.launch(core, (UNDO_LINES[0],), entry, modes)
+                self.assertEqual((rc, get(core, 0x21AF70, 1), get(core, OSD_SITE, 2)),
+                                 (0, 0x64, 0x1BFC))
+
+    def test_undo_expected_state_precedes_text_modes_in_current_order(self):
+        core = pristine_sites()
+        rc, state = self.launch(core, (UNDO_LINES[0], b"$COMPATIBILITY_0x04"))
+        self.assertEqual((rc, get(core, 0x21AF70, 1), get(core, OSD_SITE, 2)),
+                         (0, 0, 0x1BFC))
 
     def test_what_the_commands_see(self):
         """Literal results. The commands run before the files are loaded, and
@@ -1975,7 +2024,7 @@ class Source(unittest.TestCase):
         sequence is pops_stage_user_files."""
         src, body = self.src, self.body
         stage = src[src.index("static int pops_stage_fix_files("):src.index("/* Driver names within one role")]
-        order = ["pops_fix_context_init_builtin(&context, stagedCore, coreSize, builtinId,",
+        order = ["pops_fix_context_init_builtin_rom(&context, stagedCore, coreSize, builtinId,",
                  "const char *dirs[] = {vcdDir, titleDir};",
                  "for (unsigned scope = 0; scope < 2; ++scope) {",
                  "result = pops_user_bios_load(stagedCore, coreSize, dirs[scope], scope, rom);",

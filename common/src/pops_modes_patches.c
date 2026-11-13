@@ -330,9 +330,13 @@ static int builtin_expected(PopsFixContext *candidate, uint16_t id) {
   return 0;
 }
 
-int pops_fix_context_init_builtin(PopsFixContext *context, const void *staged_core,
-                                  size_t core_size, uint16_t builtin_id,
-                                  uint8_t initial_modes, uint8_t initial_video_mode) {
+static void apply_undo_expected(PopsFixContext *candidate, uint32_t tokens,
+                                const PopsUserRomState *rom);
+
+int pops_fix_context_init_builtin_rom(PopsFixContext *context, const void *staged_core,
+                                      size_t core_size, uint16_t builtin_id,
+                                      uint8_t initial_modes, uint8_t initial_video_mode,
+                                      uint32_t original_tokens, const PopsUserRomState *rom) {
   PopsFixContext candidate;
   if (!context || !staged_core ||
       fix_alias(context, sizeof(*context), staged_core, core_size))
@@ -354,6 +358,9 @@ int pops_fix_context_init_builtin(PopsFixContext *context, const void *staged_co
   candidate.video_auto_disabled = initial_video_mode == POPS_VMODE_480P;
   candidate.video_custom_set = initial_video_mode == POPS_VMODE_NTSC2PAL ||
                                initial_video_mode == POPS_VMODE_480P;
+  /* The grouped command pass applies $UNDO_ after the built-in entry and
+   * before the text compatibility mask. Replay that same order. */
+  apply_undo_expected(&candidate, original_tokens, rom);
   /* The initial text/database mask uses the existing ascending dispatcher.
    * Calculate its result independently; do not bless arbitrary current bytes. */
   for (unsigned i = 0; i < POPS_COMPAT_SITE_COUNT; ++i) {
@@ -389,6 +396,13 @@ int pops_fix_context_init_builtin(PopsFixContext *context, const void *staged_co
     return result;
   *context = candidate;
   return 0;
+}
+
+int pops_fix_context_init_builtin(PopsFixContext *context, const void *staged_core,
+                                  size_t core_size, uint16_t builtin_id,
+                                  uint8_t initial_modes, uint8_t initial_video_mode) {
+  return pops_fix_context_init_builtin_rom(context, staged_core, core_size, builtin_id,
+                                           initial_modes, initial_video_mode, 0, NULL);
 }
 
 int pops_fix_finalize_video(PopsFixContext *context, void *staged_core,
@@ -1421,6 +1435,27 @@ static const TokenWrite undo_writes[] = {
   {POPS_TOK_UNDO_LIBCRYPT, 0x00210d08, 0x00000000, 4},
   {POPS_TOK_UNDO_LIBCRYPT, 0x00210d0c, 0xfa, 1},
 };
+
+static void apply_undo_expected(PopsFixContext *candidate, uint32_t tokens,
+                                const PopsUserRomState *rom) {
+  if (!tokens)
+    return;
+  for (size_t i = 0; i < sizeof(undo_writes) / sizeof(undo_writes[0]); ++i) {
+    if (!(tokens & undo_writes[i].flag))
+      continue;
+    /* The real undo gate tests only BIOS flags. This initializer has the
+     * pre-load state, not the command pass's BIOS look-ahead. Preserve an
+     * expected mode-6 value here: the original-word fallback below covers
+     * an undo that restores POPS's word; otherwise a predicted BIOS can
+     * leave the mode-6 value when both writers skip it. */
+    if (undo_writes[i].address == 0x002525b0 &&
+        (pops_user_rom_replaced(rom) || candidate->expected[POPS_COMPAT_SITE_COUNT - 2] == 0x0648))
+      continue;
+    for (unsigned j = 0; j < POPS_COMPAT_SITE_COUNT; ++j)
+      if (compat_patches[j].address == undo_writes[i].address)
+        candidate->expected[j] = undo_writes[i].value;
+  }
+}
 
 int pops_apply_undo_tokens(void *staged_core, size_t core_size, uint32_t tokens) {
   return pops_apply_undo_tokens_rom(staged_core, core_size, tokens, NULL);

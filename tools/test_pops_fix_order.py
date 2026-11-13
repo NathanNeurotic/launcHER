@@ -58,7 +58,7 @@ static int pops_stage_user_files_alt(void *stagedCore, size_t coreSize,
                              cfg->progressive_requested ? POPS_VMODE_480P : cfg->video_mode,
                              residentHdr->progressive_entry,
                              cfg->hdtv_fix ? 0x24040001 : 0x32240001,
-                             rom, finalContext, trojanSet);
+                             0, rom, finalContext, trojanSet);
   if (res)
     return res;
   {
@@ -442,9 +442,9 @@ class Original(unittest.TestCase):
                         expected = normalized(base, original_base, original_final)
                         self.assertEqual(hashlib.sha256(core).digest(), hashlib.sha256(expected).digest(),
                                          (entry, alternate))
-        self.assertEqual((len(refused[False]), len(accepted[False])), (294, 330))
+        self.assertEqual((len(refused[False]), len(accepted[False])), (0, 624))
         self.assertEqual((len(refused[True]), len(accepted[True])), (0, 624))
-        self.assertTrue({109, 571, 572}.issubset(set(refused[False])))
+        self.assertFalse({109, 571, 572} & set(refused[False]))
         self.assertFalse({109, 571, 572} & set(refused[True]))
         print("Built-in + UNDO_COMPATIBILITY_CODES: current %d refused / %d accepted; "
               "alternate %d refused / %d accepted; accepted final-core hashes match the original" %

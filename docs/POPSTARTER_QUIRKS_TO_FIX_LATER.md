@@ -219,3 +219,9 @@ S30 to S32; host emulation only. Owner decision whether to copy it.
 | # | POPStarter behaviour (copied) | Possible fix later |
 |---|---|---|
 | 79 | `IPCONFIG.DAT`: the argument length is the file size minus the number of space, CR and LF bytes, so the block handed to the network module stops that many bytes before the end of the text, and its last part (normally the gateway) loses its last characters and its NUL. Copied for `SB.` launches; what launcHER's `ps2ip_nm` does with such a block, or with no arguments when the file is missing, is not measured. | Pass the whole text with each separator turned into a NUL, ending in a NUL. |
+
+## Fix-file and command order (launcHER difference)
+
+| # | Difference | Parity work later |
+|---|---|---|
+| 80 | The original loads BIOS/TROJAN/PATCH files before running compatibility and undo commands in text order; launcHER still runs its grouped command pass first. The reference-backed control measures 16 original-order differences and 28 current-launcHER differences at `0x2525b0` across 270 scenarios. The separate built-in-entry guard refusal was fixed on 2026-11-12, without changing this order. Host/Unicorn evidence only; no console run. | Reproduce the original file/command ordering, preserving its OSD gates and regression tests. |
