@@ -111,7 +111,8 @@ class PopsVcdInfo(c.Structure):
 
 def compile_shared_library():
     so_name = "pops_features_test.dll" if os.name == "nt" else "pops_features_test.so"
-    so_path = Path(tempfile.gettempdir()) / so_name
+    isolated = os.environ.get("POPS_TEST_HOST_LIBRARY")
+    so_path = Path(isolated) if isolated else Path(tempfile.gettempdir()) / so_name
     sources = [
         str(ROOT / "common/src/pops_config.c"),
         str(ROOT / "tools/fixtures/pops_config_host_io.c"),
