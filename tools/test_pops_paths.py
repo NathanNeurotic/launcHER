@@ -721,6 +721,14 @@ FORM_TABLE = [
 ]
 
 
+USB_GAME_SEARCH = [
+    "mass:/POPS/GAME.VCD", "mass:/POPS0/GAME.VCD", "mass:/POPS1/GAME.VCD",
+    "mass:/POPS2/GAME.VCD", "mass:/POPS3/GAME.VCD", "mass:/POPS4/GAME.VCD",
+    "mass:/POPS5/GAME.VCD", "mass:/POPS6/GAME.VCD", "mass:/POPS7/GAME.VCD",
+    "mass:/POPS8/GAME.VCD", "mass:/POPS9/GAME.VCD",
+]
+
+
 def original_search(search):
     """The pinned search of a row as the ordered list of locations."""
     if search is None:
@@ -978,12 +986,7 @@ class Native(unittest.TestCase):
         self.assertEqual(found[0], "mass0:/POPS/%s.VCD" % ("T" * 63))
 
     def test_original_search_literal_order(self):
-        self.assertEqual(original_search((USB_SEARCH, "GAME")), [
-            "mass:/POPS/GAME.VCD", "mass:/POPS0/GAME.VCD", "mass:/POPS1/GAME.VCD",
-            "mass:/POPS2/GAME.VCD", "mass:/POPS3/GAME.VCD", "mass:/POPS4/GAME.VCD",
-            "mass:/POPS5/GAME.VCD", "mass:/POPS6/GAME.VCD", "mass:/POPS7/GAME.VCD",
-            "mass:/POPS8/GAME.VCD", "mass:/POPS9/GAME.VCD",
-        ])
+        self.assertEqual(original_search((USB_SEARCH, "GAME")), USB_GAME_SEARCH)
         self.assertEqual(original_search((HDD_SEARCH, "GAME")), [
             "hdd0:__.POPS:pfs:/GAME.VCD", "hdd0:__.POPS0:pfs:/GAME.VCD",
             "hdd0:__.POPS1:pfs:/GAME.VCD", "hdd0:__.POPS2:pfs:/GAME.VCD",
@@ -996,12 +999,12 @@ class Native(unittest.TestCase):
                          ["hdd0:PP.GAME:pfs:/IMAGE0.VCD"])
 
     def test_original_search_rejects_wrong_path(self):
-        expected = original_search((USB_SEARCH, "GAME"))
-        wrong = list(expected)
+        wrong = list(USB_GAME_SEARCH)
         wrong[4] = "mass:/POPS3/WRONG.VCD"
         with self.assertRaises(AssertionError) as mismatch:
-            self.assertEqual(expected, wrong)
+            self.assertEqual(original_search((USB_SEARCH, "GAME")), wrong)
         self.assertIn("mass:/POPS3/WRONG.VCD", str(mismatch.exception))
+        self.assertEqual(original_search((USB_SEARCH, "GAME")), USB_GAME_SEARCH)
 
 
 @unittest.skipUnless(HAVE_MAIN, "needs POPSTARTER_TEST_ELF and unicorn")
