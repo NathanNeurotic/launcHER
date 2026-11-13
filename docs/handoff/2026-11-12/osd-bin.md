@@ -105,5 +105,9 @@ proprietary reference content, real card, save or share was used.
   of an actual replacement PS1 BIOS shell is unverified.
 
 On `406ddfd`, both full host sweeps passed **37 of 37 files**, without and
-with reference inputs. Independent re-review returned `merge`. The reversible
-merge into the draft PR branch is pending.
+with reference inputs. Independent re-review returned `merge`. The piece
+landed in draft PR #23 as `800d91e398830573335a6c1d43b74af0dc78da2e`,
+whose tree is identical to `ce6332d`. Final release and trace builds on that
+merge print `handoff layout: OK` and `version=800d91e39883`; their artifact
+sizes and hashes are the revised values above. PR #23 remains draft and is
+not merged into EMBER.

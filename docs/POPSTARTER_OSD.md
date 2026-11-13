@@ -2,8 +2,9 @@
 
 Status on 2026-11-13: **implemented and independently reviewed at
 host/Unicorn level; both full host sweeps and release/trace builds pass.**
-Work is on `pr23/osd-bin`, based on merge `308684c`; its draft-PR merge is
-pending. The reference is clean REPOP `bc258e48` plus the original MAIN
+Work landed in draft PR #23 as merge `800d91e`, based on merge `308684c`;
+PR #23 is not merged into EMBER. The reference is clean REPOP `bc258e48`
+plus the original MAIN
 executed under Unicorn, not REPOP's prose alone. Nothing is tested on a
 console.
 
