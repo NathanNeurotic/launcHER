@@ -504,6 +504,8 @@ static int pops_stage_fix_files(void *stagedCore, size_t coreSize,
     rom->osd_all_b = osdState->osd_all_b;
     rom->osd_game_a = osdState->osd_game_a;
     rom->osd_game_b = osdState->osd_game_b;
+    if (commandState->osd_off == osdState->osd_off)
+      rom->osd_off = osdState->osd_off;
     /* The folder's BIOS.BIN replaces POPS's PS1 ROM before the folder's
      * TROJAN and PATCH files, so the game's BIOS.BIN also replaces what the
      * all-games files wrote into that range. */
@@ -523,6 +525,7 @@ static int pops_stage_fix_files(void *stagedCore, size_t coreSize,
         char path[PATH_MAX];
         size_t size = 0;
         void *buffer = (void *)0x01f00000;
+        int osdOffBefore = rom->osd_off;
         int length = snprintf(path, sizeof(path), "%s%s_%u.BIN", dirs[scope],
                                 kind ? "PATCH" : "TROJAN", slot);
         if (length < 0 || (size_t)length >= sizeof(path))
@@ -545,6 +548,8 @@ static int pops_stage_fix_files(void *stagedCore, size_t coreSize,
                                              slot, 0, rom)
                         : pops_fix_stage_trojan(&context, trojanSet, stagedCore, coreSize,
                                                 buffer, size, slot);
+        if (kind && result >= 0 && rom->osd_off != osdOffBefore)
+          osdState->osd_off = rom->osd_off;
         /* POPS_MODE6_SKIPPED has the value of POPS_FIX_SKIP_INVALID: the
          * three skip results are TROJAN results only. */
         if (!kind && result == POPS_FIX_SKIP_INVALID) {

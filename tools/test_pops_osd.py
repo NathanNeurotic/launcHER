@@ -348,6 +348,13 @@ class OriginalProbe(OsdTest):
         self.assertEqual(result["ret"], 1)
         self.assertEqual((T.get(result["core"], 0x2525B0, 2), result["flags"]["osd_off"]), (0x1BFC, 0))
 
+    def test_root_patch_mode6_before_game_osd(self):
+        core, flags, _ = U.mode(self.core, 6)
+        result = T.run_osd(core, scope=1, data=T.make_osd(), flags=flags)
+        self.assertEqual(result["ret"], 1)
+        self.assertEqual(T.get(result["core"], 0x2525B0, 2), 0x1BFC)
+        self.assertEqual(result["flags"]["osd_off"], 0)
+
     def test_bios_state_precedes_header_mode6(self):
         core = bytearray(self.core)
         B.put(core, 0x2525B0, 0x8956, 2)
@@ -604,6 +611,20 @@ class Launch(OsdTest):
                 self.assertEqual(T.get(self.core, 0x2525B0, 2), expected)
                 self.assertEqual(flags["osd_off"], off)
                 self.assertEqual(flags["bios_all"], 1)
+
+    def test_root_patch_mode6_feeds_game_osd(self):
+        for with_bios in (False, True):
+            with self.subTest(game_bios=with_bios):
+                self.put(None, scope=0)
+                self.put(T.make_osd(), scope=1)
+                (self.root / "PATCH_3.BIN").write_bytes(B.patch_file(3, modes=(6,)))
+                if with_bios:
+                    (self.root / "GAME" / "BIOS.BIN").write_bytes(B.bios_file(B.ROM_MIN, 2))
+                rc, flags = self.launch()
+                self.assertEqual(rc, 0)
+                self.assertEqual(T.get(self.core, 0x2525B0, 2), 0x1BFC)
+                self.assertEqual(flags["osd_off"], 0)
+                self.assertEqual(flags["bios_game"], 0)
 
     def test_changed_files_between_probe_and_load(self):
         original = T.make_osd(body_size=31, seed=1)
