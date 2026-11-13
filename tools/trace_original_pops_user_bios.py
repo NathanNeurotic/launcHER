@@ -56,6 +56,8 @@ FLAGS = {
     "osd_game_a": 0x3878,
     "osd_game_b": 0x344C,
     "osd_off": 0x3704,
+    "integrity": 0x3890,
+    "no_fix": 0x3458,
     "abort": 0x38DC,          # shared "stop loading files" flag
     "game_dir_missing": 0x3460,
     "preset_osd_off": 0x3438,

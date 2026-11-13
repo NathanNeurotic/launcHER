@@ -35,7 +35,8 @@ OSD_SITE = 0x2525B0
 SKIPPED = 1  # POPS_MODE6_SKIPPED
 
 FLAG_NAMES = ("bios_all", "bios_game", "osd_all_a", "osd_all_b", "osd_game_a", "osd_game_b",
-              "osd_off")
+              "osd_off", "integrity", "no_fix", "abort", "game_dir_missing")
+BIOS_FLAG_NAMES = FLAG_NAMES[:7]
 REPLACED = ("bios_all", "bios_game")                       # gates of 0x2525b0's writers
 KEEPS_SHELL = ("bios_all", "bios_game", "osd_all_b", "osd_game_b")  # shell edits, region
 
@@ -164,11 +165,11 @@ def changed(a, b, step=4096):
 
 def all_flag_sets():
     """Every combination of the seven flags (128)."""
-    for bits in itertools.product((0, 1), repeat=len(FLAG_NAMES)):
-        yield {name: bit for name, bit in zip(FLAG_NAMES, bits) if bit}
+    for bits in itertools.product((0, 1), repeat=len(BIOS_FLAG_NAMES)):
+        yield {name: bit for name, bit in zip(BIOS_FLAG_NAMES, bits) if bit}
 
 
-SINGLE_FLAG_SETS = [{}] + [{name: 1} for name in FLAG_NAMES] + [{"bios_all": 1, "bios_game": 1}]
+SINGLE_FLAG_SETS = [{}] + [{name: 1} for name in BIOS_FLAG_NAMES] + [{"bios_all": 1, "bios_game": 1}]
 
 ROM = 0x24BC20       # POPS_USER_BIOS_ADDR: POPS's copy of the PS1 ROM
 ROM_READ = 0x7FF90   # POPS_USER_BIOS_READ: what the loader asks read() for
@@ -439,7 +440,7 @@ def reader_library():
 
 class Native(unittest.TestCase):
     def test_state_layout_and_predicates(self):
-        self.assertEqual(c.sizeof(Rom), 7)
+        self.assertEqual(c.sizeof(Rom), 11)
         self.assertEqual(LIB.pops_user_rom_replaced(None), 0)
         self.assertEqual(LIB.pops_user_rom_keeps_shell(None), 0)
         for flags in all_flag_sets():
@@ -1561,7 +1562,7 @@ class Original(unittest.TestCase):
                 count += 1
         for number in (1, 2, 3, 4, 5, 7):
             plain = U.mode(self.core, number)[0]
-            for name in FLAG_NAMES:
+            for name in BIOS_FLAG_NAMES:
                 self.assertEqual(U.mode(self.core, number, {name: 1})[0], plain, (number, name))
                 ours = bytearray(self.core)
                 state = rom(**{name: 1})
@@ -1624,7 +1625,7 @@ class Original(unittest.TestCase):
         given what the launcher's reader gives it."""
         runs = loads = 0
         for scope, size, flags in itertools.product((0, 1), (None,) + SIZES,
-                                                    [{}] + [{name: 1} for name in FLAG_NAMES]):
+                                                    [{}] + [{name: 1} for name in BIOS_FLAG_NAMES]):
             data = None if size is None else bios_file(size)
             theirs = [U.handler(self.core, scope, backend, data, flags) for backend in (0, 1)]
             case = (scope, size, flags)
@@ -1718,7 +1719,7 @@ class Original(unittest.TestCase):
             call = U.main_gate(scope)
             self.assertIsNotNone(call)
             self.assertEqual(call[0] == 1, scope == 1)
-            for flags in [{}] + [{name: 1} for name in FLAG_NAMES]:
+            for flags in [{}] + [{name: 1} for name in BIOS_FLAG_NAMES]:
                 called = U.main_gate(scope, flags) is not None
                 opened = bool(U.handler(self.core, scope, 0, None, flags)["io"])
                 state = rom(**flags)
@@ -1947,7 +1948,7 @@ class Original(unittest.TestCase):
         later readers are bnez, the loader's own entry tests compare with 1."""
         data = bios_file(ROM_MIN)
         count = 0
-        for scope, name, value in itertools.product((0, 1), FLAG_NAMES, (1, 2, 0x80, 0xFF)):
+        for scope, name, value in itertools.product((0, 1), BIOS_FLAG_NAMES, (1, 2, 0x80, 0xFF)):
             called = U.main_gate(scope, {name: value}) is not None
             loaded = U.handler(self.core, scope, 0, data, {name: value})["ret"] == 1
             state = rom(**{name: value})
@@ -1957,7 +1958,7 @@ class Original(unittest.TestCase):
             gate = name in (GATE_GAME if scope else GATE_ALL)
             self.assertEqual(loaded, not (gate and value == 1), (scope, name, value))
             count += 1
-        for name, value in itertools.product(FLAG_NAMES, (2, 0x80, 0xFF)):
+        for name, value in itertools.product(BIOS_FLAG_NAMES, (2, 0x80, 0xFF)):
             flags = {name: value}
             ours, state = bytearray(self.core), rom(**flags)
             self.assertEqual(LIB.pops_apply_bios_shell_edits_rom(buf(ours), SIZE, c.byref(state)), 0)

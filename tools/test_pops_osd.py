@@ -4,6 +4,8 @@
 Only synthetic files are constructed. Originals run under Unicorn with
 modelled services; nothing here is a console run or emits reference bytes.
 """
+import ctypes as c
+import errno
 import os
 import random
 import struct
@@ -15,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 import trace_original_pops_osd as T  # noqa: E402
 import trace_original_pops_user_bios as U  # noqa: E402
+import test_pops_user_bios as B  # noqa: E402
 
 HAVE = bool(os.environ.get("POPSTARTER_TEST_ELF")) and bool(os.environ.get("POPS_TEST_ELF"))
 if HAVE:
@@ -22,6 +25,71 @@ if HAVE:
         import unicorn  # noqa: F401
     except Exception:
         HAVE = False
+
+
+ROM_FIELDS = ("bios_all", "bios_game", "osd_all_a", "osd_all_b", "osd_game_a", "osd_game_b",
+              "osd_off", "integrity", "no_fix", "abort", "game_dir_missing")
+REASON_NAMES = {0: None, 2: "NOT_FILE", 3: "VERSION", 4: "HEADER", 5: "LOAD", 6: "ENTRY",
+                7: "SIZE", 8: "TOO_BIG", 9: "BUILD", 10: "LABEL"}
+REASON_CODES = {name: code for code, name in REASON_NAMES.items() if name is not None}
+
+
+class Plan(c.Structure):
+    _fields_ = [("header", c.c_uint8 * 64), ("file_size", c.c_int64),
+                ("body_size", c.c_uint32), ("body_request", c.c_uint32),
+                ("body_address", c.c_uint32), ("body_capacity", c.c_uint32)]
+
+
+class Rom(c.Structure):
+    _fields_ = [(name, c.c_uint8) for name in ROM_FIELDS]
+
+
+_LIB = None
+
+
+def library():
+    global _LIB
+    if _LIB is None:
+        _LIB = B.LIB
+        _LIB.pops_osd_plan.argtypes = [c.c_void_p, c.c_size_t, c.c_int64, c.POINTER(Plan)]
+        _LIB.pops_osd_plan.restype = c.c_int
+        _LIB.pops_osd_stage.argtypes = [c.c_void_p, c.c_size_t, c.POINTER(Plan), c.c_void_p,
+                                        c.c_size_t, c.c_int, c.POINTER(Rom)]
+        _LIB.pops_osd_stage.restype = c.c_int
+        _LIB.pops_user_osd_skipped.argtypes = [c.c_int, c.POINTER(Rom)]
+        _LIB.pops_user_osd_skipped.restype = c.c_int
+    return _LIB
+
+
+def buf(data):
+    return (c.c_uint8 * len(data)).from_buffer(data)
+
+
+def state_dict(state):
+    return {name: getattr(state, name) for name in ROM_FIELDS}
+
+
+def stage_file(core, data, scope=0, flags=None, body_read=None):
+    lib = library()
+    after = bytearray(core)
+    state = Rom(**{name: (flags or {}).get(name, 0) for name in ROM_FIELDS})
+    if not flags or "integrity" not in flags:
+        state.integrity = 1
+    header = bytearray(80)
+    header[:min(len(data), 80)] = data[:80]
+    plan = Plan()
+    rc = lib.pops_osd_plan(buf(header), len(header), len(data), c.byref(plan))
+    if rc:
+        return {"ret": 0, "reason": REASON_NAMES[rc], "core": after, "flags": state_dict(state),
+                "plan": plan, "rc": rc}
+    body = bytearray(data[64:])
+    if body_read is None:
+        body_read = len(body)
+    if body_read < 0:
+        body, body_read = bytearray(), 0
+    rc = lib.pops_osd_stage(buf(after), len(after), c.byref(plan), buf(body), body_read,
+                            scope, c.byref(state))
+    return {"ret": rc, "reason": None, "core": after, "flags": state_dict(state), "plan": plan, "rc": 0}
 
 
 def rejection_cases():
@@ -196,6 +264,151 @@ class OriginalProbe(OsdTest):
                 self.assertIn(result["ret"], (0, 1))
                 if result["ret"] == 0:
                     self.assertEqual(result["core"], self.core)
+
+
+class Native(unittest.TestCase):
+    def setUp(self):
+        self.lib = library()
+        self.core = B.pristine_sites()
+
+    def test_plan_rejections_are_exact_and_atomic(self):
+        for name, data, reason in rejection_cases():
+            with self.subTest(name=name):
+                header = bytearray(80)
+                header[:min(len(data), 80)] = data[:80]
+                canary = b"\xA5" * c.sizeof(Plan)
+                plan = Plan.from_buffer_copy(canary)
+                rc = self.lib.pops_osd_plan(buf(header), len(header), len(data), c.byref(plan))
+                self.assertEqual(rc, REASON_CODES[reason])
+                self.assertEqual(bytes(plan), canary)
+
+    def test_valid_plan_fields_and_body_requests(self):
+        for version, address, cap in ((1, T.V1_ADDR, T.V1_CAP), (2, T.V2_ADDR, T.V2_CAP)):
+            for size in (4, 16, 17, cap - 17, cap - 16, cap - 15, cap):
+                data = T.make_osd(version=version, body_size=size)
+                header = bytearray(80)
+                header[:80] = data[:80]
+                plan = Plan()
+                self.assertEqual(self.lib.pops_osd_plan(buf(header), 80, len(data), c.byref(plan)), 0)
+                expected = size + 16 if size <= cap - 16 and size & 0xF else size
+                self.assertEqual((plan.body_size, plan.body_request, plan.body_address,
+                                  plan.body_capacity, plan.file_size),
+                                 (size, expected, address, cap, len(data)))
+                self.assertEqual(bytes(plan.header), data[:64])
+
+    def test_stage_matches_original_values_and_state_only_probe(self):
+        for version in (1, 2):
+            data = T.make_osd(version=version, body_size=31, modes=(6,))
+            actual = stage_file(self.core, data, flags={"osd_off": 1})
+            self.assertEqual(actual["ret"], 1)
+            self.assertEqual(T.get(actual["core"], 0x2525B0, 2), 0x0648)
+            self.assertEqual(actual["flags"]["osd_off"], 1)
+            header = bytearray(80)
+            header[:80] = data[:80]
+            plan = Plan()
+            self.assertEqual(self.lib.pops_osd_plan(buf(header), 80, len(data), c.byref(plan)), 0)
+            state = Rom(osd_off=1, integrity=1)
+            self.assertEqual(self.lib.pops_osd_stage(None, 0, c.byref(plan), None, 0, 0,
+                                                     c.byref(state)), 1)
+            self.assertEqual(state_dict(state), actual["flags"])
+
+    def test_gate_rules(self):
+        for per_game in (0, 1, 2):
+            self.assertEqual(self.lib.pops_user_osd_skipped(per_game, Rom(integrity=1)), 0)
+            self.assertEqual(self.lib.pops_user_osd_skipped(per_game, Rom()), 1)
+            self.assertEqual(self.lib.pops_user_osd_skipped(per_game, Rom(integrity=1, abort=1)), 1)
+            self.assertEqual(self.lib.pops_user_osd_skipped(per_game, Rom(integrity=1, game_dir_missing=1)),
+                             int(per_game == 1))
+            self.assertEqual(self.lib.pops_user_osd_skipped(per_game, Rom(integrity=1, osd_game_b=1)),
+                             int(per_game != 1))
+
+    def test_bad_arguments_are_atomic(self):
+        data = T.make_osd(body_size=17)
+        header = bytearray(80)
+        header[:80] = data[:80]
+        plan = Plan()
+        canary = b"\xA5" * c.sizeof(Plan)
+        invalid = Plan.from_buffer_copy(canary)
+        self.assertEqual(self.lib.pops_osd_plan(None, 1, len(data), c.byref(invalid)), -errno.EINVAL)
+        self.assertEqual(self.lib.pops_osd_plan(buf(header), 80, len(data), None), -errno.EINVAL)
+        self.assertEqual(self.lib.pops_osd_plan(buf(header), 81, len(data), c.byref(invalid)), -errno.ERANGE)
+        self.assertEqual(bytes(invalid), canary)
+        self.assertEqual(self.lib.pops_osd_plan(buf(header), 80, len(data), c.byref(plan)), 0)
+        state = Rom(integrity=1)
+        before = state_dict(state)
+        self.assertEqual(self.lib.pops_osd_stage(None, 0, None, None, 0, 0, c.byref(state)), -errno.EINVAL)
+        self.assertEqual(self.lib.pops_osd_stage(None, 0, c.byref(plan), None, 0, 0, None), -errno.EINVAL)
+        small = bytearray(32)
+        self.assertEqual(self.lib.pops_osd_stage(buf(small), len(small), c.byref(plan), None, 0, 0,
+                                                 c.byref(state)), -errno.ERANGE)
+        self.assertEqual(small, bytes(32))
+        self.assertEqual(self.lib.pops_osd_stage(buf(self.core), len(self.core), c.byref(plan), None, 1, 0,
+                                                 c.byref(state)), -errno.EINVAL)
+        self.assertEqual(state_dict(state), before)
+
+
+@unittest.skipUnless(HAVE, "POPSTARTER_TEST_ELF, POPS_TEST_ELF and unicorn are needed")
+class OriginalDifferential(OsdTest):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.lib = library()
+
+    def assert_same(self, original, actual):
+        self.assertEqual(actual["ret"], original["ret"])
+        self.assertEqual(actual["reason"], original["reason"])
+        self.assertEqual(actual["core"], original["core"])
+        for name in ROM_FIELDS:
+            self.assertEqual(actual["flags"][name], original["flags"][name], name)
+
+    def test_rejections(self):
+        for name, data, reason in rejection_cases():
+            with self.subTest(name=name):
+                original = self.probe(data)
+                self.assert_rejected(original, reason)
+                self.assert_same(original, stage_file(self.core, data))
+
+    def test_valid_versions_and_cap_boundaries(self):
+        for version, cap in ((1, T.V1_CAP), (2, T.V2_CAP)):
+            for size in (4, 16, 17, cap - 17, cap - 16, cap - 15, cap):
+                with self.subTest(version=version, size=size):
+                    data = T.make_osd(version=version, body_size=size)
+                    self.assert_same(self.probe(data), stage_file(self.core, data))
+
+    def test_short_and_failed_reads(self):
+        data = T.make_osd(body_size=31)
+        for fault in (1, 0, -5):
+            with self.subTest(fault=fault):
+                original = self.probe(data, read_faults={"body": fault})
+                self.assert_same(original, stage_file(self.core, data, body_read=fault))
+
+    def test_modes_gates_and_mixed_scopes(self):
+        cases = (
+            (T.make_osd(modes=(1, 2, 3, 5)), {"no_fix": 1}),
+            (T.make_osd(modes=(4, 7, 8, 255)), None),
+            (T.make_osd(modes=(6,)), {"osd_off": 1}),
+            (T.make_osd(), {"osd_off": 1}),
+            (T.make_osd(version=2, flag=1), None),
+            (T.make_osd(), {"integrity": 0}),
+            (T.make_osd(), {"abort": 1}),
+        )
+        for index, (data, flags) in enumerate(cases):
+            with self.subTest(index=index):
+                original = self.probe(data, flags=flags)
+                self.assert_same(original, stage_file(self.core, data, flags=flags))
+        root_data = T.make_osd(version=2, body_size=64, seed=1)
+        game_data = T.make_osd(version=1, body_size=32, seed=2)
+        root = self.probe(root_data, scope=0)
+        original = T.run_osd(root["core"], scope=1, data=game_data, flags=root["flags"])
+        self.assert_same(original, stage_file(root["core"], game_data, scope=1, flags=root["flags"]))
+        original = self.probe(T.make_osd(), scope=1, game_dir_ok=False)
+        self.assert_same(original, stage_file(self.core, T.make_osd(), scope=1,
+                                              flags={"game_dir_missing": 1}))
+
+    def test_seeded_whole_core_differential(self):
+        for index, data in enumerate(seeded_cases()):
+            with self.subTest(index=index):
+                self.assert_same(self.probe(data), stage_file(self.core, data))
 
 
 class Fixtures(unittest.TestCase):

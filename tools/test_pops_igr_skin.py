@@ -221,7 +221,8 @@ L.pops_resident_hook_display.argtypes = [c.c_void_p, c.c_size_t, c.c_uint32]
 class Rom(c.Structure):
     """PopsUserRomState (common/include/pops_modes_patches.h)."""
     _fields_ = [(name, c.c_uint8) for name in ("bios_all", "bios_game", "osd_all_a", "osd_all_b",
-                                                "osd_game_a", "osd_game_b", "osd_off")]
+                                                "osd_game_a", "osd_game_b", "osd_off", "integrity",
+                                                "no_fix", "abort", "game_dir_missing")]
 
 
 L.pops_apply_all_config_patches_rom.argtypes = [c.c_void_p, c.c_size_t, c.c_void_p, c.POINTER(Rom)]

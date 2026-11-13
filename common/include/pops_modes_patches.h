@@ -11,11 +11,9 @@ extern "C" {
 #endif
 
 /* POPStarter r13's loader state that later stages test: what its BIOS.BIN
- * and OSD loaders (FUN_0088019c, FUN_0087f768) left behind, and whether
+ * and OSD.BIN loaders (FUN_0088019c, FUN_0087eb24) left behind, and whether
  * compatibility mode 6 already ran. One byte per original word; nonzero is
- * "set". See docs/POPSTARTER_USER_BIOS.md for who sets and who reads each.
- * launcHER has no OSD loader, so the four osd_* fields stay 0 in a launch;
- * they are here so the gates are the original's. A NULL state means all 0. */
+ * "set". See docs/POPSTARTER_USER_BIOS.md and POPSTARTER_OSD.md. */
 typedef struct {
   uint8_t bios_all;   /* gp+0x38a4: BIOS.BIN of the all-games folder loaded */
   uint8_t bios_game;  /* gp+0x3b98: BIOS.BIN of the game's folder loaded */
@@ -24,7 +22,43 @@ typedef struct {
   uint8_t osd_game_a; /* gp+0x3878: the game's OSD replacement, first kind */
   uint8_t osd_game_b; /* gp+0x344c: the game's OSD replacement, second kind */
   uint8_t osd_off;    /* gp+0x3704: mode 6 wrote 0x2525b0 (FUN_008db97c) */
+  uint8_t integrity;  /* gp+0x3890: the validated POPS core passed inspection */
+  uint8_t no_fix;     /* gp+0x3458: modes 1/2/3/5 after SUBCD are ignored */
+  uint8_t abort;      /* gp+0x38dc: stop loading files */
+  uint8_t game_dir_missing; /* gp+0x3460: the game's folder is missing */
 } PopsUserRomState;
+
+#define POPS_OSD_HEADER_READ 80
+#define POPS_OSD_HEADER_SIZE 64
+typedef enum {
+  POPS_OSD_REJECT_NONE = 0,
+  POPS_OSD_REJECT_NOT_FILE = 2,
+  POPS_OSD_REJECT_VERSION = 3,
+  POPS_OSD_REJECT_HEADER = 4,
+  POPS_OSD_REJECT_LOAD = 5,
+  POPS_OSD_REJECT_ENTRY = 6,
+  POPS_OSD_REJECT_SIZE = 7,
+  POPS_OSD_REJECT_TOO_BIG = 8,
+  POPS_OSD_REJECT_BUILD = 9,
+  POPS_OSD_REJECT_LABEL = 10
+} PopsOsdReject;
+
+typedef struct {
+  uint8_t header[POPS_OSD_HEADER_SIZE];
+  int64_t file_size;
+  uint32_t body_size, body_request, body_address, body_capacity;
+} PopsOsdPlan;
+
+/* Plan and stage one validated OSD.BIN. The planner returns 0, a rejection
+ * reason, or negative errno and leaves plan unchanged on failure. The stage
+ * returns 1 loaded, 0 gated/rejected, or negative errno. A NULL core is a
+ * state-only look-ahead. Core and loader state are unchanged on bad calls. */
+int pops_osd_plan(const void *header, size_t header_read,
+                  int64_t file_size, PopsOsdPlan *plan);
+int pops_osd_stage(void *core, size_t core_size, const PopsOsdPlan *plan,
+                   const void *body, size_t body_read,
+                   int per_game, PopsUserRomState *state);
+int pops_user_osd_skipped(int per_game, const PopsUserRomState *state);
 
 /* gp+0x3b98 or gp+0x38a4: the ROM copy is the user's, so every writer of
  * 0x2525b0 ($UNDO_*, compatibility mode 6) leaves it alone. */
