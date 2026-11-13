@@ -12,7 +12,7 @@ Provide drop-in `OSD.BIN` behavior for POPStarter launches, bugs included,
 without changing Ember. Implement a bounded `pops_osd_stage` and thin file
 loading before each folder's BIOS/TROJAN/PATCH files. Use the same VCD and
 per-title folders as the existing BIOS loader until the measured path-table
-piece; do not start that piece here.
+piece; do not start that piece here. This stand-in is quirk 85.
 
 Implement distinct reason codes for every rejection, in the original's
 order: PS-X EXE/foreign file, unsupported version, invalid header data,

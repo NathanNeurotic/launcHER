@@ -8,7 +8,7 @@ Branch `pr23/osd-bin`, based on `308684c`. Owner-approved design and plan:
 services, and PS2SDK container builds. NOT TESTED on a console. No game was
 booted and no drop-in-parity claim is made.**
 
-## Landed pieces so far
+## Implementation and review
 
 - `4b7fce7`: approved design and implementation plan.
 - `6581b83`: original-handler oracle, directed boundaries and 256 seeded
@@ -16,8 +16,16 @@ booted and no drop-in-parity claim is made.**
 - `e80fc9e`: pure validation, v1/v2 staging and loader state.
 - `0ed8411`: exact launcher file reader.
 - `352aae2`: per-scope look-ahead and actual OSD loading before BIOS, built-in
-  no-fix propagation, changed-file `-EIO`, and failure-atomic fix-context
-  refresh. Independent whole-branch review is pending.
+  no-fix propagation, changed-file `-EIO`, and fix-context refresh.
+- `cf20444`: separate sequential loader state from post-command effects;
+  selective, bounds-checked guard updates after independent review.
+- `d67c16f`: alternate host wrappers preserve their no-OSD-look-ahead behavior.
+- `34fd531`: carry actual root PATCH mode-6 transitions into the later game
+  OSD, including the returned state and a game-BIOS variant, after re-review.
+
+The first independent review required fixes for built-in mode-6 state,
+unrelated guard-byte acceptance and short-core reads. The second required the
+root-PATCH transition. Final independent re-review is pending.
 
 The implementation uses synthetic files only. No real OSD.BIN, BIOS image,
 proprietary reference content, real card, save or share was used.
@@ -36,25 +44,35 @@ proprietary reference content, real card, save or share was used.
   Short/failed body reads keep the accepted result and zero-filled tail.
 - Per-scope look-ahead and actual loading before BIOS, with changed valid
   plans/results/state returning `-EIO` and same-plan body changes accepted.
-- Validated OSD compatibility writes refresh the fix context; subsequent
-  corruption is still rejected.
+- Built-in, root/game, text and root-PATCH mode-6 sequences, including BIOS
+  interactions and preservation of post-command effects.
+- Only header-selected compatibility writes refresh the fix context;
+  unrelated corruption fails atomically. Short cores return `-ERANGE` before
+  compatibility reads, checked with an inaccessible memory page.
 
 ## Tests run
 
-- `tools/test_pops_osd.py`: **35 tests with references and 35 without (16
+- `tools/test_pops_osd.py`: **37 tests with references and 37 without (17
   optional skips)**. This includes 256 whole-core seeded differentials,
   every rejection, cap boundaries, both backend I/O models, read faults,
-  mixed scopes, launch ordering, changed files and guard checks.
+  mixed scopes, launch ordering, root PATCH, changed files and guard checks.
 - `tools/test_pops_user_bios.py`: 55 tests with references and 55 without
-  (13 optional skips), including the existing 270-scenario chain.
+  (13 optional skips), including the existing 270-scenario chain. The same
+  28 differences attributable to grouped order remain.
+- `tools/test_pops_trojan.py`: 59 tests with references and 59 without
+  (5 and 16 optional skips respectively).
 - `tools/test_pops_igr_skin.py`: 48 tests with references and 48 without
-  (21 optional skips).
-- `tools/test_pops_fix_order.py`: 7 tests pass in 598.706 seconds. Both
-  orders accept all 624 entries with matching accepted final-core hashes;
-  the separate 16 original-order and 28 current-launcHER ordering differences
-  remain unchanged.
-- Release and trace container builds both print `handoff layout: OK` and
-  `version=352aae2588d2`:
+  (21 optional skips). `tools/test_pops_fix_files.py`: 31 tests without
+  references (3 skips).
+- On `352aae2`, before the review fixes, `tools/test_pops_fix_order.py`
+  passed 7 tests in 598.706 seconds. Both orders accepted all 624 entries
+  with matching accepted final-core hashes; the separate 16 original-order
+  and 28 current-launcHER ordering differences remained. Its result on the
+  revised tree will come from the final full sweeps.
+- On `352aae2`, both full host sweeps passed **37 of 37 files**. Those are
+  pre-review results, not evidence for the revised tree.
+- Pre-review release and trace container builds printed `handoff layout: OK`
+  and `version=352aae2588d2`:
   - release: 333,556 bytes, SHA-256
     `e347fdd2d5f141db9a6386efaea294bc87629286ed14452fa0b13fb80c864540`;
   - trace: 338,148 bytes, SHA-256
@@ -65,7 +83,8 @@ proprietary reference content, real card, save or share was used.
 - Quirk 80: grouped file/command order still differs from the original.
 - Quirk 81: OSD is opened for look-ahead and again for the actual load;
   changed valid plans/results/state return `-EIO`. The original has no
-  look-ahead window or fix-context guard.
+  look-ahead window or fix-context guard. Debug logging also differs from
+  the original's on-screen text.
 - Quirk 82: safe `-ENAMETOOLONG` replaces attempting to copy a possible
   fixed-buffer overflow. Original overlong-path behavior was not emulated.
 - Quirk 83: the integrity result comes from launcHER's validated POPS core,
@@ -73,9 +92,11 @@ proprietary reference content, real card, save or share was used.
 - Quirk 84: original POPS-folder inspection, once flags and some
   abort/folder-error paths remain uncopied. `game_dir_missing` is modeled
   where supplied, but its inspection is not performed.
-- Debug logging is not identical to the original's on-screen text (quirk 81).
+- Quirk 85: the VCD/per-title folders stand in for the original device
+  POPS/per-game folders; HDD `__common` mapping awaits the path-table work
+  and an owner decision.
 - No PCSX2 or physical-console run was made for this piece. Runtime behavior
   of an actual replacement PS1 BIOS shell is unverified.
 
-The final no-reference sweep passes **37 of 37 files**. The reference-backed
-sweep, independent review and the reversible merge are pending.
+Final host sweeps, revised release/trace builds, independent re-review and
+the reversible merge are pending.
