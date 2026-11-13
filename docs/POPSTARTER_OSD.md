@@ -1,10 +1,11 @@
 # POPStarter r13 `OSD.BIN`: design and evidence
 
-Status on 2026-11-12: **implemented at host/Unicorn level; final full
-verification and independent review are pending.** Work is isolated on
-`pr23/osd-bin`, based on merge `308684c`. The reference is clean REPOP
-`bc258e48` plus the original MAIN executed under Unicorn, not REPOP's prose
-alone. Nothing is tested on a console.
+Status on 2026-11-13: **implemented and independently reviewed at
+host/Unicorn level; both full host sweeps and release/trace builds pass.**
+Work is on `pr23/osd-bin`, based on merge `308684c`; its draft-PR merge is
+pending. The reference is clean REPOP `bc258e48` plus the original MAIN
+executed under Unicorn, not REPOP's prose alone. Nothing is tested on a
+console.
 
 ## Intent and scope
 
@@ -110,7 +111,7 @@ Test-first, with failures watched before implementation:
 
 ## Non-goals and open work
 
-No production file/command reorder, path-table implementation, HDD
-`__common` decision, improvement of copied bugs, physical-console claim, or
-REPOP changes. `OSD.BIN` runtime behavior inside a real PS1 BIOS shell is
+No production file/command reorder, path-table implementation, improvement
+of copied bugs, physical-console claim, or REPOP changes. The owner selected
+exact HDD `__common` mapping for the follow-on path work. `OSD.BIN` runtime behavior inside a real PS1 BIOS shell is
 not established by host staging equality.

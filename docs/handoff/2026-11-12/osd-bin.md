@@ -25,7 +25,8 @@ booted and no drop-in-parity claim is made.**
 
 The first independent review required fixes for built-in mode-6 state,
 unrelated guard-byte acceptance and short-core reads. The second required the
-root-PATCH transition. Final independent re-review is pending.
+root-PATCH transition. The final re-review returned `merge` with no remaining
+findings, by inspection of the complete branch diff.
 
 The implementation uses synthetic files only. No real OSD.BIN, BIOS image,
 proprietary reference content, real card, save or share was used.
@@ -64,11 +65,10 @@ proprietary reference content, real card, save or share was used.
 - `tools/test_pops_igr_skin.py`: 48 tests with references and 48 without
   (21 optional skips). `tools/test_pops_fix_files.py`: 31 tests without
   references (3 skips).
-- On `352aae2`, before the review fixes, `tools/test_pops_fix_order.py`
-  passed 7 tests in 598.706 seconds. Both orders accepted all 624 entries
-  with matching accepted final-core hashes; the separate 16 original-order
-  and 28 current-launcHER ordering differences remained. Its result on the
-  revised tree will come from the final full sweeps.
+- On `406ddfd`, `tools/test_pops_fix_order.py` passed 7 tests in 643.747
+  seconds. Both orders accepted all 624 entries with matching accepted
+  final-core hashes; the separate 16 original-order and 28 current-launcHER
+  ordering differences remained.
 - On `352aae2`, both full host sweeps passed **37 of 37 files**. Those are
   pre-review results, not evidence for the revised tree.
 - Pre-review release and trace container builds printed `handoff layout: OK`
@@ -77,6 +77,12 @@ proprietary reference content, real card, save or share was used.
     `e347fdd2d5f141db9a6386efaea294bc87629286ed14452fa0b13fb80c864540`;
   - trace: 338,148 bytes, SHA-256
     `f178f88546daa6c7434ab3a6b78831955737ed802e7fb7d66ab5335aa9ffc71d`.
+- Revised `406ddfd` release and trace builds both print `handoff layout: OK`
+  and `version=406ddfdc956b`:
+  - release: 333,988 bytes, SHA-256
+    `c2fb1e1d32102c2746dec227093661a33a29922743a0f3082e2695467ff1952a`;
+  - trace: 338,148 bytes, SHA-256
+    `45c4788f3d42be033f27f041eaea93891a90ead8255c2270967e7d11265ec09f`.
 
 ## Remaining differences and limits
 
@@ -93,10 +99,11 @@ proprietary reference content, real card, save or share was used.
   abort/folder-error paths remain uncopied. `game_dir_missing` is modeled
   where supplied, but its inspection is not performed.
 - Quirk 85: the VCD/per-title folders stand in for the original device
-  POPS/per-game folders; HDD `__common` mapping awaits the path-table work
-  and an owner decision.
+  POPS/per-game folders; the owner approved exact HDD `__common` mapping for
+  the follow-on path work, not a launcHER-only folder default.
 - No PCSX2 or physical-console run was made for this piece. Runtime behavior
   of an actual replacement PS1 BIOS shell is unverified.
 
-Final host sweeps, revised release/trace builds, independent re-review and
-the reversible merge are pending.
+On `406ddfd`, both full host sweeps passed **37 of 37 files**, without and
+with reference inputs. Independent re-review returned `merge`. The reversible
+merge into the draft PR branch is pending.
