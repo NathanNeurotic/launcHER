@@ -1065,6 +1065,85 @@ class Original(unittest.TestCase):
                          [(0x8DB7F8, "    Resource paths re-linking... "), (0x8DB960, "DONE\n")])
 
 
+class Negative(unittest.TestCase):
+    @unittest.skipUnless(HAVE_MAIN, "needs POPSTARTER_TEST_ELF and unicorn")
+    def test_bad_table_entry_fails(self):
+        name = "usb-no-pops-folder"
+        rows = T.summary(T.run_case(name), T.CASES[name]["focus"])
+        expected = CASE_TABLE[name][1]
+        self.assertEqual(rows, expected)
+        corrupt = list(expected)
+        good = "8d8a68 fioGetstat mass:/POPS -> -2"
+        corrupt[corrupt.index(good)] = "8d8a68 fioGetstat mass:/NOT_POPS -> -2"
+        with self.assertRaises(AssertionError) as mismatch:
+            self.assertEqual(rows, corrupt)
+        self.assertIn("mass:/NOT_POPS", str(mismatch.exception))
+
+    @unittest.skipUnless(HAVE_MAIN, "needs POPSTARTER_TEST_ELF and unicorn")
+    def test_unmodelled_code_fails(self):
+        with self.subTest(kind="library"):
+            address = 0x91C528
+            library = dict(T.LIBRARY)
+            del T.LIBRARY[address]
+            try:
+                with self.assertRaisesRegex(RuntimeError,
+                                            "unmodelled library code at 0x91c528"):
+                    T.trace(["mass:/POPS/XX.GAME.ELF"], {})
+            finally:
+                T.LIBRARY.clear()
+                T.LIBRARY.update(library)
+        with self.subTest(kind="EE instruction"):
+            image, loader = T._inputs()
+            image = bytearray(image)
+            image[T.MAIN - T.BASE:T.MAIN - T.BASE + 4] = (0x70000000).to_bytes(4, "little")
+            run = T.Original(image, loader, [], T.Files())
+            with self.assertRaisesRegex(RuntimeError,
+                                        "unmodelled MMI 0x70000000 at 0x870b78"):
+                run.run(limit=100)
+
+    def test_missing_inputs_name_skips(self):
+        old = os.environ.get("POPS_TEST_ELF")
+        with tempfile.TemporaryDirectory() as folder:
+            os.environ["POPS_TEST_ELF"] = str(Path(folder) / "POPS.ELF")
+            try:
+                files = T.CASES["usb-pak"]["files"]
+                self.assertEqual(T.missing_inputs(files), ["POPS.PAK"])
+                case = Original("test_cases")
+                with self.assertRaises(unittest.SkipTest) as skipped:
+                    case.needs(files)
+                self.assertEqual(str(skipped.exception),
+                                 "POPS_TEST_ELF folder lacks POPS.PAK")
+            finally:
+                if old is None:
+                    del os.environ["POPS_TEST_ELF"]
+                else:
+                    os.environ["POPS_TEST_ELF"] = old
+
+    @unittest.skipUnless(HAVE_MAIN, "needs POPSTARTER_TEST_ELF and unicorn")
+    def test_branch_answer_changes_summary(self):
+        argv = ["hdd0:__common:pfs:/POPS/GAME.ELF"]
+        partitions = ["hdd0:__common"]
+        failed = T.trace(argv, {}, partitions=partitions,
+                         results={("mount", "hdd0:__common"): -2}, stop_at=T.LAUNCHING)
+        mounted = T.trace(argv, {}, partitions=partitions, stop_at=T.LAUNCHING)
+        failed_rows = T.summary(failed)
+        mounted_rows = T.summary(mounted)
+        self.assertIn("8d8b6c fileXioMount pfs1: = hdd0:__common -> -2", failed_rows)
+        self.assertIn("8d8b6c fileXioMount pfs1: = hdd0:__common -> 0", mounted_rows)
+        self.assertIn("873f88 fatal", failed_rows)
+        self.assertIn("8d7eac fileXioGetStat pfs1:/POPS/ -> -2", mounted_rows)
+        self.assertNotIn("8d7eac fileXioGetStat pfs1:/POPS/ -> -2", failed_rows)
+        self.assertNotEqual(failed_rows, mounted_rows)
+
+    @unittest.skipUnless(HAVE_MAIN, "needs POPSTARTER_TEST_ELF and unicorn")
+    def test_quiet_does_not_change_paths(self):
+        case = T.CASES["usb-no-pops-folder"]
+        quiet = T.run_case("usb-no-pops-folder")
+        loud = T.trace(case["argv"], {}, preset={0x100010: 0xFF}, stop_at=case["stop"])
+        self.assertEqual(T.summary(loud), T.summary(quiet))
+        self.assertNotEqual(loud["prints"], quiet["prints"])
+
+
 class Source(unittest.TestCase):
     def read(self, path):
         return (ROOT / path).read_text(encoding="utf-8")
