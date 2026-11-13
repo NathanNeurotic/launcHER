@@ -428,7 +428,7 @@ int test_fix_files(void *core, size_t size, const char *root, const char *title,
   log_used = 0;
   log_text[0] = 0;
   return pops_stage_fix_files(core, size, root, title, 0, 0, 0, 0, 0, 0, NULL, NULL, NULL,
-                              NULL, &state, set);
+                              NULL, NULL, NULL, &state, set);
 }
 const char *test_log(void) { return log_text; }
 const unsigned char *test_hold(void) { return host_hold; }

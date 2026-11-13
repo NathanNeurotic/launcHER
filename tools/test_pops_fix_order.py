@@ -60,7 +60,7 @@ static int pops_stage_user_files_alt(void *stagedCore, size_t coreSize,
                              cfg->progressive_requested ? POPS_VMODE_480P : cfg->video_mode,
                              residentHdr->progressive_entry,
                              cfg->hdtv_fix ? 0x24040001 : 0x32240001,
-                             0, NULL, NULL, NULL, rom, finalContext, trojanSet);
+                             0, NULL, NULL, NULL, NULL, NULL, rom, finalContext, trojanSet);
   if (res)
     return res;
   {
