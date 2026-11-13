@@ -834,8 +834,8 @@ OTHER_DIFFERENCES = [
           "makes no POPS folder; a launch without a package ends with its own message",
           HANDLER, ['msg("POPS: Missing POPS dependencies'], []),
     Other("no image found",
-          "the drive is asked for a PS1 disc (types 0x10 to 0x12 go on, measured), "
-          "otherwise fatal at 0x876a0c",
+          "the drive is asked for a PS1 disc (types 0x10 to 0x13 go on; only 0x10 "
+          "traced in this path suite), otherwise fatal at 0x876a0c",
           "usb-no-vcd",
           ["8767d4 sceCdGetDiskType (0, 0) -> 0", "876a0c fatal"],
           "launchPOPS returns -ENOENT",
@@ -1034,9 +1034,12 @@ class Original(unittest.TestCase):
     def test_cases(self):
         self.assertEqual(sorted(CASE_TABLE), sorted(T.CASES))
         ran = 0
+        omitted = []
         for name, (focus, lines, state, written) in CASE_TABLE.items():
             case = T.CASES[name]
-            if T.missing_inputs(case["files"]):
+            missing = T.missing_inputs(case["files"])
+            if missing:
+                omitted.append((name, missing))
                 continue
             with self.subTest(case=name):
                 report = self.report(name)
@@ -1050,8 +1053,11 @@ class Original(unittest.TestCase):
                     state)
                 self.assertEqual(report["written"], written)
             ran += 1
-        if not ran:
-            self.skipTest("no case could run without POPS_TEST_ELF")
+        if omitted:
+            details = "; ".join("%s [%s]" % (name, ", ".join(missing))
+                                for name, missing in omitted)
+            self.skipTest("%d cases compared; %d cases omitted: %s" %
+                          (ran, len(omitted), details))
 
     def test_complete_runs_end_in_pops(self):
         """The four launch kinds reach ExecPS2 at 0x87c1cc with POPS's entry."""
@@ -1070,14 +1076,25 @@ class Original(unittest.TestCase):
                 self.assertEqual(got["tries"], original_search(row.search))
 
     def test_other_differences(self):
+        ran = 0
+        omitted = []
         for item in OTHER_DIFFERENCES:
             case = T.CASES[item.case]
-            if T.missing_inputs(case["files"]):
+            missing = T.missing_inputs(case["files"])
+            if missing:
+                omitted.append((item, missing))
                 continue
             with self.subTest(name=item.name):
                 lines = T.summary(self.report(item.case))
                 for line in item.lines:
                     self.assertIn(line, lines)
+            ran += 1
+        if omitted:
+            details = "; ".join("%s (%s) [%s]" %
+                                (item.name, item.case, ", ".join(missing))
+                                for item, missing in omitted)
+            self.skipTest("%d differences compared; %d differences omitted: %s" %
+                          (ran, len(omitted), details))
 
     def test_quiet_and_verbose_ask_for_the_same(self):
         """The profile byte that turns the messages on (0x100010) does not
@@ -1147,6 +1164,65 @@ class Negative(unittest.TestCase):
                     del os.environ["POPS_TEST_ELF"]
                 else:
                     os.environ["POPS_TEST_ELF"] = old
+
+    @unittest.skipUnless(HAVE_MAIN, "needs POPSTARTER_TEST_ELF and unicorn")
+    def test_partial_inputs_name_all_skips(self):
+        old_env = os.environ.get("POPS_TEST_ELF")
+        old_reports, old_forms = Original.reports, Original.forms
+        real_run_case = T.run_case
+        called = []
+
+        def counted_run_case(name):
+            called.append(name)
+            return real_run_case(name)
+
+        with tempfile.TemporaryDirectory() as folder:
+            os.environ["POPS_TEST_ELF"] = str(Path(folder) / "POPS.ELF")
+            T.run_case = counted_run_case
+            try:
+                with self.subTest(method="test_cases"):
+                    Original.reports = {}
+                    called.clear()
+                    with self.assertRaises(unittest.SkipTest) as skipped:
+                        Original("test_cases").test_cases()
+                    self.assertEqual(called, ["usb-no-pops-folder", "hdd-no-common",
+                                              "hdd-no-pops-folder", "usb-iox-size"])
+                    omitted = [(name, T.missing_inputs(T.CASES[name]["files"]))
+                               for name in CASE_TABLE if name not in called]
+                    self.assertEqual(len(omitted), 28)
+                    message = str(skipped.exception)
+                    self.assertIn("4 cases compared; 28 cases omitted", message)
+                    for name, missing in omitted:
+                        self.assertTrue(missing, name)
+                        self.assertIn(name + " [" + ", ".join(missing) + "]", message)
+
+                with self.subTest(method="test_other_differences"):
+                    Original.reports = {}
+                    called.clear()
+                    with self.assertRaises(unittest.SkipTest) as skipped:
+                        Original("test_other_differences").test_other_differences()
+                    self.assertEqual(called, ["usb-iox-size", "usb-no-pops-folder"])
+                    omitted = [(item, T.missing_inputs(T.CASES[item.case]["files"]))
+                               for item in OTHER_DIFFERENCES if item.case not in called]
+                    self.assertEqual(len(omitted), 9)
+                    message = str(skipped.exception)
+                    self.assertIn("2 differences compared; 9 differences omitted", message)
+                    for item, missing in omitted:
+                        self.assertTrue(missing, item.name)
+                        self.assertIn(item.name + " (" + item.case + ") [" +
+                                      ", ".join(missing) + "]", message)
+            finally:
+                T.run_case = real_run_case
+                Original.reports, Original.forms = old_reports, old_forms
+                if old_env is None:
+                    del os.environ["POPS_TEST_ELF"]
+                else:
+                    os.environ["POPS_TEST_ELF"] = old_env
+
+        self.assertIs(T.run_case, real_run_case)
+        self.assertIs(Original.reports, old_reports)
+        self.assertIs(Original.forms, old_forms)
+        self.assertEqual(os.environ.get("POPS_TEST_ELF"), old_env)
 
     @unittest.skipUnless(HAVE_MAIN, "needs POPSTARTER_TEST_ELF and unicorn")
     def test_branch_answer_changes_summary(self):
@@ -1276,6 +1352,12 @@ class Source(unittest.TestCase):
             self.assertIn("`%s`" % argument, text, argument)
         for item in OTHER_DIFFERENCES:
             self.assertIn(item.name, text)
+        other = next(item for item in OTHER_DIFFERENCES if item.name == "no image found")
+        self.assertIn("types 0x10 to 0x13 go on; only 0x10 traced in this path suite",
+                      other.original)
+        self.assertIn("types `0x10` to `0x13` are accepted by the original implementation, "
+                      "with only `0x10` traced here", text)
+        self.assertNotIn("types `0x10` to `0x12`", text)
 
     def test_ci_runs_this_file(self):
         workflow = self.read(".github/workflows/build.yml")

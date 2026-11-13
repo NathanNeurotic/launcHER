@@ -12,7 +12,7 @@ behavior and no Ember code.
 | --- | --- | --- |
 | `codex/popstarter-replacement` | `0fa2c38e44bf56fbc65766c09f61876c5b8be0f5` | Draft PR integration base and merge base used for the branch diff |
 | `pr23/path-table` | `733a3fcc93183b94ee843211ebe0f2a26fe2c765` | Measured source revision used for both host sweeps and both container builds |
-| `pr23/path-table` | this commit, directly after `733a3fc` | Documentation-only evidence head; exact commit ID is in Git history and the Task 4 report |
+| `pr23/path-table` | this commit, after evidence head `20d8cdd` | Review-fix head; scoped path/document tests only, no new full sweep or build |
 
 The branch publishes [POPSTARTER_PATHS.md](../../POPSTARTER_PATHS.md), a pure
 `original_search(search) -> list[str]` comparison model, host/source checks and
@@ -72,6 +72,28 @@ and 13 for user BIOS. These skips are explicit coverage boundaries, not hidden
 passes. With the specified references, every path/document/corpus original
 comparison ran. The order differential's separately reported 16 original-order
 and 28 current-launcHER differences remain unchanged.
+
+## Scoped whole-branch review fixes
+
+After the `20d8cdd` evidence head, the path tests gained a real
+partial-reference regression. With MAIN available and Sony companions absent,
+it proves four synthetic-only cases and two differences are compared before
+skips name all 28 omitted cases and nine omitted differences with every
+missing companion. Environment and report caches are restored. With no MAIN,
+the explicit `needs POPSTARTER_TEST_ELF and unicorn` reason remains.
+
+The accepted disc range in the measured table is corrected to `0x10` through
+`0x13`; only `0x10` was traced in this path suite. A focused source/document
+assertion rejects the former `0x10` through `0x12` wording.
+
+| Mode | `test_pops_paths.py` | `test_pops_doc_claims.py` |
+| --- | --- | --- |
+| Reference variables unset | 25 run, 15 passed, 10 named skips | 19 run, 8 passed, 11 named skips |
+| All three specified references set | 25/25, zero skips, 144.538 seconds | 19/19, zero skips, 2.895 seconds |
+
+These are scoped serial checks for this review-fix commit, not another full
+38-file sweep. The 38/38 and 825-test results above remain tied to `733a3fc`;
+no new full sweep, PS2SDK build or console test was run for this fix.
 
 ## Measured path coverage and evidence boundary
 
