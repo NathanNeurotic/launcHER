@@ -7,17 +7,16 @@ present to reset the PS2.
 
 ## Build and evidence
 
-Source commit: `37784661ae7a0104dcea2c2bff29a0b519a9c7c7` (PR 23).
+Source commit: `800d91e398830573335a6c1d43b74af0dc78da2e` (PR 23).
 The earlier baseline was `412c11b5dc9e7f96c651f55498ef8a1ccf304cc6`.
 
 | Build | File | SHA-256 |
 | --- | --- | --- |
-| Release | `build-pr23-release/release/launcHER.elf` | `eabd72a33026640c6106c5fc562392bbc976362ad2f98eeac8ab998c347fadb7` |
-| Trace (`LAUNCHER_BOOT_TRACE=ON`, `DEBUG=ON`) | `build-pr23-trace/release/launcHER.elf` | `417a69be955087955afa7c20be68cc66328b52c9d8a78edea884ea998987a4f8` |
+| Release | `build-pr23-osd-merge-release/release/launcHER.elf` | `c2fb1e1d32102c2746dec227093661a33a29922743a0f3082e2695467ff1952a` |
+| Trace (`LAUNCHER_BOOT_TRACE=ON`, `DEBUG=ON`) | `build-pr23-osd-merge-trace/release/launcHER.elf` | `45c4788f3d42be033f27f041eaea93891a90ead8255c2270967e7d11265ec09f` |
 
-Both container builds printed `handoff layout: OK`. CMake printed
-`version=unknown` for these worktree builds; use the source commit above, not
-the generated version string. The files are 332,196 and 336,468 bytes.
+Both container builds printed `handoff layout: OK` and
+`version=800d91e39883`. The files are 333,988 and 338,148 bytes.
 The baseline `ata_bd: -200` reproduction and the fixed PCSX2 evidence are in
 [handoff/2026-11-12/usb-pops-services.md](handoff/2026-11-12/usb-pops-services.md).
 
