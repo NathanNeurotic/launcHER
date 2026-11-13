@@ -108,9 +108,10 @@ letter is written into the user's file. `0x2525b0` is file offset `0x6990`.
 ## 4. launcHER
 
 - `PopsUserRomState` (`common/include/pops_modes_patches.h`) holds the
-  seven words: `bios_all`, `bios_game`, the four OSD words and `osd_off`
-  (`gp+0x3704`). launcHER has no OSD loader, so only the BIOS flags and
-  `osd_off` are ever set in a launch; the functions follow all of them.
+  BIOS/OSD flags, `osd_off` (`gp+0x3704`), the validated-core integrity
+  result, built-in no-fix, abort and game-folder-missing state. The OSD
+  loader now sets the four OSD flags in a launch; see `POPSTARTER_OSD.md`.
+  The other functions continue to follow the state fields they used before.
 - `pops_user_bios_stage()` is the loader after its open: the entry tests,
   the size test, the copy of what the read delivered (at most `0x7ff90`
   bytes), the `0x20079a` write and the flag. `pops_user_bios_skipped()` and

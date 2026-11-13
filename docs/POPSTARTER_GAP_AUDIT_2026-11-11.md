@@ -453,13 +453,16 @@ handler's checks.
 | `FUN_008db97c`, mode 6 and the `$UNDO_` handlers read only the BIOS flags, never the OSD ones. Mode 6 after an OSD load still writes `0x2525b0 = 0x0648` | `1x` | yes |
 | The v2 code leaves a `jal` in a `jal`'s delay slot (`0x252c34`/`0x252c38`). What POPS's recompiler does with that is unknown | `2x` for the words; behaviour unknown | no |
 
-launcHER: still no OSD loader at `ef663b2`. Since `0945127` the four OSD
-words live in `PopsUserRomState` and the shell edits, region pass, mode 6
-and `$UNDO_` functions follow them (`docs/POPSTARTER_USER_BIOS.md`
-section 4), but nothing sets them in a launch. Wiring points:
-`pops_stage_fix_files` and `pops_stage_user_files` (`handler_pops.c`), the
-`PopsUserRomState` the launch passes to `pops_apply_bios_shell_edits_rom`
-and `pops_apply_region_rom`.
+launcHER had no OSD loader at `ef663b2`. The 2026-11-12 piece adds
+`pops_osd_plan` / `pops_osd_stage`, the exact reader and per-scope launch
+look-ahead before BIOS. It sets all four OSD flags and propagates built-in
+no-fix. `tools/test_pops_osd.py` has 30 tests with references and 30
+without (15 skips), including 256 whole-core seeded differentials and both
+backend request models. The fix context is refreshed after validated OSD
+writes without accepting later corruption. Remaining differences are quirks
+80 to 84: grouped file/command order, two-pass look-ahead, safe path-length
+handling, substituted integrity and uncopied POPS-folder inspection. Host
+and Unicorn evidence only; no real sample or console run.
 
 ### 5a. What the BIOS and OSD flags change later (shared by sections 4 and 5)
 

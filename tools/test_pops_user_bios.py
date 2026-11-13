@@ -105,7 +105,9 @@ def buf(data):
 
 
 def rom(**flags):
-    return Rom(**flags)
+    initial = {"integrity": 1}
+    initial.update(flags)
+    return Rom(**initial)
 
 
 def flags_of(state):
@@ -330,7 +332,8 @@ int test_stage(void *core, size_t size, const char *root, const char *title,
   PopsFixContext state;
   PopsTrojanSet set;
   host_set(&set);
-  return pops_stage_fix_files(core, size, root, title, 0, 0, 0, 0, 0, 0, rom, &state, &set);
+  return pops_stage_fix_files(core, size, root, title, 0, 0, 0, 0, 0, 0, NULL, NULL, NULL,
+                              rom, &state, &set);
 }
 int test_load(void *core, size_t size, const char *dir, int per_game, PopsUserRomState *rom) {
   return pops_user_bios_load(core, size, dir, per_game, rom);
@@ -1224,7 +1227,8 @@ class Launch(Files):
             if patch6[scope] and not replaced and not off:
                 put(core, OSD_SITE, 0x0648, 2)
                 off = 1
-        return core, dict(flags_of(rom()), bios_all=int(loads[0]), bios_game=int(loads[1]), osd_off=off)
+        return core, dict(flags_of(rom()), bios_all=int(loads[0]), bios_game=int(loads[1]), osd_off=off,
+                          integrity=1)
 
     def test_commands_and_files_in_every_combination(self):
         """Built-in mode 6 x each folder's BIOS.BIN (none, one byte too small,
@@ -1308,7 +1312,7 @@ class Launch(Files):
             case = ([data and len(data) for data in files], builtin6, lines)
             self.assertEqual(rc, 0, case)
             self.assertEqual(get(core, OSD_SITE, 2), word, case)
-            self.assertEqual(flags_of(state), dict(flags_of(rom()), **flags), case)
+            self.assertEqual(flags_of(state), dict(flags_of(rom()), integrity=1, **flags), case)
             loaded = files[1] if flags.get("bios_game") else files[0] if flags.get("bios_all") else None
             if loaded:
                 self.assertEqual(bytes(core[ROM - BASE:ROM - BASE + ROM_READ]), loaded[:ROM_READ], case)
@@ -2000,7 +2004,8 @@ class Source(unittest.TestCase):
         body = self.body
         declared = body.index("PopsUserRomState romState;")
         calls = ["res = pops_stage_user_files((void *)stagedCore, plan.core_size, vcdDir, gameConfigDir,\n"
-                 "                              builtinId, builtinPlan.compat_modes, &cfg, &residentHdr,\n"
+                 "                              builtinId, builtinPlan.compat_modes | (builtinPlan.subcd ? 0x80 : 0),\n"
+                 "                              &cfg, &residentHdr,\n"
                  "                              &romState, &fixContext, &trojanSet);\n  if (res)\n    return res;",
                  "res = pops_apply_bios_shell_edits_rom((void *)stagedCore, plan.core_size, &romState);",
                  "&romState)\n                   : 0;"]
@@ -2034,6 +2039,7 @@ class Source(unittest.TestCase):
         order = ["pops_fix_context_init_builtin_rom(&context, stagedCore, coreSize, builtinId,",
                  "const char *dirs[] = {vcdDir, titleDir};",
                  "for (unsigned scope = 0; scope < 2; ++scope) {",
+                 "result = pops_user_osd_load(stagedCore, coreSize, dirs[scope], scope, rom, &actualPlan);",
                  "result = pops_user_bios_load(stagedCore, coreSize, dirs[scope], scope, rom);",
                  "result = pops_fix_context_rom_loaded(&context, stagedCore, coreSize);",
                  "for (unsigned kind = 0; kind < 2; ++kind) {",

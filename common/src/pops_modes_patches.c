@@ -660,6 +660,22 @@ int pops_fix_context_rom_loaded(PopsFixContext *context, const void *staged_core
   return 0;
 }
 
+int pops_fix_context_osd_loaded(PopsFixContext *context, void *staged_core,
+                                size_t core_size) {
+  PopsFixContext candidate;
+  if (!context || !staged_core ||
+      fix_alias(context, sizeof(*context), staged_core, core_size))
+    return -EINVAL;
+  candidate = *context;
+  for (unsigned i = 0; i < POPS_COMPAT_SITE_COUNT; ++i)
+    candidate.expected[i] = compat_read(staged_core, &compat_patches[i]);
+  int result = compat_context_check(&candidate, staged_core, core_size);
+  if (result)
+    return result;
+  *context = candidate;
+  return 0;
+}
+
 /* The sites the session tracks, as they are after an explicit payload write. */
 static void fix_context_refresh(PopsFixContext *context, const uint8_t *bytes) {
   for (unsigned i = 0; i < POPS_COMPAT_SITE_COUNT; ++i)

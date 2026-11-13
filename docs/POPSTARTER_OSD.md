@@ -1,10 +1,10 @@
 # POPStarter r13 `OSD.BIN`: design and evidence
 
-Status on 2026-11-12: **design for owner approval; no implementation or
-runtime evidence yet.** Work is isolated on `pr23/osd-bin`, based on merge
-`308684c`. The reference is clean REPOP `bc258e48` plus the original MAIN
-executed under Unicorn, not REPOP's prose alone. Nothing is tested on a
-console.
+Status on 2026-11-12: **implemented at host/Unicorn level; final full
+verification and independent review are pending.** Work is isolated on
+`pr23/osd-bin`, based on merge `308684c`. The reference is clean REPOP
+`bc258e48` plus the original MAIN executed under Unicorn, not REPOP's prose
+alone. Nothing is tested on a console.
 
 ## Intent and scope
 

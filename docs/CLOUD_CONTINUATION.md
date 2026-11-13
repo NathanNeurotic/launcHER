@@ -240,7 +240,11 @@ see [PR23_HANDOFF_2026-11-11.md](PR23_HANDOFF_2026-11-11.md), section 7.
 4. The loader flags and the passes they gate, then `BIOS.BIN`. Landed in
    `0945127` for `BIOS.BIN` (no POPS folder exit; OSD flags never set).
 5. Fix files before commands: measure both orders, then decide.
-6. `OSD.BIN`.
+6. `OSD.BIN`: implemented `pops_osd_plan` / `pops_osd_stage`, the exact
+   reader and per-scope launch look-ahead; 30 tests with references and 30
+   without (15 skips), including 256 whole-core seeded differentials and
+   both backend request models. Remaining differences are quirks 80 to 84.
+   Host/Unicorn only, not a console run.
 7. `$USBDELAY` parser and default, the preset table, command recognition
    context, `VMCDIR.TXT` rules. Parser, recognition and `VMCDIR.TXT` landed
    in `95ba812`; the default and the preset table are open; the review

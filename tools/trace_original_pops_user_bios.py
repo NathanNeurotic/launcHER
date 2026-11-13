@@ -128,6 +128,7 @@ class Machine:
         uc.mem_write(CORE_BASE, bytes(core))
         self.core_size = len(core)
         self.put(GP + 0x38B0, 0)  # not quiet: the messages are recorded
+        self.put(GP + 0x3890, 1)  # the validated POPS core passed inspection
         for name, value in (flags or {}).items():
             self.put(GP + (FLAGS[name] if isinstance(name, str) else name), value)
         self.error = None

@@ -28,6 +28,10 @@ if HAVE:
         HAVE = False
 
 
+def path_key(path):
+    return os.path.normcase(os.path.normpath(os.fsdecode(path)))
+
+
 ROM_FIELDS = ("bios_all", "bios_game", "osd_all_a", "osd_all_b", "osd_game_a", "osd_game_b",
               "osd_off", "integrity", "no_fix", "abort", "game_dir_missing")
 REASON_NAMES = {0: None, 2: "NOT_FILE", 3: "VERSION", 4: "HEADER", 5: "LOAD", 6: "ENTRY",
@@ -59,6 +63,8 @@ def library():
         _LIB.pops_osd_stage.restype = c.c_int
         _LIB.pops_user_osd_skipped.argtypes = [c.c_int, c.POINTER(Rom)]
         _LIB.pops_user_osd_skipped.restype = c.c_int
+        _LIB.pops_fix_context_osd_loaded.argtypes = [c.POINTER(B.Context), c.c_void_p, c.c_size_t]
+        _LIB.pops_fix_context_osd_loaded.restype = c.c_int
     return _LIB
 
 
@@ -118,6 +124,11 @@ static void osd_event(int kind, int fd, long long a, long long b, long long resu
   if (path) snprintf(event->path, sizeof(event->path), "%%s", path);
 }
 static int test_open(const char *path, int flags) {
+  size_t length = strlen(path);
+  if (length >= 7 && !strcmp(path + length - 7, "OSD.BIN")) {
+    ++bios_opens;
+    if (on_bios_open) on_bios_open(path, bios_opens);
+  }
   int fd = test_open_original(path, flags);
   osd_event(1, fd, flags, 0, fd, path);
   return fd;
@@ -363,6 +374,153 @@ class OriginalProbe(OsdTest):
                 self.assertIn(result["ret"], (0, 1))
                 if result["ret"] == 0:
                     self.assertEqual(result["core"], self.core)
+
+
+class Guard(unittest.TestCase):
+    def test_refresh_accepts_only_the_validated_osd_writes(self):
+        lib = library()
+        core = B.pristine_sites()
+        context = B.Context()
+        self.assertEqual(lib.pops_fix_context_init_builtin(c.byref(context), B.buf(core), B.SIZE,
+                                                          0, 0, 0), 0)
+        pal = list(context.video_expected)
+        resident = (context.resident_entry, list(context.resident_expected), context.progressive_set)
+        staged = stage_file(core, T.make_osd(modes=(4,)), flags={"integrity": 1})
+        self.assertEqual(staged["ret"], 1)
+        core = staged["core"]
+        blob = B.patch((1,))
+        self.assertEqual(lib.pops_fix_stage(c.byref(context), B.buf(core), B.SIZE,
+                                            blob, len(blob), 1, 0), -errno.EINVAL)
+        self.assertEqual(lib.pops_fix_context_osd_loaded(c.byref(context), B.buf(core), B.SIZE), 0)
+        self.assertEqual(list(context.video_expected), pal)
+        self.assertEqual((context.resident_entry, list(context.resident_expected), context.progressive_set), resident)
+        self.assertEqual(lib.pops_fix_stage(c.byref(context), B.buf(core), B.SIZE,
+                                            blob, len(blob), 1, 0), 0)
+        core[0x210318 - U.CORE_BASE] ^= 1
+        self.assertEqual(lib.pops_fix_context_osd_loaded(c.byref(context), B.buf(core), B.SIZE), 0)
+        before = bytes(context)
+        other = B.patch((2,))
+        self.assertEqual(lib.pops_fix_stage(c.byref(context), B.buf(core), B.SIZE,
+                                            other, len(other), 2, 0), -errno.EINVAL)
+        core[0x21AF94 - U.CORE_BASE] ^= 1
+        self.assertEqual(lib.pops_fix_context_osd_loaded(c.byref(context), B.buf(core), B.SIZE), -errno.EINVAL)
+        self.assertEqual(bytes(context), before)
+        other = B.patch((2,))
+        self.assertEqual(lib.pops_fix_stage(c.byref(context), B.buf(core), B.SIZE,
+                                            other, len(other), 2, 0), -errno.EINVAL)
+
+
+class Launch(OsdTest):
+    @classmethod
+    def setUpClass(cls):
+        cls.lib = reader_library()
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        (self.root / "GAME").mkdir()
+        self.core = U.core_image() if HAVE else B.pristine_sites()
+
+    def put(self, data, scope=0):
+        folder = self.root / "GAME" if scope else self.root
+        path = folder / "OSD.BIN"
+        if data is None:
+            if path.exists():
+                path.unlink()
+        else:
+            path.write_bytes(data)
+
+    def events(self):
+        out = []
+        for index in range(64):
+            event = Event()
+            if self.lib.test_osd_event(index, c.byref(event)) != 1:
+                break
+            out.append(event)
+        return out
+
+    def launch(self, lines=(), builtin=0, modes=0, state=None, context=None):
+        self.core = U.core_image() if HAVE else B.pristine_sites()
+        self.lib.test_io(0, 0, 0, 0, 0)
+        cfg = B.config(*lines)
+        if state is None:
+            state = B.rom(**{name: 0xFF for name in ROM_FIELDS})
+        rc = self.lib.test_launch(B.buf(self.core), len(self.core), os.fsencode(str(self.root) + "/"),
+                                  os.fsencode(str(self.root / "GAME") + "/"), builtin, modes,
+                                  c.byref(cfg), None, 0, c.byref(state),
+                                  None if context is None else c.byref(context))
+        return rc, state_dict(state)
+
+    def osd_opens(self):
+        return [path_key(event.path) for event in self.events()
+                if event.kind == 1 and event.path.endswith(b"OSD.BIN")]
+
+    def test_root_game_order_state_and_residue(self):
+        self.put(T.make_osd(version=2, body_size=64, seed=1), scope=0)
+        self.put(T.make_osd(version=1, body_size=32, seed=2), scope=1)
+        rc, flags = self.launch()
+        self.assertEqual(rc, 0)
+        self.assertEqual((flags["osd_all_a"], flags["osd_all_b"], flags["osd_game_a"],
+                          flags["osd_game_b"], flags["bios_all"], flags["bios_game"],
+                          flags["integrity"], flags["osd_off"]), (1, 1, 1, 1, 0, 0, 1, 0))
+        expected = [self.root / "OSD.BIN", self.root / "GAME" / "OSD.BIN",
+                    self.root / "OSD.BIN", self.root / "GAME" / "OSD.BIN"]
+        self.assertEqual(self.osd_opens(), [path_key(path) for path in expected])
+        root_body = T.make_osd(version=2, body_size=64, seed=1)[64:]
+        self.assertEqual(self.core[T.V2_ADDR - U.CORE_BASE:T.V1_ADDR - U.CORE_BASE],
+                         root_body + bytes(T.V1_ADDR - T.V2_ADDR - len(root_body)))
+        self.assertEqual(self.core[T.V1_ADDR - U.CORE_BASE:T.V1_ADDR - U.CORE_BASE + 32],
+                         T.make_osd(version=1, body_size=32, seed=2)[64:])
+
+    def test_commands_see_osd_state_and_no_fix(self):
+        self.put(T.make_osd(modes=(6,)), scope=0)
+        rc, flags = self.launch((b"$UNDO_GAME_FIXES",))
+        self.assertEqual(rc, 0)
+        self.assertEqual((T.get(self.core, 0x2525B0, 2), flags["osd_off"]), (0x0648, 1))
+        self.put(T.make_osd(modes=(1, 2, 3, 5)), scope=0)
+        self.put(T.make_osd(modes=(4, 7)), scope=1)
+        rc, flags = self.launch(modes=0x80)
+        self.assertEqual(rc, 0)
+        self.assertEqual(flags["no_fix"], 1)
+        self.assertEqual(T.get(self.core, 0x210314, 4), T.get(B.pristine_sites(), 0x210314, 4))
+        self.assertEqual(T.get(self.core, 0x20083C, 4), T.get(B.pristine_sites(), 0x20083C, 4))
+        self.assertEqual(T.get(self.core, 0x21AF70, 1), 0)
+        self.assertEqual(T.get(self.core, 0x21E45C, 1), 0x40)
+
+    def test_changed_files_between_probe_and_load(self):
+        original = T.make_osd(body_size=31, seed=1)
+        for replacement in (T.make_osd(body_size=47, seed=2), None):
+            with self.subTest(replacement=None if replacement is None else len(replacement)):
+                self.put(original, scope=0)
+                self.put(None, scope=1)
+                counts = {}
+
+                def change(path, _number):
+                    name = path_key(path)
+                    counts[name] = counts.get(name, 0) + 1
+                    if name == path_key(self.root / "OSD.BIN") and counts[name] == 2:
+                        self.put(replacement, scope=0)
+
+                hook = B.BIOS_OPEN_HOOK(change)
+                self.addCleanup(lambda: self.lib.test_on_bios_open(None))
+                self.lib.test_on_bios_open(c.cast(hook, c.c_void_p))
+                rc, flags = self.launch()
+                self.assertEqual(rc, -errno.EIO)
+        self.put(original, scope=0)
+        counts = {}
+
+        def same_plan(path, _number):
+            name = path_key(path)
+            counts[name] = counts.get(name, 0) + 1
+            if name == path_key(self.root / "OSD.BIN") and counts[name] == 2:
+                self.put(T.make_osd(body_size=31, seed=2), scope=0)
+
+        hook = B.BIOS_OPEN_HOOK(same_plan)
+        self.addCleanup(lambda: self.lib.test_on_bios_open(None))
+        self.lib.test_on_bios_open(c.cast(hook, c.c_void_p))
+        rc, flags = self.launch()
+        self.assertEqual(rc, 0)
 
 
 class Reader(OsdTest):
