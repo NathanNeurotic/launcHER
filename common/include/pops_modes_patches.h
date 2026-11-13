@@ -448,7 +448,15 @@ int pops_apply_opcode_pass(void *staged_core, size_t core_size);
  * it may carry POPS_BUILTIN_AFTER_FAKELC) was applied to the staged core:
  * the entry's compatibility modes and core writes are replayed over the
  * expected site values, in the entry's order, before initial_modes.
- * Computed from the entry data, not from live bytes. */
+ * Computed from the entry data, not from live bytes. The _rom form replays
+ * original_tokens' $UNDO_ writes after the built-in operations and before
+ * initial_modes, with the replaced-BIOS OSD gate, mode-6 preservation for
+ * the command pass's BIOS look-ahead, and the existing mode-6 fallback.
+ * The other form has no tokens or loader state. */
+int pops_fix_context_init_builtin_rom(PopsFixContext *context, const void *staged_core,
+                                      size_t core_size, uint16_t builtin_id,
+                                      uint8_t initial_modes, uint8_t initial_video_mode,
+                                      uint32_t original_tokens, const PopsUserRomState *rom);
 int pops_fix_context_init_builtin(PopsFixContext *context, const void *staged_core,
                                   size_t core_size, uint16_t builtin_id,
                                   uint8_t initial_modes, uint8_t initial_video_mode);

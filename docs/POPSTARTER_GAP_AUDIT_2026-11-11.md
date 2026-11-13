@@ -416,11 +416,13 @@ from the code, not re-measured by this pass:
   missing POPS folder and a missing folder never stops the later
   current-game loaders. Proposed as a quirk entry in this pass's report;
   the quirks file is not edited here.
-- Known gap that document records: a built-in entry followed by
-  `$UNDO_COMPATIBILITY_CODES` is refused with `-EINVAL` for 294 of 624
-  entries (the 291 that set compatibility modes and three that write mode
-  4's byte at `0x21af70` directly); the test marks it as an expected
-  failure.
+- The known gap recorded at that commit—a built-in entry followed by
+  `$UNDO_COMPATIBILITY_CODES` was refused for 294 of 624 entries—was fixed
+  on 2026-11-12 by token-aware expected state, including the direct writes
+  of entries 109, 571 and 572. Both orders now accept all 624 and accepted
+  final-core hashes match the original. See
+  `docs/handoff/2026-11-12/undo-expected-state.md`; the command/file order
+  difference itself remains.
 
 Host tests and Unicorn runs only. NOT TESTED on a console.
 

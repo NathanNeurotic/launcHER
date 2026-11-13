@@ -119,14 +119,14 @@ static int test_close(int fd) {
 int test_directory(void *core, size_t size, const char *root, const char *title) {
   PopsFixContext state;
   PopsTrojanSet set = HOST_SET;
-  int result = pops_stage_fix_files(core, size, root, title, 0, 0, 0, 0, 0, NULL, &state, &set);
+  int result = pops_stage_fix_files(core, size, root, title, 0, 0, 0, 0, 0, 0, NULL, &state, &set);
   return !result && state.video_auto_disabled > 1 ? -1000 : result;
 }
 int test_directory_video(void *core, size_t size, const char *root, const char *title,
                            unsigned video_mode) {
   PopsFixContext state;
   PopsTrojanSet set = HOST_SET;
-  int result = pops_stage_fix_files(core, size, root, title, 0, 0, video_mode, 0, 0, NULL, &state,
+  int result = pops_stage_fix_files(core, size, root, title, 0, 0, video_mode, 0, 0, 0, NULL, &state,
                                     &set);
   return result ? result : state.video_auto_disabled;
 }
@@ -135,7 +135,7 @@ int test_directory_resident(void *core, size_t size, const char *root, const cha
   PopsFixContext state;
   PopsTrojanSet set = HOST_SET;
   int result = pops_stage_fix_files(core, size, root, title, 0, 0, video_mode,
-                                    0x143a5d8, 0x32240001, NULL, &state, &set);
+                                    0x143a5d8, 0x32240001, 0, NULL, &state, &set);
   if (!result) result = pops_fix_require_progressive(&state, core, size);
   return result ? result : state.progressive_set;
 }

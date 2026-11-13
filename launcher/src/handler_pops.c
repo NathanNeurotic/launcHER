@@ -404,6 +404,7 @@ static int pops_stage_fix_files(void *stagedCore, size_t coreSize,
                                  uint16_t builtinId, uint8_t initialModes,
                                  uint8_t initialVideo,
                                  uint32_t progressiveEntry, uint32_t initialInterlace,
+                                 uint32_t originalTokens,
                                  PopsUserRomState *rom, PopsFixContext *finalContext,
                                  PopsTrojanSet *trojanSet) {
   PopsFixContext context;
@@ -412,8 +413,8 @@ static int pops_stage_fix_files(void *stagedCore, size_t coreSize,
     memset(&noState, 0, sizeof(noState));
     rom = &noState;
   }
-  int result = pops_fix_context_init_builtin(&context, stagedCore, coreSize, builtinId,
-                                              initialModes, initialVideo);
+  int result = pops_fix_context_init_builtin_rom(&context, stagedCore, coreSize, builtinId,
+                                                  initialModes, initialVideo, originalTokens, rom);
   if (result)
     return result;
   if (progressiveEntry) {
@@ -1060,7 +1061,7 @@ static int pops_stage_user_files(void *stagedCore, size_t coreSize,
                              cfg->progressive_requested ? POPS_VMODE_480P : cfg->video_mode,
                              residentHdr->progressive_entry,
                              cfg->hdtv_fix ? 0x24040001 : 0x32240001,
-                             rom, finalContext, trojanSet);
+                             cfg->original_tokens, rom, finalContext, trojanSet);
   if (res)
     return res;
   if (rom->bios_all != atCommands.bios_all ||
