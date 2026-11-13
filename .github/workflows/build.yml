@@ -74,6 +74,8 @@ jobs:
         run: python tools/test_pops_config_text.py
       - name: Test POPStarter's user BIOS.BIN and the gates its loader flags drive
         run: python tools/test_pops_user_bios.py
+      - name: Test POPStarter OSD.BIN validation, staging and launch paths
+        run: python tools/test_pops_osd.py
       - name: Test fix-file and command order against the original
         run: python tools/test_pops_fix_order.py
       - name: Test the POPS handoff (one thread left, interrupts off before the clears)
