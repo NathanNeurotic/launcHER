@@ -185,6 +185,177 @@ static const CompatPatch compat_patches[] = {
 typedef char compat_site_count_must_match[
     sizeof(compat_patches) / sizeof(compat_patches[0]) == POPS_COMPAT_SITE_COUNT ? 1 : -1];
 
+int pops_user_osd_skipped(int per_game, const PopsUserRomState *state) {
+  if (!state)
+    return 0;
+  if (!state->integrity || state->abort == 1)
+    return 1;
+  if (per_game == 1)
+    return state->game_dir_missing == 1;
+  return state->osd_game_b == 1;
+}
+
+int pops_osd_plan(const void *header, size_t header_read,
+                  int64_t file_size, PopsOsdPlan *plan) {
+  uint8_t hdr[POPS_OSD_HEADER_READ] = {0};
+  PopsOsdPlan candidate;
+  int32_t size;
+  if (!plan || (!header && header_read))
+    return -EINVAL;
+  if (header_read > sizeof(hdr))
+    return -ERANGE;
+  if (header_read)
+    memcpy(hdr, header, header_read);
+  if (!memcmp(hdr, "PS-X EXE", 8))
+    return POPS_OSD_REJECT_NOT_FILE;
+  size = (int32_t)((uint32_t)hdr[0x1c] | ((uint32_t)hdr[0x1d] << 8) |
+                   ((uint32_t)hdr[0x1e] << 16)) + POPS_OSD_HEADER_SIZE;
+  if (size < 0x44 || memcmp(hdr, "PS-X OSD", 8) || !hdr[0x0c])
+    return POPS_OSD_REJECT_NOT_FILE;
+  if (hdr[0x0c] != 1 && hdr[0x0c] != 2)
+    return POPS_OSD_REJECT_VERSION;
+  if (hdr[0x08] || hdr[0x09] || hdr[0x0a] || hdr[0x0b] || hdr[0x0d] || hdr[0x0f] ||
+      hdr[0x18] || hdr[0x19] || hdr[0x1a] || hdr[0x1b] || hdr[0x1f] ||
+      hdr[0x34] || hdr[0x35] || hdr[0x36] || hdr[0x37] ||
+      (hdr[0x3c] && hdr[0x0c] != 2) || hdr[0x3d] || hdr[0x3e] || hdr[0x3f])
+    return POPS_OSD_REJECT_HEADER;
+  if (hdr[0x0c] == 1 && (hdr[0x10] || hdr[0x11] || (!hdr[0x12] && !hdr[0x13])))
+    return POPS_OSD_REJECT_LOAD;
+  if (hdr[0x0c] == 1 && (hdr[0x14] || hdr[0x15] || (!hdr[0x16] && !hdr[0x17])))
+    return POPS_OSD_REJECT_ENTRY;
+  if (size != (int32_t)(uint32_t)(uint64_t)file_size)
+    return POPS_OSD_REJECT_SIZE;
+  if ((hdr[0x0c] == 1 && size > 0x4c040) || (hdr[0x0c] == 2 && size > 0x4d0e0))
+    return POPS_OSD_REJECT_TOO_BIG;
+  if (!hdr[0x0e])
+    return POPS_OSD_REJECT_BUILD;
+  if (!hdr[0x20])
+    return POPS_OSD_REJECT_LABEL;
+
+  memset(&candidate, 0, sizeof(candidate));
+  memcpy(candidate.header, hdr, POPS_OSD_HEADER_SIZE);
+  candidate.file_size = file_size;
+  candidate.body_size = (uint32_t)size - POPS_OSD_HEADER_SIZE;
+  candidate.body_address = hdr[0x0c] == 1 ? 0x00263c20 : 0x00262b80;
+  candidate.body_capacity = hdr[0x0c] == 1 ? 0x4c000 : 0x4d0a0;
+  candidate.body_request = candidate.body_size;
+  if (candidate.body_size <= candidate.body_capacity - 16 && (hdr[0x1c] & 0x0f))
+    candidate.body_request += 16;
+  *plan = candidate;
+  return 0;
+}
+
+static void osd_write(uint8_t *core, uint32_t address, uint32_t value, unsigned width) {
+  for (unsigned i = 0; i < width; ++i)
+    core[address - POPS_CORE_BASE_ADDR + i] = (uint8_t)(value >> (8 * i));
+}
+
+static void osd_apply_mode(uint8_t *core, uint8_t number, PopsUserRomState *state) {
+  if (!number || number > 7 || (state->no_fix && (number == 1 || number == 2 ||
+                                                  number == 3 || number == 5)))
+    return;
+  if (number == 6) {
+    if (mode6_gate(state) == 0) {
+      if (core)
+        osd_write(core, 0x002525b0, 0x0648, 2);
+      state->osd_off = 1;
+    }
+    return;
+  }
+  if (!core)
+    return;
+  for (unsigned i = 0; i < POPS_COMPAT_SITE_COUNT; ++i)
+    if (compat_patches[i].mode == number)
+      osd_write(core, compat_patches[i].address, compat_patches[i].replacement,
+                compat_patches[i].width);
+}
+
+int pops_osd_stage(void *core, size_t core_size, const PopsOsdPlan *plan,
+                   const void *body, size_t body_read,
+                   int per_game, PopsUserRomState *state) {
+  PopsOsdPlan valid;
+  uint8_t *bytes = core;
+  size_t offset, copy_size;
+  int checked;
+  if (!plan || !state)
+    return -EINVAL;
+  checked = pops_osd_plan(plan->header, POPS_OSD_HEADER_READ, plan->file_size, &valid);
+  if (checked < 0)
+    return checked;
+  if (checked)
+    return 0;
+  if (plan->file_size != valid.file_size || plan->body_size != valid.body_size ||
+      plan->body_request != valid.body_request || plan->body_address != valid.body_address ||
+      plan->body_capacity != valid.body_capacity ||
+      memcmp(plan->header, valid.header, POPS_OSD_HEADER_SIZE))
+    return -EINVAL;
+  if (body_read > plan->body_request || (!body && body_read))
+    return -EINVAL;
+  if (per_game == 1 && state->game_dir_missing == 1)
+    return -666;
+  if (pops_user_osd_skipped(per_game, state))
+    return 0;
+  offset = plan->body_address - POPS_CORE_BASE_ADDR;
+  if (core) {
+    if (offset > core_size || plan->body_capacity > core_size - offset)
+      return -ERANGE;
+    if (body_read) {
+      uintptr_t a = (uintptr_t)body, b = (uintptr_t)bytes + offset;
+      if (a <= b ? b - a < body_read : a - b < plan->body_capacity)
+        return -EINVAL;
+    }
+  }
+  if (state->osd_off == 1) {
+    if (core)
+      osd_write(bytes, 0x002525b0, 0x1bfc, 2);
+    state->osd_off = 0;
+  }
+  if (core) {
+    const uint8_t *hdr = plan->header;
+    if (hdr[0x0c] == 1) {
+      osd_write(bytes, 0x00252c30, hdr[0x12], 1);
+      osd_write(bytes, 0x00252c31, hdr[0x13], 1);
+      osd_write(bytes, 0x00252c40, hdr[0x16], 1);
+      osd_write(bytes, 0x00252c41, hdr[0x17], 1);
+    } else {
+      osd_write(bytes, 0x00252c28, 0x6f60, 2);
+      osd_write(bytes, 0x00252c2c, hdr[0x12], 1);
+      osd_write(bytes, 0x00252c2d, hdr[0x13], 1);
+      osd_write(bytes, 0x00252c2e, 0x3c04, 2);
+      osd_write(bytes, 0x00252c30, hdr[0x10], 1);
+      osd_write(bytes, 0x00252c31, hdr[0x11], 1);
+      osd_write(bytes, 0x00252c32, 0x3484, 2);
+      osd_write(bytes, 0x00252c34, 0x0ff00648, 4);
+      osd_write(bytes, 0x00252c38, 0x0ff00ad4, 4);
+      osd_write(bytes, 0x00252c40, hdr[0x16], 1);
+      osd_write(bytes, 0x00252c41, hdr[0x17], 1);
+      osd_write(bytes, 0x00252c44, hdr[0x14], 1);
+      osd_write(bytes, 0x00252c45, hdr[0x15], 1);
+      osd_write(bytes, 0x00252c46, 0x35ce, 2);
+      osd_write(bytes, 0x00252c48, hdr[0x3c] == 1 ? 0x01c00008 : 0x01c0f809, 4);
+    }
+    memset(bytes + offset, 0, plan->body_capacity);
+  }
+  for (unsigned i = 0; i < 4; ++i)
+    osd_apply_mode(bytes, plan->header[0x38 + i], state);
+  if (core) {
+    copy_size = body_read < plan->body_size ? body_read : plan->body_size;
+    if (copy_size)
+      memcpy(bytes + offset, body, copy_size);
+    if (body_read != plan->body_request || (plan->header[0x1c] & 0x0f))
+      memset(bytes + offset + plan->body_size, 0, plan->body_capacity - plan->body_size);
+    osd_write(bytes, 0x0020079a, 0x1000, 2);
+  }
+  if (per_game == 1) {
+    state->osd_game_a = 1;
+    state->osd_game_b = 1;
+  } else {
+    state->osd_all_a = 1;
+    state->osd_all_b = 1;
+  }
+  return 1;
+}
+
 static uint32_t compat_read(const uint8_t *bytes, const CompatPatch *patch) {
   uint32_t value = 0;
   for (unsigned j = 0; j < patch->width; ++j)
@@ -481,6 +652,69 @@ int pops_fix_context_rom_loaded(PopsFixContext *context, const void *staged_core
     if (offset > core_size || patch->width > core_size - offset)
       return -ERANGE;
     candidate.expected[i] = compat_read(staged_core, patch);
+  }
+  int result = compat_context_check(&candidate, staged_core, core_size);
+  if (result)
+    return result;
+  *context = candidate;
+  return 0;
+}
+
+int pops_fix_context_osd_loaded(PopsFixContext *context, const void *staged_core,
+                                size_t core_size, const PopsOsdPlan *plan,
+                                const PopsUserRomState *before) {
+  PopsFixContext candidate;
+  PopsOsdPlan valid;
+  PopsUserRomState sequential;
+  int checked;
+  if (!context || !staged_core || !plan || !before ||
+      fix_alias(context, sizeof(*context), staged_core, core_size) ||
+      fix_alias(plan, sizeof(*plan), staged_core, core_size) ||
+      fix_alias(before, sizeof(*before), staged_core, core_size))
+    return -EINVAL;
+  checked = pops_osd_plan(plan->header, POPS_OSD_HEADER_READ, plan->file_size, &valid);
+  if (checked)
+    return checked < 0 ? checked : -EINVAL;
+  if (plan->file_size != valid.file_size || plan->body_size != valid.body_size ||
+      plan->body_request != valid.body_request || plan->body_address != valid.body_address ||
+      plan->body_capacity != valid.body_capacity ||
+      memcmp(plan->header, valid.header, POPS_OSD_HEADER_SIZE))
+    return -EINVAL;
+  for (unsigned i = 0; i < POPS_COMPAT_SITE_COUNT; ++i) {
+    size_t offset = compat_patches[i].address - POPS_CORE_BASE_ADDR;
+    if (offset > core_size || compat_patches[i].width > core_size - offset)
+      return -ERANGE;
+  }
+  candidate = *context;
+  sequential = *before;
+  if (sequential.osd_off == 1) {
+    for (unsigned j = 0; j < POPS_COMPAT_SITE_COUNT; ++j)
+      if (compat_patches[j].address == 0x002525b0)
+        candidate.expected[j] = 0x1bfc;
+    sequential.osd_off = 0;
+  }
+  for (unsigned mode = 0; mode < 4; ++mode) {
+    uint8_t number = plan->header[0x38 + mode];
+    if (!number || number > 7 || (sequential.no_fix && (number == 1 || number == 2 ||
+                                                        number == 3 || number == 5)))
+      continue;
+    if (number == 6) {
+      if (mode6_gate(&sequential) == 0) {
+        for (unsigned j = 0; j < POPS_COMPAT_SITE_COUNT; ++j)
+          if (compat_patches[j].address == 0x002525b0)
+            candidate.expected[j] = 0x0648;
+        sequential.osd_off = 1;
+      }
+      continue;
+    }
+    for (unsigned i = 0; i < POPS_COMPAT_SITE_COUNT; ++i) {
+      const CompatPatch *patch = &compat_patches[i];
+      if (patch->mode != number)
+        continue;
+      for (unsigned j = 0; j < POPS_COMPAT_SITE_COUNT; ++j)
+        if (compat_patches[j].address == patch->address)
+          candidate.expected[j] = patch->replacement;
+    }
   }
   int result = compat_context_check(&candidate, staged_core, core_size);
   if (result)

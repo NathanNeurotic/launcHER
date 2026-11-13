@@ -49,6 +49,8 @@ static int pops_stage_user_files_alt(void *stagedCore, size_t coreSize,
                                      PopsTrojanSet *trojanSet, const char *ordered_lines) {
   int res;
   memset(rom, 0, sizeof(*rom));
+  rom->integrity = 1;
+  rom->no_fix = (builtinModes & 0x80) != 0;
   rom->osd_off = (builtinModes & (1 << 5)) != 0;
   if (trojanSet)
     trojanSet->chain_offered =
@@ -58,7 +60,7 @@ static int pops_stage_user_files_alt(void *stagedCore, size_t coreSize,
                              cfg->progressive_requested ? POPS_VMODE_480P : cfg->video_mode,
                              residentHdr->progressive_entry,
                              cfg->hdtv_fix ? 0x24040001 : 0x32240001,
-                             0, rom, finalContext, trojanSet);
+                             0, NULL, NULL, NULL, NULL, NULL, rom, finalContext, trojanSet);
   if (res)
     return res;
   {

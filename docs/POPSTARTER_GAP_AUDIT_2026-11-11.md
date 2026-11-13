@@ -330,10 +330,10 @@ commands see the flags the original's commands would see
 order still shows at `0x2525b0`: 28 of that document's 270 launch-sequence
 scenarios end differently, all through a `$UNDO_` command (its difference
 2; Unicorn on the host). Other inputs ending differently because of this
-have not been measured. One case cannot occur yet because there is no OSD
-loader: `$COMPATIBILITY_0x06` in `CHEATS.TXT` plus an `OSD.BIN` ends with
-the OSD off in the original and would end with it on if the OSD were
-staged after the commands.
+have not been measured. The OSD loader now exists (section 5), but the
+270-scenario BIOS chain does not cover its combined file/command cases.
+The OSD piece retains the grouped order and sequential loader state; the
+remaining production-order difference is quirk 80.
 
 At `cfebe01` the same test required `res = pops_apply_bios_shell_edits(` with
 no flag gate. Since `0945127` it pins `res = pops_apply_bios_shell_edits_rom(`
@@ -453,13 +453,18 @@ handler's checks.
 | `FUN_008db97c`, mode 6 and the `$UNDO_` handlers read only the BIOS flags, never the OSD ones. Mode 6 after an OSD load still writes `0x2525b0 = 0x0648` | `1x` | yes |
 | The v2 code leaves a `jal` in a `jal`'s delay slot (`0x252c34`/`0x252c38`). What POPS's recompiler does with that is unknown | `2x` for the words; behaviour unknown | no |
 
-launcHER: still no OSD loader at `ef663b2`. Since `0945127` the four OSD
-words live in `PopsUserRomState` and the shell edits, region pass, mode 6
-and `$UNDO_` functions follow them (`docs/POPSTARTER_USER_BIOS.md`
-section 4), but nothing sets them in a launch. Wiring points:
-`pops_stage_fix_files` and `pops_stage_user_files` (`handler_pops.c`), the
-`PopsUserRomState` the launch passes to `pops_apply_bios_shell_edits_rom`
-and `pops_apply_region_rom`.
+launcHER had no OSD loader at `ef663b2`. The 2026-11-12 piece adds
+`pops_osd_plan` / `pops_osd_stage`, the exact reader and per-scope launch
+look-ahead before BIOS. It sets all four OSD flags and propagates built-in
+no-fix. Actual loads use sequential built-in/root/game state, including
+actual root PATCH mode-6 transitions. `tools/test_pops_osd.py` has 37 tests
+with references and 37 without (17 skips), including 256 whole-core seeded
+differentials and both backend request models. Only validated header-selected
+compatibility writes refresh the fix context; unrelated corruption and short
+cores are rejected. Remaining differences are quirks 80 to 85: grouped
+file/command order, two-pass look-ahead, safe path-length handling,
+substituted integrity, uncopied POPS-folder inspection and the VCD-folder
+stand-in. Host and Unicorn evidence only; no real sample or console run.
 
 ### 5a. What the BIOS and OSD flags change later (shared by sections 4 and 5)
 
@@ -1043,11 +1048,11 @@ document's proposal, not the critic's.
 |---|---|---|---|---|---|---|
 | 1 | Correct the status documents (this commit) | C1 | n/a | small | none | first pass `cfebe01`; second pass this commit |
 | 2 | Fix files the original would skip must not end the launch: treat its "Invalid" and "Skipped (outdated)" outcomes as skip-and-continue in `pops_stage_fix_files`. Then TROJAN parity proper: the original's header rules, payloads outside the core written at their EE address at handoff (after checking them against launcHER's own regions), and the call slots in the resident GP1 work: at least the ten the corpus uses (section 12). An earlier wording said "fifteen"; it came from one mapping report's reading of the block as five slots plus ten, which the count in S26 (5 plus 55 empty pairs) does not support | D A | yes for classification and slot order (add the corpus classifier to `tools/test_pops_fix_files.py`, skipped without the external corpus); a payload actually running needs a console | large | none (the corpus result has been re-run, S27) | not landed; TROJAN work in progress on a side branch |
-| 3 | One path table measured from the original: a tool that records every open for backend x scope x suffix x name, a pure function that returns the same strings, and a written decision of how each original folder maps to launcHER's per device, HDD included. No behaviour change | C2 | yes | medium | owner decision on HDD mapping | not landed |
+| 3 | One path table measured from the original: a tool that records every open for backend x scope x suffix x name, a pure function that returns the same strings, and a written decision of how each original folder maps to launcHER's per device, HDD included. No behaviour change | C2 | yes | medium | owner selected exact HDD `__common` mapping on 2026-11-13 | not landed |
 | 4 | IGR skin staging: `pops_igr_skin_stage`, size checked before reading, never fatal, staged after the always-on pokes; default exit unchanged | C3 | yes | small | 3 for the folder | landed `173d5de`: reads the `.VCD`'s folder, not `POPS/`; no POPS folder exit (sections 6, 3) |
-| 5 | The six loader flags and the three downstream gates (section 5a, `$UNDO_`, mode 6, launcHER's `$NOBOOT` path), then `BIOS.BIN` with a partial reader | C4 | yes | medium | 3; one home for the flags | landed `0945127` for `BIOS.BIN` and the flags' home (`PopsUserRomState`); OSD words exist but nothing sets them (sections 4, 5a) |
+| 5 | The six loader flags and the three downstream gates (section 5a, `$UNDO_`, mode 6, launcHER's `$NOBOOT` path), then `BIOS.BIN` with a partial reader | C4 | yes | medium | 3; one home for the flags | landed `0945127` for `BIOS.BIN` and the flags' home (`PopsUserRomState`); the OSD piece of item 7 sets all four OSD flags and their downstream gates (sections 4, 5, 5a) |
 | 6 | Fix files before commands: first a test that runs both orders and records every differing final core; reorder only if it shows differences. Touches the pinned order test | C5 | yes | medium | before 7 | not landed; `docs/POPSTARTER_USER_BIOS.md` measured 28 of 270 scenarios differing at `0x2525b0` |
-| 7 | `OSD.BIN`: `pops_osd_stage` with one reason code per rejection, whole-core differential, directed boundary cases plus three negative controls (random cases caught two of three deliberate mutants in only 1 to 3 of 600) | C6 | yes | medium | 3, 5, 6 | not landed |
+| 7 | `OSD.BIN`: `pops_osd_stage` with one reason code per rejection, whole-core differential, directed boundary cases plus three negative controls (random cases caught two of three deliberate mutants in only 1 to 3 of 600) | C6 | yes | medium | 3, 5, 6 | implemented `34fd531`; host/Unicorn evidence in section 5, remaining quirks 80 to 85; no console run |
 | 8 | `$USBDELAY` parser (one digit, the original's terminators, default 1) and the preset table (fix or delete `pops_config_load_table`); command recognition context and `VMCDIR.TXT` rules; decide which launcHER-only forms stay as documented extensions | C7, D C | yes | small | none | parser, command recognition and `VMCDIR.TXT` landed `95ba812`; default still 0, preset table unchanged; review answers in progress on a side branch |
 | 9 | The `$USBDELAY` effect: a one-time delay on the first wrapped call in popfs, `XX.`/`SB.` only, replacing the EE sleep | C7, D D | host test with a fake delay; working only after a console or emulator run | medium | 8 | not landed |
 | 10 | Launch-argument rules as a pure function (prefix scan, launch type, `cdrom` exit) and resolver candidates (`IMAGE0.VCD`, `POPS0..9`, `__.POPS0..9`, fail instead of truncating); `IOPRP.IMG` fallback; remove the test folder from the search list | C8, D B | yes | medium | a decision on where a `.vcd`-target launcher consults ELF-name rules | not landed |

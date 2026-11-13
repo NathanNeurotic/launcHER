@@ -56,6 +56,8 @@ FLAGS = {
     "osd_game_a": 0x3878,
     "osd_game_b": 0x344C,
     "osd_off": 0x3704,
+    "integrity": 0x3890,
+    "no_fix": 0x3458,
     "abort": 0x38DC,          # shared "stop loading files" flag
     "game_dir_missing": 0x3460,
     "preset_osd_off": 0x3438,
@@ -126,6 +128,7 @@ class Machine:
         uc.mem_write(CORE_BASE, bytes(core))
         self.core_size = len(core)
         self.put(GP + 0x38B0, 0)  # not quiet: the messages are recorded
+        self.put(GP + 0x3890, 1)  # the validated POPS core passed inspection
         for name, value in (flags or {}).items():
             self.put(GP + (FLAGS[name] if isinstance(name, str) else name), value)
         self.error = None

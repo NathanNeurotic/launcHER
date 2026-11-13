@@ -35,7 +35,8 @@ OSD_SITE = 0x2525B0
 SKIPPED = 1  # POPS_MODE6_SKIPPED
 
 FLAG_NAMES = ("bios_all", "bios_game", "osd_all_a", "osd_all_b", "osd_game_a", "osd_game_b",
-              "osd_off")
+              "osd_off", "integrity", "no_fix", "abort", "game_dir_missing")
+BIOS_FLAG_NAMES = FLAG_NAMES[:7]
 REPLACED = ("bios_all", "bios_game")                       # gates of 0x2525b0's writers
 KEEPS_SHELL = ("bios_all", "bios_game", "osd_all_b", "osd_game_b")  # shell edits, region
 
@@ -104,7 +105,9 @@ def buf(data):
 
 
 def rom(**flags):
-    return Rom(**flags)
+    initial = {"integrity": 1}
+    initial.update(flags)
+    return Rom(**initial)
 
 
 def flags_of(state):
@@ -164,11 +167,11 @@ def changed(a, b, step=4096):
 
 def all_flag_sets():
     """Every combination of the seven flags (128)."""
-    for bits in itertools.product((0, 1), repeat=len(FLAG_NAMES)):
-        yield {name: bit for name, bit in zip(FLAG_NAMES, bits) if bit}
+    for bits in itertools.product((0, 1), repeat=len(BIOS_FLAG_NAMES)):
+        yield {name: bit for name, bit in zip(BIOS_FLAG_NAMES, bits) if bit}
 
 
-SINGLE_FLAG_SETS = [{}] + [{name: 1} for name in FLAG_NAMES] + [{"bios_all": 1, "bios_game": 1}]
+SINGLE_FLAG_SETS = [{}] + [{name: 1} for name in BIOS_FLAG_NAMES] + [{"bios_all": 1, "bios_game": 1}]
 
 ROM = 0x24BC20       # POPS_USER_BIOS_ADDR: POPS's copy of the PS1 ROM
 ROM_READ = 0x7FF90   # POPS_USER_BIOS_READ: what the loader asks read() for
@@ -329,10 +332,17 @@ int test_stage(void *core, size_t size, const char *root, const char *title,
   PopsFixContext state;
   PopsTrojanSet set;
   host_set(&set);
-  return pops_stage_fix_files(core, size, root, title, 0, 0, 0, 0, 0, 0, rom, &state, &set);
+  return pops_stage_fix_files(core, size, root, title, 0, 0, 0, 0, 0, 0,
+                              NULL, NULL, NULL, NULL, NULL, rom, &state, &set);
 }
 int test_load(void *core, size_t size, const char *dir, int per_game, PopsUserRomState *rom) {
   return pops_user_bios_load(core, size, dir, per_game, rom);
+}
+static int pops_user_osd_load(void *core, size_t size, const char *dir,
+                              int per_game, PopsUserRomState *state, PopsOsdPlan *plan);
+int test_osd_load(void *core, size_t size, const char *dir, int per_game,
+                  PopsUserRomState *state, PopsOsdPlan *plan) {
+  return pops_user_osd_load(core, size, dir, per_game, state, plan);
 }
 int test_dependency(const char *path, void *buffer, size_t size, size_t *read_size) {
   return readPopsDependency(path, buffer, size, read_size);
@@ -439,7 +449,7 @@ def reader_library():
 
 class Native(unittest.TestCase):
     def test_state_layout_and_predicates(self):
-        self.assertEqual(c.sizeof(Rom), 7)
+        self.assertEqual(c.sizeof(Rom), 11)
         self.assertEqual(LIB.pops_user_rom_replaced(None), 0)
         self.assertEqual(LIB.pops_user_rom_keeps_shell(None), 0)
         for flags in all_flag_sets():
@@ -1217,7 +1227,8 @@ class Launch(Files):
             if patch6[scope] and not replaced and not off:
                 put(core, OSD_SITE, 0x0648, 2)
                 off = 1
-        return core, dict(flags_of(rom()), bios_all=int(loads[0]), bios_game=int(loads[1]), osd_off=off)
+        return core, dict(flags_of(rom()), bios_all=int(loads[0]), bios_game=int(loads[1]), osd_off=off,
+                          integrity=1)
 
     def test_commands_and_files_in_every_combination(self):
         """Built-in mode 6 x each folder's BIOS.BIN (none, one byte too small,
@@ -1301,7 +1312,7 @@ class Launch(Files):
             case = ([data and len(data) for data in files], builtin6, lines)
             self.assertEqual(rc, 0, case)
             self.assertEqual(get(core, OSD_SITE, 2), word, case)
-            self.assertEqual(flags_of(state), dict(flags_of(rom()), **flags), case)
+            self.assertEqual(flags_of(state), dict(flags_of(rom()), integrity=1, **flags), case)
             loaded = files[1] if flags.get("bios_game") else files[0] if flags.get("bios_all") else None
             if loaded:
                 self.assertEqual(bytes(core[ROM - BASE:ROM - BASE + ROM_READ]), loaded[:ROM_READ], case)
@@ -1561,7 +1572,7 @@ class Original(unittest.TestCase):
                 count += 1
         for number in (1, 2, 3, 4, 5, 7):
             plain = U.mode(self.core, number)[0]
-            for name in FLAG_NAMES:
+            for name in BIOS_FLAG_NAMES:
                 self.assertEqual(U.mode(self.core, number, {name: 1})[0], plain, (number, name))
                 ours = bytearray(self.core)
                 state = rom(**{name: 1})
@@ -1624,7 +1635,7 @@ class Original(unittest.TestCase):
         given what the launcher's reader gives it."""
         runs = loads = 0
         for scope, size, flags in itertools.product((0, 1), (None,) + SIZES,
-                                                    [{}] + [{name: 1} for name in FLAG_NAMES]):
+                                                    [{}] + [{name: 1} for name in BIOS_FLAG_NAMES]):
             data = None if size is None else bios_file(size)
             theirs = [U.handler(self.core, scope, backend, data, flags) for backend in (0, 1)]
             case = (scope, size, flags)
@@ -1718,7 +1729,7 @@ class Original(unittest.TestCase):
             call = U.main_gate(scope)
             self.assertIsNotNone(call)
             self.assertEqual(call[0] == 1, scope == 1)
-            for flags in [{}] + [{name: 1} for name in FLAG_NAMES]:
+            for flags in [{}] + [{name: 1} for name in BIOS_FLAG_NAMES]:
                 called = U.main_gate(scope, flags) is not None
                 opened = bool(U.handler(self.core, scope, 0, None, flags)["io"])
                 state = rom(**flags)
@@ -1947,7 +1958,7 @@ class Original(unittest.TestCase):
         later readers are bnez, the loader's own entry tests compare with 1."""
         data = bios_file(ROM_MIN)
         count = 0
-        for scope, name, value in itertools.product((0, 1), FLAG_NAMES, (1, 2, 0x80, 0xFF)):
+        for scope, name, value in itertools.product((0, 1), BIOS_FLAG_NAMES, (1, 2, 0x80, 0xFF)):
             called = U.main_gate(scope, {name: value}) is not None
             loaded = U.handler(self.core, scope, 0, data, {name: value})["ret"] == 1
             state = rom(**{name: value})
@@ -1957,7 +1968,7 @@ class Original(unittest.TestCase):
             gate = name in (GATE_GAME if scope else GATE_ALL)
             self.assertEqual(loaded, not (gate and value == 1), (scope, name, value))
             count += 1
-        for name, value in itertools.product(FLAG_NAMES, (2, 0x80, 0xFF)):
+        for name, value in itertools.product(BIOS_FLAG_NAMES, (2, 0x80, 0xFF)):
             flags = {name: value}
             ours, state = bytearray(self.core), rom(**flags)
             self.assertEqual(LIB.pops_apply_bios_shell_edits_rom(buf(ours), SIZE, c.byref(state)), 0)
@@ -1993,7 +2004,8 @@ class Source(unittest.TestCase):
         body = self.body
         declared = body.index("PopsUserRomState romState;")
         calls = ["res = pops_stage_user_files((void *)stagedCore, plan.core_size, vcdDir, gameConfigDir,\n"
-                 "                              builtinId, builtinPlan.compat_modes, &cfg, &residentHdr,\n"
+                 "                              builtinId, builtinPlan.compat_modes | (builtinPlan.subcd ? 0x80 : 0),\n"
+                 "                              &cfg, &residentHdr,\n"
                  "                              &romState, &fixContext, &trojanSet);\n  if (res)\n    return res;",
                  "res = pops_apply_bios_shell_edits_rom((void *)stagedCore, plan.core_size, &romState);",
                  "&romState)\n                   : 0;"]
@@ -2027,7 +2039,8 @@ class Source(unittest.TestCase):
         order = ["pops_fix_context_init_builtin_rom(&context, stagedCore, coreSize, builtinId,",
                  "const char *dirs[] = {vcdDir, titleDir};",
                  "for (unsigned scope = 0; scope < 2; ++scope) {",
-                 "result = pops_user_bios_load(stagedCore, coreSize, dirs[scope], scope, rom);",
+                 "result = pops_user_osd_load(stagedCore, coreSize, dirs[scope], scope, osdState, &actualPlan);",
+                 "result = pops_user_bios_load(stagedCore, coreSize, dirs[scope], scope, osdState);",
                  "result = pops_fix_context_rom_loaded(&context, stagedCore, coreSize);",
                  "for (unsigned kind = 0; kind < 2; ++kind) {",
                  'kind ? "PATCH" : "TROJAN", slot);',
@@ -2046,13 +2059,13 @@ class Source(unittest.TestCase):
         helper = self.helper()
         order = ["memset(rom, 0, sizeof(*rom));",
                  "rom->osd_off = (builtinModes & (1 << 5)) != 0;",
-                 "atCommands = *rom;",
+                 "sequential = *rom;",
+                 "atCommands = sequential;",
                  "res = pops_user_bios_load(NULL, 0, vcdDir, 0, &atCommands);",
                  "atCommands.bios_all = res > 0;",
                  "res = pops_user_bios_load(NULL, 0, titleDir, 1, &atCommands);",
                  "atCommands.bios_game = res > 0;",
                  "res = pops_apply_all_config_patches_rom(stagedCore, coreSize, cfg, &atCommands);",
-                 "rom->osd_off = atCommands.osd_off;",
                  "res = pops_resident_hook_recompiler_emit(stagedCore, coreSize, cfg->recompiler_addons,",
                  "res = pops_stage_fix_files(stagedCore, coreSize, vcdDir, titleDir, builtinId,",
                  "if (rom->bios_all != atCommands.bios_all ||\n"
