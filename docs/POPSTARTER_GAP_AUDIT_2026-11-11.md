@@ -20,6 +20,16 @@ What those branches will end with is not described here.
 
 **Later the same day:** those three pieces were merged (`adcca00` handoff fix, `bc67659` TROJAN files, `31300cd` config-text review answers; [PR23_HANDOFF_2026-11-11.md](PR23_HANDOFF_2026-11-11.md) section 2). The rows marked "in progress on a side branch" were not rewritten after those merges; read them together with that section.
 
+**2026-11-13 path measurement addendum:** [POPSTARTER_PATHS.md](POPSTARTER_PATHS.md)
+now publishes all 32 cases, 40 argument forms and 11 non-argument differences
+from original MAIN under Unicorn, independently verified in Task 2 with zero
+missing-input skips. Four complete launch kinds reach the modelled `ExecPS2`
+at `0x87c1cc`. The pure `original_search` model and native/source comparisons
+are registered in CI. Remaining path/staging behavior classes are quirks 86
+to 99. This addendum changes no production path or Ember behavior; exact HDD
+`__common` mapping is selected for later POPStarter-only implementation, not
+claimed as current behavior. Host/Unicorn evidence only.
+
 **Nothing in this document was run on a console or in an emulator of the
 whole machine.** "Measured" means: the named block of the original was run on
 a host under Unicorn (or the in-repo R5900 interpreter) with its library
@@ -453,7 +463,7 @@ handler's checks.
 | `FUN_008db97c`, mode 6 and the `$UNDO_` handlers read only the BIOS flags, never the OSD ones. Mode 6 after an OSD load still writes `0x2525b0 = 0x0648` | `1x` | yes |
 | The v2 code leaves a `jal` in a `jal`'s delay slot (`0x252c34`/`0x252c38`). What POPS's recompiler does with that is unknown | `2x` for the words; behaviour unknown | no |
 
-launcHER had no OSD loader at `ef663b2`. The 2026-11-12 piece adds
+At the historical `ef663b2` checkpoint launcHER had no OSD loader. The current 2026-11-12 piece adds
 `pops_osd_plan` / `pops_osd_stage`, the exact reader and per-scope launch
 look-ahead before BIOS. It sets all four OSD flags and propagates built-in
 no-fix. Actual loads use sequential built-in/root/game state, including
@@ -675,25 +685,27 @@ by older launcHER documents and not re-checked in this audit.
 
 ## 10. Launch type, argv rules and device paths
 
-Almost everything here is `read` from flow dumps and byte-store chains, and
-part of it from REPOP's superseded Ghidra export used as a lead. Only the
-`XX.` scan was run. Treat this section as the least certain one.
+The first version of this section used flow dumps and byte-store chains.
+The 2026-11-13 measured table now executes all 40 argument forms and the
+path/package/folder cases below under Unicorn. Labels here distinguish that
+later execution from the remaining static message/control-flow notes; see
+[POPSTARTER_PATHS.md](POPSTARTER_PATHS.md) for every ordered summary.
 
 | Statement | Label | Host |
 |---|---|---|
-| `argc == 0`, or `argv[0]` beginning `cdrom`: Exit (syscall 4) | `2x S10` (static both times) | yes |
-| `SB.`/`XX.` scan (`0x8714b8..0x8719c4`): index from the end down to 1; a `:`, `/` or `\` must stand before the three characters; `XX.` or `xx.` exactly, mixed case does not match; any path component qualifies, not only the file name; a bare name with no separator never matches | `2x` for `XX.` (12 strings emulated by the critic). The `SB.` half and `gp+0x3888 = 3` are `read` only: the critic's harness crashed on `SB.` inputs because that path runs extra debug code at `0x871624..0x8716c4` | yes |
-| Launch type `gp+0x3414` (`FUN_008d8db8`, `0x8d8db8..0x8db770`, 10,688 bytes): 1 for `hdd0:...:PATINFO` or `hdd0:...:pfs:/` with `LAUNCHER.ELF`/`.KELF` or `EXECUTE.ELF`/`.KELF`; 2 for `:pfs:/PP.` or `:pfs:/__.`, or a non-`hdd0` path with `/PP.` or `/__.`; 3 for mass mode; else 0 | `read`, never executed | yes |
-| The "was not renamed" messages fire only when `argv[0]` is not on `hdd0:` (or in mass mode) and names `LAUNCHER`/`EXECUTE` `.ELF`/`.KELF` after a separator. From `hdd0:...:pfs:/LAUNCHER.ELF` the same names select type 1 with no message. On MAIN no message is ever shown (quiet) | `read` | yes |
-| Types 1 and 2 mount `hdd0:<partition>` on `pfs0` and open `pfs0:IMAGE0.VCD` (`0x87551c`, `0x8754e0..0x875780`) | `read` | yes |
-| Type 0 mounts `hdd0:__.POPS` and opens `pfs0:<ELF base name>.VCD`; on failure it retries ten times, incrementing one byte of the partition name (`0x875d94..0x875fa4`). The names `__.POPS0`..`__.POPS9` are `inferred` from the byte writes | `read` / `inferred` | yes |
-| Type 3 opens `mass:/POPS/<name>.VCD`, then `mass:/POPS0/`..`mass:/POPS9/` (`0x8762cc..0x876690`); the loop also patches a path inside the PFS wrapper image with the folder found. Nobody decoded that loop or what the wrapper then serves | `read`, partly undecoded | yes |
-| Name length: `<folder>/<name>.VCD` reaching 80 characters is fatal ("Please shorten ...", `0x875a34..0x875aa8`) | `read` | yes |
-| On HDD, everything except the VCD comes from `hdd0:__common` mounted as `pfs1` (`FUN_008d8b14`, string xref `0x8d8b68`): `pfs1:/POPS/POPS.ELF`, the IOPRP image, `MODULE_n.IRX`, the IGR skin, `OSD.BIN`, `BIOS.BIN`, fix files, `CHEATS.TXT`, `VMCDIR.TXT`, `DISCS.TXT`, and the per-game folder `pfs1:/POPS/<title>/` with `SLOT%d.VMC`. The mount itself was read, not traced | `read` (paths for IGR/OSD/BIOS `2x`) | partly |
-| A failed `__common` mount is fatal ("Please create a __common partition manually...", `0x873f64`) | `read` | no |
-| POPS package (`FUN_0087cf68`, 5,240 bytes, caller `0x8743d8`): `XX.`/`SB.` try `mass:/POPS/POPS_IOX.PAK` (exactly `0xe50b8` bytes), then on USB only `POPS.PAK` (`0xe6240`), then `POPS.ELF` (`0x30530c`) with `IOPRP252.IMG` or `IOPRP.IMG`; `SB.` fails without the IOX pack; HDD uses only `pfs1:/POPS/POPS.ELF` with `IOPRP252.IMG` or `IOPRP.IMG`. There is no `pfs1` variant of either PAK | `read` from a superseded decompile plus strings; not emulated. Its identity checks (`305_`, `/kHn`, ` 4.5`) and failure handling are unmeasured | yes |
-| On HDD launches the VMC step (`FUN_008d8050`, branch at `0x8d8738`) creates the game folder if missing and writes `icon.sys` and `list.ico` into it when they are absent (xrefs `0x8d87cc`, `0x8d8848`; icon data at `0x9639b4`) | `read`; only the tail of the function was examined | partly |
-| The inventory's statement that SLOT VMC pre-creation is `XX.`/`SB.` only has not been checked against that HDD branch | open | yes |
+| `argc == 0`, or `argv[0]` beginning `cdrom`: Exit (syscall 4) | `2x S10` (static both times); both outcomes measured again in the 40-form run | yes |
+| `SB.`/`XX.` scan (`0x8714b8..0x8719c4`): index from the end down to 1; a `:`, `/` or `\` must stand before the three characters; `XX.` or `xx.` exactly, mixed case does not match; any path component qualifies, not only the file name; a bare name with no separator never matches. The measured `SB.`/`sb.` forms set `gp+0x3888 = 3` | measured for both prefixes and the native differences in all 40 forms, quirks 86 to 87 | yes |
+| Launch type `gp+0x3414` (`FUN_008d8db8`, `0x8d8db8..0x8db770`, 10,688 bytes): 1 for `hdd0:...:PATINFO` or `hdd0:...:pfs:/` with `LAUNCHER.ELF`/`.KELF` or `EXECUTE.ELF`/`.KELF`; 2 for `:pfs:/PP.` or `:pfs:/__.`, or a non-`hdd0` path with `/PP.` or `/__.`; 3 for mass mode; else 0 | measured through main for all 40 forms, including case, subdirectory, PATINFO and extension variants | yes |
+| The "was not renamed" messages fire only when `argv[0]` is not on `hdd0:` (or in mass mode) and names `LAUNCHER`/`EXECUTE` `.ELF`/`.KELF` after a separator. From `hdd0:...:pfs:/LAUNCHER.ELF` the same names select type 1 with no message. On MAIN no message is ever shown (quiet) | `read` for the message conditions; the corresponding stop/type outcomes are measured | yes |
+| Types 1 and 2 mount `hdd0:<partition>` on `pfs0` and open `pfs0:IMAGE0.VCD` (`0x87551c`, `0x8754e0..0x875780`) | measured in `hdd-pp`, `hdd-pp-no-vcd` and every type-1/2 form; pure `PART` returns only `IMAGE0.VCD` | yes |
+| Type 0 mounts `hdd0:__.POPS` and opens `pfs0:<ELF base name>.VCD`; on failure it retries the literal partitions `__.POPS0` through `__.POPS9`, skipping a failed mount | measured in `hdd-pops3` and `hdd-no-vcd`; no longer inferred from byte writes | yes |
+| Type 3 opens `mass:/POPS/<name>.VCD`, then `mass:/POPS0/`..`mass:/POPS9/` (`0x8762cc..0x876690`); the selected digit moves per-game files but not the IGR skin or MODULE_n.IRX | paths and state measured in `usb-pops4` and all USB forms; what the wrapper later serves in a real POPS run remains outside this model | yes |
+| Name length: a title of 72 characters is used whole; 73 is fatal at `0x875aa8` before the VCD open | measured independently on USB and HDD (`usb-72`, `usb-73`, `hdd-72`, `hdd-73`) | yes |
+| On HDD, everything except the VCD comes from `hdd0:__common` mounted as `pfs1` (`FUN_008d8b14`, string xref `0x8d8b68`): `pfs1:/POPS/POPS.ELF`, the IOPRP image, `MODULE_n.IRX`, the IGR skin, `OSD.BIN`, `BIOS.BIN`, fix files, `CHEATS.TXT`, `VMCDIR.TXT`, `DISCS.TXT`, and the per-game folder `pfs1:/POPS/<title>/` | complete ordered mount/open/create traces measured in `hdd`, `hdd-pp` and `hdd-folder`; quirks 88 and 92 to 96 | yes |
+| A failed `__common` mount is fatal ("Please create a __common partition manually...", `0x873f64`) | `hdd-no-common` measures mount `-2` and fatal `0x873f88`; message text remains static | yes |
+| POPS package (`FUN_0087cf68`, 5,240 bytes, caller `0x8743d8`): `XX.`/`SB.` try `mass:/POPS/POPS_IOX.PAK` (exactly `0xe50b8` bytes), then on USB only `POPS.PAK` (`0xe6240`), then `POPS.ELF` (`0x30530c`) with `IOPRP252.IMG` or `IOPRP.IMG`; `SB.` fails without the IOX pack; HDD uses only `pfs1:/POPS/POPS.ELF` with `IOPRP252.IMG` or `IOPRP.IMG`. There is no `pfs1` variant of either PAK | all package search/fallback cases measured, including wrong-size and wrong-content rejection; quirks 88 to 91 | yes |
+| On HDD launches the VMC step (`FUN_008d8050`, branch at `0x8d8738`) creates the game folder if missing and writes `icon.sys` and `list.ico` into it when they are absent (xrefs `0x8d87cc`, `0x8d8848`; icon data at `0x9639b4`) | measured write sizes/order in `hdd`; existing files retained in `hdd-folder`; quirk 93 | yes |
+| SLOT VMC pre-creation is `XX.`/`SB.` only; the HDD branch asks for the game folder and icon files, not SLOT0/1.VMC | measured in the complete HDD traces and the USB/SMB card cases; quirk 95 | yes |
 
 Paths the original opens, assembled from the rows above and sections 4 to 6:
 
@@ -712,12 +724,14 @@ Paths the original opens, assembled from the rows above and sections 4 to 6:
 | `VMCDIR.TXT` | same | same | `0x8d50d8` |
 | `DISCS.TXT` | same | same | `0x8d5dd8` |
 | `MODULE_n.IRX` | `pfs1:/POPS/` | `mass:/POPS/` | strings |
-| `SLOT%d.VMC` | `pfs1:/POPS/<title>/` | `mass:/POPS<s>/<title>/` (`read`) | `0x874d78` |
+| `SLOT%d.VMC` | not pre-created in the measured HDD launch; that branch writes icons instead | `mass:/POPS<s>/<title>/` (measured) | complete traces; quirk 95 |
 | SMB files, USB pair | `mc0:/POPSTARTER/`, then `mc1:` | same | `0x871d68..0x873c40` |
 
-`<s>` is the optional `POPS0..9` digit. No report produced this table from
-one measurement; a tool that records every open for backend x scope x
-suffix is increment 3 in section 16.
+`<s>` is the optional `POPS0..9` digit. This was the old static assembly;
+the authoritative 2026-11-13 table now records every open for the 32 cases,
+40 forms, branch answers, suffixes and outcomes in request order. Its pure
+model and CI registration complete measurement increment 3 in section 16,
+not the later production implementation.
 
 launcHER:
 
@@ -734,7 +748,8 @@ launcHER:
   All per-game files are looked up relative to the VCD's own folder
   (`vcdDir`, `gameConfigDir`, `handler_pops.c:870-884`). On USB/SMB with the
   VCD in the POPS folder that is the same folder as the original's. On HDD
-  it is not. Nobody has compared the HDD locations file by file.
+  it is not. The 2026-11-13 measured table now compares every HDD location
+  file by file (quirks 88 and 92 to 96); production mapping remains open.
 - POPS package search (`handler_pops.c:114-196`): per folder
   `POPS_IOX.PAK`, `POPS.PAK`, `POPS.ELF` + `IOPRP252.IMG`. There is no
   `IOPRP.IMG` fallback (S17 grep). Folders: the VCD's, `<dev>:/POPS/`,
@@ -943,10 +958,15 @@ from launcHER's sources (S17 for the lines).
 - Its own exit instead of the original's exit program at `0x1450000`.
 - The stale test folder in the package search list (`handler_pops.c:153`).
 
-## 15. Parts of the original nobody has examined
+## 15. Parts of the original nobody had examined at `ef663b2`
 
-From the critic's list, unchanged in substance. "Examined" here means read
-closely or executed; strings-only passes do not count.
+This is the historical coverage list from the critic, not a claim that the
+same path work is still absent. The 2026-11-13 addendum above supersedes its
+path-related bullets for numbered folders, HDD retry and file locations,
+package loading, name construction/length, VMC preparation and argument
+classification with the 32-case/40-form measured table. Unrelated and
+explicitly unmeasured runtime questions below remain open. "Examined" here
+means read closely or executed; strings-only passes do not count.
 
 - `POPS<n>` folder variant on type 3: `0x8762cc..0x876690` sets
   `gp+0x381c`, stores `/` pairs at `gp+0x347a`/`0x347b`, loops over the
@@ -969,7 +989,7 @@ closely or executed; strings-only passes do not count.
   variant.
 - `FUN_008d8050` (2,312 bytes, VMC preparation): only its tail.
   `FUN_008d7c40` (568 bytes, called from it at `0x8d8810`): not at all.
-- `FUN_008d8db8` (10,688 bytes): read from flow dumps, never executed.
+- `FUN_008d8db8` (10,688 bytes): only flow dumps at this historical checkpoint; subsequently executed through main for all 40 forms in the 2026-11-13 measured table.
 - `main` `0x879e5c..0x87c1e0` ("LAUNCHING POPS"): the ten `FUN_008d7024`
   calls, the IOPRP module-name compare chains `0x87a074..0x87a610`, the
   `crap:` device and its small embedded IRX (copied five times at
@@ -1044,11 +1064,11 @@ POPS memory, so launcHER needs nothing for it (`1x`; callers `2x S6`).
 which the critic never saw; where those sit in the order is this
 document's proposal, not the critic's.
 
-| # | Increment | Source | Host-verifiable | Effort | Depends on | State at `ef663b2` |
+| # | Increment | Source | Host-verifiable | Effort | Depends on | State at `ef663b2`, with later updates noted |
 |---|---|---|---|---|---|---|
 | 1 | Correct the status documents (this commit) | C1 | n/a | small | none | first pass `cfebe01`; second pass this commit |
 | 2 | Fix files the original would skip must not end the launch: treat its "Invalid" and "Skipped (outdated)" outcomes as skip-and-continue in `pops_stage_fix_files`. Then TROJAN parity proper: the original's header rules, payloads outside the core written at their EE address at handoff (after checking them against launcHER's own regions), and the call slots in the resident GP1 work: at least the ten the corpus uses (section 12). An earlier wording said "fifteen"; it came from one mapping report's reading of the block as five slots plus ten, which the count in S26 (5 plus 55 empty pairs) does not support | D A | yes for classification and slot order (add the corpus classifier to `tools/test_pops_fix_files.py`, skipped without the external corpus); a payload actually running needs a console | large | none (the corpus result has been re-run, S27) | not landed; TROJAN work in progress on a side branch |
-| 3 | One path table measured from the original: a tool that records every open for backend x scope x suffix x name, a pure function that returns the same strings, and a written decision of how each original folder maps to launcHER's per device, HDD included. No behaviour change | C2 | yes | medium | owner selected exact HDD `__common` mapping on 2026-11-13 | not landed |
+| 3 | One path table measured from the original: a tool that records every open for backend x scope x suffix x name, a pure function that returns the same strings, and a written decision of how each original folder maps to launcHER's per device, HDD included. No behaviour change | C2 | yes | medium | owner selected exact HDD `__common` mapping on 2026-11-13 | measurement landed 2026-11-13 in [POPSTARTER_PATHS.md](POPSTARTER_PATHS.md): 32 cases, 40 forms, 11 other differences, pure `original_search`, CI; production mapping remains follow-on and quirks 86 to 99 are open |
 | 4 | IGR skin staging: `pops_igr_skin_stage`, size checked before reading, never fatal, staged after the always-on pokes; default exit unchanged | C3 | yes | small | 3 for the folder | landed `173d5de`: reads the `.VCD`'s folder, not `POPS/`; no POPS folder exit (sections 6, 3) |
 | 5 | The six loader flags and the three downstream gates (section 5a, `$UNDO_`, mode 6, launcHER's `$NOBOOT` path), then `BIOS.BIN` with a partial reader | C4 | yes | medium | 3; one home for the flags | landed `0945127` for `BIOS.BIN` and the flags' home (`PopsUserRomState`); the OSD piece of item 7 sets all four OSD flags and their downstream gates (sections 4, 5, 5a) |
 | 6 | Fix files before commands: first a test that runs both orders and records every differing final core; reorder only if it shows differences. Touches the pinned order test | C5 | yes | medium | before 7 | not landed; `docs/POPSTARTER_USER_BIOS.md` measured 28 of 270 scenarios differing at `0x2525b0` |

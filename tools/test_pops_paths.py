@@ -977,6 +977,32 @@ class Native(unittest.TestCase):
         found = native_candidates("mass:/POPS/XX.%s.ELF" % ("T" * 63))
         self.assertEqual(found[0], "mass0:/POPS/%s.VCD" % ("T" * 63))
 
+    def test_original_search_literal_order(self):
+        self.assertEqual(original_search((USB_SEARCH, "GAME")), [
+            "mass:/POPS/GAME.VCD", "mass:/POPS0/GAME.VCD", "mass:/POPS1/GAME.VCD",
+            "mass:/POPS2/GAME.VCD", "mass:/POPS3/GAME.VCD", "mass:/POPS4/GAME.VCD",
+            "mass:/POPS5/GAME.VCD", "mass:/POPS6/GAME.VCD", "mass:/POPS7/GAME.VCD",
+            "mass:/POPS8/GAME.VCD", "mass:/POPS9/GAME.VCD",
+        ])
+        self.assertEqual(original_search((HDD_SEARCH, "GAME")), [
+            "hdd0:__.POPS:pfs:/GAME.VCD", "hdd0:__.POPS0:pfs:/GAME.VCD",
+            "hdd0:__.POPS1:pfs:/GAME.VCD", "hdd0:__.POPS2:pfs:/GAME.VCD",
+            "hdd0:__.POPS3:pfs:/GAME.VCD", "hdd0:__.POPS4:pfs:/GAME.VCD",
+            "hdd0:__.POPS5:pfs:/GAME.VCD", "hdd0:__.POPS6:pfs:/GAME.VCD",
+            "hdd0:__.POPS7:pfs:/GAME.VCD", "hdd0:__.POPS8:pfs:/GAME.VCD",
+            "hdd0:__.POPS9:pfs:/GAME.VCD",
+        ])
+        self.assertEqual(original_search((PART, "PP.GAME")),
+                         ["hdd0:PP.GAME:pfs:/IMAGE0.VCD"])
+
+    def test_original_search_rejects_wrong_path(self):
+        expected = original_search((USB_SEARCH, "GAME"))
+        wrong = list(expected)
+        wrong[4] = "mass:/POPS3/WRONG.VCD"
+        with self.assertRaises(AssertionError) as mismatch:
+            self.assertEqual(expected, wrong)
+        self.assertIn("mass:/POPS3/WRONG.VCD", str(mismatch.exception))
+
 
 @unittest.skipUnless(HAVE_MAIN, "needs POPSTARTER_TEST_ELF and unicorn")
 class Original(unittest.TestCase):
@@ -1238,14 +1264,13 @@ class Source(unittest.TestCase):
         self.assertIn("NOT TESTED on a console", text)
         for name in T.CASES:
             self.assertIn("`%s`" % name, text, name)
-        # Every call site of the four complete runs is in the document.
+        # Every complete summary row, not only its call site, is published.
         for lines in (USB, HDD, PP_IMAGE, SMB):
             for line in lines:
-                for site in line.split()[0].split(".."):
-                    self.assertIn("0x" + site, text, line)
+                self.assertIn(line, text, line)
         for row in FORM_TABLE:
-            if row.argv is not None:
-                self.assertIn("`%s`" % row.argv, text, row.argv)
+            argument = "argc == 0" if row.argv is None else row.argv
+            self.assertIn("`%s`" % argument, text, argument)
         for item in OTHER_DIFFERENCES:
             self.assertIn(item.name, text)
 
