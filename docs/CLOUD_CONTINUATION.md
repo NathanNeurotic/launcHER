@@ -49,6 +49,15 @@ corrected from it on the same day. Both were brought up to `ef663b2` by a
 second correction pass (audit header and section 2b). Nothing in either was
 run on a console.
 
+On 2026-11-13 [POPSTARTER_PATHS.md](POPSTARTER_PATHS.md) adds the measured
+launch-path table: 32 cases, 40 argument forms and 11 non-argument
+differences, independently verified with zero missing-input skips. Its pure
+`original_search` expectations do not come from launcHER's resolver. Four
+complete modelled launches reach `ExecPS2` at `0x87c1cc`. Remaining classes
+are quirks 86 to 99. No launcher production path or Ember behavior changed;
+exact HDD `__common` mapping is follow-on POPStarter-only work. Host and
+Unicorn evidence only, NOT TESTED on a console.
+
 The finding that matters most to users: every TROJAN file found in the
 community fix packs loads outside the POPS core, launcHER rejects all of
 them, and a rejected fix file ends the launch. launcHER's side of that was
@@ -100,6 +109,12 @@ hook slots.
 - Run by `launch-args.yml`, not by `build.yml`: `test_launch_args.py`.
 - Every other `tools/test_*.py` file is a step of the `host-tests` job in `build.yml`.
 <!-- ci-coverage:end -->
+
+Current count after the 2026-11-13 path-table registration: 38 test files;
+CI runs 36, with 35 as `host-tests` steps in `build.yml` plus
+`test_launch_args.py` in its own workflow. The two unrun files remain the
+ones named above. `test_pops_paths.py` runs without references in CI, so its
+original-dependent methods report their documented skips there.
 
 Without the reference inputs the Original classes are skipped, so a green
 CI run says nothing about agreement with POPStarter. On a busy machine the
@@ -232,9 +247,11 @@ see [PR23_HANDOFF_2026-11-11.md](PR23_HANDOFF_2026-11-11.md), section 7.
 1. Fix files the original would skip must not end the launch; then TROJAN
    parity. The corpus result it rests on has been re-run (gap audit, S27).
    In progress on a side branch at `ef663b2`.
-2. One path table measured from the original for every per-folder file,
-   and a written decision on how each original folder maps to launcHER's
-   (HDD `hdd0:__common` included). No behaviour change.
+2. [Measured path table](POPSTARTER_PATHS.md) published: 32 cases, 40 forms
+   and 11 other differences, pure `original_search`, CI registration and
+   quirks 86 to 99. No behaviour change. Exact HDD `hdd0:__common` mapping
+   is selected for the later POPStarter-only implementation, not current
+   behavior.
 3. IGR skin staging. Landed in `173d5de` (reads the `.VCD`'s folder; no
    POPS folder exit).
 4. The loader flags and the passes they gate, then `BIOS.BIN`. Landed in
@@ -252,13 +269,17 @@ see [PR23_HANDOFF_2026-11-11.md](PR23_HANDOFF_2026-11-11.md), section 7.
    answers are in progress on a side branch.
 8. The `$USBDELAY` delay itself in popfs (needs tier 2 or 3 to call
    working).
-9. Launch-argument rules, resolver candidates, the `IOPRP.IMG` fallback,
-   removing the test folder from the package search list.
+9. Implement the measured launch-argument rules and resolver candidates
+   (quirks 86 to 87 and 98), the `IOPRP.IMG` fallback and package rules
+   (88 to 91), without preserving launcHER-only paths or the test folder as
+   defaults. Measurement is done; production behavior is not landed.
 10. SMB config parsers. Landed in `21c3476` for `SB.` launches of PS1
     games; not reviewed.
 11. Physical disc fallback. Host part landed in `f22a69f`, not called by
     the launch; not reviewed.
-12. HDD `__common` layout; SMB external modules and connect order (tier 3).
+12. Implement the selected exact HDD `__common` layout (quirks 92 to 96)
+   and the measured SMB external-module/connect sequence (99); runtime claims
+   need the appropriate later tier-3 evidence, not this host table.
 13. REPOP documentation follow-up, as a separate REPOP pull request.
 
 Owner decisions that block or shape the above are named in the gap audit
