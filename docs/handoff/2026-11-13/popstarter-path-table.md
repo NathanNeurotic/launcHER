@@ -20,10 +20,11 @@ CI registration. It does not add a production path implementation or a
 launcHER-only path default. Later POPStarter-only work must match r13 first,
 bugs included; Ember is excluded.
 
-The controller's final verdict and merge gate remain open. This handoff records
-the verification evidence and scoped re-review outcome, not a final `merge`
-verdict. No merge, push, PR-ready transition or PR description update was made
-with this evidence.
+The independent whole-branch verdict was `merge`. The piece then landed in
+draft PR #23 as `fcf24e89af183adebf28cbb7318850f7425b011f`; its tree was
+verified identical to the reviewed branch. The draft description and this
+handoff were updated after the merge build. PR #23 was not merged into EMBER
+or marked ready.
 
 ## Complete serial host verification
 
@@ -175,6 +176,12 @@ Follow-on order is argument parsing/dispatch (86); image candidates and
 length/failure rules (87, 98); exact device/POPS-folder mapping (88, 92–96);
 package acceptance and IOPRP fallback (89–91); physical-disc integration (97);
 and the full SB startup/connect sequence (99). Each implementation piece needs
-separate evidence and independent review. The immediate gate for this branch
-is the controller's final verdict and merge decision; no merge was performed
-in Task 4.
+separate evidence and independent review. The independent whole-branch verdict
+was `merge` with no remaining Critical or Important findings.
+
+The measured table landed in draft PR #23 as
+`fcf24e89af183adebf28cbb7318850f7425b011f`, with tree identity verified
+against `a7b3f991cdeb9848cefc6936583fc0f0dced1ade`. Final release and trace
+builds on that merge print `handoff layout: OK` and `version=fcf24e89af18`;
+their sizes and hashes match the artifacts above. PR #23 remains draft and is
+not merged into EMBER. No ELF was run on a console.
