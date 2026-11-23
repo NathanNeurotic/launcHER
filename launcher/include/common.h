@@ -3,6 +3,7 @@
 
 #include "loader.h"
 #include <debug.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #define USB_MOUNTPOINT "mass0:"
@@ -68,6 +69,10 @@ DeviceType guessDeviceType(char *path);
 
 // Attempts to convert launcher-specific path into path supported by PS2 modules
 char *normalizePath(char *path, DeviceType type);
+
+// Parses an APA/PFS path to extract the mount partition (e.g. "hdd0:+OPL")
+// and the relative path inside the partition.
+int parseAPAPath(const char *path, char *mountPart, size_t partSize, const char **pfsSubPath);
 
 // Attempts to launch ELF from device and path in argv[0]
 int launchPath(int argc, char *argv[]);

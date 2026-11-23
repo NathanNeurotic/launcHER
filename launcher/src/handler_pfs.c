@@ -13,9 +13,9 @@ int handlePFS(int argc, char *argv[]) {
     return -EINVAL;
   }
 
-  // Check if the path starts with "hdd?:/" and reject it
-  char *path = &argv[0][5];
-  if (path[0] == '/') {
+  char mountPart[256];
+  const char *subPath = NULL;
+  if (parseAPAPath(argv[0], mountPart, sizeof(mountPart), &subPath) != 0 || mountPart[0] == '\0') {
     msg("PFS: invalid path format\n");
     return -EINVAL;
   }
@@ -36,19 +36,12 @@ int handlePFS(int argc, char *argv[]) {
   if (res)
     return -ENOENT;
 
-  // Build the path as 'hdd0:<partition name>:pfs:/<path to ELF>'
-  if ((path = strstr(argv[0], ":pfs:"))) {
-    path[0] = '\0';
-    path += 5;
-    if (path[0] == '/')
-      path++;
-  } else if ((path = strchr(argv[0], '/'))) {
-    path[0] = '\0';
-    path++;
-  }
-
-  snprintf(elfPath, PATH_MAX - 1, "%s:pfs:/%s", argv[0], path);
-  argv[0] = elfPath;
+  // Build canonical path as 'hdd0:<partition name>:pfs:/<path to ELF>'
+  static char canonicalPath[PATH_MAX];
+  if (subPath[0] == '/' || subPath[0] == '\\')
+    subPath++;
+  snprintf(canonicalPath, sizeof(canonicalPath), "%s:pfs:/%s", mountPart, subPath);
+  argv[0] = canonicalPath;
 
   return LoadELFFromFile(argc, argv);
 }
