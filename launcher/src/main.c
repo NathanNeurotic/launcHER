@@ -1,7 +1,6 @@
 #include "common.h"
 #include "handlers.h"
 #include "loader.h"
-#include "launch_args.h"
 #include <fcntl.h>
 #include <kernel.h>
 #include <ps2sdkapi.h>
@@ -26,14 +25,10 @@ int main(int argc, char *argv[]) {
   settings.dkwdrvPath = NULL;
   settings.dev9ShutdownType = ShutdownType_All;
 
-  argc = launcher_normalize_args(argc, argv);
-  if (argc < 1)
-    fail("Invalid launcher arguments");
-
   // Try to guess the device type using argv[0]
   if (!strncmp(argv[0], "mc1", 3))
     settings.mcHint = 1;
-  if (!strncmp(argv[0], "pfs", 3) || !strncmp(argv[0], "hdd", 3) || argv[0][0] == '+' || !strncmp(argv[0], "__", 2) || strstr(argv[0], ":pfs"))
+  if (!strncmp(argv[0], "pfs", 3) || !strncmp(argv[0], "hdd", 3))
     settings.deviceHint = Device_APA;
   if (!strncmp(argv[0], "xfrom", 5))
     settings.deviceHint = Device_XFROM;
@@ -68,7 +63,7 @@ int main(int argc, char *argv[]) {
     fail("Invalid argv[0]");
 
   char *p = strrchr(argv[0], '.');
-  if (p && (!strcasecmp(p, ".cfg") || !strcasecmp(p, ".cnf")))
+  if (p && (!strcmp(p, ".cfg") || !strcmp(p, ".CFG") || !strcmp(p, ".CNF") || !strcmp(p, ".cnf")))
     // If argv[1] is a CNF/CFG file, try to load it
     fail("Quickboot failed: %d", handleQuickboot(argv[0]));
 

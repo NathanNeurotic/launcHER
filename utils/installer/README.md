@@ -1,7 +1,7 @@
 # OSDMenu MBR installer
 
 This is a simple application for installing the [OSDMenu MBR](../../mbr/).  
-Based on the [SoftDev2 installer](https://github.com/parrado/SoftDev2) by [Alex Parrado](https://github.com/parrado).
+Based on the [SoftDev2 installer](https://github.com/parrado/SoftDev2) by Alex Parrado.
 
 Requires properly configured `kelftool` to be present in the `./kelftool/` directory
 

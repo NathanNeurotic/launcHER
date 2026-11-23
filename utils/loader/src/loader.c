@@ -20,10 +20,8 @@
 #include <loadfile.h>
 #include <ps2sdkapi.h>
 #include <sifrpc.h>
-#include <stddef.h>
 #include <stdio.h>
 #include <string.h>
-#include <ctype.h>
 
 #define NEWLIB_PORT_AWARE
 #include <fileXio_rpc.h>
@@ -62,7 +60,6 @@ void resetIOP();
 
 // Mounts the partition specified in path
 int mountPFS(char *path);
-int parseAPAPath(const char *path, char *mountPart, size_t partSize, const char **pfsSubPath);
 
 // Puts HDD in idle mode and powers off the dev9 device
 void shutdownDEV9(ShutdownType s);
@@ -160,32 +157,19 @@ int main(int argc, char *argv[]) {
   }
 
   if (!elfPath) {
-    if (!strncmp(argv[0], "hdd", 3) || argv[0][0] == '+' || !strncmp(argv[0], "__", 2) || strstr(argv[0], ":pfs")) {
+    if (!strncmp(argv[0], "hdd", 3)) {
       // Mount the partition
       if (mountPFS(argv[0]))
         return -ENODEV;
 
       // HDD paths usually look as follows: hdd0:<partition name>:pfs:/<path to ELF>
       // However, SifLoadElf needs PFS path, not hdd0:
-      const char *subPath = NULL;
-      static char pfsPathBuf[256];
-      if (parseAPAPath(argv[0], NULL, 0, &subPath) == 0 && subPath && subPath[0] != '\0') {
-        if (subPath[0] == '/' || subPath[0] == '\\')
-          snprintf(pfsPathBuf, sizeof(pfsPathBuf), "pfs0:%s", subPath);
-        else
-          snprintf(pfsPathBuf, sizeof(pfsPathBuf), "pfs0:/%s", subPath);
-        for (char *c = pfsPathBuf + 5; *c; c++) {
-          if (*c == '\\')
-            *c = '/';
-        }
-        elfPath = pfsPathBuf;
-      } else {
-        elfPath = strstr(argv[0], ":pfs");
-        if (!elfPath)
-          elfPath = argv[0];
-        else
-          elfPath++; // point to 'pfs...'
-      }
+      // Extract PFS path from the argument
+      elfPath = (strstr(argv[0], ":pfs"));
+      if (!elfPath)
+        elfPath = argv[0];
+      else
+        elfPath++; // point to 'pfs...'
     } else
       elfPath = argv[0];
   }
@@ -413,136 +397,23 @@ int loadIOPRP(char *ioprpPath) {
 #endif
 }
 
-// Checks if a substring looks like a PFS mount token (e.g. pfs:, pfs0:, pfs0/)
-static int isPfsToken(const char *s) {
-  if (!s || strncasecmp(s, "pfs", 3) != 0)
-    return 0;
-  const char *t = s + 3;
-  while (*t >= '0' && *t <= '9')
-    t++;
-  return (*t == ':' || *t == '/' || *t == '\\');
-}
-
-// Parses an APA/PFS path to extract the mount partition (e.g. "hdd0:+OPL")
-// and the relative path inside the partition.
-int parseAPAPath(const char *path, char *mountPart, size_t partSize, const char **pfsSubPath) {
-  if (!path || !path[0])
-    return -EINVAL;
-
-  char hddPrefix[8] = "hdd0:";
-  const char *p = path;
-
-  // Check if it begins with hdd<unit>:
-  if (!strncmp(p, "hdd", 3)) {
-    const char *colon = strchr(p, ':');
-    if (colon) {
-      size_t unitLen = (size_t)(colon - p) + 1;
-      if (unitLen < sizeof(hddPrefix)) {
-        memcpy(hddPrefix, p, unitLen);
-        hddPrefix[unitLen] = '\0';
-      }
-      p = colon + 1;
-    }
-  }
-
-  // If path started with "pfs" directly (e.g. pfs0:/path), there is no partition info in path
-  if (!strncmp(p, "pfs", 3)) {
-    if (mountPart && partSize > 0)
-      mountPart[0] = '\0';
-    if (pfsSubPath) {
-      const char *colon = strchr(p, ':');
-      *pfsSubPath = colon ? colon + 1 : p;
-    }
-    return 0;
-  }
-
-  // p points to the start of the partition name (e.g. "+OPL" or "__.EMBER").
-  // Find where the partition name ends. Delimiters:
-  // 1. ':' (e.g. "+OPL:pfs:/...", "+OPL:pfs0:/...", "+OPL:/...", "+OPL:")
-  // 2. '/' or '\\' (e.g. "+OPL/APPS/...")
-  // 3. "pfs" mount token without preceding colon (e.g. "+OPLpfs0:/...")
-  // 4. '\0' (end of string)
-  const char *partStart = p;
-  while (*partStart == '/' || *partStart == '\\')
-    partStart++;
-  const char *partEnd = NULL;
-
-  const char *colon = strchr(partStart, ':');
-  const char *slash = strchr(partStart, '/');
-  const char *bslash = strchr(partStart, '\\');
-  if (bslash && (!slash || bslash < slash))
-    slash = bslash;
-
-  // Search for pfs mount token (e.g. pfs:, pfs0:, pfs0/)
-  const char *pfsToken = NULL;
-  const char *cur = partStart;
-  while ((cur = strstr(cur, "pfs")) != NULL) {
-    if (cur > partStart && isPfsToken(cur)) {
-      pfsToken = cur;
-      break;
-    }
-    cur += 3;
-  }
-
-  // Determine the earliest valid delimiter
-  if (colon)
-    partEnd = colon;
-  if (slash && (!partEnd || slash < partEnd))
-    partEnd = slash;
-  if (pfsToken && (!partEnd || pfsToken < partEnd))
-    partEnd = pfsToken;
-
-  if (!partEnd)
-    partEnd = partStart + strlen(partStart);
-
-  size_t partLen = (size_t)(partEnd - partStart);
-  if (partLen == 0)
-    return -EINVAL;
-
-  if (mountPart && partSize > 0) {
-    snprintf(mountPart, partSize, "%s%.*s", hddPrefix, (int)partLen, partStart);
-  }
-
-  // Advance past any delimiter, ":pfs", "pfs", digits, and colon to find the subpath
-  const char *sub = partEnd;
-  if (*sub == ':')
-    sub++;
-
-  if (!strncasecmp(sub, "pfs", 3)) {
-    sub += 3;
-    while (*sub >= '0' && *sub <= '9')
-      sub++;
-    if (*sub == ':')
-      sub++;
-  }
-
-  if (pfsSubPath) {
-    *pfsSubPath = sub;
-  }
-
-  return 0;
-}
-
-#define PFS_MT_WRITETHROUGH 0x02 // ps2sdk libpfs PFS_FIO_ATTR_WRITEABLE: commit on every write/close
-
 // Mounts the partition specified in path
 int mountPFS(char *path) {
-  char mountPart[256];
-  if (parseAPAPath(path, mountPart, sizeof(mountPart), NULL) != 0 || mountPart[0] == '\0')
-    return -ENODEV;
+  // Extract partition path
+  char *filePath = strstr(path, ":pfs:");
+  char pathSeparator = '\0';
+  if (filePath || (filePath = strchr(path, '/'))) {
+    // Terminate the partition path
+    pathSeparator = filePath[0];
+    filePath[0] = '\0';
+  }
 
   // Preserve a writable PFS mount when NICHDD was requested. Other DEV9
   // shutdown modes keep the existing read-only mount behavior.
-  //
-  // The NICHDD mount must also be WRITE-THROUGH (0x02, ps2sdk libpfs PFS_FIO_ATTR_WRITEABLE).
-  // FIO_MT_RDWR is 0x00: writable, but PFS then keeps every write in its RAM cache until an
-  // unmount or sync -- it commits on write/close only when the mount flags carry 0x02
-  // (pfs_fio.c pfsFioCloseFileSlot, pfsFioWrite). NICHDD hands this mount to the target live and
-  // shutdownDEV9 skips the unmount, so a target that closes but never syncs (Ember: its memory
-  // cards, and PS1 play ends in a reset) never had its writes reach the disk
-  // (Gageformer/Ember#69; the same fix as RiptOPL's Ember hand-off).
-  int mountMode = (dev9ShutdownType == ShutdownType_None) ? (FIO_MT_RDWR | PFS_MT_WRITETHROUGH) : FIO_MT_RDONLY;
-  int res = fileXioMount("pfs0:", mountPart, mountMode);
+  int mountMode = (dev9ShutdownType == ShutdownType_None) ? FIO_MT_RDWR : FIO_MT_RDONLY;
+  int res = fileXioMount("pfs0:", path, mountMode);
+  if (pathSeparator != '\0')
+    filePath[0] = pathSeparator; // Restore the path
   if (res)
     return -ENODEV;
 

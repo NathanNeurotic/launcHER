@@ -1,11 +1,7 @@
-<!-- project-links:start (generated, see https://github.com/NathanNeurotic/NathanNeurotic/tree/main/project-links) -->
-<p align="center"><sub><a href="https://github.com/NathanNeurotic/RiptOPL">RiptOPL</a> · <a href="https://github.com/NathanNeurotic/Launchstation">Launchstation</a> · <a href="https://github.com/NathanNeurotic/PS2-Servers">PS2-Servers</a> · <b>launcHER</b> · <a href="https://github.com/NathanNeurotic/Simple-Media-System">Simple-Media-System</a> · <a href="https://github.com/NathanNeurotic/POPSLoader">POPSLoader</a></sub></p>
-<p align="center"><sub><b>English</b> · <a href="https://github-com.translate.goog/NathanNeurotic/launcHER?_x_tr_sl=en&amp;_x_tr_tl=es&amp;_x_tr_hl=es">Español</a> · <a href="https://github-com.translate.goog/NathanNeurotic/launcHER?_x_tr_sl=en&amp;_x_tr_tl=pt&amp;_x_tr_hl=pt">Português (Brasil)</a> · <a href="https://github-com.translate.goog/NathanNeurotic/launcHER?_x_tr_sl=en&amp;_x_tr_tl=pt-PT&amp;_x_tr_hl=pt-PT">Português</a> · <a href="https://github-com.translate.goog/NathanNeurotic/launcHER?_x_tr_sl=en&amp;_x_tr_tl=fr&amp;_x_tr_hl=fr">Français</a> · <a href="https://github-com.translate.goog/NathanNeurotic/launcHER?_x_tr_sl=en&amp;_x_tr_tl=de&amp;_x_tr_hl=de">Deutsch</a> · <a href="https://github-com.translate.goog/NathanNeurotic/launcHER?_x_tr_sl=en&amp;_x_tr_tl=it&amp;_x_tr_hl=it">Italiano</a> · <a href="https://github-com.translate.goog/NathanNeurotic/launcHER?_x_tr_sl=en&amp;_x_tr_tl=nl&amp;_x_tr_hl=nl">Nederlands</a> · <a href="https://github-com.translate.goog/NathanNeurotic/launcHER?_x_tr_sl=en&amp;_x_tr_tl=da&amp;_x_tr_hl=da">Dansk</a> · <a href="https://github-com.translate.goog/NathanNeurotic/launcHER?_x_tr_sl=en&amp;_x_tr_tl=sv&amp;_x_tr_hl=sv">Svenska</a> · <a href="https://github-com.translate.goog/NathanNeurotic/launcHER?_x_tr_sl=en&amp;_x_tr_tl=pl&amp;_x_tr_hl=pl">Polski</a> · <a href="https://github-com.translate.goog/NathanNeurotic/launcHER?_x_tr_sl=en&amp;_x_tr_tl=cs&amp;_x_tr_hl=cs">Čeština</a> · <a href="https://github-com.translate.goog/NathanNeurotic/launcHER?_x_tr_sl=en&amp;_x_tr_tl=hr&amp;_x_tr_hl=hr">Hrvatski</a> · <a href="https://github-com.translate.goog/NathanNeurotic/launcHER?_x_tr_sl=en&amp;_x_tr_tl=sr&amp;_x_tr_hl=sr">Српски</a> · <a href="https://github-com.translate.goog/NathanNeurotic/launcHER?_x_tr_sl=en&amp;_x_tr_tl=bg&amp;_x_tr_hl=bg">Български</a> · <a href="https://github-com.translate.goog/NathanNeurotic/launcHER?_x_tr_sl=en&amp;_x_tr_tl=ru&amp;_x_tr_hl=ru">Русский</a> · <a href="https://github-com.translate.goog/NathanNeurotic/launcHER?_x_tr_sl=en&amp;_x_tr_tl=el&amp;_x_tr_hl=el">Ελληνικά</a> · <a href="https://github-com.translate.goog/NathanNeurotic/launcHER?_x_tr_sl=en&amp;_x_tr_tl=hu&amp;_x_tr_hl=hu">Magyar</a> · <a href="https://github-com.translate.goog/NathanNeurotic/launcHER?_x_tr_sl=en&amp;_x_tr_tl=ro&amp;_x_tr_hl=ro">Română</a> · <a href="https://github-com.translate.goog/NathanNeurotic/launcHER?_x_tr_sl=en&amp;_x_tr_tl=gl&amp;_x_tr_hl=gl">Galego</a> · <a href="https://github-com.translate.goog/NathanNeurotic/launcHER?_x_tr_sl=en&amp;_x_tr_tl=sq&amp;_x_tr_hl=sq">Shqip</a> · <a href="https://github-com.translate.goog/NathanNeurotic/launcHER?_x_tr_sl=en&amp;_x_tr_tl=tr&amp;_x_tr_hl=tr">Türkçe</a> · <a href="https://github-com.translate.goog/NathanNeurotic/launcHER?_x_tr_sl=en&amp;_x_tr_tl=ar&amp;_x_tr_hl=ar">العربية</a> · <a href="https://github-com.translate.goog/NathanNeurotic/launcHER?_x_tr_sl=en&amp;_x_tr_tl=fa&amp;_x_tr_hl=fa">فارسی</a> · <a href="https://github-com.translate.goog/NathanNeurotic/launcHER?_x_tr_sl=en&amp;_x_tr_tl=ja&amp;_x_tr_hl=ja">日本語</a> · <a href="https://github-com.translate.goog/NathanNeurotic/launcHER?_x_tr_sl=en&amp;_x_tr_tl=ko&amp;_x_tr_hl=ko">한국어</a> · <a href="https://github-com.translate.goog/NathanNeurotic/launcHER?_x_tr_sl=en&amp;_x_tr_tl=zh-CN&amp;_x_tr_hl=zh-CN">简体中文</a> · <a href="https://github-com.translate.goog/NathanNeurotic/launcHER?_x_tr_sl=en&amp;_x_tr_tl=zh-TW&amp;_x_tr_hl=zh-TW">繁體中文</a> · <a href="https://github-com.translate.goog/NathanNeurotic/launcHER?_x_tr_sl=en&amp;_x_tr_tl=vi&amp;_x_tr_hl=vi">Tiếng Việt</a> · <a href="https://github-com.translate.goog/NathanNeurotic/launcHER?_x_tr_sl=en&amp;_x_tr_tl=lo&amp;_x_tr_hl=lo">ລາວ</a> · <a href="https://github-com.translate.goog/NathanNeurotic/launcHER?_x_tr_sl=en&amp;_x_tr_tl=id&amp;_x_tr_hl=id">Bahasa Indonesia</a> · <a href="https://github-com.translate.goog/NathanNeurotic/launcHER?_x_tr_sl=en&amp;_x_tr_tl=tl&amp;_x_tr_hl=tl">Filipino</a> · <a href="https://github-com.translate.goog/NathanNeurotic/launcHER?_x_tr_sl=en&amp;_x_tr_tl=ceb&amp;_x_tr_hl=ceb">Cebuano</a> <i>(automatic translation by Google)</i></sub></p>
-<!-- project-links:end -->
 
 <p align="center">
 
-<img width="873" height="348" alt="launcHER" src="https://github.com/user-attachments/assets/e54f9ad4-c40b-483a-acaa-2accb5aa55cc" />
+<img width="1774" height="887" alt="launcHER" src="https://github.com/user-attachments/assets/2ff5cd86-8be3-4c4e-b3fe-f7470e8eec39" />
 
 <img width="400" height="92" alt="AI-Assisted-Software-Lovers-Only" src="https://github.com/user-attachments/assets/71335775-9fe3-4507-ac2c-caa851abb24c" />
 
@@ -118,7 +114,7 @@ The storage device changes. The Ember folder structure does not.
 
 ### Game argument
 
-Pass the **game folder name** underneath `EMBER/games/` for a normal folder launch.
+Ember expects the **bare folder name** underneath `EMBER/games/`.
 
 If the game is stored at:
 
@@ -132,41 +128,15 @@ then the game argument is:
 Soul Blade
 ```
 
-To choose a specific CUE with an Ember build supporting explicit file selection,
-append its filename to that folder in the **same argument**:
-
-```ini
-arg=Final Fantasy VII/Final Fantasy VII (Disc 2).cue
-```
-
-This selects `EMBER/games/Final Fantasy VII/Final Fantasy VII (Disc 2).cue`.
-Use the actual folder and filename, including spaces, without quotes in the CNF.
-Replace the folder-only game argument with this value; do not add the CUE on a
-second `arg=` line. launcHER forwards the value unchanged and does not interpret
-disc numbers or select discs itself. Settings and saves remain in the game folder.
-See [Ember's argument interface](https://github.com/Gageformer/Ember#launching-ember-from-homebrew).
-
-The same replacement works in every storage profile. For APA/PFS:
-
-```ini
-path=hdd0:__.EMBER:pfs:/EMBER/ember.elf
-arg=pfs0:/EMBER/ember.elf
-arg=Final Fantasy VII/Final Fantasy VII (Disc 2).cue
-arg=-skip_argv0
-arg=-dev9=NICHDD
-```
-
-Keep the existing ELF-path argument and launcher flags. Only the game argument changes.
-
-Do not include the `games/` prefix, an absolute device path, or a CUE without its folder:
+Do not pass:
 
 ```text
 games/Soul Blade
-Soul Blade.cue
+Soul Blade/Soul Blade.cue
 mass0:/EMBER/games/Soul Blade/
 ```
 
-For the folder-only Soul Blade example, Ember should ultimately receive:
+For the example above, Ember should ultimately receive:
 
 ```text
 argv[1] = Soul Blade
@@ -181,10 +151,9 @@ Download the current release and copy:
 ```text
 launcHER.elf
 launcHER.CNF
-version.txt
 ```
 
-to the location from which you want to start launcHER. The `version.txt` file is optional at runtime; keep it with the ELF when reporting bugs so the exact build can be identified.
+to the location from which you want to start launcHER.
 
 Keep `launcHER.CNF` beside the launcHER ELF. Then edit `launcHER.CNF`, enable the storage profile matching **where Ember is stored**, and replace `<GAME_FOLDER>` with the actual folder name from `EMBER/games/`.
 
@@ -217,8 +186,6 @@ launcHER.CNF
 ```
 
 works correctly.
-
-**Started from OPL or RiptOPL's APPS?** Those loaders name every BDM device `mass0:`, `mass1:`, ... whether it is a USB drive, an exFAT internal HDD, MX4SIO or i.Link. launcHER therefore asks the device behind that number which driver it is (the same check RiptOPL makes on its own `massN:` boot) and carries on under that device's own name, exactly as if it had been started as `ata0:/…` or `mx4sio0:/…`. Your `path=` target still starts with only its own device's drivers. (wLaunchELF passes the device's own name, such as `ata0:/`, so it never needed this.)
 
 Lines beginning with `#` are comments.
 
@@ -537,8 +504,7 @@ Each release provides:
 
 - **`launcHER.elf`** — the standalone launcher;
 - **`launcHER.CNF`** — an editable quickboot template with device examples;
-- **`version.txt`** — a one-line build identifier (`version=<12-character Git commit>` for rolling builds, or `version=vX.Y.Z` for tagged releases);
-- **`launcHER.zip`** — ready-to-copy package containing the ELF, CNF and version file;
+- **`launcHER.zip`** — ready-to-copy package containing the ELF and CNF;
 - GitHub's automatic **Source code (zip)** and **Source code (tar.gz)** archives.
 
 No KELF is required for normal launcHER use.
@@ -559,11 +525,10 @@ The finished package is generated under:
 ```text
 build/release/
 ├── launcHER.elf
-├── launcHER.CNF
-└── version.txt
+└── launcHER.CNF
 ```
 
-GitHub Actions additionally creates `launcHER.zip` from those three files for releases. `version.txt` is regenerated on each build, so repeated builds after a commit do not reuse a stale identifier. A local build from a source archive without Git metadata uses `version=unknown`; CI rejects unknown versions for published packages.
+GitHub Actions additionally creates `launcHER.zip` from those two files for releases.
 
 ---
 
@@ -582,7 +547,7 @@ If you encounter a problem, please include:
 - exact Ember location;
 - exact `launcHER.CNF`;
 - Ember version;
-- launcHER version (the exact `version=...` line from `version.txt`);
+- launcHER version;
 - game folder being launched;
 - what appears on screen before failure.
 
@@ -610,12 +575,11 @@ The project no longer builds or packages unrelated:
 
 ## Credits
 
-- **[nuno6573](https://github.com/nuno6573)** — solution, concept, and selection of the approach used for [Ember](https://github.com/Gageformer/Ember)'s external launcher. Thanks to nuno for the information and idea.
+- **[nuno6573](https://github.com/nuno6573)** — solution, concept, and selection of the approach used for Ember's external launcher. Thanks to nuno for the information and idea.
 - **[pcm720](https://github.com/pcm720)** — creator of [OSDMenu](https://github.com/pcm720/OSDMenu) and the standalone OSDMenu Launcher from which launcHER is derived. The device handlers, loader architecture, and foundation of this project come from that work.
 - **Eliminator / eliminator1403** — PS2 hardware testing, validation, regression checking, device-side feedback, and the filename-independent `launcHER.CNF` quickboot refinement used for renamed OPL APPS entries.
 - **[Gageformer](https://github.com/Gageformer)** — creator of [Ember](https://github.com/Gageformer/Ember), the project launcHER exists to launch.
-- **[NathanNeurotic / Ripto](https://github.com/NathanNeurotic)** — launcHER fork, [Ember](https://github.com/Gageformer/Ember) handoff integration, APA/PFS persistence changes, standalone build, configuration, documentation, and release packaging.
+- **[NathanNeurotic / Ripto](https://github.com/NathanNeurotic)** — launcHER fork, Ember handoff integration, APA/PFS persistence changes, standalone build, configuration, documentation, and release packaging.
 - The **PS2SDK / ps2dev** contributors and broader PS2 homebrew community whose drivers and libraries make the supported storage stack possible.
 
-launcHER keeps its upstream lineage visible intentionally. It would not exist without [pcm720](https://github.com/pcm720)'s launcher work, [Ember](https://github.com/Gageformer/Ember) would not exist without [Gageformer](https://github.com/Gageformer), and its hardware behavior would not be trustworthy without real-console testing.
-<img width="873" height="348" alt="launcherbanner" src="https://github.com/user-attachments/assets/e54f9ad4-c40b-483a-acaa-2accb5aa55cc" />
+launcHER keeps its upstream lineage visible intentionally. It would not exist without pcm720's launcher work, Ember would not exist without Gageformer, and its hardware behavior would not be trustworthy without real-console testing.
