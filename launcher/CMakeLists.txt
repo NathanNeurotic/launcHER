@@ -82,17 +82,45 @@ if(LAUNCHER_MMCE)
   add_compile_definitions(MMCE)
   set(SIO2MAN ON)
 
-  # Build mmceman from submodule
+  # Build mmceman from the submodule, with the same file-system fixes RiptOPL ships to Ember
+  # (Open-PS2-Loader .github/scripts/install_coherent_mmce.sh, same pin and patches).
+  # Ember lists games/<folder> to pick its .cue/.bin through this driver. Unpatched, a
+  # listing opened while the card's descriptor 0 is free (the normal case right after
+  # launcHER's IOP reset) returns 0 for its first entry, which reads as end of directory,
+  # so Ember sees an empty game folder. The patches are applied to a copy in the build
+  # directory; the submodule checkout stays clean. A patch that stops applying fails the build.
   set(MMCEMAN_IRX "${CMAKE_CURRENT_BINARY_DIR}/mmceman.irx")
-  file(GLOB MMCEMAN_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/iop/mmceman/mmceman/src/*" "${CMAKE_CURRENT_SOURCE_DIR}/iop/mmceman/mmceman/Makefile")
+  set(MMCEMAN_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/iop/mmceman/mmceman")
+  set(MMCEMAN_WORK_DIR "${CMAKE_CURRENT_BINARY_DIR}/mmceman-src")
+  set(MMCEMAN_PATCH_DIR "${CMAKE_CURRENT_SOURCE_DIR}/iop/mmceman-patches")
+  # Order matters: the same order RiptOPL applies them in
+  set(MMCEMAN_PATCHES
+      "${MMCEMAN_PATCH_DIR}/mmceman-fs-close-fd-leak.patch"
+      "${MMCEMAN_PATCH_DIR}/mmceman-fs-open-enoent.patch"
+      "${MMCEMAN_PATCH_DIR}/mmceman-fs-dopen-enoent.patch"
+      "${MMCEMAN_PATCH_DIR}/mmceman-fs-dread-eof.patch"
+      "${MMCEMAN_PATCH_DIR}/mmceman-fs-dread-entry.patch")
+  set(MMCEMAN_APPLY_COMMANDS)
+  foreach(patch ${MMCEMAN_PATCHES})
+    # The copy sits inside launcHER's own work tree, where git apply would silently skip every
+    # path ("Skipped patch") and exit 0. The ceiling stops git from finding that repository.
+    list(APPEND MMCEMAN_APPLY_COMMANDS COMMAND ${CMAKE_COMMAND} -E chdir "${MMCEMAN_WORK_DIR}"
+         ${CMAKE_COMMAND} -E env "GIT_CEILING_DIRECTORIES=${CMAKE_CURRENT_BINARY_DIR}" git apply --verbose "${patch}")
+  endforeach()
+  file(GLOB MMCEMAN_SOURCES "${MMCEMAN_SRC_DIR}/src/*" "${MMCEMAN_SRC_DIR}/include/*" "${MMCEMAN_SRC_DIR}/Makefile")
   add_custom_command(
         OUTPUT ${MMCEMAN_IRX}
-        COMMAND ${CMAKE_COMMAND} -E chdir "${CMAKE_CURRENT_SOURCE_DIR}/iop/mmceman/mmceman" ${CMAKE_MAKE_PROGRAM}
+        COMMAND ${CMAKE_COMMAND} -E rm -rf "${MMCEMAN_WORK_DIR}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${MMCEMAN_WORK_DIR}"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory "${MMCEMAN_SRC_DIR}" "${MMCEMAN_WORK_DIR}/mmceman"
+        ${MMCEMAN_APPLY_COMMANDS}
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${MMCEMAN_WORK_DIR}/mmceman/obj"
+        COMMAND ${CMAKE_COMMAND} -E chdir "${MMCEMAN_WORK_DIR}/mmceman" ${CMAKE_MAKE_PROGRAM}
         COMMAND ${CMAKE_COMMAND} -E copy
-            "${CMAKE_CURRENT_SOURCE_DIR}/iop/mmceman/mmceman/irx/mmceman.irx"
+            "${MMCEMAN_WORK_DIR}/mmceman/irx/mmceman.irx"
             ${MMCEMAN_IRX}
-        DEPENDS ${MMCEMAN_SOURCES}
-        COMMENT "Building mmceman"
+        DEPENDS ${MMCEMAN_SOURCES} ${MMCEMAN_PATCHES}
+        COMMENT "Building mmceman (with RiptOPL file-system patches)"
         VERBATIM
     )
 endif()
