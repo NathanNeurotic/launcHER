@@ -110,7 +110,7 @@ if(LAUNCHER_MMCE)
   file(GLOB MMCEMAN_SOURCES "${MMCEMAN_SRC_DIR}/src/*" "${MMCEMAN_SRC_DIR}/include/*" "${MMCEMAN_SRC_DIR}/Makefile")
   add_custom_command(
         OUTPUT ${MMCEMAN_IRX}
-        COMMAND ${CMAKE_COMMAND} -E rm -rf "${MMCEMAN_WORK_DIR}"
+        COMMAND ${CMAKE_COMMAND} "-DTREE=${MMCEMAN_WORK_DIR}" -P "${MMCEMAN_PATCH_DIR}/remove_tree.cmake"
         COMMAND ${CMAKE_COMMAND} -E make_directory "${MMCEMAN_WORK_DIR}"
         COMMAND ${CMAKE_COMMAND} -E copy_directory "${MMCEMAN_SRC_DIR}" "${MMCEMAN_WORK_DIR}/mmceman"
         ${MMCEMAN_APPLY_COMMANDS}
